@@ -1,0 +1,3026 @@
+[
+  {
+    "key": "salesforce",
+    "display_name": "Salesforce",
+    "category": "CRM & Sales",
+    "brand_color": "#00A1E0",
+    "description": "World's #1 CRM platform with REST, SOAP, Bulk, and Streaming APIs for sales, service, and marketing automation"
+  },
+  {
+    "key": "hubspot",
+    "display_name": "HubSpot",
+    "category": "CRM & Sales",
+    "brand_color": "#FF7A59",
+    "description": "Inbound marketing and CRM platform with REST APIs for contacts, deals, pipelines, and marketing automation"
+  },
+  {
+    "key": "zoho_crm",
+    "display_name": "Zoho CRM",
+    "category": "CRM & Sales",
+    "brand_color": "#E42527",
+    "description": "Comprehensive CRM with REST APIs for leads, contacts, accounts, deals, and automation workflows"
+  },
+  {
+    "key": "pipedrive",
+    "display_name": "Pipedrive",
+    "category": "CRM & Sales",
+    "brand_color": "#00A85A",
+    "description": "Sales-focused CRM with RESTful API for pipeline management, deals, contacts, and activity tracking"
+  },
+  {
+    "key": "monday_crm",
+    "display_name": "Monday.com CRM",
+    "category": "CRM & Sales",
+    "brand_color": "#FF3D57",
+    "description": "Flexible CRM built on Monday.com work OS with GraphQL API for boards, items, and automations"
+  },
+  {
+    "key": "gohighlevel",
+    "display_name": "GoHighLevel",
+    "category": "CRM & Sales",
+    "brand_color": "#F9A825",
+    "description": "All-in-one sales and marketing platform for agencies with REST APIs for contacts, funnels, and automation"
+  },
+  {
+    "key": "freshsales",
+    "display_name": "Freshsales",
+    "category": "CRM & Sales",
+    "brand_color": "#22A699",
+    "description": "AI-powered CRM by Freshworks with REST APIs for contacts, deals, email, and phone integrations"
+  },
+  {
+    "key": "close_io",
+    "display_name": "Close",
+    "category": "CRM & Sales",
+    "brand_color": "#5F37FF",
+    "description": "Sales CRM built for high-velocity sales teams with REST API for leads, contacts, sequences, and calls"
+  },
+  {
+    "key": "copper",
+    "display_name": "Copper",
+    "category": "CRM & Sales",
+    "brand_color": "#E8572A",
+    "description": "Google Workspace-native CRM with REST API for people, companies, opportunities, and activities"
+  },
+  {
+    "key": "keap",
+    "display_name": "Keap (Infusionsoft)",
+    "category": "CRM & Sales",
+    "brand_color": "#5BA745",
+    "description": "Small business CRM and marketing automation with REST API for contacts, campaigns, orders, and invoices"
+  },
+  {
+    "key": "nutshell",
+    "display_name": "Nutshell",
+    "category": "CRM & Sales",
+    "brand_color": "#0078C8",
+    "description": "CRM and email marketing platform with REST API for contacts, leads, and pipeline reporting"
+  },
+  {
+    "key": "vtiger",
+    "display_name": "Vtiger",
+    "category": "CRM & Sales",
+    "brand_color": "#1A7EC8",
+    "description": "Open-source CRM with REST APIs for contacts, leads, campaigns, and customer support modules"
+  },
+  {
+    "key": "agile_crm",
+    "display_name": "Agile CRM",
+    "category": "CRM & Sales",
+    "brand_color": "#E74C3C",
+    "description": "All-in-one CRM with sales, marketing, and service automation REST API for contacts and deals"
+  },
+  {
+    "key": "suitecrm",
+    "display_name": "SuiteCRM",
+    "category": "CRM & Sales",
+    "brand_color": "#5C3D99",
+    "description": "Open-source enterprise CRM with REST API for accounts, contacts, leads, opportunities, and cases"
+  },
+  {
+    "key": "mailchimp",
+    "display_name": "Mailchimp",
+    "category": "Marketing & Email",
+    "brand_color": "#FFE01B",
+    "description": "Email marketing and automation platform with REST API for campaigns, audiences, and analytics"
+  },
+  {
+    "key": "sendgrid",
+    "display_name": "SendGrid",
+    "category": "Marketing & Email",
+    "brand_color": "#1A82E2",
+    "description": "Twilio's email delivery and marketing platform with REST API for transactional and marketing emails"
+  },
+  {
+    "key": "klaviyo",
+    "display_name": "Klaviyo",
+    "category": "Marketing & Email",
+    "brand_color": "#000000",
+    "description": "E-commerce-focused email and SMS marketing platform with REST API for flows, campaigns, and profiles"
+  },
+  {
+    "key": "activecampaign",
+    "display_name": "ActiveCampaign",
+    "category": "Marketing & Email",
+    "brand_color": "#356AE6",
+    "description": "Customer experience automation platform with REST API for email, CRM, and marketing automation"
+  },
+  {
+    "key": "brevo",
+    "display_name": "Brevo (Sendinblue)",
+    "category": "Marketing & Email",
+    "brand_color": "#0B996E",
+    "description": "All-in-one marketing platform with REST API for email, SMS, WhatsApp, and CRM campaigns"
+  },
+  {
+    "key": "constant_contact",
+    "display_name": "Constant Contact",
+    "category": "Marketing & Email",
+    "brand_color": "#1B67AC",
+    "description": "Email marketing platform with REST API for contacts, campaigns, event management, and e-commerce"
+  },
+  {
+    "key": "campaign_monitor",
+    "display_name": "Campaign Monitor",
+    "category": "Marketing & Email",
+    "brand_color": "#FB5A5A",
+    "description": "Email marketing platform with REST API for subscriber management, campaigns, and reporting"
+  },
+  {
+    "key": "drip",
+    "display_name": "Drip",
+    "category": "Marketing & Email",
+    "brand_color": "#9B4DCA",
+    "description": "E-commerce CRM and email platform with REST API for subscriber segmentation and workflow automation"
+  },
+  {
+    "key": "convertkit",
+    "display_name": "ConvertKit",
+    "category": "Marketing & Email",
+    "brand_color": "#FB6970",
+    "description": "Creator-focused email marketing platform with REST API for subscribers, sequences, and forms"
+  },
+  {
+    "key": "omnisend",
+    "display_name": "Omnisend",
+    "category": "Marketing & Email",
+    "brand_color": "#0066FF",
+    "description": "E-commerce email and SMS marketing platform with REST API for campaigns, automations, and segments"
+  },
+  {
+    "key": "moosend",
+    "display_name": "Moosend",
+    "category": "Marketing & Email",
+    "brand_color": "#6A4FE0",
+    "description": "Email marketing automation platform with REST API for campaigns, subscribers, and analytics"
+  },
+  {
+    "key": "iterable",
+    "display_name": "Iterable",
+    "category": "Marketing & Email",
+    "brand_color": "#5F27CD",
+    "description": "Cross-channel marketing automation platform with REST API for users, events, and campaign workflows"
+  },
+  {
+    "key": "customer_io",
+    "display_name": "Customer.io",
+    "category": "Marketing & Email",
+    "brand_color": "#8C4BF5",
+    "description": "Behavior-based messaging platform with REST API for event tracking, segments, and automated campaigns"
+  },
+  {
+    "key": "marketo",
+    "display_name": "Marketo (Adobe)",
+    "category": "Marketing & Email",
+    "brand_color": "#5C67F2",
+    "description": "Enterprise marketing automation platform with REST API for leads, campaigns, and revenue attribution"
+  },
+  {
+    "key": "pardot",
+    "display_name": "Pardot (Salesforce)",
+    "category": "Marketing & Email",
+    "brand_color": "#00A1E0",
+    "description": "Salesforce B2B marketing automation with REST API for prospect management and email campaigns"
+  },
+  {
+    "key": "eloqua",
+    "display_name": "Oracle Eloqua",
+    "category": "Marketing & Email",
+    "brand_color": "#F80000",
+    "description": "Oracle's B2B marketing automation platform with REST API for contacts, campaigns, and lead scoring"
+  },
+  {
+    "key": "shopify",
+    "display_name": "Shopify",
+    "category": "E-commerce",
+    "brand_color": "#96BF48",
+    "description": "Leading e-commerce platform with REST and GraphQL Admin APIs for products, orders, and storefronts"
+  },
+  {
+    "key": "woocommerce",
+    "display_name": "WooCommerce",
+    "category": "E-commerce",
+    "brand_color": "#7F54B3",
+    "description": "WordPress e-commerce plugin with REST API for products, orders, customers, and coupons"
+  },
+  {
+    "key": "bigcommerce",
+    "display_name": "BigCommerce",
+    "category": "E-commerce",
+    "brand_color": "#34313F",
+    "description": "Enterprise e-commerce platform with REST and GraphQL APIs for catalog, orders, and storefronts"
+  },
+  {
+    "key": "magento",
+    "display_name": "Adobe Commerce (Magento)",
+    "category": "E-commerce",
+    "brand_color": "#EE672F",
+    "description": "Enterprise e-commerce platform with REST and GraphQL APIs for large-scale catalog and order management"
+  },
+  {
+    "key": "squarespace_commerce",
+    "display_name": "Squarespace Commerce",
+    "category": "E-commerce",
+    "brand_color": "#000000",
+    "description": "Website builder with commerce REST API for orders, products, inventory, and transactions"
+  },
+  {
+    "key": "wix_ecommerce",
+    "display_name": "Wix eCommerce",
+    "category": "E-commerce",
+    "brand_color": "#0C6EFC",
+    "description": "Website and commerce platform with REST API for product catalog, orders, and payments"
+  },
+  {
+    "key": "ecwid",
+    "display_name": "Ecwid",
+    "category": "E-commerce",
+    "brand_color": "#FF6B35",
+    "description": "E-commerce platform embeddable on any site with REST API for products, orders, and customers"
+  },
+  {
+    "key": "prestashop",
+    "display_name": "PrestaShop",
+    "category": "E-commerce",
+    "brand_color": "#DF0067",
+    "description": "Open-source e-commerce platform with REST API for catalog, orders, customers, and modules"
+  },
+  {
+    "key": "opencart",
+    "display_name": "OpenCart",
+    "category": "E-commerce",
+    "brand_color": "#23B3D7",
+    "description": "Open-source e-commerce platform with REST API for products, orders, and customer management"
+  },
+  {
+    "key": "vendure",
+    "display_name": "Vendure",
+    "category": "E-commerce",
+    "brand_color": "#7775D0",
+    "description": "Headless commerce framework with GraphQL API for building custom e-commerce experiences"
+  },
+  {
+    "key": "shift4shop",
+    "display_name": "Shift4Shop (3dcart)",
+    "category": "E-commerce",
+    "brand_color": "#00B9E4",
+    "description": "E-commerce platform with REST API for products, orders, customers, and shopping cart management"
+  },
+  {
+    "key": "volusion",
+    "display_name": "Volusion",
+    "category": "E-commerce",
+    "brand_color": "#8B3A8F",
+    "description": "E-commerce platform with REST API for store management, products, orders, and customer data"
+  },
+  {
+    "key": "stripe",
+    "display_name": "Stripe",
+    "category": "Payments",
+    "brand_color": "#635BFF",
+    "description": "Developer-first payment processing platform with REST API for charges, subscriptions, and payouts"
+  },
+  {
+    "key": "paypal",
+    "display_name": "PayPal",
+    "category": "Payments",
+    "brand_color": "#003087",
+    "description": "Global payments platform with REST API for payments, invoicing, subscriptions, and payouts"
+  },
+  {
+    "key": "square",
+    "display_name": "Square",
+    "category": "Payments",
+    "brand_color": "#3E4348",
+    "description": "Point-of-sale and payments platform with REST API for payments, orders, catalog, and employees"
+  },
+  {
+    "key": "braintree",
+    "display_name": "Braintree (PayPal)",
+    "category": "Payments",
+    "brand_color": "#3A3A6E",
+    "description": "PayPal's full-stack payments platform with REST API for credit cards, PayPal, and vault management"
+  },
+  {
+    "key": "adyen",
+    "display_name": "Adyen",
+    "category": "Payments",
+    "brand_color": "#0ABF53",
+    "description": "Global payments technology platform with REST API for online, mobile, and in-store payments"
+  },
+  {
+    "key": "razorpay",
+    "display_name": "Razorpay",
+    "category": "Payments",
+    "brand_color": "#0D94FB",
+    "description": "India's leading payment gateway with REST API for payments, subscriptions, payouts, and UPI"
+  },
+  {
+    "key": "paytm",
+    "display_name": "Paytm",
+    "category": "Payments",
+    "brand_color": "#00BAF2",
+    "description": "India's largest digital payments platform with API for UPI, wallets, cards, and QR code payments"
+  },
+  {
+    "key": "phonepe",
+    "display_name": "PhonePe",
+    "category": "Payments",
+    "brand_color": "#5F259F",
+    "description": "India's leading UPI payment platform with API for payment requests, refunds, and transaction status"
+  },
+  {
+    "key": "cashfree",
+    "display_name": "Cashfree Payments",
+    "category": "Payments",
+    "brand_color": "#05A67C",
+    "description": "India's payment and banking infrastructure with REST API for payments, payouts, and verification"
+  },
+  {
+    "key": "instamojo",
+    "display_name": "Instamojo",
+    "category": "Payments",
+    "brand_color": "#E36F2C",
+    "description": "India's payment and e-commerce platform for small businesses with REST API for payment links and orders"
+  },
+  {
+    "key": "ccavenue",
+    "display_name": "CCAvenue",
+    "category": "Payments",
+    "brand_color": "#E31837",
+    "description": "India's premier payment gateway with API for credit/debit cards, UPI, wallets, and EMI"
+  },
+  {
+    "key": "payu",
+    "display_name": "PayU",
+    "category": "Payments",
+    "brand_color": "#FF6600",
+    "description": "Global fintech payment platform with REST API for online payments, split payments, and subscriptions"
+  },
+  {
+    "key": "billdesk",
+    "display_name": "BillDesk",
+    "category": "Payments",
+    "brand_color": "#003C78",
+    "description": "India's payment gateway and bill payment platform with API for collections and recurring payments"
+  },
+  {
+    "key": "juspay",
+    "display_name": "Juspay",
+    "category": "Payments",
+    "brand_color": "#FF5F00",
+    "description": "India's checkout and payments orchestration platform with API for smart payment routing and express checkout"
+  },
+  {
+    "key": "setu",
+    "display_name": "Setu (Pine Labs)",
+    "category": "Payments",
+    "brand_color": "#4B5563",
+    "description": "India Stack API platform with APIs for UPI, Account Aggregator, lending, and bill payments"
+  },
+  {
+    "key": "easebuzz",
+    "display_name": "EaseBuzz",
+    "category": "Payments",
+    "brand_color": "#F04E23",
+    "description": "India payment gateway with REST API for payment collection, split payments, and refunds"
+  },
+  {
+    "key": "airpay",
+    "display_name": "Airpay",
+    "category": "Payments",
+    "brand_color": "#FF5722",
+    "description": "India's payment platform with API for online payments, POS, and QR-based transactions"
+  },
+  {
+    "key": "zaakpay",
+    "display_name": "Zaakpay",
+    "category": "Payments",
+    "brand_color": "#FF4081",
+    "description": "India's payment gateway by Mobikwik with API for online payments and checkout integrations"
+  },
+  {
+    "key": "authorize_net",
+    "display_name": "Authorize.net",
+    "category": "Payments",
+    "brand_color": "#2C5697",
+    "description": "Visa's payment gateway with REST API for transaction processing, subscription billing, and fraud detection"
+  },
+  {
+    "key": "klarna",
+    "display_name": "Klarna",
+    "category": "Payments",
+    "brand_color": "#FFB3C7",
+    "description": "Buy Now Pay Later platform with REST API for flexible checkout and installment payment options"
+  },
+  {
+    "key": "afterpay",
+    "display_name": "Afterpay",
+    "category": "Payments",
+    "brand_color": "#B2FCE4",
+    "description": "BNPL platform with API for interest-free installment payments at checkout"
+  },
+  {
+    "key": "affirm",
+    "display_name": "Affirm",
+    "category": "Payments",
+    "brand_color": "#4A90D9",
+    "description": "Buy Now Pay Later platform with REST API for checkout financing and installment payments"
+  },
+  {
+    "key": "mollie",
+    "display_name": "Mollie",
+    "category": "Payments",
+    "brand_color": "#000000",
+    "description": "European payments platform with REST API for iDEAL, credit cards, SEPA, and subscription billing"
+  },
+  {
+    "key": "checkout_com",
+    "display_name": "Checkout.com",
+    "category": "Payments",
+    "brand_color": "#0B4FFF",
+    "description": "Global payment platform with REST API for card processing, alternative payments, and fraud management"
+  },
+  {
+    "key": "worldpay",
+    "display_name": "Worldpay (FIS)",
+    "category": "Payments",
+    "brand_color": "#00A862",
+    "description": "Global payments technology company with APIs for card processing, e-commerce, and point-of-sale"
+  },
+  {
+    "key": "2checkout",
+    "display_name": "2Checkout (Verifone)",
+    "category": "Payments",
+    "brand_color": "#008ECC",
+    "description": "Global monetization platform with API for digital commerce, subscriptions, and recurring billing"
+  },
+  {
+    "key": "twilio",
+    "display_name": "Twilio",
+    "category": "Communication & Messaging",
+    "brand_color": "#F22F46",
+    "description": "Cloud communications platform with REST APIs for SMS, voice, WhatsApp, email, and video"
+  },
+  {
+    "key": "vonage",
+    "display_name": "Vonage (Nexmo)",
+    "category": "Communication & Messaging",
+    "brand_color": "#6F2DA8",
+    "description": "Communications APIs for SMS, voice, WhatsApp, video, and authentication via Verify API"
+  },
+  {
+    "key": "plivo",
+    "display_name": "Plivo",
+    "category": "Communication & Messaging",
+    "brand_color": "#3C3C3C",
+    "description": "Cloud communications platform with REST API for SMS, voice calls, and phone number management"
+  },
+  {
+    "key": "bandwidth",
+    "display_name": "Bandwidth",
+    "category": "Communication & Messaging",
+    "brand_color": "#079BFF",
+    "description": "Enterprise communications platform with APIs for voice, messaging, 911, and number management"
+  },
+  {
+    "key": "telnyx",
+    "display_name": "Telnyx",
+    "category": "Communication & Messaging",
+    "brand_color": "#00C887",
+    "description": "Cloud communication platform with REST APIs for SMS, voice, fax, and real-time networking"
+  },
+  {
+    "key": "messagebird",
+    "display_name": "MessageBird (Bird)",
+    "category": "Communication & Messaging",
+    "brand_color": "#2481D7",
+    "description": "Omnichannel communications platform with APIs for SMS, WhatsApp, voice, and email"
+  },
+  {
+    "key": "sinch",
+    "display_name": "Sinch",
+    "category": "Communication & Messaging",
+    "brand_color": "#FFBE3C",
+    "description": "Cloud communications company with APIs for SMS, RCS, voice, video, and WhatsApp Business"
+  },
+  {
+    "key": "kaleyra",
+    "display_name": "Kaleyra",
+    "category": "Communication & Messaging",
+    "brand_color": "#FF6900",
+    "description": "Global communications platform with APIs for SMS, voice, push notifications, and WhatsApp Business"
+  },
+  {
+    "key": "gupshup",
+    "display_name": "Gupshup",
+    "category": "Communication & Messaging",
+    "brand_color": "#FF4F00",
+    "description": "Conversational messaging platform with APIs for WhatsApp, SMS, RCS, and chatbot development"
+  },
+  {
+    "key": "route_mobile",
+    "display_name": "Route Mobile",
+    "category": "Communication & Messaging",
+    "brand_color": "#1A3C8F",
+    "description": "Cloud communication services provider with APIs for SMS, voice, email, and RCS messaging"
+  },
+  {
+    "key": "exotel",
+    "display_name": "Exotel",
+    "category": "Communication & Messaging",
+    "brand_color": "#F06C00",
+    "description": "India's cloud telephony platform with REST API for calls, SMS, IVR, and customer engagement"
+  },
+  {
+    "key": "msg91",
+    "display_name": "MSG91",
+    "category": "Communication & Messaging",
+    "brand_color": "#4B5EFC",
+    "description": "India's cloud communication platform with APIs for OTP, SMS, voice, email, and WhatsApp"
+  },
+  {
+    "key": "knowlarity",
+    "display_name": "Knowlarity",
+    "category": "Communication & Messaging",
+    "brand_color": "#E84393",
+    "description": "India's cloud telephony provider with APIs for IVR, outbound calls, and business phone systems"
+  },
+  {
+    "key": "textlocal",
+    "display_name": "TextLocal",
+    "category": "Communication & Messaging",
+    "brand_color": "#00C3A0",
+    "description": "UK-based SMS platform with REST API for bulk SMS, personalised messages, and group messaging"
+  },
+  {
+    "key": "servetel",
+    "display_name": "Servetel",
+    "category": "Communication & Messaging",
+    "brand_color": "#0D6EFD",
+    "description": "India's cloud telephony service with API for IVR, click-to-call, call recording, and virtual numbers"
+  },
+  {
+    "key": "whatsapp_business",
+    "display_name": "WhatsApp Business API",
+    "category": "Communication & Messaging",
+    "brand_color": "#25D366",
+    "description": "Meta's official API for sending transactional messages, notifications, and customer support via WhatsApp"
+  },
+  {
+    "key": "telegram_bot",
+    "display_name": "Telegram Bot API",
+    "category": "Communication & Messaging",
+    "brand_color": "#2CA5E0",
+    "description": "Telegram's Bot API for building bots with messaging, inline queries, payments, and media support"
+  },
+  {
+    "key": "mailgun",
+    "display_name": "Mailgun",
+    "category": "Email Delivery",
+    "brand_color": "#F06B66",
+    "description": "Email API service by Sinch with REST API for sending, receiving, and tracking transactional emails"
+  },
+  {
+    "key": "aws_ses",
+    "display_name": "Amazon SES",
+    "category": "Email Delivery",
+    "brand_color": "#FF9900",
+    "description": "Amazon's scalable email sending service with REST and SMTP APIs for transactional and bulk email"
+  },
+  {
+    "key": "postmark",
+    "display_name": "Postmark",
+    "category": "Email Delivery",
+    "brand_color": "#FFDE00",
+    "description": "Fast email delivery service focused on transactional email with REST API and detailed analytics"
+  },
+  {
+    "key": "sparkpost",
+    "display_name": "SparkPost (MessageBird)",
+    "category": "Email Delivery",
+    "brand_color": "#FA6423",
+    "description": "Email delivery and analytics platform with REST API for high-volume transactional email sending"
+  },
+  {
+    "key": "elastic_email",
+    "display_name": "Elastic Email",
+    "category": "Email Delivery",
+    "brand_color": "#00B0FF",
+    "description": "Email delivery platform with REST API for marketing campaigns and transactional email at scale"
+  },
+  {
+    "key": "mailjet",
+    "display_name": "Mailjet",
+    "category": "Email Delivery",
+    "brand_color": "#FE5C00",
+    "description": "Email sending and marketing platform with REST API for transactional emails and campaign management"
+  },
+  {
+    "key": "pepipost",
+    "display_name": "Pepipost (Netcore)",
+    "category": "Email Delivery",
+    "brand_color": "#F7941E",
+    "description": "India's email delivery platform with REST API for transactional email with AI-powered optimisation"
+  },
+  {
+    "key": "mailtrap",
+    "display_name": "Mailtrap",
+    "category": "Email Delivery",
+    "brand_color": "#16A34A",
+    "description": "Email testing and sending platform with REST API for staging, production email delivery and debugging"
+  },
+  {
+    "key": "sendpulse",
+    "display_name": "SendPulse",
+    "category": "Email Delivery",
+    "brand_color": "#0050D0",
+    "description": "Multichannel marketing platform with REST API for email, SMS, web push, and chatbot communications"
+  },
+  {
+    "key": "twitter_x",
+    "display_name": "X (Twitter) API",
+    "category": "Social Media",
+    "brand_color": "#000000",
+    "description": "Microblogging platform API for tweets, timelines, users, search, and real-time streaming data"
+  },
+  {
+    "key": "facebook_meta",
+    "display_name": "Meta Graph API",
+    "category": "Social Media",
+    "brand_color": "#0866FF",
+    "description": "Meta's platform API for Facebook pages, posts, ads, insights, and user profile data"
+  },
+  {
+    "key": "instagram_api",
+    "display_name": "Instagram Graph API",
+    "category": "Social Media",
+    "brand_color": "#E1306C",
+    "description": "Instagram's business API for media management, hashtag search, mentions, and audience insights"
+  },
+  {
+    "key": "linkedin_api",
+    "display_name": "LinkedIn API",
+    "category": "Social Media",
+    "brand_color": "#0A66C2",
+    "description": "Professional network API for profile data, job postings, company pages, and marketing content"
+  },
+  {
+    "key": "youtube_api",
+    "display_name": "YouTube Data API",
+    "category": "Social Media",
+    "brand_color": "#FF0000",
+    "description": "Google's YouTube API for video uploads, channel management, comments, playlists, and analytics"
+  },
+  {
+    "key": "tiktok_api",
+    "display_name": "TikTok API",
+    "category": "Social Media",
+    "brand_color": "#69C9D0",
+    "description": "TikTok's developer API for video publishing, user data, hashtag analytics, and business insights"
+  },
+  {
+    "key": "pinterest_api",
+    "display_name": "Pinterest API",
+    "category": "Social Media",
+    "brand_color": "#E60023",
+    "description": "Visual discovery platform API for boards, pins, audience insights, and ad campaign management"
+  },
+  {
+    "key": "reddit_api",
+    "display_name": "Reddit API",
+    "category": "Social Media",
+    "brand_color": "#FF4500",
+    "description": "Reddit's REST API for posts, comments, subreddits, user data, and OAuth-based authentication"
+  },
+  {
+    "key": "snapchat_api",
+    "display_name": "Snapchat Marketing API",
+    "category": "Social Media",
+    "brand_color": "#FFFC00",
+    "description": "Snap Inc.'s marketing API for ad campaigns, targeting, creatives, and audience insights"
+  },
+  {
+    "key": "discord_api",
+    "display_name": "Discord API",
+    "category": "Social Media",
+    "brand_color": "#5865F2",
+    "description": "Discord's platform API for bots, webhooks, server management, messages, and OAuth2 authentication"
+  },
+  {
+    "key": "aws",
+    "display_name": "Amazon Web Services",
+    "category": "Cloud Platforms",
+    "brand_color": "#FF9900",
+    "description": "World's largest cloud platform with 200+ APIs for compute, storage, databases, AI, and networking"
+  },
+  {
+    "key": "google_cloud",
+    "display_name": "Google Cloud",
+    "category": "Cloud Platforms",
+    "brand_color": "#4285F4",
+    "description": "Google's cloud platform with APIs for compute, storage, BigQuery, AI/ML, and Kubernetes"
+  },
+  {
+    "key": "azure",
+    "display_name": "Microsoft Azure",
+    "category": "Cloud Platforms",
+    "brand_color": "#008AD7",
+    "description": "Microsoft's cloud platform with REST APIs for compute, storage, AI, DevOps, and enterprise services"
+  },
+  {
+    "key": "ibm_cloud",
+    "display_name": "IBM Cloud",
+    "category": "Cloud Platforms",
+    "brand_color": "#1F70C1",
+    "description": "IBM's hybrid cloud platform with APIs for AI (Watson), blockchain, containers, and databases"
+  },
+  {
+    "key": "oracle_cloud",
+    "display_name": "Oracle Cloud",
+    "category": "Cloud Platforms",
+    "brand_color": "#F80000",
+    "description": "Oracle's enterprise cloud with REST APIs for compute, autonomous databases, and applications"
+  },
+  {
+    "key": "digitalocean",
+    "display_name": "DigitalOcean",
+    "category": "Cloud Platforms",
+    "brand_color": "#0080FF",
+    "description": "Developer-friendly cloud platform with REST API for Droplets, Kubernetes, databases, and apps"
+  },
+  {
+    "key": "linode",
+    "display_name": "Linode (Akamai)",
+    "category": "Cloud Platforms",
+    "brand_color": "#02B159",
+    "description": "Developer cloud platform with REST API for virtual machines, Kubernetes, block storage, and networking"
+  },
+  {
+    "key": "vultr",
+    "display_name": "Vultr",
+    "category": "Cloud Platforms",
+    "brand_color": "#007BFC",
+    "description": "Cloud computing platform with REST API for VPS instances, bare metal, Kubernetes, and storage"
+  },
+  {
+    "key": "hetzner",
+    "display_name": "Hetzner",
+    "category": "Cloud Platforms",
+    "brand_color": "#D50C2D",
+    "description": "European cloud provider with REST API for servers, load balancers, networks, and floating IPs"
+  },
+  {
+    "key": "ovhcloud",
+    "display_name": "OVHcloud",
+    "category": "Cloud Platforms",
+    "brand_color": "#123F93",
+    "description": "European cloud provider with REST APIs for dedicated servers, VPS, Object Storage, and CDN"
+  },
+  {
+    "key": "gmail",
+    "display_name": "Gmail API (Google Workspace)",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#EA4335",
+    "description": "Google's email service API for reading, sending, labeling, and managing email threads and drafts"
+  },
+  {
+    "key": "google_drive",
+    "display_name": "Google Drive API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#4285F4",
+    "description": "Google's file storage API for uploading, downloading, sharing, and managing files and folders"
+  },
+  {
+    "key": "google_calendar",
+    "display_name": "Google Calendar API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#1A73E8",
+    "description": "Google Calendar REST API for creating, updating, and managing events, calendars, and attendees"
+  },
+  {
+    "key": "google_sheets",
+    "display_name": "Google Sheets API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#0F9D58",
+    "description": "Google Sheets REST API for reading, writing, and formatting spreadsheet data programmatically"
+  },
+  {
+    "key": "outlook",
+    "display_name": "Microsoft Outlook API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#0078D4",
+    "description": "Microsoft Graph API for Outlook email, calendar, contacts, and tasks in Microsoft 365 ecosystem"
+  },
+  {
+    "key": "onedrive",
+    "display_name": "OneDrive API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#094AB2",
+    "description": "Microsoft's cloud file storage API for uploading, sharing, and managing files via Microsoft Graph"
+  },
+  {
+    "key": "teams",
+    "display_name": "Microsoft Teams API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#6264A7",
+    "description": "Microsoft Teams Bot Framework and Graph API for messaging, meetings, channels, and collaboration"
+  },
+  {
+    "key": "slack",
+    "display_name": "Slack API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#4A154B",
+    "description": "Team messaging platform API for bots, workflows, channels, messages, and workspace management"
+  },
+  {
+    "key": "notion",
+    "display_name": "Notion API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#000000",
+    "description": "All-in-one workspace REST API for databases, pages, blocks, comments, and search"
+  },
+  {
+    "key": "airtable",
+    "display_name": "Airtable API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#FCB400",
+    "description": "Spreadsheet-database hybrid with REST API for records, tables, views, and automations"
+  },
+  {
+    "key": "asana",
+    "display_name": "Asana API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#F06A6A",
+    "description": "Project management platform REST API for tasks, projects, teams, goals, and workflow automation"
+  },
+  {
+    "key": "monday_com",
+    "display_name": "Monday.com API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#FF3D57",
+    "description": "Work OS platform with GraphQL API for boards, items, updates, and workflow automation"
+  },
+  {
+    "key": "trello",
+    "display_name": "Trello API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#0079BF",
+    "description": "Kanban project management REST API for boards, lists, cards, members, and activity tracking"
+  },
+  {
+    "key": "clickup",
+    "display_name": "ClickUp API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#7B68EE",
+    "description": "Productivity platform REST API for tasks, docs, goals, spaces, and time tracking"
+  },
+  {
+    "key": "basecamp",
+    "display_name": "Basecamp API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#1D2D35",
+    "description": "Project management and team collaboration REST API for projects, to-dos, messages, and schedules"
+  },
+  {
+    "key": "todoist",
+    "display_name": "Todoist API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#DB4035",
+    "description": "Task management app with REST API for tasks, projects, labels, filters, and productivity insights"
+  },
+  {
+    "key": "linear",
+    "display_name": "Linear API",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#5E6AD2",
+    "description": "Software project management platform with GraphQL API for issues, cycles, projects, and roadmaps"
+  },
+  {
+    "key": "jira",
+    "display_name": "Jira (Atlassian)",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#0052CC",
+    "description": "Issue and project tracking REST API for issues, sprints, boards, workflows, and agile reporting"
+  },
+  {
+    "key": "confluence",
+    "display_name": "Confluence (Atlassian)",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#172B4D",
+    "description": "Team wiki and knowledge base REST API for pages, spaces, comments, and content management"
+  },
+  {
+    "key": "servicenow",
+    "display_name": "ServiceNow",
+    "category": "Productivity & Collaboration",
+    "brand_color": "#62D84E",
+    "description": "Enterprise IT service management platform with REST API for incidents, changes, and IT workflows"
+  },
+  {
+    "key": "zendesk",
+    "display_name": "Zendesk",
+    "category": "Customer Support",
+    "brand_color": "#03363D",
+    "description": "Customer service platform REST API for tickets, agents, macros, triggers, and help centre articles"
+  },
+  {
+    "key": "freshdesk",
+    "display_name": "Freshdesk",
+    "category": "Customer Support",
+    "brand_color": "#25C16F",
+    "description": "Customer support platform REST API for tickets, agents, canned responses, and helpdesk automation"
+  },
+  {
+    "key": "intercom",
+    "display_name": "Intercom",
+    "category": "Customer Support",
+    "brand_color": "#286EFA",
+    "description": "Customer messaging platform REST API for conversations, contacts, companies, and product tours"
+  },
+  {
+    "key": "drift",
+    "display_name": "Drift",
+    "category": "Customer Support",
+    "brand_color": "#0042DA",
+    "description": "Conversational marketing platform with REST API for live chat, email, video, and lead qualification"
+  },
+  {
+    "key": "tidio",
+    "display_name": "Tidio",
+    "category": "Customer Support",
+    "brand_color": "#0B5EFF",
+    "description": "Customer service platform with REST API for live chat, chatbots, and omnichannel support"
+  },
+  {
+    "key": "livechat",
+    "display_name": "LiveChat",
+    "category": "Customer Support",
+    "brand_color": "#F76834",
+    "description": "Customer service platform with REST API for chats, agents, reports, and customer management"
+  },
+  {
+    "key": "crisp",
+    "display_name": "Crisp",
+    "category": "Customer Support",
+    "brand_color": "#16C96E",
+    "description": "Customer messaging platform with REST API for conversations, contacts, and inbox management"
+  },
+  {
+    "key": "helpscout",
+    "display_name": "Help Scout",
+    "category": "Customer Support",
+    "brand_color": "#1292EE",
+    "description": "Customer support platform with REST API for conversations, customers, mailboxes, and workflows"
+  },
+  {
+    "key": "kustomer",
+    "display_name": "Kustomer",
+    "category": "Customer Support",
+    "brand_color": "#7B68EE",
+    "description": "Customer service CRM platform with REST API for omnichannel conversations and customer timelines"
+  },
+  {
+    "key": "reamaze",
+    "display_name": "Re:amaze",
+    "category": "Customer Support",
+    "brand_color": "#4A90D9",
+    "description": "Customer support and messaging platform with REST API for conversations, contacts, and FAQ management"
+  },
+  {
+    "key": "kayako",
+    "display_name": "Kayako",
+    "category": "Customer Support",
+    "brand_color": "#F7941D",
+    "description": "Customer service platform with REST API for conversations, cases, and customer journey tracking"
+  },
+  {
+    "key": "google_analytics",
+    "display_name": "Google Analytics",
+    "category": "Analytics & BI",
+    "brand_color": "#E37400",
+    "description": "Google's web analytics platform with Data API for dimensions, metrics, custom reports, and segments"
+  },
+  {
+    "key": "mixpanel",
+    "display_name": "Mixpanel",
+    "category": "Analytics & BI",
+    "brand_color": "#7856FF",
+    "description": "Product analytics platform with REST API for event tracking, funnels, retention, and A/B testing"
+  },
+  {
+    "key": "amplitude",
+    "display_name": "Amplitude",
+    "category": "Analytics & BI",
+    "brand_color": "#0066FF",
+    "description": "Digital analytics platform with REST API for event ingestion, user behavior analysis, and cohorts"
+  },
+  {
+    "key": "segment",
+    "display_name": "Segment (Twilio)",
+    "category": "Analytics & BI",
+    "brand_color": "#52BD95",
+    "description": "Customer data platform with REST API for collecting, unifying, and routing user data to tools"
+  },
+  {
+    "key": "heap",
+    "display_name": "Heap",
+    "category": "Analytics & BI",
+    "brand_color": "#FF6B35",
+    "description": "Auto-capture analytics platform with REST API for retroactive event analysis and user sessions"
+  },
+  {
+    "key": "hotjar",
+    "display_name": "Hotjar",
+    "category": "Analytics & BI",
+    "brand_color": "#FD3A5C",
+    "description": "Behavior analytics platform with REST API for heatmaps, session recordings, surveys, and funnels"
+  },
+  {
+    "key": "looker",
+    "display_name": "Looker (Google)",
+    "category": "Analytics & BI",
+    "brand_color": "#4285F4",
+    "description": "Business intelligence platform with REST API for data modeling, embedded analytics, and dashboards"
+  },
+  {
+    "key": "datadog",
+    "display_name": "Datadog",
+    "category": "Analytics & BI",
+    "brand_color": "#632CA6",
+    "description": "Monitoring and analytics platform with REST API for metrics, logs, traces, and dashboards"
+  },
+  {
+    "key": "new_relic",
+    "display_name": "New Relic",
+    "category": "Analytics & BI",
+    "brand_color": "#00AC18",
+    "description": "Observability platform with NerdGraph (GraphQL) API for APM, logs, infrastructure, and alerting"
+  },
+  {
+    "key": "grafana",
+    "display_name": "Grafana",
+    "category": "Analytics & BI",
+    "brand_color": "#F46800",
+    "description": "Open-source analytics and monitoring platform with HTTP API for dashboards, alerts, and data sources"
+  },
+  {
+    "key": "splunk",
+    "display_name": "Splunk",
+    "category": "Analytics & BI",
+    "brand_color": "#65A637",
+    "description": "Data platform with REST API for log search, monitoring, security analytics, and dashboards"
+  },
+  {
+    "key": "elastic",
+    "display_name": "Elasticsearch (Elastic)",
+    "category": "Analytics & BI",
+    "brand_color": "#FEC514",
+    "description": "Search and analytics engine with REST API for full-text search, aggregations, and log analysis"
+  },
+  {
+    "key": "chartio",
+    "display_name": "Chartio",
+    "category": "Analytics & BI",
+    "brand_color": "#FF6B6B",
+    "description": "Cloud-based BI tool with REST API for connecting data sources and building visual dashboards"
+  },
+  {
+    "key": "metabase",
+    "display_name": "Metabase",
+    "category": "Analytics & BI",
+    "brand_color": "#509EE3",
+    "description": "Open-source BI platform with REST API for questions, dashboards, and embedded analytics"
+  },
+  {
+    "key": "quickbooks",
+    "display_name": "QuickBooks (Intuit)",
+    "category": "Finance & Accounting",
+    "brand_color": "#2CA01C",
+    "description": "Small business accounting platform with REST API for invoices, expenses, payments, and reporting"
+  },
+  {
+    "key": "xero",
+    "display_name": "Xero",
+    "category": "Finance & Accounting",
+    "brand_color": "#13B5EA",
+    "description": "Cloud accounting platform with REST API for invoices, bank reconciliation, payroll, and reporting"
+  },
+  {
+    "key": "freshbooks",
+    "display_name": "FreshBooks",
+    "category": "Finance & Accounting",
+    "brand_color": "#1DB2DB",
+    "description": "Accounting software with REST API for invoices, expenses, time tracking, and client management"
+  },
+  {
+    "key": "wave",
+    "display_name": "Wave Accounting",
+    "category": "Finance & Accounting",
+    "brand_color": "#00D0BB",
+    "description": "Free accounting software with REST API for invoices, payments, receipts, and financial reports"
+  },
+  {
+    "key": "sage",
+    "display_name": "Sage",
+    "category": "Finance & Accounting",
+    "brand_color": "#00D639",
+    "description": "Business management software with APIs for accounting, payroll, HR, and ERP for SMEs"
+  },
+  {
+    "key": "zoho_books",
+    "display_name": "Zoho Books",
+    "category": "Finance & Accounting",
+    "brand_color": "#E42527",
+    "description": "Online accounting software with REST API for invoices, expenses, bank feeds, and tax compliance"
+  },
+  {
+    "key": "taxjar",
+    "display_name": "TaxJar",
+    "category": "Finance & Accounting",
+    "brand_color": "#00B5E2",
+    "description": "Sales tax automation platform with REST API for tax calculations, filing, and nexus reporting"
+  },
+  {
+    "key": "avalara",
+    "display_name": "Avalara",
+    "category": "Finance & Accounting",
+    "brand_color": "#FF6600",
+    "description": "Tax compliance automation platform with REST API for real-time sales tax calculation and filing"
+  },
+  {
+    "key": "cleartax",
+    "display_name": "ClearTax",
+    "category": "Finance & Accounting",
+    "brand_color": "#3B82F6",
+    "description": "India's tax and compliance platform with API for GST filing, ITR, e-invoicing, and TDS management"
+  },
+  {
+    "key": "plaid",
+    "display_name": "Plaid",
+    "category": "Banking & Fintech",
+    "brand_color": "#00B050",
+    "description": "Open banking data platform with REST API for bank account verification, transactions, and identity"
+  },
+  {
+    "key": "mx_technologies",
+    "display_name": "MX Technologies",
+    "category": "Banking & Fintech",
+    "brand_color": "#1B3C87",
+    "description": "Financial data platform with REST API for account aggregation, transaction enrichment, and insights"
+  },
+  {
+    "key": "yodlee",
+    "display_name": "Yodlee (Envestnet)",
+    "category": "Banking & Fintech",
+    "brand_color": "#005EB8",
+    "description": "Financial data aggregation platform with REST API for account data, transactions, and analytics"
+  },
+  {
+    "key": "finicity",
+    "display_name": "Finicity (Mastercard)",
+    "category": "Banking & Fintech",
+    "brand_color": "#EB001B",
+    "description": "Open banking data network with REST API for account verification, cash flow analysis, and lending"
+  },
+  {
+    "key": "zerodha",
+    "display_name": "Zerodha Kite API",
+    "category": "Banking & Fintech",
+    "brand_color": "#387ED1",
+    "description": "India's largest stockbroker with Kite REST API for trading, portfolio, orders, and market data"
+  },
+  {
+    "key": "upstox",
+    "display_name": "Upstox API",
+    "category": "Banking & Fintech",
+    "brand_color": "#6E3BD1",
+    "description": "India's discount broker with REST API for trading, positions, holdings, and market data access"
+  },
+  {
+    "key": "groww",
+    "display_name": "Groww",
+    "category": "Banking & Fintech",
+    "brand_color": "#00D09C",
+    "description": "India's investment platform for stocks and mutual funds with developer APIs for fintech integrations"
+  },
+  {
+    "key": "angel_one",
+    "display_name": "AngelOne SmartAPI",
+    "category": "Banking & Fintech",
+    "brand_color": "#F07C00",
+    "description": "India's full-service broker with REST SmartAPI for market data, order management, and portfolio access"
+  },
+  {
+    "key": "smallcase",
+    "display_name": "Smallcase",
+    "category": "Banking & Fintech",
+    "brand_color": "#00B386",
+    "description": "Investment platform with REST API for curated stock and ETF portfolios and subscription management"
+  },
+  {
+    "key": "account_aggregator",
+    "display_name": "Account Aggregator (India)",
+    "category": "Banking & Fintech",
+    "brand_color": "#1E3A5F",
+    "description": "India's NBFC-AA framework with APIs for secure financial data consent and sharing across institutions"
+  },
+  {
+    "key": "finastra",
+    "display_name": "Finastra",
+    "category": "Banking & Fintech",
+    "brand_color": "#782E90",
+    "description": "Financial technology company with FusionFabric.cloud open APIs for banking, lending, and payments"
+  },
+  {
+    "key": "epic",
+    "display_name": "Epic (App Orchard)",
+    "category": "Healthcare",
+    "brand_color": "#CC1F26",
+    "description": "Leading EHR platform with FHIR R4 and REST APIs for patient data, clinical records, and care coordination"
+  },
+  {
+    "key": "cerner",
+    "display_name": "Cerner (Oracle Health)",
+    "category": "Healthcare",
+    "brand_color": "#F80000",
+    "description": "Oracle's healthcare platform with FHIR APIs for clinical data, interoperability, and care management"
+  },
+  {
+    "key": "athenahealth",
+    "display_name": "Athenahealth",
+    "category": "Healthcare",
+    "brand_color": "#0071BC",
+    "description": "Cloud-based EHR platform with 800+ REST API endpoints for patient records, billing, and scheduling"
+  },
+  {
+    "key": "veeva",
+    "display_name": "Veeva Systems",
+    "category": "Healthcare",
+    "brand_color": "#F26724",
+    "description": "Life sciences cloud platform with REST API for CRM, clinical data, regulatory submissions, and content"
+  },
+  {
+    "key": "redox",
+    "display_name": "Redox",
+    "category": "Healthcare",
+    "brand_color": "#2E5BFF",
+    "description": "Healthcare integration platform with standardized API for connecting to EHR systems and clinical workflows"
+  },
+  {
+    "key": "microsoft_fhir",
+    "display_name": "Azure Health Data Services (FHIR)",
+    "category": "Healthcare",
+    "brand_color": "#0078D4",
+    "description": "Microsoft's managed FHIR service with REST API for healthcare interoperability and clinical data exchange"
+  },
+  {
+    "key": "drchrono",
+    "display_name": "DrChrono",
+    "category": "Healthcare",
+    "brand_color": "#44A8D8",
+    "description": "EHR and practice management platform with REST API for clinical notes, appointments, and billing"
+  },
+  {
+    "key": "healthie",
+    "display_name": "Healthie",
+    "category": "Healthcare",
+    "brand_color": "#4DB37E",
+    "description": "Healthcare and wellness platform with GraphQL API for patient management, telehealth, and charting"
+  },
+  {
+    "key": "allscripts",
+    "display_name": "Allscripts",
+    "category": "Healthcare",
+    "brand_color": "#00529B",
+    "description": "Healthcare IT platform with REST API for clinical workflows, patient data, and practice management"
+  },
+  {
+    "key": "practice_fusion",
+    "display_name": "Practice Fusion",
+    "category": "Healthcare",
+    "brand_color": "#008BB9",
+    "description": "Cloud EHR platform with REST API for patient charts, appointments, e-prescribing, and billing"
+  },
+  {
+    "key": "fedex",
+    "display_name": "FedEx",
+    "category": "Logistics & Shipping",
+    "brand_color": "#FF6600",
+    "description": "Global courier company with REST API for shipping rates, label generation, tracking, and pickup scheduling"
+  },
+  {
+    "key": "ups",
+    "display_name": "UPS",
+    "category": "Logistics & Shipping",
+    "brand_color": "#351C15",
+    "description": "Global shipping company with REST API for rates, time-in-transit, label generation, and package tracking"
+  },
+  {
+    "key": "usps",
+    "display_name": "USPS",
+    "category": "Logistics & Shipping",
+    "brand_color": "#004B87",
+    "description": "US Postal Service API for address validation, shipping rates, tracking, and label printing"
+  },
+  {
+    "key": "dhl",
+    "display_name": "DHL",
+    "category": "Logistics & Shipping",
+    "brand_color": "#FFCC00",
+    "description": "Global logistics company with REST APIs for shipment tracking, rates, shipping labels, and returns"
+  },
+  {
+    "key": "shippo",
+    "display_name": "Shippo",
+    "category": "Logistics & Shipping",
+    "brand_color": "#6A2FE7",
+    "description": "Multi-carrier shipping API platform for rates comparison, label generation, and tracking integration"
+  },
+  {
+    "key": "easypost",
+    "display_name": "EasyPost",
+    "category": "Logistics & Shipping",
+    "brand_color": "#4E95D9",
+    "description": "Shipping API for carrier rate shopping, label generation, package tracking, and address verification"
+  },
+  {
+    "key": "shipstation",
+    "display_name": "ShipStation",
+    "category": "Logistics & Shipping",
+    "brand_color": "#0066CC",
+    "description": "E-commerce shipping platform with REST API for order imports, label creation, and carrier management"
+  },
+  {
+    "key": "aftership",
+    "display_name": "AfterShip",
+    "category": "Logistics & Shipping",
+    "brand_color": "#F95700",
+    "description": "Shipment tracking and returns platform with REST API for multi-carrier tracking across 900+ couriers"
+  },
+  {
+    "key": "narvar",
+    "display_name": "Narvar",
+    "category": "Logistics & Shipping",
+    "brand_color": "#5B4FC1",
+    "description": "Post-purchase experience platform with API for order tracking, notifications, and returns management"
+  },
+  {
+    "key": "shipbob",
+    "display_name": "ShipBob",
+    "category": "Logistics & Shipping",
+    "brand_color": "#00B5E2",
+    "description": "E-commerce fulfillment platform with REST API for inventory management, orders, and shipping"
+  },
+  {
+    "key": "delhivery",
+    "display_name": "Delhivery",
+    "category": "Logistics & Shipping",
+    "brand_color": "#E31837",
+    "description": "India's largest logistics company with REST API for shipment creation, tracking, and warehouse management"
+  },
+  {
+    "key": "bluedart",
+    "display_name": "Blue Dart",
+    "category": "Logistics & Shipping",
+    "brand_color": "#E31837",
+    "description": "India's premier courier service with API for shipment booking, tracking, and delivery status updates"
+  },
+  {
+    "key": "ecom_express",
+    "display_name": "Ecom Express",
+    "category": "Logistics & Shipping",
+    "brand_color": "#F7941D",
+    "description": "India's e-commerce logistics provider with API for forward and reverse shipping, and real-time tracking"
+  },
+  {
+    "key": "shiprocket",
+    "display_name": "Shiprocket",
+    "category": "Logistics & Shipping",
+    "brand_color": "#F26722",
+    "description": "India's e-commerce shipping aggregator with REST API for multi-carrier shipping and order management"
+  },
+  {
+    "key": "xpressbees",
+    "display_name": "XpressBees",
+    "category": "Logistics & Shipping",
+    "brand_color": "#F7A623",
+    "description": "India's fast-growing logistics company with API for order pickup, delivery, and tracking services"
+  },
+  {
+    "key": "shadowfax",
+    "display_name": "Shadowfax",
+    "category": "Logistics & Shipping",
+    "brand_color": "#2D2D2D",
+    "description": "India's on-demand logistics platform with API for same-day/next-day delivery and hyperlocal fulfillment"
+  },
+  {
+    "key": "pickrr",
+    "display_name": "Pickrr",
+    "category": "Logistics & Shipping",
+    "brand_color": "#9C27B0",
+    "description": "India's AI-driven logistics platform with REST API for smart courier allocation and shipment management"
+  },
+  {
+    "key": "porter",
+    "display_name": "Porter",
+    "category": "Logistics & Shipping",
+    "brand_color": "#E91E63",
+    "description": "India's intracity logistics platform with API for truck booking, ride management, and fleet operations"
+  },
+  {
+    "key": "dunzo",
+    "display_name": "Dunzo",
+    "category": "Logistics & Shipping",
+    "brand_color": "#00C781",
+    "description": "India's hyperlocal delivery platform with API for quick commerce and last-mile delivery integrations"
+  },
+  {
+    "key": "workday",
+    "display_name": "Workday",
+    "category": "HR & Payroll",
+    "brand_color": "#F0AA00",
+    "description": "Enterprise HCM and finance platform with REST API for workers, payroll, benefits, and financial data"
+  },
+  {
+    "key": "bamboohr",
+    "display_name": "BambooHR",
+    "category": "HR & Payroll",
+    "brand_color": "#73C41D",
+    "description": "HR software for SMBs with REST API for employee records, time-off requests, and onboarding workflows"
+  },
+  {
+    "key": "gusto",
+    "display_name": "Gusto",
+    "category": "HR & Payroll",
+    "brand_color": "#F45D48",
+    "description": "Payroll and HR platform with REST API for employee payroll, benefits, onboarding, and time tracking"
+  },
+  {
+    "key": "adp",
+    "display_name": "ADP",
+    "category": "HR & Payroll",
+    "brand_color": "#D0103A",
+    "description": "Global HR and payroll leader with REST API for workforce management, payroll data, and compliance"
+  },
+  {
+    "key": "rippling",
+    "display_name": "Rippling",
+    "category": "HR & Payroll",
+    "brand_color": "#FFB900",
+    "description": "HR, IT, and finance platform with REST API for employee management, payroll, and device provisioning"
+  },
+  {
+    "key": "greenhouse",
+    "display_name": "Greenhouse",
+    "category": "HR & Payroll",
+    "brand_color": "#24A47F",
+    "description": "Recruiting and onboarding platform with REST API for jobs, applications, interviews, and offers"
+  },
+  {
+    "key": "lever",
+    "display_name": "Lever",
+    "category": "HR & Payroll",
+    "brand_color": "#5834DC",
+    "description": "Talent acquisition platform with REST API for candidates, opportunities, postings, and interviews"
+  },
+  {
+    "key": "workable",
+    "display_name": "Workable",
+    "category": "HR & Payroll",
+    "brand_color": "#1565C0",
+    "description": "Hiring and onboarding platform with REST API for job listings, candidates, and recruitment workflows"
+  },
+  {
+    "key": "hirevue",
+    "display_name": "HireVue",
+    "category": "HR & Payroll",
+    "brand_color": "#0D6EFD",
+    "description": "AI-powered recruiting platform with API for video interviewing, assessments, and candidate scoring"
+  },
+  {
+    "key": "paylocity",
+    "display_name": "Paylocity",
+    "category": "HR & Payroll",
+    "brand_color": "#0071BC",
+    "description": "Cloud HR and payroll platform with REST API for employee data, payroll processing, and engagement"
+  },
+  {
+    "key": "ceridian",
+    "display_name": "Ceridian (Dayforce)",
+    "category": "HR & Payroll",
+    "brand_color": "#E4003A",
+    "description": "HCM platform with REST API for workforce management, payroll, benefits, and talent management"
+  },
+  {
+    "key": "ukg",
+    "display_name": "UKG (Kronos/UltiPro)",
+    "category": "HR & Payroll",
+    "brand_color": "#005EB8",
+    "description": "Workforce management platform with REST API for timekeeping, scheduling, and HR data"
+  },
+  {
+    "key": "keka_hr",
+    "display_name": "Keka HR",
+    "category": "HR & Payroll",
+    "brand_color": "#FF5A5F",
+    "description": "India's modern HR and payroll platform with REST API for employee data, attendance, and payroll processing"
+  },
+  {
+    "key": "greythr",
+    "display_name": "greytHR",
+    "category": "HR & Payroll",
+    "brand_color": "#00A99D",
+    "description": "India's HR and payroll solution with REST API for payroll processing, compliance, and employee self-service"
+  },
+  {
+    "key": "zoho_people",
+    "display_name": "Zoho People",
+    "category": "HR & Payroll",
+    "brand_color": "#E42527",
+    "description": "HR management software with REST API for employee records, attendance, performance, and appraisals"
+  },
+  {
+    "key": "darwinbox",
+    "display_name": "Darwinbox",
+    "category": "HR & Payroll",
+    "brand_color": "#7B5EA7",
+    "description": "Asia's leading HCM platform with REST API for hire-to-retire HR workflows and workforce analytics"
+  },
+  {
+    "key": "sumhr",
+    "display_name": "sumHR",
+    "category": "HR & Payroll",
+    "brand_color": "#FF6B35",
+    "description": "India's cloud HR management platform with REST API for attendance, payroll, and employee self-service"
+  },
+  {
+    "key": "hrmantra",
+    "display_name": "HRMantra",
+    "category": "HR & Payroll",
+    "brand_color": "#1A56DB",
+    "description": "India's fastest HR software with REST API for payroll, biometrics, performance, and recruitment"
+  },
+  {
+    "key": "sap",
+    "display_name": "SAP",
+    "category": "ERP",
+    "brand_color": "#00B7F0",
+    "description": "World's leading ERP with OData and REST APIs for finance, logistics, HR, manufacturing, and procurement"
+  },
+  {
+    "key": "oracle_erp",
+    "display_name": "Oracle ERP Cloud",
+    "category": "ERP",
+    "brand_color": "#F80000",
+    "description": "Oracle's cloud ERP with REST APIs for financial management, supply chain, procurement, and reporting"
+  },
+  {
+    "key": "ms_dynamics",
+    "display_name": "Microsoft Dynamics 365",
+    "category": "ERP",
+    "brand_color": "#0078D4",
+    "description": "Microsoft's ERP and CRM platform with REST API for finance, sales, supply chain, and field service"
+  },
+  {
+    "key": "netsuite",
+    "display_name": "Oracle NetSuite",
+    "category": "ERP",
+    "brand_color": "#009FDA",
+    "description": "Cloud ERP platform with REST and SuiteScript APIs for financials, inventory, CRM, and e-commerce"
+  },
+  {
+    "key": "odoo",
+    "display_name": "Odoo",
+    "category": "ERP",
+    "brand_color": "#875A7B",
+    "description": "Open-source ERP with JSON-RPC and REST APIs for accounting, CRM, inventory, and manufacturing"
+  },
+  {
+    "key": "infor",
+    "display_name": "Infor",
+    "category": "ERP",
+    "brand_color": "#E31B23",
+    "description": "Industry-specific cloud ERP with REST APIs for manufacturing, distribution, healthcare, and hospitality"
+  },
+  {
+    "key": "acumatica",
+    "display_name": "Acumatica",
+    "category": "ERP",
+    "brand_color": "#CF4B00",
+    "description": "Cloud ERP with REST API for financial management, distribution, CRM, manufacturing, and project accounting"
+  },
+  {
+    "key": "epicor",
+    "display_name": "Epicor",
+    "category": "ERP",
+    "brand_color": "#003087",
+    "description": "Industry-specific ERP with REST APIs for manufacturing, retail, distribution, and services"
+  },
+  {
+    "key": "syspro",
+    "display_name": "SYSPRO",
+    "category": "ERP",
+    "brand_color": "#E31837",
+    "description": "ERP platform for manufacturing and distribution with REST APIs for production, inventory, and finance"
+  },
+  {
+    "key": "square_pos",
+    "display_name": "Square POS",
+    "category": "Retail & POS",
+    "brand_color": "#3E4348",
+    "description": "Point-of-sale platform with REST API for payments, catalog, orders, inventory, and employee management"
+  },
+  {
+    "key": "lightspeed",
+    "display_name": "Lightspeed",
+    "category": "Retail & POS",
+    "brand_color": "#F03E2F",
+    "description": "Cloud POS for retail and restaurants with REST API for sales, inventory, customers, and analytics"
+  },
+  {
+    "key": "toast",
+    "display_name": "Toast",
+    "category": "Retail & POS",
+    "brand_color": "#FF4C00",
+    "description": "Restaurant management platform with REST API for menus, orders, payments, and kitchen display"
+  },
+  {
+    "key": "clover",
+    "display_name": "Clover",
+    "category": "Retail & POS",
+    "brand_color": "#00A94F",
+    "description": "POS platform by Fiserv with REST API for merchants, employees, items, orders, and payments"
+  },
+  {
+    "key": "vend",
+    "display_name": "Vend (Lightspeed)",
+    "category": "Retail & POS",
+    "brand_color": "#14B8A6",
+    "description": "Retail POS software with REST API for products, inventory, customers, sales, and registers"
+  },
+  {
+    "key": "revel_systems",
+    "display_name": "Revel Systems",
+    "category": "Retail & POS",
+    "brand_color": "#E8372D",
+    "description": "iPad-based POS platform with REST API for inventory, orders, employees, and customer data"
+  },
+  {
+    "key": "ncr",
+    "display_name": "NCR Voyix",
+    "category": "Retail & POS",
+    "brand_color": "#006DA3",
+    "description": "Enterprise POS platform with APIs for retail, restaurant, and banking transaction management"
+  },
+  {
+    "key": "zillow",
+    "display_name": "Zillow",
+    "category": "Real Estate",
+    "brand_color": "#006AFF",
+    "description": "US real estate marketplace with API for property listings, Zestimates, rental data, and market trends"
+  },
+  {
+    "key": "realtor_com",
+    "display_name": "Realtor.com",
+    "category": "Real Estate",
+    "brand_color": "#D92228",
+    "description": "US real estate portal with REST API for property listings, agent directories, and market statistics"
+  },
+  {
+    "key": "housing_com",
+    "display_name": "Housing.com",
+    "category": "Real Estate",
+    "brand_color": "#E00D1B",
+    "description": "India's leading real estate platform with API for property listings, home loans, and market data"
+  },
+  {
+    "key": "magicbricks",
+    "display_name": "MagicBricks",
+    "category": "Real Estate",
+    "brand_color": "#E31E24",
+    "description": "India's property marketplace with APIs for residential and commercial property listings and trends"
+  },
+  {
+    "key": "proptiger",
+    "display_name": "PropTiger",
+    "category": "Real Estate",
+    "brand_color": "#F7941D",
+    "description": "India's real estate advisory platform with API for new home listings and property recommendations"
+  },
+  {
+    "key": "99acres",
+    "display_name": "99acres",
+    "category": "Real Estate",
+    "brand_color": "#E8001D",
+    "description": "India's largest real estate portal with API for property listings, search, and price trends"
+  },
+  {
+    "key": "moodle",
+    "display_name": "Moodle",
+    "category": "Education & EdTech",
+    "brand_color": "#F98012",
+    "description": "Open-source LMS with REST API for courses, users, assignments, grades, and activity tracking"
+  },
+  {
+    "key": "canvas",
+    "display_name": "Canvas (Instructure)",
+    "category": "Education & EdTech",
+    "brand_color": "#E66000",
+    "description": "LMS platform with REST API for courses, assignments, discussions, grades, and user enrollment"
+  },
+  {
+    "key": "blackboard",
+    "display_name": "Blackboard (Anthology)",
+    "category": "Education & EdTech",
+    "brand_color": "#B90E34",
+    "description": "Education technology platform with REST API for courses, users, content, and grade management"
+  },
+  {
+    "key": "google_classroom",
+    "display_name": "Google Classroom",
+    "category": "Education & EdTech",
+    "brand_color": "#1A73E8",
+    "description": "Google's free education platform with REST API for classes, coursework, students, and submissions"
+  },
+  {
+    "key": "coursera",
+    "display_name": "Coursera",
+    "category": "Education & EdTech",
+    "brand_color": "#0056D2",
+    "description": "Online learning platform with API for courses, learner progress, certifications, and enterprise access"
+  },
+  {
+    "key": "udemy",
+    "display_name": "Udemy",
+    "category": "Education & EdTech",
+    "brand_color": "#A435F0",
+    "description": "Online learning marketplace with Udemy Business API for course access, learner enrollment, and reporting"
+  },
+  {
+    "key": "zoom",
+    "display_name": "Zoom API",
+    "category": "Education & EdTech",
+    "brand_color": "#2D8CFF",
+    "description": "Video conferencing platform with REST API for meetings, webinars, users, recordings, and reports"
+  },
+  {
+    "key": "amadeus",
+    "display_name": "Amadeus",
+    "category": "Travel & Hospitality",
+    "brand_color": "#005EB8",
+    "description": "Global travel technology GDS with REST APIs for flight search, hotel booking, and travel insights"
+  },
+  {
+    "key": "sabre",
+    "display_name": "Sabre",
+    "category": "Travel & Hospitality",
+    "brand_color": "#003580",
+    "description": "Travel technology company with REST APIs for flights, hotels, cars, and travel agency workflows"
+  },
+  {
+    "key": "travelport",
+    "display_name": "Travelport",
+    "category": "Travel & Hospitality",
+    "brand_color": "#0057B8",
+    "description": "Travel commerce GDS platform with APIs for airline, hotel, car rental, and rail content"
+  },
+  {
+    "key": "booking_com",
+    "display_name": "Booking.com",
+    "category": "Travel & Hospitality",
+    "brand_color": "#003580",
+    "description": "Global hotel and accommodation platform with REST API for property listings, availability, and reservations"
+  },
+  {
+    "key": "expedia",
+    "display_name": "Expedia",
+    "category": "Travel & Hospitality",
+    "brand_color": "#FFC20E",
+    "description": "Online travel platform with REST API for flights, hotels, vacation packages, and car rentals"
+  },
+  {
+    "key": "airbnb",
+    "display_name": "Airbnb",
+    "category": "Travel & Hospitality",
+    "brand_color": "#FF5A5F",
+    "description": "Short-term rental marketplace with REST API for listings, bookings, availability, and pricing management"
+  },
+  {
+    "key": "makemytrip",
+    "display_name": "MakeMyTrip",
+    "category": "Travel & Hospitality",
+    "brand_color": "#DA291C",
+    "description": "India's leading travel platform with API for flights, hotels, holiday packages, and bus bookings"
+  },
+  {
+    "key": "cleartrip",
+    "display_name": "Cleartrip (Flipkart)",
+    "category": "Travel & Hospitality",
+    "brand_color": "#EA2126",
+    "description": "India's travel booking platform with API for flights, hotels, and activity reservations"
+  },
+  {
+    "key": "irctc",
+    "display_name": "IRCTC Rail Connect",
+    "category": "Travel & Hospitality",
+    "brand_color": "#1A5276",
+    "description": "Indian Railways official API for train search, PNR status, booking, and cancellation services"
+  },
+  {
+    "key": "redbus",
+    "display_name": "redBus",
+    "category": "Travel & Hospitality",
+    "brand_color": "#D0312D",
+    "description": "India's largest bus ticketing platform with REST API for bus search, booking, and cancellation"
+  },
+  {
+    "key": "ixigo",
+    "display_name": "ixigo",
+    "category": "Travel & Hospitality",
+    "brand_color": "#FF6C37",
+    "description": "India's AI-powered travel platform with API for train, flight, bus, and hotel booking services"
+  },
+  {
+    "key": "swiggy",
+    "display_name": "Swiggy",
+    "category": "Food & Delivery",
+    "brand_color": "#FC8019",
+    "description": "India's leading food and grocery delivery platform with developer API for restaurant and order data"
+  },
+  {
+    "key": "zomato",
+    "display_name": "Zomato",
+    "category": "Food & Delivery",
+    "brand_color": "#CB202D",
+    "description": "India's restaurant discovery and food delivery platform with REST API for restaurants and menus"
+  },
+  {
+    "key": "yelp",
+    "display_name": "Yelp Fusion API",
+    "category": "Food & Delivery",
+    "brand_color": "#D32323",
+    "description": "Local business review platform with REST API for business search, reviews, and ratings"
+  },
+  {
+    "key": "doordash",
+    "display_name": "DoorDash Drive API",
+    "category": "Food & Delivery",
+    "brand_color": "#FF3008",
+    "description": "US food delivery platform with Drive API for on-demand local delivery from restaurants"
+  },
+  {
+    "key": "uber_eats",
+    "display_name": "Uber Eats API",
+    "category": "Food & Delivery",
+    "brand_color": "#06C167",
+    "description": "Uber's food delivery platform with REST API for restaurant menu, order management, and delivery status"
+  },
+  {
+    "key": "grubhub",
+    "display_name": "Grubhub",
+    "category": "Food & Delivery",
+    "brand_color": "#F63440",
+    "description": "US food delivery platform with REST API for restaurant menus, orders, and delivery tracking"
+  },
+  {
+    "key": "blinkit",
+    "display_name": "Blinkit (Zomato)",
+    "category": "Food & Delivery",
+    "brand_color": "#F8C409",
+    "description": "India's quick commerce platform for 10-minute grocery delivery with integration APIs for businesses"
+  },
+  {
+    "key": "digilocker",
+    "display_name": "DigiLocker",
+    "category": "Government APIs (India)",
+    "brand_color": "#0058A6",
+    "description": "India's digital document wallet with OAuth2 API for issuing and verifying government documents"
+  },
+  {
+    "key": "aadhaar_uidai",
+    "display_name": "Aadhaar (UIDAI)",
+    "category": "Government APIs (India)",
+    "brand_color": "#F7941E",
+    "description": "India's biometric identity platform with APIs for e-KYC, authentication, and demographic verification"
+  },
+  {
+    "key": "gst_api",
+    "display_name": "GST APIs (GSTN)",
+    "category": "Government APIs (India)",
+    "brand_color": "#13609E",
+    "description": "India's Goods and Services Tax network APIs for GST filing, return status, and taxpayer verification"
+  },
+  {
+    "key": "esign",
+    "display_name": "eSign API (India)",
+    "category": "Government APIs (India)",
+    "brand_color": "#004B97",
+    "description": "India's digital signature API enabling Aadhaar-based online document signing for paperless workflows"
+  },
+  {
+    "key": "bbps",
+    "display_name": "Bharat BillPay (BBPS)",
+    "category": "Government APIs (India)",
+    "brand_color": "#1A56DB",
+    "description": "RBI's interoperable bill payment system with API for utility bills, insurance, education, and loan repayments"
+  },
+  {
+    "key": "pan_verification",
+    "display_name": "PAN Verification API",
+    "category": "Government APIs (India)",
+    "brand_color": "#0066CC",
+    "description": "India's income tax PAN card verification API for individual and business identity verification"
+  },
+  {
+    "key": "mca21",
+    "display_name": "MCA21 (India)",
+    "category": "Government APIs (India)",
+    "brand_color": "#003087",
+    "description": "Ministry of Corporate Affairs API for company registration, director data, and compliance filings"
+  },
+  {
+    "key": "cowin",
+    "display_name": "CoWIN API",
+    "category": "Government APIs (India)",
+    "brand_color": "#0C5A72",
+    "description": "India's COVID-19 vaccination platform API for slot availability, registration, and certificate download"
+  },
+  {
+    "key": "abdm",
+    "display_name": "Ayushman Bharat (ABDM)",
+    "category": "Government APIs (India)",
+    "brand_color": "#007B5E",
+    "description": "India's national digital health mission APIs for health IDs, doctor registry, and health records"
+  },
+  {
+    "key": "nsdl",
+    "display_name": "NSDL",
+    "category": "Government APIs (India)",
+    "brand_color": "#0033A0",
+    "description": "India's depository for securities with APIs for demat account data, KYC, and PAN verification"
+  },
+  {
+    "key": "auth0",
+    "display_name": "Auth0 (Okta)",
+    "category": "Identity & Auth",
+    "brand_color": "#EB5424",
+    "description": "Identity platform with REST API for authentication, authorization, user management, and MFA"
+  },
+  {
+    "key": "okta",
+    "display_name": "Okta",
+    "category": "Identity & Auth",
+    "brand_color": "#007DC1",
+    "description": "Enterprise identity platform with REST API for SSO, MFA, user provisioning, and lifecycle management"
+  },
+  {
+    "key": "firebase_auth",
+    "display_name": "Firebase Auth",
+    "category": "Identity & Auth",
+    "brand_color": "#FFCA28",
+    "description": "Google's authentication service with REST API for email/password, OAuth, phone, and anonymous auth"
+  },
+  {
+    "key": "aws_cognito",
+    "display_name": "AWS Cognito",
+    "category": "Identity & Auth",
+    "brand_color": "#FF9900",
+    "description": "Amazon's user identity service with REST API for user pools, identity federation, and JWT tokens"
+  },
+  {
+    "key": "onelogin",
+    "display_name": "OneLogin",
+    "category": "Identity & Auth",
+    "brand_color": "#003D6A",
+    "description": "Identity and access management platform with REST API for SSO, MFA, and user provisioning"
+  },
+  {
+    "key": "ping_identity",
+    "display_name": "Ping Identity",
+    "category": "Identity & Auth",
+    "brand_color": "#C50024",
+    "description": "Enterprise identity security platform with REST API for SSO, MFA, API access, and zero trust"
+  },
+  {
+    "key": "supabase_auth",
+    "display_name": "Supabase Auth",
+    "category": "Identity & Auth",
+    "brand_color": "#3ECF8E",
+    "description": "Open-source Firebase alternative with REST API for authentication, row-level security, and OAuth"
+  },
+  {
+    "key": "clerk",
+    "display_name": "Clerk",
+    "category": "Identity & Auth",
+    "brand_color": "#6C47FF",
+    "description": "Developer-first authentication platform with REST API for user management, organizations, and sessions"
+  },
+  {
+    "key": "ory",
+    "display_name": "Ory",
+    "category": "Identity & Auth",
+    "brand_color": "#5528FF",
+    "description": "Open-source identity infrastructure with REST APIs for authentication, authorization, and API security"
+  },
+  {
+    "key": "aws_s3",
+    "display_name": "Amazon S3",
+    "category": "File Storage",
+    "brand_color": "#FF9900",
+    "description": "Industry-standard object storage with REST API for file upload, download, versioning, and access control"
+  },
+  {
+    "key": "google_cloud_storage",
+    "display_name": "Google Cloud Storage",
+    "category": "File Storage",
+    "brand_color": "#4285F4",
+    "description": "Google's scalable object storage with REST API for blobs, buckets, access policies, and lifecycle rules"
+  },
+  {
+    "key": "cloudinary",
+    "display_name": "Cloudinary",
+    "category": "File Storage",
+    "brand_color": "#3448C5",
+    "description": "Media management platform with REST API for image/video upload, transformation, and CDN delivery"
+  },
+  {
+    "key": "uploadcare",
+    "display_name": "Uploadcare",
+    "category": "File Storage",
+    "brand_color": "#6936FF",
+    "description": "File management platform with REST API for file upload, processing, storage, and CDN delivery"
+  },
+  {
+    "key": "imagekit",
+    "display_name": "ImageKit",
+    "category": "File Storage",
+    "brand_color": "#00AEFF",
+    "description": "Real-time image optimization and CDN with REST API for image uploads, transformations, and delivery"
+  },
+  {
+    "key": "bunny_net",
+    "display_name": "Bunny.net",
+    "category": "File Storage",
+    "brand_color": "#FF7B26",
+    "description": "CDN and edge storage with REST API for content delivery, video streaming, and storage optimization"
+  },
+  {
+    "key": "backblaze_b2",
+    "display_name": "Backblaze B2",
+    "category": "File Storage",
+    "brand_color": "#E04A3E",
+    "description": "S3-compatible cloud storage with REST API for cost-effective object storage and backups"
+  },
+  {
+    "key": "wasabi",
+    "display_name": "Wasabi",
+    "category": "File Storage",
+    "brand_color": "#00B050",
+    "description": "Hot cloud storage with S3-compatible REST API for object storage, versioning, and immutable backups"
+  },
+  {
+    "key": "firebase_firestore",
+    "display_name": "Firebase / Firestore",
+    "category": "Database & Backend",
+    "brand_color": "#FFCA28",
+    "description": "Google's real-time NoSQL database with REST and SDK APIs for data sync, queries, and offline support"
+  },
+  {
+    "key": "supabase",
+    "display_name": "Supabase",
+    "category": "Database & Backend",
+    "brand_color": "#3ECF8E",
+    "description": "Open-source Firebase alternative with REST and GraphQL APIs for Postgres, auth, storage, and functions"
+  },
+  {
+    "key": "planetscale",
+    "display_name": "PlanetScale",
+    "category": "Database & Backend",
+    "brand_color": "#000000",
+    "description": "Serverless MySQL platform with REST API for database branching, deployments, and schema management"
+  },
+  {
+    "key": "neon",
+    "display_name": "Neon",
+    "category": "Database & Backend",
+    "brand_color": "#00E599",
+    "description": "Serverless Postgres platform with REST and standard SQL APIs for branching and auto-scaling databases"
+  },
+  {
+    "key": "mongodb_atlas",
+    "display_name": "MongoDB Atlas",
+    "category": "Database & Backend",
+    "brand_color": "#13AA52",
+    "description": "Cloud MongoDB platform with Data API and Atlas Search for document storage and full-text search"
+  },
+  {
+    "key": "hasura",
+    "display_name": "Hasura",
+    "category": "Database & Backend",
+    "brand_color": "#1EB4D4",
+    "description": "GraphQL engine that auto-generates instant GraphQL and REST APIs over PostgreSQL databases"
+  },
+  {
+    "key": "directus",
+    "display_name": "Directus",
+    "category": "Database & Backend",
+    "brand_color": "#6644FF",
+    "description": "Open data platform with REST and GraphQL APIs wrapping any SQL database as a headless CMS or API"
+  },
+  {
+    "key": "fauna",
+    "display_name": "Fauna",
+    "category": "Database & Backend",
+    "brand_color": "#3A1AB6",
+    "description": "Distributed serverless database with FQL (Fauna Query Language) and GraphQL APIs"
+  },
+  {
+    "key": "cockroachdb",
+    "display_name": "CockroachDB",
+    "category": "Database & Backend",
+    "brand_color": "#6933FF",
+    "description": "Distributed SQL database with REST and PostgreSQL wire-compatible APIs for globally distributed apps"
+  },
+  {
+    "key": "pocketbase",
+    "display_name": "PocketBase",
+    "category": "Database & Backend",
+    "brand_color": "#E06837",
+    "description": "Open-source backend with REST API for database management, auth, file storage, and real-time subscriptions"
+  },
+  {
+    "key": "appwrite",
+    "display_name": "Appwrite",
+    "category": "Database & Backend",
+    "brand_color": "#FD366E",
+    "description": "Open-source backend platform with REST and GraphQL APIs for auth, databases, storage, and functions"
+  },
+  {
+    "key": "openai",
+    "display_name": "OpenAI",
+    "category": "AI & ML APIs",
+    "brand_color": "#10A37F",
+    "description": "Leading AI research company with REST API for GPT models, DALL-E image generation, and embeddings"
+  },
+  {
+    "key": "anthropic",
+    "display_name": "Anthropic (Claude)",
+    "category": "AI & ML APIs",
+    "brand_color": "#D97757",
+    "description": "AI safety company with REST API for Claude LLM models for text generation, analysis, and reasoning"
+  },
+  {
+    "key": "google_gemini",
+    "display_name": "Google Gemini",
+    "category": "AI & ML APIs",
+    "brand_color": "#4285F4",
+    "description": "Google's multimodal AI with REST API for text, image, audio, and video understanding and generation"
+  },
+  {
+    "key": "cohere",
+    "display_name": "Cohere",
+    "category": "AI & ML APIs",
+    "brand_color": "#FF7759",
+    "description": "Enterprise AI company with REST API for LLMs, embeddings, reranking, and retrieval-augmented generation"
+  },
+  {
+    "key": "mistral",
+    "display_name": "Mistral AI",
+    "category": "AI & ML APIs",
+    "brand_color": "#F7931A",
+    "description": "European AI company with REST API for open and proprietary LLMs for chat, classification, and coding"
+  },
+  {
+    "key": "hugging_face",
+    "display_name": "Hugging Face",
+    "category": "AI & ML APIs",
+    "brand_color": "#FF9D00",
+    "description": "ML model hub with Inference API for thousands of open-source models for NLP, vision, and audio tasks"
+  },
+  {
+    "key": "aws_bedrock",
+    "display_name": "AWS Bedrock",
+    "category": "AI & ML APIs",
+    "brand_color": "#FF9900",
+    "description": "Amazon's managed AI service with REST API for foundation models from Anthropic, Meta, Mistral, and more"
+  },
+  {
+    "key": "azure_openai",
+    "display_name": "Azure OpenAI Service",
+    "category": "AI & ML APIs",
+    "brand_color": "#0078D4",
+    "description": "Microsoft's managed OpenAI service with REST API for GPT, DALL-E, and embeddings in Azure cloud"
+  },
+  {
+    "key": "replicate",
+    "display_name": "Replicate",
+    "category": "AI & ML APIs",
+    "brand_color": "#000000",
+    "description": "Cloud platform for running open-source AI models with REST API for image generation, video, and text"
+  },
+  {
+    "key": "stability_ai",
+    "display_name": "Stability AI",
+    "category": "AI & ML APIs",
+    "brand_color": "#8A2BE2",
+    "description": "Generative AI company with REST API for Stable Diffusion image and video generation"
+  },
+  {
+    "key": "elevenlabs",
+    "display_name": "ElevenLabs",
+    "category": "AI & ML APIs",
+    "brand_color": "#000000",
+    "description": "AI voice synthesis platform with REST API for text-to-speech, voice cloning, and speech-to-speech"
+  },
+  {
+    "key": "deepgram",
+    "display_name": "Deepgram",
+    "category": "AI & ML APIs",
+    "brand_color": "#13EF93",
+    "description": "AI speech recognition platform with REST and streaming WebSocket APIs for accurate transcription"
+  },
+  {
+    "key": "assemblyai",
+    "display_name": "AssemblyAI",
+    "category": "AI & ML APIs",
+    "brand_color": "#3D00F5",
+    "description": "AI audio intelligence platform with REST API for transcription, speaker diarization, and audio analysis"
+  },
+  {
+    "key": "groq",
+    "display_name": "Groq",
+    "category": "AI & ML APIs",
+    "brand_color": "#F55036",
+    "description": "AI inference hardware company with OpenAI-compatible REST API for ultra-fast LLM inference"
+  },
+  {
+    "key": "perplexity",
+    "display_name": "Perplexity AI",
+    "category": "AI & ML APIs",
+    "brand_color": "#20808D",
+    "description": "AI search and answer engine with REST API for online search queries and grounded LLM responses"
+  },
+  {
+    "key": "speechify",
+    "display_name": "Speechify",
+    "category": "AI & ML APIs",
+    "brand_color": "#5B40FF",
+    "description": "AI text-to-speech platform with REST API for natural voice synthesis and audio content generation"
+  },
+  {
+    "key": "google_maps",
+    "display_name": "Google Maps Platform",
+    "category": "Maps & Location",
+    "brand_color": "#4285F4",
+    "description": "Google's mapping platform with REST APIs for maps, geocoding, directions, and places data"
+  },
+  {
+    "key": "mapbox",
+    "display_name": "Mapbox",
+    "category": "Maps & Location",
+    "brand_color": "#4264FB",
+    "description": "Mapping and location data platform with REST APIs for custom maps, navigation, and search"
+  },
+  {
+    "key": "here_maps",
+    "display_name": "HERE Technologies",
+    "category": "Maps & Location",
+    "brand_color": "#00AFAA",
+    "description": "Location intelligence platform with REST APIs for maps, routing, geocoding, and fleet management"
+  },
+  {
+    "key": "tomtom",
+    "display_name": "TomTom",
+    "category": "Maps & Location",
+    "brand_color": "#DF1B12",
+    "description": "Mapping and navigation technology with REST APIs for routing, traffic, geocoding, and map display"
+  },
+  {
+    "key": "openstreetmap",
+    "display_name": "OpenStreetMap (Nominatim)",
+    "category": "Maps & Location",
+    "brand_color": "#7EBC6F",
+    "description": "Open-source mapping project with Nominatim REST API for geocoding and reverse geocoding"
+  },
+  {
+    "key": "mapmyindia",
+    "display_name": "MapmyIndia (Mappls)",
+    "category": "Maps & Location",
+    "brand_color": "#E8352B",
+    "description": "India's indigenous mapping platform with REST APIs for maps, routing, geocoding, and places in India"
+  },
+  {
+    "key": "ola_maps",
+    "display_name": "Ola Maps",
+    "category": "Maps & Location",
+    "brand_color": "#1FC84B",
+    "description": "Ola's mapping service with REST APIs for maps, routing, and geocoding focused on Indian geography"
+  },
+  {
+    "key": "youtube_data",
+    "display_name": "YouTube Data API",
+    "category": "Video & Media",
+    "brand_color": "#FF0000",
+    "description": "Google's YouTube REST API for video uploads, channel management, comments, playlists, and analytics"
+  },
+  {
+    "key": "vimeo",
+    "display_name": "Vimeo API",
+    "category": "Video & Media",
+    "brand_color": "#1AB7EA",
+    "description": "Professional video hosting platform with REST API for upload, streaming, analytics, and access control"
+  },
+  {
+    "key": "wistia",
+    "display_name": "Wistia",
+    "category": "Video & Media",
+    "brand_color": "#54BBFF",
+    "description": "Business video hosting platform with REST API for video management, analytics, and lead generation"
+  },
+  {
+    "key": "cloudflare_stream",
+    "display_name": "Cloudflare Stream",
+    "category": "Video & Media",
+    "brand_color": "#F38020",
+    "description": "Cloudflare's video streaming platform with REST API for video uploads, encoding, and delivery"
+  },
+  {
+    "key": "mux",
+    "display_name": "Mux",
+    "category": "Video & Media",
+    "brand_color": "#FA50B5",
+    "description": "Developer-first video streaming platform with REST API for video encoding, delivery, and real-time analytics"
+  },
+  {
+    "key": "agora",
+    "display_name": "Agora",
+    "category": "Video & Media",
+    "brand_color": "#099DFD",
+    "description": "Real-time engagement platform with SDK and REST APIs for video calls, live streaming, and messaging"
+  },
+  {
+    "key": "daily_co",
+    "display_name": "Daily.co",
+    "category": "Video & Media",
+    "brand_color": "#121A2D",
+    "description": "Video API platform with REST API for embedding real-time video calls and live streaming in apps"
+  },
+  {
+    "key": "dailymotion",
+    "display_name": "Dailymotion API",
+    "category": "Video & Media",
+    "brand_color": "#0066DC",
+    "description": "Video platform with REST API for video uploads, channel management, and content discovery"
+  },
+  {
+    "key": "vonage_video",
+    "display_name": "Vonage Video API (TokBox)",
+    "category": "Video & Media",
+    "brand_color": "#6F2DA8",
+    "description": "WebRTC-based video platform with REST API for live video calls, recording, and screen sharing"
+  },
+  {
+    "key": "github",
+    "display_name": "GitHub",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#181717",
+    "description": "Code hosting and collaboration platform with REST and GraphQL APIs for repos, issues, PRs, and Actions"
+  },
+  {
+    "key": "gitlab",
+    "display_name": "GitLab",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#FC6D26",
+    "description": "DevOps platform with comprehensive REST API for repositories, CI/CD pipelines, and project management"
+  },
+  {
+    "key": "bitbucket",
+    "display_name": "Bitbucket (Atlassian)",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#0052CC",
+    "description": "Atlassian's code collaboration platform with REST API for repositories, pull requests, and Pipelines"
+  },
+  {
+    "key": "circleci",
+    "display_name": "CircleCI",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#343434",
+    "description": "Continuous integration and delivery platform with REST API for pipelines, jobs, and insights"
+  },
+  {
+    "key": "travis_ci",
+    "display_name": "Travis CI",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#3EAAAF",
+    "description": "Hosted CI/CD service with REST API for build management, repositories, and environment configuration"
+  },
+  {
+    "key": "vercel",
+    "display_name": "Vercel",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#000000",
+    "description": "Frontend cloud platform with REST API for deployments, domains, projects, and serverless functions"
+  },
+  {
+    "key": "netlify",
+    "display_name": "Netlify",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#00C7B7",
+    "description": "Web development platform with REST API for site deployments, serverless functions, and forms"
+  },
+  {
+    "key": "heroku",
+    "display_name": "Heroku",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#430098",
+    "description": "Platform-as-a-service with REST API for app deployments, add-ons, dynos, and pipeline management"
+  },
+  {
+    "key": "railway",
+    "display_name": "Railway",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#0B0D0E",
+    "description": "Developer infrastructure platform with REST API for project deployments, databases, and environments"
+  },
+  {
+    "key": "render",
+    "display_name": "Render",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#46E3B7",
+    "description": "Cloud application hosting platform with REST API for services, databases, and static site deployments"
+  },
+  {
+    "key": "fly_io",
+    "display_name": "Fly.io",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#7B3FBE",
+    "description": "Application deployment platform with Machines API for deploying containers close to users globally"
+  },
+  {
+    "key": "azure_devops",
+    "display_name": "Azure DevOps",
+    "category": "DevOps & CI/CD",
+    "brand_color": "#0078D4",
+    "description": "Microsoft's DevOps platform with REST API for repos, pipelines, boards, test plans, and artifacts"
+  },
+  {
+    "key": "crowdstrike",
+    "display_name": "CrowdStrike",
+    "category": "Security",
+    "brand_color": "#E2000F",
+    "description": "Cybersecurity platform with REST API for endpoint protection, threat intelligence, and incident response"
+  },
+  {
+    "key": "sentinelone",
+    "display_name": "SentinelOne",
+    "category": "Security",
+    "brand_color": "#6A1BE2",
+    "description": "AI-powered cybersecurity platform with REST API for endpoint detection, response, and threat hunting"
+  },
+  {
+    "key": "qualys",
+    "display_name": "Qualys",
+    "category": "Security",
+    "brand_color": "#ED1C24",
+    "description": "Cloud security platform with REST API for vulnerability management, compliance, and web app scanning"
+  },
+  {
+    "key": "tenable",
+    "display_name": "Tenable",
+    "category": "Security",
+    "brand_color": "#00BFEF",
+    "description": "Cyber exposure platform with REST API for vulnerability assessment, cloud security, and risk management"
+  },
+  {
+    "key": "snyk",
+    "display_name": "Snyk",
+    "category": "Security",
+    "brand_color": "#4C4A73",
+    "description": "Developer security platform with REST API for finding and fixing vulnerabilities in code and containers"
+  },
+  {
+    "key": "cloudflare",
+    "display_name": "Cloudflare",
+    "category": "Security",
+    "brand_color": "#F38020",
+    "description": "Web infrastructure and security platform with REST API for DNS, CDN, DDoS protection, and Zero Trust"
+  },
+  {
+    "key": "pagerduty",
+    "display_name": "PagerDuty",
+    "category": "Security",
+    "brand_color": "#06AC38",
+    "description": "Digital operations management platform with REST API for incidents, alerts, on-call scheduling, and runbooks"
+  },
+  {
+    "key": "palo_alto",
+    "display_name": "Palo Alto Networks",
+    "category": "Security",
+    "brand_color": "#FA5820",
+    "description": "Cybersecurity company with REST APIs for firewall management, threat prevention, and cloud security"
+  },
+  {
+    "key": "fortinet",
+    "display_name": "Fortinet",
+    "category": "Security",
+    "brand_color": "#EE3124",
+    "description": "Network security company with REST APIs for firewall, VPN, endpoint, and threat management"
+  },
+  {
+    "key": "bloomberg",
+    "display_name": "Bloomberg API",
+    "category": "Data & Research",
+    "brand_color": "#F60000",
+    "description": "Financial data platform with API for market data, news, company financials, and economic indicators"
+  },
+  {
+    "key": "alpha_vantage",
+    "display_name": "Alpha Vantage",
+    "category": "Data & Research",
+    "brand_color": "#2563EB",
+    "description": "Free and premium stock, forex, and crypto API for real-time and historical market data"
+  },
+  {
+    "key": "polygon_io",
+    "display_name": "Polygon.io",
+    "category": "Data & Research",
+    "brand_color": "#5E00EB",
+    "description": "Financial market data platform with REST and WebSocket APIs for stocks, options, forex, and crypto"
+  },
+  {
+    "key": "openweather",
+    "display_name": "OpenWeatherMap",
+    "category": "Data & Research",
+    "brand_color": "#E96E00",
+    "description": "Weather data provider with REST API for current weather, forecasts, air quality, and historical data"
+  },
+  {
+    "key": "tomorrow_io",
+    "display_name": "Tomorrow.io",
+    "category": "Data & Research",
+    "brand_color": "#4B5563",
+    "description": "Weather intelligence platform with REST API for hyper-local forecasts, alerts, and climate insights"
+  },
+  {
+    "key": "world_bank",
+    "display_name": "World Bank API",
+    "category": "Data & Research",
+    "brand_color": "#009FDA",
+    "description": "World Bank's open data API for economic indicators, development data, and country statistics"
+  },
+  {
+    "key": "quandl",
+    "display_name": "Nasdaq Data Link (Quandl)",
+    "category": "Data & Research",
+    "brand_color": "#003087",
+    "description": "Financial and economic data platform with REST API for alternative data, financial ratios, and commodities"
+  },
+  {
+    "key": "refinitiv",
+    "display_name": "Refinitiv (LSEG)",
+    "category": "Data & Research",
+    "brand_color": "#C40B37",
+    "description": "Financial market data provider with REST APIs for news, market data, and ESG data"
+  },
+  {
+    "key": "cropin",
+    "display_name": "CropIn",
+    "category": "Agriculture",
+    "brand_color": "#4CAF50",
+    "description": "India's agri-tech platform with REST API for crop monitoring, farm data, and supply chain traceability"
+  },
+  {
+    "key": "fasal",
+    "display_name": "Fasal",
+    "category": "Agriculture",
+    "brand_color": "#388E3C",
+    "description": "Crop intelligence platform with APIs for microclimate data, crop advisory, and precision farming"
+  },
+  {
+    "key": "dehaat",
+    "display_name": "DeHaat",
+    "category": "Agriculture",
+    "brand_color": "#2E7D32",
+    "description": "Full-stack agri-tech company with APIs for farmer services, input supply, and market linkage"
+  },
+  {
+    "key": "ninjacart",
+    "display_name": "Ninjacart",
+    "category": "Agriculture",
+    "brand_color": "#00A651",
+    "description": "India's agri supply chain company with API for fresh produce sourcing and B2B agricultural commerce"
+  },
+  {
+    "key": "agribazaar",
+    "display_name": "AgriBazaar",
+    "category": "Agriculture",
+    "brand_color": "#F7941D",
+    "description": "India's digital agri-marketplace with API for commodity trading, mandi prices, and farmer transactions"
+  },
+  {
+    "key": "agristack",
+    "display_name": "Agristack (India)",
+    "category": "Agriculture",
+    "brand_color": "#558B2F",
+    "description": "India's federated farmers' database with APIs for land records, crop data, and farmer identity"
+  },
+  {
+    "key": "cred",
+    "display_name": "CRED",
+    "category": "Indian Fintech",
+    "brand_color": "#1D1D1D",
+    "description": "India's premium credit card rewards platform with partner APIs for financial services and commerce"
+  },
+  {
+    "key": "policybazaar",
+    "display_name": "PolicyBazaar",
+    "category": "Indian Fintech",
+    "brand_color": "#F7941D",
+    "description": "India's leading insurance marketplace with APIs for insurance comparison, policy issuance, and renewal"
+  },
+  {
+    "key": "acko",
+    "display_name": "Acko",
+    "category": "Indian Fintech",
+    "brand_color": "#3B82F6",
+    "description": "India's digital insurance company with REST API for motor, health, and travel insurance integration"
+  },
+  {
+    "key": "digit_insurance",
+    "display_name": "Go Digit Insurance",
+    "category": "Indian Fintech",
+    "brand_color": "#EE342A",
+    "description": "India's digital insurer with API for motor, health, travel, and commercial insurance product integrations"
+  },
+  {
+    "key": "nykaa",
+    "display_name": "Nykaa",
+    "category": "Indian E-commerce",
+    "brand_color": "#FC2779",
+    "description": "India's beauty and lifestyle e-commerce platform with APIs for product catalog and order management"
+  },
+  {
+    "key": "meesho",
+    "display_name": "Meesho",
+    "category": "Indian E-commerce",
+    "brand_color": "#9C27B0",
+    "description": "India's social commerce platform with APIs for resellers, product catalog, and order processing"
+  },
+  {
+    "key": "flipkart",
+    "display_name": "Flipkart",
+    "category": "Indian E-commerce",
+    "brand_color": "#2874F0",
+    "description": "India's largest e-commerce platform with Flipkart Affiliate API for product data and order tracking"
+  },
+  {
+    "key": "myntra",
+    "display_name": "Myntra",
+    "category": "Indian E-commerce",
+    "brand_color": "#FF3F6C",
+    "description": "India's leading fashion e-commerce platform with APIs for product catalog and seller integrations"
+  },
+  {
+    "key": "snapdeal",
+    "display_name": "Snapdeal",
+    "category": "Indian E-commerce",
+    "brand_color": "#E40046",
+    "description": "India's value-focused e-commerce marketplace with REST API for product listing and order management"
+  },
+  {
+    "key": "airtel_developer",
+    "display_name": "Airtel Developer APIs",
+    "category": "Telecom",
+    "brand_color": "#E40000",
+    "description": "India's leading telecom company with APIs for OTP authentication, network data, and payment services"
+  },
+  {
+    "key": "jio_apis",
+    "display_name": "Jio APIs",
+    "category": "Telecom",
+    "brand_color": "#006AFF",
+    "description": "Reliance Jio's telecom APIs for OTP verification, mobile number validation, and digital services"
+  },
+  {
+    "key": "zapier",
+    "display_name": "Zapier",
+    "category": "Automation & iPaaS",
+    "brand_color": "#FF4A00",
+    "description": "No-code automation platform with REST API for workflows (Zaps) connecting thousands of apps"
+  },
+  {
+    "key": "make",
+    "display_name": "Make (Integromat)",
+    "category": "Automation & iPaaS",
+    "brand_color": "#6D00CC",
+    "description": "Visual automation platform with REST API for complex multi-step workflows and data transformations"
+  },
+  {
+    "key": "n8n",
+    "display_name": "n8n",
+    "category": "Automation & iPaaS",
+    "brand_color": "#EA4B71",
+    "description": "Open-source workflow automation tool with REST API for self-hosted integrations and automations"
+  },
+  {
+    "key": "workato",
+    "display_name": "Workato",
+    "category": "Automation & iPaaS",
+    "brand_color": "#3E54A3",
+    "description": "Enterprise integration and automation platform with REST API for business process automations"
+  },
+  {
+    "key": "mulesoft",
+    "display_name": "MuleSoft (Salesforce)",
+    "category": "Automation & iPaaS",
+    "brand_color": "#00A1DF",
+    "description": "API integration and management platform with Anypoint APIs for connecting enterprise applications"
+  },
+  {
+    "key": "boomi",
+    "display_name": "Boomi",
+    "category": "Automation & iPaaS",
+    "brand_color": "#00558B",
+    "description": "Low-code integration platform with REST API for connecting applications, data, and people"
+  },
+  {
+    "key": "tray_io",
+    "display_name": "Tray.io",
+    "category": "Automation & iPaaS",
+    "brand_color": "#5D32F5",
+    "description": "Enterprise automation platform with REST API for complex workflow integrations and data pipelines"
+  },
+  {
+    "key": "postman",
+    "display_name": "Postman API",
+    "category": "Developer Tools",
+    "brand_color": "#FF6C37",
+    "description": "API development and testing platform with REST API for collections, environments, and test automation"
+  },
+  {
+    "key": "pusher",
+    "display_name": "Pusher",
+    "category": "Developer Tools",
+    "brand_color": "#2D87F7",
+    "description": "Real-time messaging platform with REST API for WebSockets, channels, and push notifications"
+  },
+  {
+    "key": "ably",
+    "display_name": "Ably",
+    "category": "Developer Tools",
+    "brand_color": "#FF5416",
+    "description": "Realtime data delivery platform with REST and WebSocket APIs for pub/sub messaging and data streams"
+  },
+  {
+    "key": "algolia",
+    "display_name": "Algolia",
+    "category": "Developer Tools",
+    "brand_color": "#003DFF",
+    "description": "Search and discovery API platform with REST API for instant search, recommendations, and analytics"
+  },
+  {
+    "key": "typesense",
+    "display_name": "Typesense",
+    "category": "Developer Tools",
+    "brand_color": "#D90368",
+    "description": "Open-source, typo-tolerant search engine with REST API for fast and relevant full-text search"
+  },
+  {
+    "key": "liveblocks",
+    "display_name": "Liveblocks",
+    "category": "Developer Tools",
+    "brand_color": "#6148F4",
+    "description": "Real-time collaboration infrastructure with REST API for multiplayer features, presence, and CRDT storage"
+  },
+  {
+    "key": "novu",
+    "display_name": "Novu",
+    "category": "Developer Tools",
+    "brand_color": "#000000",
+    "description": "Open-source notification infrastructure with REST API for email, SMS, push, chat, and in-app notifications"
+  },
+  {
+    "key": "resend",
+    "display_name": "Resend",
+    "category": "Developer Tools",
+    "brand_color": "#000000",
+    "description": "Email API built for developers with REST API for transactional email with React Email support"
+  },
+  {
+    "key": "courier",
+    "display_name": "Courier",
+    "category": "Developer Tools",
+    "brand_color": "#9D5EDB",
+    "description": "Notification API platform with REST API for multi-channel notification delivery across email, SMS, and push"
+  },
+  {
+    "key": "knock",
+    "display_name": "Knock",
+    "category": "Developer Tools",
+    "brand_color": "#FC9F4E",
+    "description": "Notification infrastructure with REST API for workflows, templates, and multi-channel delivery"
+  },
+  {
+    "key": "contentful",
+    "display_name": "Contentful",
+    "category": "CMS & Content",
+    "brand_color": "#FFD83D",
+    "description": "Headless CMS with REST and GraphQL APIs for structured content creation and multi-channel delivery"
+  },
+  {
+    "key": "sanity",
+    "display_name": "Sanity",
+    "category": "CMS & Content",
+    "brand_color": "#F03E2F",
+    "description": "Headless CMS platform with GROQ query language and REST API for structured content management"
+  },
+  {
+    "key": "strapi",
+    "display_name": "Strapi",
+    "category": "CMS & Content",
+    "brand_color": "#4945FF",
+    "description": "Open-source headless CMS with REST and GraphQL APIs, fully customizable for any content type"
+  },
+  {
+    "key": "wordpress_api",
+    "display_name": "WordPress REST API",
+    "category": "CMS & Content",
+    "brand_color": "#21759B",
+    "description": "WordPress REST API for posts, pages, media, users, taxonomies, and custom post type management"
+  },
+  {
+    "key": "ghost",
+    "display_name": "Ghost",
+    "category": "CMS & Content",
+    "brand_color": "#15171A",
+    "description": "Open-source headless CMS with REST API for posts, pages, tags, authors, and member subscriptions"
+  },
+  {
+    "key": "prismic",
+    "display_name": "Prismic",
+    "category": "CMS & Content",
+    "brand_color": "#5163BA",
+    "description": "Headless CMS with REST and GraphQL APIs for managing and delivering structured web content"
+  },
+  {
+    "key": "storyblok",
+    "display_name": "Storyblok",
+    "category": "CMS & Content",
+    "brand_color": "#09B3AF",
+    "description": "Headless CMS with REST API and visual editor for managing content across websites and apps"
+  },
+  {
+    "key": "gcash",
+    "display_name": "GCash",
+    "category": "Payments",
+    "brand_color": "#007DFF",
+    "description": "Philippines' #1 mobile wallet with API for payments, cashouts, and QR Ph via PayMongo Source API"
+  },
+  {
+    "key": "maya",
+    "display_name": "Maya (PayMaya)",
+    "category": "Payments",
+    "brand_color": "#00D09C",
+    "description": "Philippines' digital bank and wallet with Business API for card and Maya wallet checkout"
+  },
+  {
+    "key": "gopay",
+    "display_name": "GoPay",
+    "category": "Payments",
+    "brand_color": "#00AED6",
+    "description": "Indonesia's leading e-wallet (Gojek) with API via Midtrans for QR and in-app payments"
+  },
+  {
+    "key": "ovo",
+    "display_name": "OVO",
+    "category": "Payments",
+    "brand_color": "#4C3494",
+    "description": "Indonesia's second-largest e-wallet with push payment API via Xendit, 115M+ users"
+  },
+  {
+    "key": "dana",
+    "display_name": "DANA",
+    "category": "Payments",
+    "brand_color": "#118EEA",
+    "description": "Indonesia's e-wallet backed by Ant Group with redirect checkout API via Xendit, 140M+ users"
+  },
+  {
+    "key": "alipay_direct",
+    "display_name": "Alipay (Direct)",
+    "category": "Payments",
+    "brand_color": "#1677FF",
+    "description": "China's leading digital wallet with direct API integration for web, H5, and QR code payments"
+  },
+  {
+    "key": "wechatpay_direct",
+    "display_name": "WeChat Pay (Direct)",
+    "category": "Payments",
+    "brand_color": "#07C160",
+    "description": "China's dominant payment platform with direct API for Native QR, H5, and JSAPI payments"
+  },
+  {
+    "key": "kakaopay",
+    "display_name": "Kakao Pay",
+    "category": "Payments",
+    "brand_color": "#FAE100",
+    "description": "South Korea's leading mobile payment platform with API for QR, card, and in-app payments"
+  },
+  {
+    "key": "naverpay",
+    "display_name": "Naver Pay",
+    "category": "Payments",
+    "brand_color": "#03C75A",
+    "description": "South Korea's second-largest payment platform with reserve-and-approve checkout API"
+  },
+  {
+    "key": "paypay",
+    "display_name": "PayPay",
+    "category": "Payments",
+    "brand_color": "#FF0033",
+    "description": "Japan's #1 QR code payment app with 65M+ users and official SDK-based API integration"
+  },
+  {
+    "key": "swish",
+    "display_name": "Swish",
+    "category": "Payments",
+    "brand_color": "#6CC049",
+    "description": "Sweden's dominant instant mobile payment network covering 85% of the population, requires mTLS"
+  },
+  {
+    "key": "vipps_mobilepay",
+    "display_name": "Vipps MobilePay",
+    "category": "Payments",
+    "brand_color": "#FF5B24",
+    "description": "Scandinavia's leading mobile wallet covering Norway (Vipps) and Denmark/Finland (MobilePay), 11M+ users"
+  },
+  {
+    "key": "trustly",
+    "display_name": "Trustly",
+    "category": "Payments",
+    "brand_color": "#0EE06E",
+    "description": "Europe's leading Open Banking network for account-to-account payments across 6,000+ banks in 30+ countries"
+  },
+  {
+    "key": "ach_plaid",
+    "display_name": "ACH / Plaid",
+    "category": "Payments",
+    "brand_color": "#00D64F",
+    "description": "US bank-to-bank ACH transfers via Plaid account linking and Dwolla execution, no interchange fees"
+  },
+  {
+    "key": "cash_app_pay",
+    "display_name": "Cash App Pay",
+    "category": "Payments",
+    "brand_color": "#00D54B",
+    "description": "Square/Block's payment button for US merchants, backed by Cash App's 50M+ users via Square API"
+  },
+  {
+    "key": "mpesa",
+    "display_name": "M-Pesa",
+    "category": "Payments",
+    "brand_color": "#00A550",
+    "description": "Africa's leading mobile money platform with Daraja API for STK Push payments in Kenya, Tanzania, and more"
+  },
+  {
+    "key": "flutterwave",
+    "display_name": "Flutterwave",
+    "category": "Payments",
+    "brand_color": "#F5A623",
+    "description": "Pan-African payment gateway covering 34 countries with API for cards, mobile money, and bank transfers"
+  },
+  {
+    "key": "mercadopago",
+    "display_name": "Mercado Pago",
+    "category": "Payments",
+    "brand_color": "#009EE3",
+    "description": "Latin America's leading payment platform covering AR, BR, MX, CO, CL, PE with PIX, OXXO, and card support"
+  },
+  {
+    "key": "telr",
+    "display_name": "Telr",
+    "category": "Payments",
+    "brand_color": "#E31E26",
+    "description": "Middle East and GCC payment gateway supporting UAE, Saudi Arabia, Kuwait and local methods like Mada and KNET"
+  }
+]
