@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shielva-connector-sdk"
+version = "1.0.0"
+description = "Shielva connector base SDK — BaseConnector, shared utilities, and helpers"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27",
+    "structlog>=24",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+# Expose the shared/ directory under two importable names:
+#   from shared.base_connector import BaseConnector          (legacy, widely used)
+#   from shielva_connector_sdk.base_connector import BaseConnector  (canonical)
+[tool.setuptools]
+packages = ["shared", "shielva_connector_sdk"]
+
+[tool.setuptools.package-dir]
+"shielva_connector_sdk" = "shared"

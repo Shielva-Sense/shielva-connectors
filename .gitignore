@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+*.so
+site-packages/
+pip-wheel-metadata/
+
+# Secrets & local config
+.env
+.env.*
+!.env.example
+!.env.local.example
+*.pem
+*.key
+*.crt
+
+# Runtime artefacts
+*.log
+logs/
+*.pid
+*.sock
+plan_cache/
+
+# Test artefacts
+htmlcov/
+.coverage
+coverage.xml
+junit.xml
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+Thumbs.db

@@ -1,0 +1,14 @@
+{
+  "source_directories": [
+    "."
+  ],
+  "exclude": [
+    ".venv",
+    "venv",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    "*.pyc"
+  ],
+  "strict": false
+}
