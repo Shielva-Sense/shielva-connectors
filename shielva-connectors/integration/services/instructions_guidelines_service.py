@@ -178,8 +178,8 @@ async def seed_instruction_guidelines() -> None:
             existing = lp.read_text(encoding="utf-8") if lp.exists() else None
         else:
             try:
-                obj = r2_service._s3().get_object(
-                    Bucket=r2_service._bucket(),
+                obj = r2_service._get_client().get_object(
+                    Bucket=r2_service._get_shared_bucket(),
                     Key=key,
                 )
                 existing = obj["Body"].read().decode("utf-8")

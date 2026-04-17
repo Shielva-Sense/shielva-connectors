@@ -10,7 +10,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from bson import ObjectId
@@ -70,10 +70,10 @@ def _run_pytest_sync(
             encoding="utf-8",
         )
 
-    # Ensure pytest.ini with asyncio_mode=auto
+    # Ensure pytest.ini with asyncio_mode=auto and per-test timeout
     pytest_ini = out_dir / "pytest.ini"
     if not pytest_ini.exists():
-        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
+        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\ntimeout = 60\n", encoding="utf-8")
 
     # Base command — use short tracebacks for speed; long tracebacks add significant I/O
     cmd = [

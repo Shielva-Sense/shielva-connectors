@@ -25,7 +25,14 @@ from integration.services.llm_client import call_llm
 # If the SDK is not installed or SHIELVA_SECURITY_API_KEY is not set, this
 # integration is silently skipped and only local scanners run.
 try:
-    from shielva_security import ShielvaSecurityClient, ScanFailedError, ScanTimeoutError, ShielvaError
+    from shielva_security import (
+        ShielvaSecurityClient,
+        AuthError,
+        PaymentRequiredError,
+        ScanFailedError,
+        ScanTimeoutError,
+        ShielvaError,
+    )
     _SDK_AVAILABLE = True
 except ImportError:
     _SDK_AVAILABLE = False
@@ -715,7 +722,11 @@ async def _upload_to_r2(
     content: bytes,
     content_type: str,
 ) -> None:
-    """Upload binary or text content to R2 under the vuln/ prefix."""
+    """Upload binary or text content to R2 under the vuln/ prefix.
+
+    Bucket  : shielva-agentic-app-{app_id}  (per-installation, via _get_bucket())
+    Key     : {collection}/{provider}/{service_slug}/vuln/{key_suffix}
+    """
     if r2_service._use_local():
         return  # local mode — files already written to disk
 
@@ -745,7 +756,7 @@ async def _run_shielva_security_scan(
     target: str,
     tenant_id: str,
     session_id: str,
-    scan_type: str = "sast",
+    scan_type: str = "full",
 ) -> Dict[str, Any]:
     """Run a scan via the Shielva Security platform SDK.
 
@@ -775,15 +786,19 @@ async def _run_shielva_security_scan(
             api_key=api_key,
             base_url=settings.SHIELVA_SECURITY_URL,
             verify_ssl=False,  # self-signed cert on localhost
+            app_id=tenant_id or None,
         ) as client:
-            scan = await client.scan_and_wait(
+            scan = await client.scans.create_and_wait(
                 target=target,
                 scan_type=scan_type,
                 timeout=settings.SHIELVA_SECURITY_SCAN_TIMEOUT,
             )
 
-            findings_raw = await client.get_findings(scan.id)
-            report_url = client.get_report_url(scan.id)
+            findings_raw = await client.scans.findings(scan.id)
+
+        # R2 key set by security API after report generation
+        # e.g. "Shielvasense-platform-int/{scan_id}/report.html"  in bucket: shielvasense
+        report_r2_key: Optional[str] = scan.report_r2_url
 
         summary = {}
         if scan.summary:
@@ -825,10 +840,18 @@ async def _run_shielva_security_scan(
             "scan_id": scan.id,
             "summary": summary,
             "findings": findings,
-            "report_url": report_url,
+            # R2 key in the shielvasense bucket — set by security API after scan completes
+            # Full path: shielvasense/Shielvasense-platform-int/{scan_id}/report.html
+            "report_r2_key": report_r2_key,
             "error": None,
         }
 
+    except AuthError as e:
+        log.warning("shielva_security.auth_error", error=str(e))
+        return {"ok": False, "error": f"API key invalid or revoked: {e}", "findings": [], "summary": {}}
+    except PaymentRequiredError as e:
+        log.warning("shielva_security.payment_required", error=str(e))
+        return {"ok": False, "error": f"Subscription required: {e}", "findings": [], "summary": {}}
     except ScanTimeoutError as e:
         log.warning("shielva_security.scan_timeout", error=str(e))
         return {"ok": False, "error": str(e), "findings": [], "summary": {}}
@@ -913,14 +936,14 @@ async def run_vulnerability_scan(
     log.info("vuln_scan.pip_audit_start", requirements=str(requirements_txt))
     log.info("vuln_scan.semgrep_start", source_dir=output_dir)
 
-    # Shielva Security platform scan — runs against repo_url if provided,
-    # otherwise targets the connector by its provider/service slug identifier.
-    # Falls back silently if API key is not configured or SDK is not installed.
-    shielva_target = repo_url or f"connector://{provider}/{service_slug}"
+    # Shielva Security platform scan — runs against repo_url (GitHub) if provided,
+    # otherwise scans the local connector directory directly (output_dir).
+    # scan_type="full" runs all scanners: SAST + SCA + IaC + Secrets in parallel.
+    shielva_target = repo_url or output_dir
     scan_coros = [
         _run_pip_audit(str(requirements_txt)),
         _run_semgrep(output_dir),
-        _run_shielva_security_scan(shielva_target, tenant_id, session_id),
+        _run_shielva_security_scan(shielva_target, tenant_id, session_id, scan_type="full"),
     ]
     audit_result, semgrep_result, shielva_result = await asyncio.gather(*scan_coros)
 
@@ -953,7 +976,7 @@ async def run_vulnerability_scan(
     # ── Shielva Security platform results ──
     shielva_findings: List[Dict[str, Any]] = shielva_result.get("findings", [])
     shielva_scan_id: Optional[str] = shielva_result.get("scan_id")
-    shielva_report_url: Optional[str] = shielva_result.get("report_url")
+    shielva_report_r2_key: Optional[str] = shielva_result.get("report_r2_key")
     shielva_error: Optional[str] = shielva_result.get("error")
     if not shielva_result["ok"]:
         log.warning("vuln_scan.shielva_security_skipped", reason=shielva_error)
@@ -1036,7 +1059,9 @@ async def run_vulnerability_scan(
         # Shielva Security platform scan metadata (null when API key not configured)
         "shielva_security": {
             "scan_id": shielva_scan_id,
-            "report_url": shielva_report_url,
+            # R2 key in shielvasense bucket set by security API
+            # Full path: shielvasense/Shielvasense-platform-int/{scan_id}/report.html
+            "report_r2_key": shielva_report_r2_key,
             "error": shielva_error,
             "summary": shielva_result.get("summary"),
         } if shielva_result["ok"] else None,

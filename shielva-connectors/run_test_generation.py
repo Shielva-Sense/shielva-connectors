@@ -134,10 +134,10 @@ def run_pytest() -> dict:
         _SITE_PKGS, _USER_SITE, str(SCRIPT_DIR),
     ]))
 
-    # Ensure pytest.ini exists
+    # Ensure pytest.ini exists with per-test timeout
     pytest_ini = CONNECTOR_DIR / "pytest.ini"
     if not pytest_ini.exists():
-        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
+        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\ntimeout = 60\n", encoding="utf-8")
 
     # Ensure conftest with asyncio_mode
     conftest = TESTS_DIR / "conftest.py"

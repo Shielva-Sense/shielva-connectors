@@ -36,6 +36,7 @@ class AuthStatus(str, Enum):
     MISSING_CREDENTIALS = "missing_credentials"
     TOKEN_EXPIRED = "token_expired"
     AUTHENTICATED = "authenticated"
+    UNAUTHENTICATED = "unauthenticated"
     INVALID_CREDENTIALS = "invalid_credentials"
 
 

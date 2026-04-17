@@ -48,3 +48,8 @@ junit.xml
 .DS_Store
 *.swp
 Thumbs.db
+
+# Runtime-generated symlinks (created by server.sh)
+*/shared/discovery_client.py
+*/shared/__init__.py
+*/shared/__pycache__/

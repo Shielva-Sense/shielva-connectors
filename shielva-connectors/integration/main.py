@@ -40,7 +40,7 @@ from integration.api.prompt_steps_routes import prompt_steps_router
 from integration.core.config import settings
 from integration.db.database import close_db, connect_db
 from integration.services import r2_service
-from integration.services.guidelines_service import seed_default_guidelines
+from integration.services.guidelines_service import seed_default_guidelines, seed_test_case_writing_guidelines
 from integration.services.docs_guidelines_service import seed_default_doc_guidelines
 from integration.services.metadata_guidelines_service import seed_metadata_writing_guidelines
 from integration.services.instructions_guidelines_service import seed_instruction_guidelines
@@ -100,22 +100,46 @@ logger = structlog.get_logger(__name__)
 # ── Request/Response logging middleware ──────────────────────────────
 
 class TenantBucketMiddleware(BaseHTTPMiddleware):
-    """Sets the R2 bucket ContextVar from the X-Tenant-Name header on every request.
+    """Sets R2 bucket ContextVars from request headers (or query params for SSE) on every request.
 
-    The gateway injects X-Tenant-Name (from JWT tenant_name claim) into every
-    proxied request. Lowercasing it gives the tenant-root R2 bucket name so
-    r2_service never needs a hardcoded bucket in config.
+    Priority (highest → lowest):
+      1. X-App-ID header  → "shielva-agentic-app-{app_id}" — stable per-installation bucket.
+                            Covers pre-login AND post-login sessions for the same device.
+      2. app_id query param → same bucket name (fallback for EventSource / SSE connections
+                              which cannot send custom headers).
+      3. X-Tenant-Name header → tenant-root bucket (legacy / multi-tenant server deployments).
+      4. tenant_id query param → same as above (SSE fallback).
+
+    The configured R2_BUCKET_NAME env var always overrides all of the above (see r2_service._get_bucket).
     """
 
     async def dispatch(self, request: Request, call_next):
+        # Headers (standard API calls)
+        app_id      = request.headers.get("X-App-ID", "").strip()
         tenant_name = request.headers.get("X-Tenant-Name", "").strip().lower()
+
+        # Query param fallback (SSE / EventSource connections can't send custom headers)
+        if not app_id:
+            app_id = request.query_params.get("app_id", "").strip()
+        if not tenant_name:
+            tenant_name = request.query_params.get("tenant_id", "").strip().lower()
+
+        tokens = []
+        if app_id:
+            bucket = r2_service.app_id_to_bucket(app_id)
+            tokens.append(r2_service._app_bucket_ctx.set(bucket))
         if tenant_name:
-            token = r2_service._tenant_bucket_ctx.set(tenant_name)
-            try:
-                return await call_next(request)
-            finally:
-                r2_service._tenant_bucket_ctx.reset(token)
-        return await call_next(request)
+            tokens.append(r2_service._tenant_bucket_ctx.set(tenant_name))
+
+        try:
+            return await call_next(request)
+        finally:
+            for t in tokens:
+                # Each ContextVar token has a .var attribute we use to reset
+                try:
+                    t.var.reset(t)
+                except Exception:
+                    pass
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -237,10 +261,11 @@ async def lifespan(app: FastAPI):
     await setup_shared_venv_async()
     # Recover sessions stuck in 'executing' from a previous crash
     await _recover_stale_sessions()
-    await seed_default_guidelines()          # seeds CODE_EXECUTION_GUIDELINES on first boot
-    await seed_default_doc_guidelines()      # seeds CONNECTOR_DOCUMENTATION_GUIDELINES on first boot
-    await seed_metadata_writing_guidelines() # seeds METADATA_WRITING_GUIDELINES on first boot
-    await seed_instruction_guidelines()      # seeds INSTRUCTION_SETUP_GUIDELINES on first boot
+    await seed_default_guidelines()               # seeds CODE_EXECUTION_GUIDELINES on first boot
+    await seed_test_case_writing_guidelines()     # seeds TEST_CASE_WRITING_GUIDELINES.md to R2 on first boot
+    await seed_default_doc_guidelines()           # seeds CONNECTOR_DOCUMENTATION_GUIDELINES on first boot
+    await seed_metadata_writing_guidelines()      # seeds METADATA_WRITING_GUIDELINES on first boot
+    await seed_instruction_guidelines()           # seeds INSTRUCTION_SETUP_GUIDELINES on first boot
     # Upload step prompts to R2/local on first boot (skips if already present so manual R2 edits are preserved)
     await r2_service.sync_all_step_prompts_to_r2()
     # Ensure MongoDB indexes for sync request collections
@@ -366,7 +391,7 @@ async def health():
 
 
 @app.get("/api/v3/heartbeat")
-async def heartbeat():
+async def heartbeat(request: Request):
     """SSE heartbeat stream — sends a ping every 5 seconds.
     Frontend subscribes once; connection alive = backend up, connection lost = backend down.
     """
@@ -374,16 +399,23 @@ async def heartbeat():
     from fastapi.responses import StreamingResponse
 
     async def _stream():
-        while True:
-            payload = json.dumps({"ts": int(asyncio.get_event_loop().time() * 1000)})
-            yield f"event: ping\ndata: {payload}\n\n"
-            await asyncio.sleep(5)
+        try:
+            while True:
+                # Check if client disconnected before sending the next ping
+                if await request.is_disconnected():
+                    break
+                ts = int(asyncio.get_running_loop().time() * 1000)
+                yield f"event: ping\ndata: {json.dumps({'ts': ts})}\n\n"
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            pass
 
     return StreamingResponse(
         _stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )

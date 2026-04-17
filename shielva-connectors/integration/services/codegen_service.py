@@ -81,6 +81,8 @@ def _slug_from_connector_name(connector_name: str) -> str:
     slug = re.sub(r'[\s\-]+', '_', slug)
     # Strip any character that isn't alphanumeric or underscore
     slug = re.sub(r'[^\w]', '', slug)
+    # Final safety: strip any residual _connector suffix after replacements
+    slug = re.sub(r'_connector$', '', slug)
     return slug
 
 
@@ -219,7 +221,7 @@ async def _heartbeat_loop(oid) -> None:
 
 async def execute_plan(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
     from_step_index: int = 0,
     force_restart: bool = False,
     skip_llm: bool = False,
@@ -241,7 +243,7 @@ async def execute_plan(
     # Propagate tenant_id to the LLM client ContextVar so every call_llm*
     # call in this async task automatically includes it.  Required when
     # INTEGRATION_LLM_MODE=mcp (shielva-mcp needs X-Tenant-ID on every request).
-    set_llm_tenant_id(tenant_id)
+    set_llm_tenant_id(tenant_id or "")
 
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one({"_id": oid})
@@ -255,21 +257,31 @@ async def execute_plan(
 
     # ── Set R2 bucket context for the entire execution ────────────────────────
     # execute_plan() owns the session document and is the authoritative resolver.
-    # Setting _tenant_bucket_ctx here means every r2_service call in every step
-    # handler — store_implementation_plan, store_test_guidelines, save_prompt_and_plan
-    # — all write to the correct tenant bucket regardless of how the caller invoked us
-    # (WS, SSE, background task).
+    # Set R2 bucket context for the entire execution so every r2_service call
+    # (store_implementation_plan, store_test_guidelines, save_prompt_and_plan, etc.)
+    # writes to the correct bucket regardless of invocation path (WS, SSE, background task).
+    #
+    # Priority mirrors _get_bucket():
+    #   1. app_id  → "shielva-agentic-app-{app_id}"  (per-device bucket — preferred)
+    #   2. tenant_name → tenant-root bucket           (legacy / multi-tenant fallback)
     from integration.services import r2_service as _r2_svc
+    _exec_app_id      = (session.get("app_id")      or "").strip()
     _exec_tenant_name = (session.get("tenant_name") or "").strip().lower()
+
+    if _exec_app_id:
+        _app_bucket = _r2_svc.app_id_to_bucket(_exec_app_id)
+        _r2_svc._app_bucket_ctx.set(_app_bucket)
+        logger.info("execution.bucket_ctx_set", session_id=session_id, bucket=_app_bucket, source="app_id")
     if _exec_tenant_name:
         _r2_svc._tenant_bucket_ctx.set(_exec_tenant_name)
-        logger.info("execution.bucket_ctx_set", session_id=session_id, bucket=_exec_tenant_name)
-    else:
+        if not _exec_app_id:
+            logger.info("execution.bucket_ctx_set", session_id=session_id, bucket=_exec_tenant_name, source="tenant_name")
+    if not _exec_app_id and not _exec_tenant_name:
         logger.warning(
             "execution.bucket_unresolved",
             session_id=session_id,
-            note="session.tenant_name empty — R2 writes will fall back to local disk. "
-                 "Re-create the session to capture tenant_name.",
+            note="session has no app_id and no tenant_name — R2 writes will fall back to local disk. "
+                 "Re-create the session to capture app_id.",
         )
 
     plan = session.get("plan", {})
@@ -1307,7 +1319,7 @@ async def execute_plan(
 
 # ── Non-streaming execution ──────────────────────────────────────────
 
-async def execute_plan_sync(session_id: str, tenant_id: str) -> Dict[str, Any]:
+async def execute_plan_sync(session_id: str, tenant_id: Optional[str]) -> Dict[str, Any]:
     """Execute plan without SSE streaming. Returns final result dict."""
     events = []
     async for event_str in execute_plan(session_id, tenant_id):
@@ -1762,7 +1774,7 @@ async def attempt_fix_step(
     tenant_id = session.get("tenant_id") or tenant_id
 
     # Propagate tenant_id and preferred model to LLM client ContextVars
-    set_llm_tenant_id(tenant_id)
+    set_llm_tenant_id(tenant_id or "")
     set_llm_model(session.get("llm_model", "") or "")
 
     plan = session.get("plan", {})

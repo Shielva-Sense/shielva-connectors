@@ -420,7 +420,7 @@ For `write_connector` step, config should include ALL extracted requirements:
 }}
 ```
 Include only the fields that are relevant to the user's prompt — omit empty ones.
-For `write_tests` step, config should include: `{{ "test_types": ["unit", "integration"] }}`
+For `write_tests` step, config should include: `{{ "test_types": ["unit"] }}` — unit tests only. Integration tests are generated in a separate \`write_integration_tests\` step when the user selects "Unit + Integration" testing.
 For `generate_metadata` step, config should include: `{{ "version": "1.0.0" }}` — always add this as the FINAL step after write_tests. It reads the built connector.py and generates `metadata/connector.json` with the install form, API catalogue, and Painter config.
 
 Generate 5-7 steps covering the full connector lifecycle. Always end with a `generate_metadata` step as the final step. Be specific to the service and SDK.

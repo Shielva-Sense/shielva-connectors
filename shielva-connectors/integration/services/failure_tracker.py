@@ -92,9 +92,10 @@ def _get_r2_client():
 
 def _sync_r2_read(key: str) -> Optional[str]:
     from botocore.exceptions import ClientError
+    from integration.services.r2_service import _get_bucket
     try:
         client = _get_r2_client()
-        resp = client.get_object(Bucket=settings.R2_BUCKET_NAME, Key=key)
+        resp = client.get_object(Bucket=_get_bucket(), Key=key)
         return resp["Body"].read().decode("utf-8")
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
@@ -108,9 +109,10 @@ def _sync_r2_read(key: str) -> Optional[str]:
 
 
 def _sync_r2_write(key: str, content: str) -> None:
+    from integration.services.r2_service import _get_bucket
     client = _get_r2_client()
     client.put_object(
-        Bucket=settings.R2_BUCKET_NAME,
+        Bucket=_get_bucket(),  # per-app bucket — failure data is session-specific
         Key=key,
         Body=content.encode("utf-8"),
         ContentType="text/markdown",
@@ -119,9 +121,10 @@ def _sync_r2_write(key: str, content: str) -> None:
 
 def _sync_r2_delete(key: str) -> None:
     from botocore.exceptions import ClientError
+    from integration.services.r2_service import _get_bucket
     try:
         client = _get_r2_client()
-        client.delete_object(Bucket=settings.R2_BUCKET_NAME, Key=key)
+        client.delete_object(Bucket=_get_bucket(), Key=key)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code not in ("NoSuchKey", "404"):
