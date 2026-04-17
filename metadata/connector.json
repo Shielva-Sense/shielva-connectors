@@ -1,0 +1,126 @@
+{
+  "name": "GmailConnector",
+  "display_name": "Gmail",
+  "version": "1.0.0",
+  "description": "Connects to Google Gmail to list, search, send, and delete emails using OAuth2.",
+  "provider": "google",
+  "service": "shielva_gmail",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Google OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "help": "The OAuth2 Client ID from your Google Cloud Console project credentials."
+    },
+    {
+      "key": "client_secret",
+      "label": "Google OAuth2 Client Secret",
+      "type": "secret",
+      "required": true,
+      "help": "The OAuth2 Client Secret from your Google Cloud Console project credentials."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "help": "Space-separated OAuth2 scopes. Defaults to gmail.modify and gmail.send if not set."
+    },
+    {
+      "key": "auth_url",
+      "label": "Authorization URL",
+      "type": "string",
+      "required": false,
+      "help": "Google OAuth2 authorization endpoint. Defaults to https://accounts.google.com/o/oauth2/v2/auth."
+    },
+    {
+      "key": "token_url",
+      "label": "Token URL",
+      "type": "string",
+      "required": false,
+      "help": "Google OAuth2 token endpoint. Defaults to https://oauth2.googleapis.com/token."
+    },
+    {
+      "key": "base_url",
+      "label": "Gmail API Base URL",
+      "type": "string",
+      "required": false,
+      "help": "Gmail REST API base URL. Defaults to https://gmail.googleapis.com/gmail/v1."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "string",
+      "required": false,
+      "help": "Maximum number of API requests per minute. Leave blank to use provider defaults."
+    },
+    {
+      "key": "pagination_type",
+      "label": "Pagination Type",
+      "type": "string",
+      "required": false,
+      "help": "Pagination strategy. Defaults to 'cursor' (nextPageToken)."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "help": "Gmail API version. Defaults to 'v1'."
+    }
+  ],
+  "methods": [
+    {
+      "name": "install",
+      "description": "Persist connector configuration and return a PENDING status prompting the user to authorize via OAuth.",
+      "returns": "ConnectorStatus"
+    },
+    {
+      "name": "authorize",
+      "description": "Exchange an OAuth2 authorization code for access and refresh tokens; persist via set_token().",
+      "returns": "TokenInfo"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify that the stored token is valid and the Gmail API is reachable.",
+      "returns": "ConnectorStatus"
+    },
+    {
+      "name": "sync",
+      "description": "Incrementally sync Gmail messages using an 'after:{epoch}' search query; paginates until all messages are fetched.",
+      "returns": "SyncResult"
+    },
+    {
+      "name": "list_emails",
+      "description": "Return a single paginated page of normalized email documents, optionally filtered by query.",
+      "returns": "List[NormalizedDocument]"
+    },
+    {
+      "name": "list_email",
+      "description": "Fetch and normalize a single email message by its Gmail message ID.",
+      "returns": "NormalizedDocument"
+    },
+    {
+      "name": "search_email",
+      "description": "Search Gmail messages using Gmail search syntax and return a page of normalized documents.",
+      "returns": "List[NormalizedDocument]"
+    },
+    {
+      "name": "send_email",
+      "description": "Send an email from the authenticated Gmail account with optional CC, BCC, reply-to, and attachments.",
+      "returns": "Dict[str, Any]"
+    },
+    {
+      "name": "delete_email",
+      "description": "Move an email to Trash (permanent=False) or permanently delete it (permanent=True).",
+      "returns": "None"
+    }
+  ],
+  "dependencies": [
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.0",
+    "google-auth-httplib2>=0.1"
+  ]
+}
