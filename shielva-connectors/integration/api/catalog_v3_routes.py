@@ -49,7 +49,7 @@ _CONNECTOR_CATALOG: dict = _load_connector_catalog()
 
 # R2 logo path — stored at shielva-sense / shielva-platform-int/Connector/logos/{key}.svg
 _LOGO_R2_PREFIX = "shielva-platform-int/Connector/logos"
-_LOGO_R2_BUCKET = "shielva-sense"
+_LOGO_R2_BUCKET = "shielvasense"
 # Gateway CDN URL prefix served by the api-gateway
 _LOGO_CDN_PREFIX = "/integration/api/v3/catalog/logos"
 
@@ -97,19 +97,34 @@ def _merge_brand(provider_dict: dict) -> dict:
     return provider_dict
 
 
+def _build_services_for_static_provider(key: str) -> list:
+    """Return normalized services list for a static catalog provider."""
+    services = get_provider_services(key)
+    if not services:
+        return []
+    for s in services:
+        if "key" not in s:
+            s["key"] = s.get("service", s.get("service_key", ""))
+    return services
+
+
 @catalog_v3_router.get("/providers")
 async def v3_list_providers():
-    """Return all providers (static + connector_catalog.json + custom DB). No tenant scope."""
+    """Return all providers with embedded services (static + connector_catalog.json + custom DB).
+
+    Embeds services[] on each provider so the frontend makes exactly ONE call
+    to get providers + all services — no per-provider service fetches needed.
+    """
     seen_keys: set = set()
     result = []
 
-    # 1. Static Python catalog providers
+    # 1. Static Python catalog providers — embed services inline
     for p in get_all_providers():
         key = p.get("provider", "")
         p["key"] = key
         p = _merge_brand(p)
-        # Inject R2 logo URL — overrides static logo_url only if logo was seeded
         p["logo_url"] = _logo_cdn_url(key)
+        p["services"] = _build_services_for_static_provider(key)
         seen_keys.add(key)
         result.append(p)
 
@@ -126,15 +141,29 @@ async def v3_list_providers():
             "service_count": 0,
             "logo_url": _logo_cdn_url(key),
             "is_custom": False,
+            "services": [],
         })
         seen_keys.add(key)
 
-    # 3. Custom providers from MongoDB
+    # 3. Custom providers from MongoDB — embed their services inline
     try:
         customs = await custom_providers_collection().find({}).to_list(None)
         for c in customs:
             key = c.get("provider_key", _provider_key(c.get("display_name", "")))
-            services = c.get("services", [])
+            raw_services = c.get("services", [])
+            services = [
+                {
+                    "key": svc.get("service_key", ""),
+                    "service": svc.get("service_key", ""),
+                    "display_name": svc.get("display_name", ""),
+                    "description": svc.get("description", ""),
+                    "auth_type": svc.get("auth_type", "api_key"),
+                    "category": svc.get("category", "general"),
+                    "logo_url": svc.get("logo_url", ""),
+                    "is_custom": True,
+                }
+                for svc in raw_services
+            ]
             entry = {
                 "key": key,
                 "provider": key,
@@ -142,15 +171,16 @@ async def v3_list_providers():
                 "service_count": len(services),
                 "logo_url": c.get("logo_url", ""),
                 "is_custom": True,
+                "custom_id": str(c["_id"]) if "_id" in c else "",
                 "brand_color": c.get("brand_color", "#14B8A6"),
                 "description": c.get("description", ""),
+                "services": services,
             }
             entry = _merge_brand(entry)
             if key not in seen_keys:
                 result.append(entry)
                 seen_keys.add(key)
             else:
-                # Override static with custom if same key
                 for i, r in enumerate(result):
                     if r.get("key") == key:
                         result[i] = entry

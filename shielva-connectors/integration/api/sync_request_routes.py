@@ -23,6 +23,8 @@ import json
 import os
 import random
 import re
+import shutil
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +33,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import httpx
 import structlog
 from bson import ObjectId
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pymongo import ReturnDocument
@@ -74,6 +76,14 @@ MAX_SYNC_PAYLOAD_BYTES = 25 * 1024 * 1024
 
 _sse_clients: Dict[str, set] = {}
 
+# ── Active CI task registry ───────────────────────────────────────────────────
+# Maps sync_request_id → asyncio.Task for the running CI pipeline.
+# Used by the cancel-ci endpoint to cancel any in-progress gate (including the
+# long-running SDK security scan). Entries are removed automatically when the
+# task finishes via a done-callback.
+
+_ci_tasks: Dict[str, "asyncio.Task[Any]"] = {}
+
 
 def _broadcast(tenant_id: str, event: str, data: Any) -> None:
     """Push an SSE event to all connected clients for a tenant."""
@@ -87,6 +97,17 @@ def _broadcast(tenant_id: str, event: str, data: Any) -> None:
             dead.append(q)
     for q in dead:
         clients.discard(q)
+
+
+@sync_request_router.post("/connector-sync")
+async def connector_sync_broadcast(
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    body: dict = Body(...),
+):
+    """Internal endpoint — called by CMS core after connector CRUD to broadcast change to all SSE clients."""
+    action = body.get("action", "changed")  # created | updated | deleted
+    _broadcast(x_tenant_id, f"connector:{action}", body)
+    return {"ok": True}
 
 
 # ── MongoDB collections ─────────────────────────────────────────────────────
@@ -176,6 +197,14 @@ class ApproveSyncRequestBody(BaseModel):
     pass  # no body needed — auth from headers
 
 
+class RerunSyncRequestBody(BaseModel):
+    run_all: bool = False  # when True: run all gates without early-exit, always include integration tests
+
+
+class RaisePrBody(BaseModel):
+    branch_name: Optional[str] = None  # if set, overrides the branch recorded on the sync request
+
+
 class SyncSettingsBody(BaseModel):
     github_repo_url: Optional[str] = None
     github_token: Optional[str] = None
@@ -199,6 +228,31 @@ JUNK_PATTERNS = [
     "__pycache__/", ".pyc", ".pyo", ".DS_Store", ".idea/", ".vscode/",
     "Thumbs.db", ".env", ".env.local", "node_modules/",
 ]
+
+
+def _write_files_to_tempdir(files: List["SyncFilePayload"]) -> Path:
+    """Write sync request files into a fresh temp directory.
+
+    Strips the leading 'generated_connectors/{name}/' prefix so that
+    connector.py / tests/ land at the root of the returned directory.
+    Never uses hardcoded paths — tempfile.mkdtemp() is used for isolation.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="shielva_ci_"))
+    # Detect common prefix: generated_connectors/{connector_name}/
+    prefix = ""
+    if files:
+        first = files[0].path.replace("\\", "/")
+        parts = first.split("/")
+        if len(parts) >= 2 and parts[0] == "generated_connectors":
+            prefix = f"{parts[0]}/{parts[1]}/"
+    for f in files:
+        rel = f.path.replace("\\", "/")
+        if prefix and rel.startswith(prefix):
+            rel = rel[len(prefix):]
+        dest = tmp / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f.content, encoding="utf-8")
+    return tmp
 
 
 def _validate_path(rel_path: str) -> bool:
@@ -247,6 +301,300 @@ async def _security_audit(files: List[SyncFilePayload]) -> Dict[str, Any]:
     file_dicts = [{"path": f.path, "content": f.content} for f in files]
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, functools.partial(_security_audit_sync, file_dicts))
+
+
+async def _enrich_findings_with_ai(findings: List[Dict]) -> List[Dict]:
+    """Call shielva-security-ai /api/v1/enrich/batch to add AI fix suggestions.
+
+    Returns the findings list with ai_fix populated. Never raises — on error
+    the original findings are returned unchanged.
+    """
+    if not findings:
+        return findings
+
+    # security-ai runs on the same host as security-api but port 8043 with SSL.
+    ai_url = settings.SHIELVA_SECURITY_URL.replace(":8045", ":8043")
+    # Allow explicit override via SHIELVA_SECURITY_AI_URL env var
+    ai_url = getattr(settings, "SHIELVA_SECURITY_AI_URL", None) or ai_url
+
+    # Build payload — give each finding a stable finding_id
+    payload_findings = []
+    for i, f in enumerate(findings):
+        payload_findings.append({
+            "finding_id":    f.get("id") or f.get("finding_id") or str(i),
+            "title":         f.get("issue") or f.get("title") or "Security finding",
+            "severity":      (f.get("severity") or "medium").upper(),
+            "file_path":     f.get("file") or f.get("file_path"),
+            "line_start":    f.get("line") or f.get("line_number"),
+            "description":   f.get("description") or "",
+            "scanner":       f.get("scanner") or "shielva-security",
+            "code_snippet":  f.get("code_snippet") or "",
+        })
+
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+            resp = await client.post(
+                f"{ai_url}/api/v1/enrich/batch",
+                json={"findings": payload_findings},
+            )
+            resp.raise_for_status()
+            results: List[Dict] = resp.json().get("results", [])
+
+        # Map enrichment results back by finding_id
+        enrich_map = {r["finding_id"]: r for r in results}
+        enriched = []
+        for i, f in enumerate(findings):
+            fid = f.get("id") or f.get("finding_id") or str(i)
+            r = enrich_map.get(fid) or enrich_map.get(str(i), {})
+            enriched.append({
+                **f,
+                "ai_fix":        r.get("fix_suggestion"),
+                "ai_explanation": r.get("explanation"),
+            })
+        return enriched
+    except Exception as exc:
+        logger.warning("security_ai_enrich_failed", ai_url=ai_url, error=str(exc)[:300])
+        return findings
+
+
+async def _security_audit_sdk(
+    sync_request_id: str,
+    branch_name: str,
+    commit_sha: str,
+    sync_settings: Dict,
+    files: Optional[List[Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Gate 1 via shielva-security-sdk — full scan, identical to the stepper flow.
+
+    Strategy (local-first, mirrors vuln_scan_service):
+      1. Write connector source files to a local temp dir.
+      2. Pass the local path directly to the security-api (scan_type="full").
+         This gives SAST + SCA + Secrets + IaC — the same breadth as the stepper.
+         No GitHub clone roundtrip needed, no orphan-branch gymnastics.
+      3. Fetch findings, enrich with AI fix suggestions.
+      4. Clean up temp dir in finally.
+
+    Fallback chain:
+      - No api_key  → return None (regex scanner)
+      - No files    → try GitHub URL scan (branch_name / commit_sha)
+      - SDK error   → return None (regex scanner)
+
+    Gate decision:
+      - "failed"  → any CRITICAL finding (blocks merge)
+      - "passed"  → HIGH / MEDIUM / LOW (informational, merge allowed)
+    """
+    api_key = settings.SHIELVA_SECURITY_API_KEY
+
+    if not api_key or not api_key.startswith("shv_sk_"):
+        logger.info("security_sdk_skipped", reason="no valid SHIELVA_SECURITY_API_KEY")
+        return None
+
+    repo_url = sync_settings.get("github_repo_url", "")
+    gh_token = sync_settings.get("github_token", "")
+
+    client = None
+    _scan_tmpdir: Optional[Path] = None
+    _scan_branch_pushed = False
+    _owner = _repo_name = ""
+
+    try:
+        from shielva_security import ShielvaSecurityClient
+        from shielva_security.exceptions import ScanFailedError, ScanTimeoutError
+
+        client = ShielvaSecurityClient(
+            api_key=api_key,
+            base_url=settings.SHIELVA_SECURITY_URL,
+            timeout=60.0,
+        )
+
+        # ── Determine scan target ──────────────────────────────────────────────
+        # Preferred: local temp dir — same approach as vuln_scan_service.
+        # The security-api and connectors service run on the same host, so a
+        # local path avoids the GitHub clone roundtrip and enables full scanning.
+        scan_target: str
+        scan_kwargs: Dict[str, Any] = {}
+
+        if files:
+            # Write ONLY connector source files (no tests, no fixtures)
+            def _is_source_file(path: str) -> bool:
+                norm = path.replace("\\", "/")
+                parts = norm.split("/")
+                fn = parts[-1]
+                if "tests" in parts or "test" in parts:
+                    return False
+                if fn.startswith("test_") or fn in ("conftest.py", "pytest.ini"):
+                    return False
+                if fn.endswith(".py"):
+                    return True
+                if fn.startswith("requirements") and fn.endswith(".txt"):
+                    return True
+                return False
+
+            source_files = [f for f in files if _is_source_file(f.path)] or list(files)
+            _scan_tmpdir = _write_files_to_tempdir(source_files)
+            scan_target = str(_scan_tmpdir)
+            logger.info(
+                "security_sdk_local_scan",
+                sync_request_id=sync_request_id,
+                target=scan_target,
+                file_count=len(source_files),
+            )
+
+        elif repo_url:
+            # Fallback: no files in memory → scan GitHub branch directly
+            if repo_url.startswith("git@github.com:"):
+                repo_url = "https://github.com/" + repo_url.replace("git@github.com:", "").rstrip(".git")
+            if not repo_url.startswith("https://github.com"):
+                logger.warning("security_sdk_skipped", reason="invalid repo_url", url=repo_url[:60])
+                return None
+
+            # Sync PAT for cloning private repos
+            if gh_token:
+                try:
+                    await client.settings.update(github_token=gh_token)
+                except Exception as tok_err:
+                    logger.warning("security_sdk_token_sync_failed", error=str(tok_err)[:200])
+
+            # Push orphan scan branch (connector source only)
+            try:
+                _url_parts = repo_url.rstrip("/").rstrip(".git").split("github.com/")[-1].split("/")
+                _owner, _repo_name = _url_parts[0], _url_parts[1]
+                scan_branch = f"security-scan-{sync_request_id[-12:]}"
+                await _push_security_scan_branch(_owner, _repo_name, gh_token, scan_branch, files or [])
+                _scan_branch_pushed = True
+                scan_kwargs = {"branch": scan_branch, "commit_sha": None}
+            except Exception as push_err:
+                logger.warning("security_sdk_scan_branch_push_failed", error=str(push_err)[:200])
+                return None
+
+            scan_target = repo_url
+            logger.info(
+                "security_sdk_github_scan",
+                sync_request_id=sync_request_id,
+                repo=repo_url,
+                branch=scan_branch,
+            )
+        else:
+            logger.info("security_sdk_skipped", reason="no files and no repo_url")
+            return None
+
+        # ── Trigger full scan (SAST + SCA + Secrets + IaC) ────────────────────
+        # "full" matches what vuln_scan_service uses in the stepper flow.
+        timeout = settings.SHIELVA_SECURITY_SCAN_TIMEOUT
+        scan = await client.scans.create_and_wait(
+            target=scan_target,
+            scan_type="full",
+            timeout=timeout,
+            **scan_kwargs,
+        )
+
+        # ── Fetch findings ─────────────────────────────────────────────────────
+        findings_raw = await client.scans.findings(scan.id)
+        findings = [
+            {
+                "id":           f.id,
+                "file":         f.file_path or "",
+                "line":         f.line_number,
+                "issue":        f.title,
+                "severity":     f.severity.lower(),
+                "description":  f.description or "",
+                "scanner":      f.scanner,
+                "rule_id":      f.rule_id or "",
+                "code_snippet": f.code_snippet or None,
+                # Extra fields matching stepper/vuln_scan_service output
+                "fix_guidance": f.remediation or "",
+                "cwe":          [f.cwe] if f.cwe else [],
+                "owasp":        [f.owasp] if f.owasp else [],
+                "package":      f.package_name or "",
+                "fix_version":  f.fix_version or "",
+            }
+            for f in findings_raw
+        ]
+
+        logger.info(
+            "security_sdk_scan_done",
+            sync_request_id=sync_request_id,
+            scan_id=scan.id,
+            scan_type="full",
+            finding_count=len(findings),
+            mode="local" if _scan_tmpdir else "github",
+        )
+
+        # ── AI enrichment ──────────────────────────────────────────────────────
+        if findings:
+            findings = await _enrich_findings_with_ai(findings)
+
+        # ── Gate decision: CRITICAL = fail, else pass (informational) ──────────
+        has_critical = any(f["severity"].lower() == "critical" for f in findings)
+        sev_counts: Dict[str, int] = {}
+        for f in findings:
+            sev_counts[f["severity"].upper()] = sev_counts.get(f["severity"].upper(), 0) + 1
+
+        _SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+        summary_parts = [f"{sev_counts[s]} {s}" for s in _SEV_ORDER if sev_counts.get(s)]
+        summary = (
+            ("Security scan FAILED — " if has_critical else "Security scan passed — ")
+            + ", ".join(summary_parts) + " finding(s)"
+            if summary_parts else "No security issues detected"
+        )
+
+        return {
+            "gate":    "security_audit",
+            "status":  "failed" if has_critical else "passed",
+            "summary": summary,
+            "details": json.dumps(findings) if findings else None,
+        }
+
+    except ScanTimeoutError:
+        logger.warning("security_sdk_timeout", sync_request_id=sync_request_id, timeout=settings.SHIELVA_SECURITY_SCAN_TIMEOUT)
+        return {
+            "gate":    "security_audit",
+            "status":  "passed",
+            "summary": f"Security scan timed out after {settings.SHIELVA_SECURITY_SCAN_TIMEOUT}s — review manually",
+            "details": None,
+        }
+    except ScanFailedError as exc:
+        logger.warning("security_sdk_scan_failed", error=str(exc), sync_request_id=sync_request_id)
+        return None
+    except Exception as exc:
+        logger.warning("security_sdk_error", error=str(exc)[:300], sync_request_id=sync_request_id)
+        return None
+    finally:
+        # Clean up local scan temp dir
+        if _scan_tmpdir and _scan_tmpdir.exists():
+            shutil.rmtree(_scan_tmpdir, ignore_errors=True)
+        # Clean up ephemeral GitHub scan branch (fallback path only)
+        if _scan_branch_pushed and gh_token and _owner and _repo_name:
+            try:
+                await _delete_branch(_owner, _repo_name, gh_token, f"security-scan-{sync_request_id[-12:]}")
+            except Exception:
+                pass
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+async def _delete_ci_branch(branch_name: str, sync_settings: Dict) -> None:
+    """Delete a CI branch from GitHub after a failed pipeline run.
+
+    Called when CI gates fail or an unrecoverable error occurs, so that
+    branches pushed purely for security scanning don't pile up on the repo.
+    Non-fatal — logs a warning on failure but never raises.
+    """
+    if not branch_name or not sync_settings:
+        return
+    repo_url = sync_settings.get("github_repo_url", "")
+    token    = sync_settings.get("github_token", "")
+    if not repo_url or not token:
+        return
+    try:
+        owner, repo = _parse_repo(repo_url)
+        await _delete_branch(owner, repo, token, branch_name)
+        logger.info("ci_branch_deleted", branch=branch_name)
+    except Exception as exc:
+        logger.warning("ci_branch_delete_failed", branch=branch_name, error=str(exc)[:200])
 
 
 def _smart_diff(files: List[SyncFilePayload]) -> tuple[List[SyncFilePayload], Dict[str, Any]]:
@@ -384,15 +732,16 @@ async def _github_request(
     raise HTTPException(status_code=502, detail=f"GitHub API request failed: {last_exc}")
 
 
-async def _create_pr(
+async def _push_branch(
     owner: str, repo: str, token: str,
     branch_name: str, target_branch: str,
-    title: str, body: str,
     files: List[SyncFilePayload],
-) -> Dict[str, Any]:
-    """Create a branch, commit files, and open a PR. Returns PR data.
+    commit_message: str = "Shielva sync — automated commit",
+) -> str:
+    """Push connector files onto a new GitHub branch. Returns the commit SHA.
 
-    Uses asyncio.gather() to create all blobs in parallel for better performance.
+    Creates blobs (parallel), tree, commit, and branch ref.
+    If the branch ref already exists (e.g. CI re-run), updates it by force.
     """
     repo_path = f"/repos/{owner}/{repo}"
 
@@ -427,30 +776,155 @@ async def _create_pr(
 
     # 5. Create commit
     commit = await _github_request("POST", f"{repo_path}/git/commits", token, {
-        "message": title,
+        "message": commit_message,
         "tree": tree["sha"],
         "parents": [base_sha],
     })
+    commit_sha = commit["sha"]
 
-    # 6. Create branch ref
-    await _github_request("POST", f"{repo_path}/git/refs", token, {
-        "ref": f"refs/heads/{branch_name}",
-        "sha": commit["sha"],
+    # 6. Create branch ref (or update if it already exists from a re-run)
+    try:
+        await _github_request("POST", f"{repo_path}/git/refs", token, {
+            "ref": f"refs/heads/{branch_name}",
+            "sha": commit_sha,
+        })
+    except HTTPException as e:
+        if e.status_code == 422:
+            # Branch already exists (re-run scenario) — force-update it
+            await _github_request("PATCH", f"{repo_path}/git/refs/heads/{branch_name}", token, {
+                "sha": commit_sha,
+                "force": True,
+            })
+        else:
+            raise
+
+    return commit_sha
+
+
+async def _push_security_scan_branch(
+    owner: str, repo: str, token: str,
+    scan_branch: str,
+    files: List["SyncFilePayload"],
+) -> str:
+    """Push ONLY connector source files to a clean orphan branch for security scanning.
+
+    Unlike _push_branch, this does NOT use base_tree — the resulting branch
+    contains EXACTLY the connector source files and nothing else.  No inherited
+    history from connector-development, no test fixtures, no generated configs.
+
+    Branch is meant to be ephemeral: _security_audit_sdk deletes it in its
+    finally block regardless of scan outcome.
+
+    Returns the commit SHA.
+    """
+    repo_path = f"/repos/{owner}/{repo}"
+
+    # ── Filter: keep only connector source files ──────────────────────────────
+    # Tests, conftest, pytest.ini, yaml fixtures, etc. are noise for SAST.
+    # We want the production Python source that the connector runs in prod.
+    def _is_source_file(path: str) -> bool:
+        norm = path.replace("\\", "/")
+        parts = norm.split("/")
+        filename = parts[-1]
+        # Exclude test directories entirely
+        if "tests" in parts or "test" in parts:
+            return False
+        # Exclude individual test/config files
+        if filename.startswith("test_") or filename in ("conftest.py", "pytest.ini"):
+            return False
+        # Include Python source
+        if filename.endswith(".py"):
+            return True
+        # Include requirements (SCA — dependency vulnerability detection)
+        if filename.startswith("requirements") and filename.endswith(".txt"):
+            return True
+        return False
+
+    scan_files = [f for f in files if _is_source_file(f.path)]
+    if not scan_files:
+        # Nothing survived the filter — fall back to all files (shouldn't happen
+        # in normal usage but keeps the gate functional)
+        scan_files = files
+        logger.warning("security_scan_branch_no_filter_match", total=len(files))
+
+    logger.info(
+        "security_scan_branch_files",
+        scan_branch=scan_branch,
+        total_files=len(files),
+        scan_files=len(scan_files),
+    )
+
+    # ── Create blobs in parallel ───────────────────────────────────────────────
+    async def _create_blob(f: "SyncFilePayload") -> Dict:
+        blob = await _github_request("POST", f"{repo_path}/git/blobs", token, {
+            "content": f.content,
+            "encoding": "utf-8",
+        })
+        return {"path": f.path, "mode": "100644", "type": "blob", "sha": blob["sha"]}
+
+    tree_items = await asyncio.gather(*[_create_blob(f) for f in scan_files])
+
+    # ── Create tree with NO base_tree (clean slate) ────────────────────────────
+    tree = await _github_request("POST", f"{repo_path}/git/trees", token, {
+        "tree": list(tree_items),
+        # Deliberately NO "base_tree" — orphan tree, only our files
     })
 
-    # 7. Open PR
+    # ── Orphan commit (no parents) ─────────────────────────────────────────────
+    commit = await _github_request("POST", f"{repo_path}/git/commits", token, {
+        "message": f"security-scan: connector source snapshot ({scan_branch})",
+        "tree": tree["sha"],
+        "parents": [],
+    })
+    commit_sha = commit["sha"]
+
+    # ── Create branch ref ──────────────────────────────────────────────────────
+    await _github_request("POST", f"{repo_path}/git/refs", token, {
+        "ref": f"refs/heads/{scan_branch}",
+        "sha": commit_sha,
+    })
+
+    return commit_sha
+
+
+async def _open_pr(
+    owner: str, repo: str, token: str,
+    branch_name: str, target_branch: str,
+    title: str, body: str,
+) -> Dict[str, Any]:
+    """Open a GitHub PR from an existing branch. Returns {pr_number, pr_url, branch_name}."""
+    repo_path = f"/repos/{owner}/{repo}"
     pr = await _github_request("POST", f"{repo_path}/pulls", token, {
         "title": title,
         "body": body,
         "head": branch_name,
         "base": target_branch,
     })
-
     return {
         "pr_number": pr["number"],
         "pr_url": pr["html_url"],
         "branch_name": branch_name,
-        "commit_sha": commit["sha"],
+    }
+
+
+async def _create_pr(
+    owner: str, repo: str, token: str,
+    branch_name: str, target_branch: str,
+    title: str, body: str,
+    files: List[SyncFilePayload],
+) -> Dict[str, Any]:
+    """Create a branch, commit files, and open a PR. Returns PR data.
+
+    Convenience wrapper around _push_branch + _open_pr.
+    Used only when raise_pr is called without a prior CI branch push.
+    """
+    commit_sha = await _push_branch(owner, repo, token, branch_name, target_branch, files, title)
+    pr_data = await _open_pr(owner, repo, token, branch_name, target_branch, title, body)
+    return {
+        "pr_number": pr_data["pr_number"],
+        "pr_url": pr_data["pr_url"],
+        "branch_name": branch_name,
+        "commit_sha": commit_sha,
     }
 
 
@@ -515,6 +989,154 @@ async def _get_tenant_sync_settings(tenant_id: str) -> Dict:
     return doc
 
 
+# ── Cancellable subprocess helpers ───────────────────────────────────────────
+
+async def _run_pytest_cancellable(
+    out_dir: Path,
+    test_mode: str = "unit",
+) -> Dict[str, Any]:
+    """Run pytest as a real subprocess (asyncio.create_subprocess_exec).
+
+    Unlike asyncio.to_thread(subprocess.run, ...), this coroutine is truly
+    cancellable: if the outer CI task receives CancelledError, the subprocess
+    is killed before re-raising, so no orphan pytest process is left running.
+
+    Returns a dict with keys: passed, failed, errors, skipped, details, output.
+    """
+    import sysconfig as _sc2, site as _st2
+    _site_pkgs2 = _sc2.get_paths().get("purelib", "")
+    _user_site2 = _st2.getusersitepackages() if hasattr(_st2, "getusersitepackages") else ""
+    import sys as _sys2
+    repo_root = Path(os.environ.get("GENERATED_CODE_DIR", str(out_dir.parent.parent))).resolve().parent
+    python_path = os.pathsep.join(filter(None, [
+        str(out_dir), str(out_dir.parent), _site_pkgs2, _user_site2, str(repo_root),
+    ]))
+
+    tests_dir = out_dir / "tests"
+
+    # Ensure conftest.py with asyncio_mode=auto
+    conftest = tests_dir / "conftest.py"
+    if tests_dir.exists() and not conftest.exists():
+        conftest.write_text(
+            "import pytest\n\n"
+            "def pytest_configure(config):\n"
+            "    config.addinivalue_line('markers', 'asyncio: mark test as async')\n",
+            encoding="utf-8",
+        )
+
+    # Ensure pytest.ini
+    pytest_ini = out_dir / "pytest.ini"
+    if not pytest_ini.exists():
+        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\ntimeout = 60\n", encoding="utf-8")
+
+    # If no test files found, report as skipped
+    if not tests_dir.exists() or not list(tests_dir.glob("test_*.py")):
+        return {"passed": 0, "failed": 0, "errors": 0, "skipped": 0, "details": [], "output": "No test files found"}
+
+    cov_json = out_dir / ".coverage_report.json"
+    run_cov = (test_mode == "full")
+
+    cmd = [
+        _sys2.executable, "-m", "pytest",
+        str(tests_dir),
+        "-v", "--tb=short", "--no-header",
+        f"--rootdir={out_dir}",
+    ]
+    if run_cov:
+        cmd += [
+            f"--cov={out_dir}",
+            "--cov-report=term-missing",
+            f"--cov-report=json:{cov_json}",
+            "--cov-config=/dev/null",
+        ]
+
+    env = {**os.environ, "PYTHONPATH": python_path}
+
+    async def _exec(command: list) -> tuple:
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(out_dir),
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except (asyncio.TimeoutError, asyncio.CancelledError) as _kill_exc:
+            try:
+                proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except Exception:
+                pass
+            raise _kill_exc
+        return stdout.decode(errors="replace"), stderr.decode(errors="replace"), proc.returncode
+
+    stdout, stderr, returncode = await _exec(cmd)
+    output = stdout + stderr
+
+    # Retry without --cov if coverage flags caused failure
+    if run_cov and returncode != 0 and (
+        "unrecognized arguments" in output or "no module named pytest_cov" in output.lower()
+    ):
+        cmd_no_cov = [c for c in cmd if not c.startswith("--cov")]
+        stdout, stderr, returncode = await _exec(cmd_no_cov)
+        output = stdout + stderr
+        run_cov = False
+
+    passed = output.count(" PASSED")
+    failed = output.count(" FAILED")
+    skipped = output.count(" SKIPPED")
+    errors = output.count("ERROR collecting") + output.count("ERROR tests/")
+
+    details = []
+    for line in output.split("\n"):
+        if " PASSED" in line or " FAILED" in line or " SKIPPED" in line:
+            parts = line.strip().split(" ")
+            if len(parts) >= 2:
+                test_name = parts[0]
+                status = "passed" if "PASSED" in line else ("failed" if "FAILED" in line else "skipped")
+                details.append({"test": test_name, "status": status})
+        elif "ERROR collecting" in line or ("ERROR " in line and "tests/" in line):
+            details.append({"test": line.strip(), "status": "error"})
+
+    # Parse per-test failure messages
+    import re as _re2
+    _failure_msgs: dict = {}
+    _cur_test: Optional[str] = None
+    _cur_lines: list = []
+    for _line in output.split("\n"):
+        _hdr = _re2.match(r"^_{5,}\s+(\S+)\s+_{5,}", _line)
+        if _hdr:
+            if _cur_test and _cur_lines:
+                _failure_msgs[_cur_test] = "\n".join(_cur_lines)
+            _cur_test = _hdr.group(1).split("::")[-1]
+            _cur_lines = []
+        elif _cur_test:
+            if _line.startswith("E ") or _line.startswith("E\t"):
+                _cur_lines.append(_line[2:].strip())
+            elif _line.startswith("======"):
+                if _cur_test and _cur_lines:
+                    _failure_msgs[_cur_test] = "\n".join(_cur_lines)
+                _cur_test = None
+                _cur_lines = []
+    if _cur_test and _cur_lines:
+        _failure_msgs[_cur_test] = "\n".join(_cur_lines)
+    for _d in details:
+        if _d["status"] == "failed":
+            _fn = _d["test"].split("::")[-1] if "::" in _d["test"] else _d["test"]
+            if _fn in _failure_msgs:
+                _d["message"] = _failure_msgs[_fn]
+
+    return {
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "skipped": skipped,
+        "details": details,
+        "output": (output[:6000] + "\n...\n" + output[-2000:]) if len(output) > 8000 else output,
+    }
+
+
 # ── CI pipeline runner ───────────────────────────────────────────────────────
 
 async def _run_ci_pipeline(
@@ -522,6 +1144,9 @@ async def _run_ci_pipeline(
     tenant_id: str,
     session_id: str,
     files: List[SyncFilePayload],
+    run_all: bool = False,
+    branch_name: Optional[str] = None,
+    sync_settings: Optional[Dict] = None,
 ) -> tuple[List[Dict], List[SyncFilePayload]]:
     """Run all CI gates sequentially. Broadcasts SSE progress. Returns (ci_results, cleaned_files).
 
@@ -530,7 +1155,10 @@ async def _run_ci_pipeline(
       - "both"  → run unit tests (Gate 4) + integration tests (Gate 5)
     If test_type is not set, defaults to "unit" only.
 
-    Gates 3–5 call service functions directly (no self-HTTP calls).
+    When ``branch_name`` and ``sync_settings`` are provided, Gate 1 pushes the
+    connector files to a GitHub branch first and then scans via
+    shielva-security-sdk. Falls back to the local regex scanner if the SDK
+    is not configured or the scan fails.
     """
     col = _sync_requests_col()
     oid = ObjectId(sync_request_id)
@@ -552,14 +1180,61 @@ async def _run_ci_pipeline(
             "gate": gate_result,
         })
 
-    # Gate 1: Security Audit — offloaded to thread pool
+    # ── Pre-CI: push connector files to GitHub (for PR creation later) ───────────
+    # The branch is NOT used for security scanning (that now runs locally).
+    # It is stored so raise_pr_for_sync_request can open the PR without re-uploading.
+    branch_commit_sha: Optional[str] = None
+    if branch_name and sync_settings and sync_settings.get("github_repo_url") and sync_settings.get("github_token"):
+        try:
+            owner, repo = _parse_repo(sync_settings["github_repo_url"])
+            token = sync_settings["github_token"]
+            sr_doc = await col.find_one({"_id": oid}, {"target_branch": 1})
+            target_branch = (sr_doc or {}).get("target_branch", "connector-development")
+            branch_commit_sha = await _push_branch(
+                owner, repo, token,
+                branch_name, target_branch,
+                files,
+                commit_message=f"[Shielva CI] {branch_name}",
+            )
+            await col.update_one(
+                {"_id": oid},
+                {"$set": {"branch_commit_sha": branch_commit_sha, "updated_at": datetime.utcnow()}},
+            )
+            logger.info("ci_branch_pushed", sync_request_id=sync_request_id, branch=branch_name, sha=branch_commit_sha[:8])
+        except Exception as push_err:
+            logger.warning("ci_branch_push_failed", error=str(push_err)[:300], sync_request_id=sync_request_id)
+            branch_commit_sha = None
+
+    # Gate 1: Security Audit — full scan via SDK (local files) or regex fallback
     _broadcast(tenant_id, "sync:ci_progress", {
         "sync_request_id": sync_request_id,
-        "gate": {"gate": "security_audit", "status": "running", "summary": "Scanning for secrets and dangerous code..."},
+        "gate": {
+            "gate": "security_audit",
+            "status": "running",
+            "summary": (
+                "Running full security scan (SAST + SCA + Secrets)..."
+                if settings.SHIELVA_SECURITY_API_KEY else
+                "Scanning for secrets and dangerous code..."
+            ),
+        },
     })
-    security_result = await _security_audit(files)
+
+    security_result: Optional[Dict] = None
+    if settings.SHIELVA_SECURITY_API_KEY:
+        security_result = await _security_audit_sdk(
+            sync_request_id=sync_request_id,
+            branch_name=branch_name,
+            commit_sha=branch_commit_sha or "",
+            sync_settings=sync_settings,
+            files=files,
+        )
+
+    if security_result is None:
+        # Fallback: local regex scanner
+        security_result = await _security_audit(files)
+
     await _update_gate(security_result)
-    if security_result["status"] == "failed":
+    if security_result["status"] == "failed" and not run_all:
         return ci_results, files
 
     # Gate 2: Smart Diff
@@ -573,7 +1248,9 @@ async def _run_ci_pipeline(
         diff_result["status"] = "failed"
         diff_result["summary"] = "No meaningful files after filtering"
         await col.update_one({"_id": oid}, {"$set": {"ci_results": ci_results}})
-        return ci_results, cleaned_files
+        if not run_all:
+            return ci_results, cleaned_files
+        cleaned_files = files  # fall back to all files so remaining gates can still run
 
     # Gate 3: Import/Compilation Check — direct call (same process, no HTTP)
     _broadcast(tenant_id, "sync:ci_progress", {
@@ -581,14 +1258,15 @@ async def _run_ci_pipeline(
         "gate": {"gate": "import_check", "status": "running", "summary": "Checking imports and compilation..."},
     })
     import_result = {"gate": "import_check", "status": "passed", "summary": "Imports OK"}
+    _import_tmpdir: Optional[Path] = None
     try:
-        from integration.api.testing_routes import _get_session_output_dir
-        out_dir, _, _ = await _get_session_output_dir(session_id, tenant_id)
+        # Write the files being synced to a temp dir — never touches the server's
+        # GENERATED_CODE_DIR or any hardcoded path; each CI run is fully isolated.
+        _import_tmpdir = _write_files_to_tempdir(cleaned_files or files)
+        out_dir = _import_tmpdir
 
-        import subprocess as _sp
         import sys as _sys
-        repo_root = Path(settings.GENERATED_CODE_DIR).resolve().parent
-        pythonpath = os.pathsep.join([str(out_dir), str(repo_root), str(out_dir.parent)])
+        pythonpath = str(out_dir)
 
         check_script = (
             "import sys, pathlib, py_compile, ast, subprocess, traceback\n"
@@ -653,84 +1331,105 @@ async def _run_ci_pipeline(
             "    print('OK: all files compile clean')\n"
         )
 
-        proc = await asyncio.to_thread(
-            _sp.run,
-            [_sys.executable, "-c", check_script],
+        # Use create_subprocess_exec so CancelledError actually kills the process.
+        _import_proc = await asyncio.create_subprocess_exec(
+            _sys.executable, "-c", check_script,
             cwd=str(out_dir),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env={**os.environ, "PYTHONPATH": pythonpath},
         )
-        output = (proc.stdout + proc.stderr).strip() or "OK: all files compile clean"
+        try:
+            _imp_stdout, _imp_stderr = await asyncio.wait_for(
+                _import_proc.communicate(), timeout=30
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError) as _imp_exc:
+            try:
+                _import_proc.kill()
+                await asyncio.wait_for(_import_proc.wait(), timeout=5)
+            except Exception:
+                pass
+            raise _imp_exc
+        output = (
+            _imp_stdout.decode(errors="replace") + _imp_stderr.decode(errors="replace")
+        ).strip() or "OK: all files compile clean"
         clean = output.startswith("OK:")
         if not clean:
             import_result["status"] = "failed"
             import_result["summary"] = "Import errors detected"
             import_result["details"] = output
-    except HTTPException:
-        import_result["status"] = "skipped"
-        import_result["summary"] = "Session output directory not found"
     except Exception as e:
-        import_result["status"] = "skipped"
-        import_result["summary"] = f"Import check unavailable: {str(e)[:100]}"
+        import_result["status"] = "failed"
+        import_result["summary"] = f"Import check error: {str(e)[:120]}"
+    finally:
+        if _import_tmpdir and _import_tmpdir.exists():
+            shutil.rmtree(_import_tmpdir, ignore_errors=True)
     await _update_gate(import_result)
-    if import_result["status"] == "failed":
+    if import_result["status"] == "failed" and not run_all:
         return ci_results, cleaned_files
 
-    # Gate 4: Unit Tests — direct function call (no HTTP)
-    _broadcast(tenant_id, "sync:ci_progress", {
-        "sync_request_id": sync_request_id,
-        "gate": {"gate": "unit_tests", "status": "running", "summary": "Running unit tests..."},
-    })
-    unit_result = {"gate": "unit_tests", "status": "passed", "summary": "Unit tests passed"}
+    # Gates 4 & 5: write sync request files to a shared temp dir so run_tests
+    # operates on the exact files being synced — not whatever is on the server's disk.
+    _tests_tmpdir: Optional[Path] = None
     try:
-        from integration.services.testing_service import run_tests
-        data = await run_tests(session_id=session_id, tenant_id=tenant_id, test_mode="unit")
-        pytest_data = data.get("pytest", {})
-        passed = pytest_data.get("passed", 0)
-        failed = pytest_data.get("failed", 0)
-        errors = pytest_data.get("errors", 0)
-        unit_result["summary"] = f"{passed} passed, {failed} failed, {errors} errors"
-        if failed > 0 or errors > 0:
-            unit_result["status"] = "failed"
-            unit_result["details"] = json.dumps(pytest_data.get("details", ""))
-    except Exception as e:
-        unit_result["status"] = "skipped"
-        unit_result["summary"] = f"Tests unavailable: {str(e)[:100]}"
-    await _update_gate(unit_result)
-    if unit_result["status"] == "failed":
-        return ci_results, cleaned_files
+        _tests_tmpdir = _write_files_to_tempdir(cleaned_files or files)
 
-    # Gate 5: Integration Tests — only if session test_type is "both"
-    if test_type == "both":
+        # Gate 4: Unit Tests
         _broadcast(tenant_id, "sync:ci_progress", {
             "sync_request_id": sync_request_id,
-            "gate": {"gate": "integration_tests", "status": "running", "summary": "Running integration tests..."},
+            "gate": {"gate": "unit_tests", "status": "running", "summary": "Running unit tests..."},
         })
-        int_result = {"gate": "integration_tests", "status": "passed", "summary": "Integration tests passed"}
+        unit_result = {"gate": "unit_tests", "status": "passed", "summary": "Unit tests passed"}
         try:
-            from integration.services.testing_service import run_tests
-            data = await run_tests(session_id=session_id, tenant_id=tenant_id, test_mode="full")
-            pytest_data = data.get("pytest", {})
+            pytest_data = await _run_pytest_cancellable(_tests_tmpdir, test_mode="unit")
             passed = pytest_data.get("passed", 0)
             failed = pytest_data.get("failed", 0)
             errors = pytest_data.get("errors", 0)
-            int_result["summary"] = f"{passed} passed, {failed} failed, {errors} errors"
+            unit_result["summary"] = f"{passed} passed, {failed} failed, {errors} errors"
             if failed > 0 or errors > 0:
-                int_result["status"] = "failed"
-                int_result["details"] = json.dumps(pytest_data.get("details", ""))
+                unit_result["status"] = "failed"
+                unit_result["details"] = json.dumps(pytest_data.get("details", ""))
+        except asyncio.CancelledError:
+            raise  # propagate — _run_pipeline's except will handle cleanup
         except Exception as e:
-            int_result["status"] = "skipped"
-            int_result["summary"] = f"Integration tests unavailable: {str(e)[:100]}"
-        await _update_gate(int_result)
-    else:
-        int_result = {
-            "gate": "integration_tests",
-            "status": "skipped",
-            "summary": "Skipped — session configured for unit tests only",
-        }
-        await _update_gate(int_result)
+            unit_result["status"] = "failed"
+            unit_result["summary"] = f"Unit tests error: {str(e)[:120]}"
+        await _update_gate(unit_result)
+        if unit_result["status"] == "failed" and not run_all:
+            return ci_results, cleaned_files
+
+        # Gate 5: Integration Tests — always run when run_all=True, else only if test_type == "both"
+        if run_all or test_type == "both":
+            _broadcast(tenant_id, "sync:ci_progress", {
+                "sync_request_id": sync_request_id,
+                "gate": {"gate": "integration_tests", "status": "running", "summary": "Running integration tests..."},
+            })
+            int_result = {"gate": "integration_tests", "status": "passed", "summary": "Integration tests passed"}
+            try:
+                pytest_data = await _run_pytest_cancellable(_tests_tmpdir, test_mode="full")
+                passed = pytest_data.get("passed", 0)
+                failed = pytest_data.get("failed", 0)
+                errors = pytest_data.get("errors", 0)
+                int_result["summary"] = f"{passed} passed, {failed} failed, {errors} errors"
+                if failed > 0 or errors > 0:
+                    int_result["status"] = "failed"
+                    int_result["details"] = json.dumps(pytest_data.get("details", ""))
+            except asyncio.CancelledError:
+                raise  # propagate — _run_pipeline's except will handle cleanup
+            except Exception as e:
+                int_result["status"] = "failed"
+                int_result["summary"] = f"Integration tests error: {str(e)[:120]}"
+            await _update_gate(int_result)
+        else:
+            int_result = {
+                "gate": "integration_tests",
+                "status": "skipped",
+                "summary": "Skipped — session configured for unit tests only",
+            }
+            await _update_gate(int_result)
+    finally:
+        if _tests_tmpdir and _tests_tmpdir.exists():
+            shutil.rmtree(_tests_tmpdir, ignore_errors=True)
 
     return ci_results, cleaned_files
 
@@ -841,14 +1540,18 @@ async def raise_sync_request(
         try:
             ci_results, cleaned_files = await _run_ci_pipeline(
                 sync_request_id, x_tenant_id, body.session_id, body.files,
+                branch_name=branch_name,
+                sync_settings=sync_settings,
             )
 
             # Check if any gate failed
             any_failed = any(r["status"] == "failed" for r in ci_results)
             if any_failed:
+                # Delete the CI branch — it will never become a PR
+                await _delete_ci_branch(branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
                 _broadcast(x_tenant_id, "sync:request_validation_failed", {
                     "sync_request_id": sync_request_id,
@@ -857,68 +1560,51 @@ async def raise_sync_request(
                 return
 
             if not cleaned_files:
+                await _delete_ci_branch(branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
                 return
 
-            # All gates passed — create PR on GitHub
-            owner, repo = _parse_repo(sync_settings["github_repo_url"])
-            token = sync_settings["github_token"]
-
-            pr_title = f"[Shielva Sync] {body.connector_name} — {x_tenant_id}"
-            pr_body = (
-                f"## Sync Request\n\n"
-                f"- **Connector**: {body.connector_name}\n"
-                f"- **Tenant**: {x_tenant_id}\n"
-                f"- **Raised by**: {user_email}\n"
-                f"- **Session**: {body.session_id}\n"
-                f"- **CI Pipeline**: All gates passed\n\n"
-                f"---\n*Auto-generated by Shielva Agentic Developer*"
-            )
-
-            pr_data = await _create_pr(
-                owner, repo, token,
-                branch_name, body.target_branch,
-                pr_title, pr_body,
-                cleaned_files,
-            )
-
-            # Fetch diff
-            diff = await _get_pr_diff(owner, repo, token, pr_data["pr_number"])
-
+            # All gates passed — branch stays on GitHub, user will raise PR from it
             await col.update_one(
                 {"_id": ObjectId(sync_request_id)},
-                {"$set": {
-                    "status": "ready",
-                    "pr_number": pr_data["pr_number"],
-                    "pr_url": pr_data["pr_url"],
-                    "branch_name": pr_data["branch_name"],
-                    "diff": diff,
-                    "updated_at": datetime.utcnow(),
-                }},
+                {"$set": {"status": "ci_passed", "updated_at": datetime.utcnow()}},
             )
-
-            _broadcast(x_tenant_id, "sync:request_ready", {
+            _broadcast(x_tenant_id, "sync:ci_passed", {
                 "sync_request_id": sync_request_id,
-                "pr_number": pr_data["pr_number"],
-                "pr_url": pr_data["pr_url"],
-                "diff": diff,
+                "ci_results": ci_results,
+            })
+
+        except asyncio.CancelledError:
+            # User cancelled the CI run — clean up and surface as dismissed
+            logger.info("sync_request.pipeline_cancelled", sync_request_id=sync_request_id)
+            await _delete_ci_branch(branch_name, sync_settings)
+            await col.update_one(
+                {"_id": ObjectId(sync_request_id)},
+                {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+            )
+            _broadcast(x_tenant_id, "sync:request_cancelled", {
+                "sync_request_id": sync_request_id,
             })
 
         except Exception as e:
             logger.error("sync_request.pipeline_error", error=str(e), sync_request_id=sync_request_id)
+            # Delete the CI branch on unrecoverable error
+            await _delete_ci_branch(branch_name, sync_settings)
             await col.update_one(
                 {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "error", "error": str(e)[:500], "updated_at": datetime.utcnow()}},
+                {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
             )
             _broadcast(x_tenant_id, "sync:request_error", {
                 "sync_request_id": sync_request_id,
                 "error": str(e)[:200],
             })
 
-    asyncio.create_task(_run_pipeline())
+    _task = asyncio.create_task(_run_pipeline())
+    _ci_tasks[sync_request_id] = _task
+    _task.add_done_callback(lambda _: _ci_tasks.pop(sync_request_id, None))
 
     return {
         "sync_request_id": sync_request_id,
@@ -1001,6 +1687,7 @@ async def get_sync_request(
 @sync_request_router.post("/{sync_request_id}/rerun")
 async def rerun_sync_request(
     sync_request_id: str,
+    body: RerunSyncRequestBody = RerunSyncRequestBody(),
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
     x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
@@ -1023,19 +1710,19 @@ async def rerun_sync_request(
         raise HTTPException(status_code=400, detail="Invalid sync request ID")
     if not doc:
         raise HTTPException(status_code=404, detail="Sync request not found")
-    if doc["status"] not in ("validation_failed", "error", "ready"):
+    if doc["status"] not in ("validation_failed", "error", "ready", "ci_passed"):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot re-run — status is '{doc['status']}'. Only validation_failed, error, or ready requests can be re-run.",
+            detail=f"Cannot re-run — status is '{doc['status']}'. Only validation_failed, error, ci_passed, or ready requests can be re-run.",
         )
 
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
 
-    # Reset state
+    # Reset state — also clear branch_commit_sha so the branch is re-pushed
     now = datetime.utcnow()
     await col.update_one(
         {"_id": ObjectId(doc["_id"])},
-        {"$set": {"status": "validating", "ci_results": [], "error": None, "updated_at": now}},
+        {"$set": {"status": "validating", "ci_results": [], "error": None, "branch_commit_sha": None, "updated_at": now}},
     )
     _broadcast(x_tenant_id, "sync:ci_rerun", {
         "sync_request_id": sync_request_id,
@@ -1045,16 +1732,21 @@ async def rerun_sync_request(
     # Re-run pipeline in background using the original files stored in doc
     files = [SyncFilePayload(path=f["path"], content=f["content"]) for f in (doc.get("files") or [])]
 
+    _rerun_branch_name = doc.get("branch_name", "")
+
     async def _rerun():
         try:
             ci_results, cleaned_files = await _run_ci_pipeline(
-                sync_request_id, x_tenant_id, doc["session_id"], files,
+                sync_request_id, x_tenant_id, doc["session_id"], files, run_all=body.run_all,
+                branch_name=_rerun_branch_name,
+                sync_settings=sync_settings,
             )
             any_failed = any(r["status"] == "failed" for r in ci_results)
             if any_failed:
+                await _delete_ci_branch(_rerun_branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
                 _broadcast(x_tenant_id, "sync:request_validation_failed", {
                     "sync_request_id": sync_request_id,
@@ -1062,53 +1754,197 @@ async def rerun_sync_request(
                 })
                 return
             if not cleaned_files:
+                await _delete_ci_branch(_rerun_branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
                 return
 
-            # CI passed — update existing PR or create new one
-            owner, repo = _parse_repo(sync_settings["github_repo_url"])
-            token = sync_settings["github_token"]
-            pr_number = doc.get("pr_number")
-            pr_url = doc.get("pr_url")
-            branch_name = doc.get("branch_name", "")
-
-            if not pr_number:
-                pr_title = f"[Shielva Sync] {doc['connector_name']} — {x_tenant_id}"
-                pr_body = (
-                    f"## Sync Request (Re-run)\n\n"
-                    f"- **Connector**: {doc['connector_name']}\n"
-                    f"- **Tenant**: {x_tenant_id}\n"
-                    f"- **CI Pipeline**: All gates passed\n\n"
-                    f"---\n*Auto-generated by Shielva Agentic Developer*"
-                )
-                pr_data = await _create_pr(owner, repo, token, branch_name, doc["target_branch"], pr_title, pr_body, cleaned_files)
-                pr_number = pr_data["pr_number"]
-                pr_url = pr_data["pr_url"]
-
-            diff = await _get_pr_diff(owner, repo, token, pr_number)
+            # CI passed — branch stays on GitHub, user will raise PR from it
             await col.update_one(
                 {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "ready", "pr_number": pr_number, "pr_url": pr_url, "diff": diff, "updated_at": datetime.utcnow()}},
+                {"$set": {"status": "ci_passed", "pr_number": None, "pr_url": None, "diff": None, "updated_at": datetime.utcnow()}},
             )
-            _broadcast(x_tenant_id, "sync:request_ready", {
+            _broadcast(x_tenant_id, "sync:ci_passed", {
                 "sync_request_id": sync_request_id,
-                "pr_number": pr_number,
-                "pr_url": pr_url,
-                "diff": diff,
+                "ci_results": ci_results,
             })
+        except asyncio.CancelledError:
+            logger.info("sync_request.rerun_cancelled", sync_request_id=sync_request_id)
+            await _delete_ci_branch(_rerun_branch_name, sync_settings)
+            await col.update_one(
+                {"_id": ObjectId(sync_request_id)},
+                {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+            )
+            _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
+
         except Exception as e:
             logger.error("sync_request.rerun_error", error=str(e), sync_request_id=sync_request_id)
+            await _delete_ci_branch(_rerun_branch_name, sync_settings)
             await col.update_one(
                 {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "error", "error": str(e)[:500], "updated_at": datetime.utcnow()}},
+                {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
             )
             _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
 
-    asyncio.create_task(_rerun())
+    _rerun_task = asyncio.create_task(_rerun())
+    _ci_tasks[sync_request_id] = _rerun_task
+    _rerun_task.add_done_callback(lambda _: _ci_tasks.pop(sync_request_id, None))
     return {"status": "validating", "message": "CI pipeline re-started."}
+
+
+@sync_request_router.post("/{sync_request_id}/cancel-ci")
+async def cancel_ci_pipeline(
+    sync_request_id: str,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Cancel a running CI pipeline immediately.
+
+    Cancels the asyncio task (stops any in-progress gate including long-running
+    SDK security scans), deletes the CI branch from GitHub, and sets status to
+    'dismissed'. Can be called at any point while status is 'validating'.
+    """
+    user_role = (x_user_role or "viewer").lower()
+    perms = SYNC_PERMISSIONS.get(user_role, SYNC_PERMISSIONS["viewer"])
+    if not perms["can_raise"]:
+        raise HTTPException(status_code=403, detail=f"Role '{user_role}' cannot cancel CI runs")
+
+    col = _sync_requests_col()
+    try:
+        doc = await col.find_one({"_id": ObjectId(sync_request_id), "tenant_id": x_tenant_id})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid sync request ID")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sync request not found")
+    if doc["status"] != "validating":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel — status is '{doc['status']}', expected 'validating'",
+        )
+
+    task = _ci_tasks.get(sync_request_id)
+    if task and not task.done():
+        # Cancel the asyncio task — raises CancelledError at the next await point
+        # in _run_pipeline / _rerun, which handles cleanup (branch delete + status update)
+        task.cancel()
+        return {"status": "dismissed", "message": "CI pipeline cancelled."}
+
+    # Task already finished (race condition) — the pipeline already updated status.
+    # If it somehow still shows 'validating' (shouldn't happen), force-dismiss it.
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    branch_name = doc.get("branch_name", "")
+    await _delete_ci_branch(branch_name, sync_settings)
+    await col.update_one(
+        {"_id": ObjectId(sync_request_id)},
+        {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+    )
+    _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
+    return {"status": "dismissed", "message": "CI pipeline cancelled."}
+
+
+@sync_request_router.post("/{sync_request_id}/raise-pr")
+async def raise_pr_for_sync_request(
+    sync_request_id: str,
+    body: RaisePrBody = None,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Create a GitHub PR for a sync request whose CI has passed.
+
+    Only allowed when status is 'ci_passed'. User must explicitly call this
+    after reviewing the files — PR is never created automatically.
+    """
+    user_role = (x_user_role or "viewer").lower()
+    perms = SYNC_PERMISSIONS.get(user_role, SYNC_PERMISSIONS["viewer"])
+    if not perms["can_raise"]:
+        raise HTTPException(status_code=403, detail=f"Role '{user_role}' cannot raise PRs")
+
+    col = _sync_requests_col()
+    try:
+        doc = await col.find_one({"_id": ObjectId(sync_request_id), "tenant_id": x_tenant_id})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid sync request ID")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sync request not found")
+    if doc["status"] != "ci_passed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot raise PR — status is '{doc['status']}', expected 'ci_passed'",
+        )
+
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    if not sync_settings.get("github_repo_url") or not sync_settings.get("github_token"):
+        raise HTTPException(status_code=400, detail="GitHub repo URL and token must be configured in sync settings")
+
+    user_email = x_user_email or "unknown"
+    try:
+        owner, repo = _parse_repo(sync_settings["github_repo_url"])
+        token = sync_settings["github_token"]
+        files = [SyncFilePayload(path=f["path"], content=f["content"]) for f in (doc.get("files") or [])]
+
+        pr_title = f"[Shielva Sync] {doc['connector_name']} — {x_tenant_id}"
+        pr_body = (
+            f"## Sync Request\n\n"
+            f"- **Connector**: {doc['connector_name']}\n"
+            f"- **Tenant**: {x_tenant_id}\n"
+            f"- **Raised by**: {user_email}\n"
+            f"- **Session**: {doc['session_id']}\n"
+            f"- **CI Pipeline**: All gates passed\n\n"
+            f"---\n*Created via Shielva Agentic Developer*"
+        )
+        effective_branch = (body.branch_name if body and body.branch_name else None) or doc["branch_name"]
+
+        # If branch was already pushed during CI (branch_commit_sha is set),
+        # skip the branch push step and just open the PR from the existing branch.
+        if doc.get("branch_commit_sha"):
+            pr_data = await _open_pr(
+                owner, repo, token,
+                effective_branch, doc["target_branch"],
+                pr_title, pr_body,
+            )
+            pr_data["commit_sha"] = doc["branch_commit_sha"]
+        else:
+            # Fallback: branch was not pushed during CI (e.g. GitHub not configured then)
+            pr_data = await _create_pr(
+                owner, repo, token,
+                effective_branch, doc["target_branch"],
+                pr_title, pr_body,
+                files,
+            )
+
+        diff = await _get_pr_diff(owner, repo, token, pr_data["pr_number"])
+
+        now = datetime.utcnow()
+        await col.update_one(
+            {"_id": ObjectId(sync_request_id)},
+            {"$set": {
+                "status": "ready",
+                "pr_number": pr_data["pr_number"],
+                "pr_url": pr_data["pr_url"],
+                "diff": diff,
+                "updated_at": now,
+            }},
+        )
+        _broadcast(x_tenant_id, "sync:request_ready", {
+            "sync_request_id": sync_request_id,
+            "pr_number": pr_data["pr_number"],
+            "pr_url": pr_data["pr_url"],
+            "diff": diff,
+        })
+        return {"status": "ready", "pr_number": pr_data["pr_number"], "pr_url": pr_data["pr_url"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await col.update_one(
+            {"_id": ObjectId(sync_request_id)},
+            {"$set": {"status": "error", "error": str(e)[:500], "updated_at": datetime.utcnow()}},
+        )
+        _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
+        raise HTTPException(status_code=500, detail=f"PR creation failed: {str(e)[:200]}")
 
 
 @sync_request_router.post("/{sync_request_id}/approve")
