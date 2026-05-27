@@ -27,6 +27,47 @@ logger = structlog.get_logger(__name__)
 ws_router = APIRouter()
 
 
+# ── Shared connection registry ────────────────────────────────────────────────
+class _SessionWsManager:
+    """Global registry of active WebSocket connections per session.
+
+    Allows session_routes (PATCH /steps/.../status) to broadcast step updates
+    to all CMS clients currently watching a session — without a dedicated
+    Electron→CMS WebSocket channel.
+    """
+
+    def __init__(self) -> None:
+        self._connections: Dict[str, set] = {}
+
+    def register(self, session_id: str, ws: WebSocket) -> None:
+        self._connections.setdefault(session_id, set()).add(ws)
+
+    def unregister(self, session_id: str, ws: WebSocket) -> None:
+        bucket = self._connections.get(session_id)
+        if bucket:
+            bucket.discard(ws)
+            if not bucket:
+                del self._connections[session_id]
+
+    async def broadcast(self, session_id: str, message: Dict[str, Any]) -> None:
+        """Send *message* to every live WebSocket watching *session_id*."""
+        dead: set = set()
+        for ws in list(self._connections.get(session_id, [])):
+            try:
+                if _ws_is_open(ws):
+                    await ws.send_json(message)
+                else:
+                    dead.add(ws)
+            except Exception:
+                dead.add(ws)
+        for ws in dead:
+            self.unregister(session_id, ws)
+
+
+# Module-level singleton — imported by session_routes for PATCH broadcasts
+ws_manager = _SessionWsManager()
+
+
 def _parse_sse_event(sse_chunk: str) -> Optional[Dict[str, Any]]:
     """Parse an SSE string like 'event: X\\ndata: {...}\\n\\n' into a dict."""
     event_type = ""
@@ -95,7 +136,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
     try:
         _sess_doc = await sessions_collection().find_one(
             {"_id": ObjectId(session_id)},
-            {"tenant_id": 1, "tenant_name": 1},
+            {"tenant_id": 1, "tenant_name": 1, "app_id": 1},
         )
     except Exception as _e:
         logger.warning("ws.session_lookup_error", session_id=session_id, error=str(_e))
@@ -106,6 +147,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
 
     tenant_id   = (_sess_doc.get("tenant_id")   or "").strip()
     tenant_name = (_sess_doc.get("tenant_name") or "").strip().lower()
+    app_id      = (_sess_doc.get("app_id")      or "").strip()
 
     if not tenant_id:
         logger.warning("ws.session_missing_tenant_id", session_id=session_id)
@@ -116,14 +158,21 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         if tenant_name:
             logger.info("ws.tenant_name_from_query_param_fallback", session_id=session_id, tenant_name=tenant_name)
 
+    # Set R2 bucket context — priority: app_id bucket (preferred) → tenant_name (legacy fallback)
+    if app_id:
+        _app_bucket = r2_service.app_id_to_bucket(app_id)
+        r2_service._app_bucket_ctx.set(_app_bucket)
+        logger.info("ws.bucket_ctx_set", session_id=session_id, bucket=_app_bucket, source="app_id")
     if tenant_name:
         r2_service._tenant_bucket_ctx.set(tenant_name)
-        logger.info("ws.bucket_ctx_set", session_id=session_id, bucket=tenant_name)
-    else:
+        if not app_id:
+            logger.info("ws.bucket_ctx_set", session_id=session_id, bucket=tenant_name, source="tenant_name")
+    if not app_id and not tenant_name:
         logger.warning("ws.bucket_unresolved", session_id=session_id,
-                       note="session.tenant_name null, no query param — r2_service uses R2_BUCKET_NAME env fallback")
+                       note="session has no app_id and no tenant_name — r2_service uses R2_BUCKET_NAME env fallback")
 
     logger.info("ws.connected", session_id=session_id, tenant_id=tenant_id)
+    ws_manager.register(session_id, websocket)
 
     # Shared state
     phase = "idle"  # idle | executing | processing_prompt
@@ -555,4 +604,5 @@ async def ws_execute(websocket: WebSocket, session_id: str):
             except Exception:
                 pass
 
+        ws_manager.unregister(session_id, websocket)
         logger.info("ws.cleanup", session_id=session_id)

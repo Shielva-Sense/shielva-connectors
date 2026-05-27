@@ -3003,7 +3003,7 @@ async def gemini_agentic_generate_test_guidelines(
         initial_message=user_message,
         tools=_GENERATION_TOOLS,
         log_cb=log_cb,
-        max_iterations=30,  # read(5-6) + write(1) + validate(1) + done(1) = 8 typical; 30 gives headroom for complex connectors
+        max_iterations=10,  # read(5-6) + write(1) + validate(1) + done(1) = 8 typical
         stop_on_done=True,
         require_file="test_guidelines.md",
         require_file_min_size=800,

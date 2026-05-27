@@ -39,10 +39,11 @@ def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
 
 async def start_execution(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
     from_step_index: int = 0,
     force_restart: bool = False,
     skip_llm: bool = False,
+    app_id: Optional[str] = None,
 ) -> bool:
     """Start execution as a background task (survives HTTP disconnect).
 
@@ -61,6 +62,7 @@ async def start_execution(
         "done": False,
         "started_at": time.time(),
         "tenant_id": tenant_id,
+        "app_id": app_id,
     }
 
     # Import here to avoid circular imports

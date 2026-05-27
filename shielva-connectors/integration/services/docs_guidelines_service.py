@@ -1093,7 +1093,7 @@ async def _r2_get_text(r2, key: str) -> Optional[str]:
             aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
             region_name="auto",
         )
-        get_fn = partial(s3.get_object, Bucket=settings.R2_BUCKET_NAME, Key=key)
+        get_fn = partial(s3.get_object, Bucket=settings.R2_SHARED_BUCKET, Key=key)  # shared admin bucket
         resp = await loop.run_in_executor(None, get_fn)
         return resp["Body"].read().decode("utf-8")
     except Exception:
@@ -1119,7 +1119,7 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
         )
         put_fn = partial(
             s3.put_object,
-            Bucket=settings.R2_BUCKET_NAME,
+            Bucket=settings.R2_SHARED_BUCKET,  # shared admin bucket
             Key=key,
             Body=content.encode("utf-8"),
             ContentType="text/markdown",

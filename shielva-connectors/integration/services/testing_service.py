@@ -10,7 +10,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from bson import ObjectId
@@ -70,10 +70,10 @@ def _run_pytest_sync(
             encoding="utf-8",
         )
 
-    # Ensure pytest.ini with asyncio_mode=auto
+    # Ensure pytest.ini with asyncio_mode=auto and per-test timeout
     pytest_ini = out_dir / "pytest.ini"
     if not pytest_ini.exists():
-        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
+        pytest_ini.write_text("[pytest]\nasyncio_mode = auto\ntimeout = 60\n", encoding="utf-8")
 
     # Base command — use short tracebacks for speed; long tracebacks add significant I/O
     cmd = [
@@ -226,14 +226,19 @@ async def run_tests(
     tenant_id: str,
     methods: List[str] | None = None,
     test_mode: str = "unit",
+    output_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Run test suite on generated code: validation + pytest.
 
     Args:
-        methods:   Only run tests whose names contain these method names (-k filter).
-                   None / empty → run all tests.
-        test_mode: "unit" (default) — fast, no coverage.
-                   "full" — include --cov coverage report.
+        methods:    Only run tests whose names contain these method names (-k filter).
+                    None / empty → run all tests.
+        test_mode:  "unit" (default) — fast, no coverage.
+                    "full" — include --cov coverage report.
+        output_dir: When provided, use this directory directly instead of resolving
+                    from the session's stored path. Used by the CI pipeline so that
+                    tests run against the exact files being synced (written to a temp
+                    dir) rather than whatever is on the server's disk.
     """
     oid = ObjectId(session_id)
     # Use _id only — the gateway may inject a different tenant_id from JWT than
@@ -242,23 +247,27 @@ async def run_tests(
     if not session:
         raise ValueError(f"Session {session_id} not found")
 
-    service = session.get("service", "")
-    # Resolve tenant from stored session doc, not from the header
+    # Always resolve stored_tenant / service meta from the session doc
     stored_tenant = session.get("tenant_id") or tenant_id
-    # service_slug is just the service name (provider prefix excluded — tenant_id
-    # already provides isolation). Stored slug takes precedence for sessions that
-    # were executed before this convention was established.
+    service = session.get("service", "")
     service_slug = session.get("service_slug") or service.replace("-", "_").lower()
 
-    out_dir = _resolve_output_dir(stored_tenant, service_slug)
-    if not out_dir:
-        raise ValueError(f"No generated files found (looked at {stored_tenant}/{service_slug})")
+    if output_dir is not None:
+        # Caller supplies an explicit directory (e.g. CI pipeline temp dir).
+        # Skip disk path resolution entirely — do NOT mutate session state.
+        out_dir = output_dir
+    else:
+        out_dir = _resolve_output_dir(stored_tenant, service_slug)
+        if not out_dir:
+            raise ValueError(f"No generated files found (looked at {stored_tenant}/{service_slug})")
 
-    # Update status to testing
-    await sessions_collection().update_one(
-        {"_id": oid},
-        {"$set": {"status": SessionStatus.TESTING.value, "updated_at": datetime.utcnow()}},
-    )
+    # Update status to testing — skip when called from CI pipeline (output_dir provided)
+    # to avoid flipping a completed session back to "testing".
+    if output_dir is None:
+        await sessions_collection().update_one(
+            {"_id": oid},
+            {"$set": {"status": SessionStatus.TESTING.value, "updated_at": datetime.utcnow()}},
+        )
 
     results: Dict[str, Any] = {
         "validation": {},
@@ -344,66 +353,70 @@ async def run_tests(
         len(plan_steps) - 1,  # fallback to last step
     )
 
-    if overall_pass:
-        asyncio.ensure_future(failure_tracker.resolve_failure(
-            session_id=session_id,
-            step_index=run_tests_step_index,
-            provider=provider,
-            service=service_name,
-            tenant_id=stored_tenant,
-        ))
-    else:
-        pytest_out = results.get("pytest", {})
-        validation_out = results.get("validation", {})
-        error_summary_parts = []
-        if not validation_out.get("valid"):
-            error_summary_parts.append(f"Validation failed: {validation_out.get('error', 'see details')}")
-        if failed > 0:
-            error_summary_parts.append(f"{failed} test(s) failed, {passed} passed")
-        elif passed == 0 and not pytest_out.get("error"):
-            error_summary_parts.append("No tests ran (0 passed)")
-        if pytest_err := pytest_out.get("error"):
-            error_summary_parts.append(pytest_err)
-        asyncio.ensure_future(failure_tracker.create_failure(
-            session_id=session_id,
-            step_index=run_tests_step_index,
-            step_type="run_tests",
-            provider=provider,
-            service=service_name,
-            tenant_id=stored_tenant,
-            error_summary="; ".join(error_summary_parts) or "Test suite failed",
-            full_output=pytest_out.get("output", "")[:6000],
-        ))
+    # Skip all session mutation when called from CI pipeline (output_dir provided).
+    # The CI gate only needs the test results — it must not touch session status,
+    # plan step statuses, or failure tracker records.
+    if output_dir is None:
+        if overall_pass:
+            asyncio.ensure_future(failure_tracker.resolve_failure(
+                session_id=session_id,
+                step_index=run_tests_step_index,
+                provider=provider,
+                service=service_name,
+                tenant_id=stored_tenant,
+            ))
+        else:
+            pytest_out = results.get("pytest", {})
+            validation_out = results.get("validation", {})
+            error_summary_parts = []
+            if not validation_out.get("valid"):
+                error_summary_parts.append(f"Validation failed: {validation_out.get('error', 'see details')}")
+            if failed > 0:
+                error_summary_parts.append(f"{failed} test(s) failed, {passed} passed")
+            elif passed == 0 and not pytest_out.get("error"):
+                error_summary_parts.append("No tests ran (0 passed)")
+            if pytest_err := pytest_out.get("error"):
+                error_summary_parts.append(pytest_err)
+            asyncio.ensure_future(failure_tracker.create_failure(
+                session_id=session_id,
+                step_index=run_tests_step_index,
+                step_type="run_tests",
+                provider=provider,
+                service=service_name,
+                tenant_id=stored_tenant,
+                error_summary="; ".join(error_summary_parts) or "Test suite failed",
+                full_output=pytest_out.get("output", "")[:6000],
+            ))
 
-    # Store full results dict (including validation, pytest, quality) so session restore
-    # can display the complete test results without needing to re-run tests.
-    full_test_results = {
-        **test_results.model_dump(mode="json"),
-        "validation": results.get("validation", {}),
-        "pytest": results.get("pytest", {}),
-        "quality": results.get("quality", {}),
-        "overall_pass": overall_pass,
-        "method_results": method_results,
-    }
+        # Store full results dict (including validation, pytest, quality) so session restore
+        # can display the complete test results without needing to re-run tests.
+        full_test_results = {
+            **test_results.model_dump(mode="json"),
+            "validation": results.get("validation", {}),
+            "pytest": results.get("pytest", {}),
+            "quality": results.get("quality", {}),
+            "overall_pass": overall_pass,
+            "method_results": method_results,
+        }
 
-    # Build the update — always persist test results + session status
-    _set_fields: dict = {
-        "test_results": full_test_results,
-        "status": SessionStatus.COMPLETED.value if overall_pass else SessionStatus.FAILED.value,
-        "updated_at": datetime.utcnow(),
-    }
+        # Build the update — always persist test results + session status
+        _set_fields: dict = {
+            "test_results": full_test_results,
+            "status": SessionStatus.COMPLETED.value if overall_pass else SessionStatus.FAILED.value,
+            "updated_at": datetime.utcnow(),
+        }
 
-    # When tests pass, mark write_tests and run_tests plan steps as completed so the
-    # UI step indicator turns green (it reads plan.steps.N.status).
-    if overall_pass:
-        for _i, _s in enumerate(plan_steps):
-            if isinstance(_s, dict) and _s.get("type") in ("write_tests", "run_tests"):
-                _set_fields[f"plan.steps.{_i}.status"] = StepStatus.COMPLETED.value
+        # When tests pass, mark write_tests and run_tests plan steps as completed so the
+        # UI step indicator turns green (it reads plan.steps.N.status).
+        if overall_pass:
+            for _i, _s in enumerate(plan_steps):
+                if isinstance(_s, dict) and _s.get("type") in ("write_tests", "run_tests"):
+                    _set_fields[f"plan.steps.{_i}.status"] = StepStatus.COMPLETED.value
 
-    await sessions_collection().update_one(
-        {"_id": oid},
-        {"$set": _set_fields},
-    )
+        await sessions_collection().update_one(
+            {"_id": oid},
+            {"$set": _set_fields},
+        )
 
     logger.info(
         "tests.completed",

@@ -26,10 +26,9 @@ logger = structlog.get_logger(__name__)
 planning_router = APIRouter(prefix="/sessions", tags=["planning"])
 
 
-def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> str:
-    if not x_tenant_id:
-        raise HTTPException(400, "X-Tenant-ID header is required")
-    return x_tenant_id
+def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> Optional[str]:
+    """Return tenant_id from header — optional (pre-login sessions use app_id only)."""
+    return x_tenant_id or None
 
 
 @planning_router.get("/{session_id}/plan-prompt")
@@ -107,22 +106,30 @@ async def trigger_plan_generation(session_id: str, x_tenant_id: Optional[str] = 
 async def stream_plan_generation(
     session_id: str,
     prompt: Optional[str] = None,
+    app_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
 ):
     """Generate a plan with SSE streaming logs for real-time UI feedback.
+
+    Accepts app_id + tenant_id as query params (required for EventSource connections
+    which cannot send custom headers). Falls back to X-App-ID / X-Tenant-ID headers.
 
     Optional query param `prompt`: if provided, the session's user_prompt is updated to this
     value, the R2 plan cache is cleared, and a fresh plan is generated from scratch.
     Used by the frontend "Regenerate Plan" flow to bypass the old plan context.
     """
-    tenant_id = _get_tenant(x_tenant_id)
+    resolved_app_id    = app_id or x_app_id
+    resolved_tenant_id = tenant_id or x_tenant_id
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, f"Invalid session ID: {session_id}")
     new_prompt = prompt.strip() if prompt and prompt.strip() else None
-    logger.info("planning.stream_start", session_id=session_id, tenant_id=tenant_id,
+    logger.info("planning.stream_start", session_id=session_id,
+                app_id=resolved_app_id, tenant_id=resolved_tenant_id,
                 force_regen=new_prompt is not None)
     return StreamingResponse(
-        generate_plan_stream(session_id, tenant_id, new_prompt=new_prompt),
+        generate_plan_stream(session_id, resolved_tenant_id, new_prompt=new_prompt, app_id=resolved_app_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -141,20 +148,23 @@ async def stream_plan_generation_post(
     session_id: str,
     body: PlanStreamBody = Body(default=PlanStreamBody()),
     x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
 ):
     """POST variant of plan/stream — accepts the prompt in the request body.
 
     Preferred over the GET variant for regeneration because large prompts can
     exceed URL length limits when passed as query parameters.
     """
-    tenant_id = _get_tenant(x_tenant_id)
+    resolved_app_id    = x_app_id
+    resolved_tenant_id = _get_tenant(x_tenant_id)
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, f"Invalid session ID: {session_id}")
     new_prompt = body.prompt.strip() if body.prompt and body.prompt.strip() else None
-    logger.info("planning.stream_post_start", session_id=session_id, tenant_id=tenant_id,
+    logger.info("planning.stream_post_start", session_id=session_id,
+                app_id=resolved_app_id, tenant_id=resolved_tenant_id,
                 force_regen=new_prompt is not None)
     return StreamingResponse(
-        generate_plan_stream(session_id, tenant_id, new_prompt=new_prompt),
+        generate_plan_stream(session_id, resolved_tenant_id, new_prompt=new_prompt, app_id=resolved_app_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -169,15 +179,24 @@ async def stream_replan(
     session_id: str,
     step_index: int = 0,
     comment: str = "",
+    app_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
 ):
-    """Regenerate the plan with user feedback, streaming SSE log events for real-time UI."""
-    tenant_id = _get_tenant(x_tenant_id)
+    """Regenerate the plan with user feedback, streaming SSE log events for real-time UI.
+
+    Accepts app_id + tenant_id as query params (required for EventSource connections
+    which cannot send custom headers). Falls back to X-App-ID / X-Tenant-ID headers.
+    """
+    resolved_app_id    = app_id or x_app_id
+    resolved_tenant_id = tenant_id or x_tenant_id
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, f"Invalid session ID: {session_id}")
-    logger.info("planning.replan_stream_start", session_id=session_id, step_index=step_index)
+    logger.info("planning.replan_stream_start", session_id=session_id,
+                app_id=resolved_app_id, step_index=step_index)
     return StreamingResponse(
-        replan_stream(session_id, tenant_id, step_index, comment),
+        replan_stream(session_id, resolved_tenant_id, step_index, comment, app_id=resolved_app_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

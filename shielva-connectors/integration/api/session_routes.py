@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Header, Query, Request
 from pydantic import BaseModel
 
 from integration.core.config import settings
+from integration.api.ws_routes import ws_manager
 from integration.db.database import sessions_collection
 from integration.services import r2_service
 from integration.services import knowledge_service
@@ -166,10 +167,71 @@ def _cache_prompt_to_tmp(content: str, label: str) -> str:
     return tmp_path
 
 
-def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> str:
-    if not x_tenant_id:
-        raise HTTPException(400, "X-Tenant-ID header is required")
-    return x_tenant_id
+def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> Optional[str]:
+    """Return tenant_id from header (optional — may be None pre-login)."""
+    return x_tenant_id or None
+
+
+def _get_app_id(x_app_id: Optional[str] = Header(None)) -> Optional[str]:
+    """Return the stable per-install app_id from X-App-ID header."""
+    return x_app_id or None
+
+
+def _session_filter(oid, app_id: Optional[str], tenant_id: Optional[str]) -> dict:
+    """Build the MongoDB filter for a single session lookup.
+
+    Priority: app_id (new sessions) → tenant_id (legacy sessions without app_id).
+    Both can coexist: if the doc has an app_id we always use it.
+    """
+    f: dict = {"_id": oid}
+    if app_id:
+        f["app_id"] = app_id
+    elif tenant_id:
+        f["tenant_id"] = tenant_id
+    return f
+
+
+# ── App identity / tenant linking ─────────────────────────────────────────────
+
+@session_router.post("/app/link-tenant")
+async def link_app_to_tenant(
+    body: dict,
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_name: Optional[str] = Header(None),
+):
+    """Map a stable app_id to an authenticated tenant after login.
+
+    Called by the Electron app immediately after OAuth login.
+    Updates ALL sessions for this app_id with the real tenant_id + tenant_name,
+    making pre-login sessions visible to the authenticated user.
+    No R2 file movement required — the bucket is already app-scoped.
+    """
+    app_id      = x_app_id or body.get("app_id") or None
+    tenant_id   = x_tenant_id or body.get("tenant_id") or None
+    tenant_name = (x_tenant_name or body.get("tenant_name") or "").strip().lower()
+
+    if not app_id:
+        raise HTTPException(400, "X-App-ID header (or app_id in body) is required")
+    if not tenant_id:
+        raise HTTPException(400, "X-Tenant-ID header (or tenant_id in body) is required")
+
+    result = await sessions_collection().update_many(
+        {"app_id": app_id},
+        {"$set": {
+            "tenant_id":   tenant_id,
+            "tenant_name": tenant_name,
+            "updated_at":  __import__("datetime").datetime.utcnow(),
+        }},
+    )
+    logger.info(
+        "app.link_tenant",
+        app_id=app_id,
+        tenant_id=tenant_id,
+        tenant_name=tenant_name,
+        sessions_updated=result.modified_count,
+    )
+    return {"ok": True, "sessions_updated": result.modified_count}
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────
@@ -177,16 +239,24 @@ def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> str:
 @session_router.post("")
 async def create_session(
     body: CreateSessionRequest,
+    x_app_id: Optional[str] = Header(None),
     x_tenant_id: Optional[str] = Header(None),
     x_tenant_name: Optional[str] = Header(None),
 ):
-    """Create a new integration session."""
-    tenant_id = _get_tenant(x_tenant_id)
-    # tenant_name == R2 bucket name (lowercase).  Injected by the gateway from the
-    # JWT "tenant_name" claim.  Stored on the session so WebSocket handlers can
-    # resolve the correct R2 bucket without relying on a per-request ContextVar.
+    """Create a new integration session.
+
+    Pre-login: only app_id is set; tenant fields are None.
+    Post-login: app_id + tenant_id + tenant_name are all set.
+    """
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
     tenant_name = (x_tenant_name or "").strip().lower()
+
+    if not app_id and not tenant_id:
+        raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
+
     session = IntegrationSession(
+        app_id=app_id,
         tenant_id=tenant_id,
         tenant_name=tenant_name,
         provider=body.provider,
@@ -211,13 +281,20 @@ async def create_session(
     import re as _slug_re, hashlib as _slug_hash
 
     _cn = (body.connector_name or "").strip().lower()
+    # Strip trailing "connector" word in all forms the user might type:
+    #   "Shielva Gmail Connector" → "shielva_gmail"
+    #   "shielva_gmail_connector" → "shielva_gmail"
     _cn = _slug_re.sub(r'[\s_]+connector\s*$', '', _cn)
     _cn = _slug_re.sub(r'[\s\-]+', '_', _cn)
     _cn = _slug_re.sub(r'[^\w]', '', _cn)
+    # Final safety: strip any residual _connector suffix after replacements
+    _cn = _slug_re.sub(r'_connector$', '', _cn)
     _base_slug = _cn or body.service.replace("-", "_").lower()
 
     # 6 alphanumeric chars: md5( objectId_hex + tenant_id )[:6]
-    _hash_input = f"{session_id_str}{tenant_id}"
+    # Use app_id as hash seed (pre-login) or tenant_id (legacy fallback)
+    _hash_seed = app_id or tenant_id or session_id_str
+    _hash_input = f"{session_id_str}{_hash_seed}"
     _suffix = _slug_hash.md5(_hash_input.encode()).hexdigest()[:6]
     _unique_slug = f"{_base_slug}_{_suffix}"
 
@@ -243,28 +320,39 @@ async def create_session(
 
 
 @session_router.patch("/{session_id}")
-async def patch_session(session_id: str, body: dict, x_tenant_id: Optional[str] = Header(None)):
+async def patch_session(
+    session_id: str,
+    body: dict,
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+):
     """Partial update of a session (docs_urls, custom_rules_md, etc.)."""
     from bson import ObjectId
-    tenant_id = _get_tenant(x_tenant_id)
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
     allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         return {"ok": True}
     updates["updated_at"] = __import__("datetime").datetime.utcnow()
     await sessions_collection().update_one(
-        {"_id": ObjectId(session_id), "tenant_id": tenant_id},
+        _session_filter(ObjectId(session_id), app_id, tenant_id),
         {"$set": updates},
     )
     return {"ok": True}
 
 
 @session_router.get("/{session_id}/stepper-progress")
-async def get_stepper_progress(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_stepper_progress(
+    session_id: str,
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+):
     """Return the highest stepper tab reached for this session from R2/disk progress.json."""
-    tenant_id = _get_tenant(x_tenant_id)
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
     oid = ObjectId(session_id)
-    session = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    session = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not session:
         raise HTTPException(404, "Session not found")
 
@@ -289,8 +377,9 @@ async def patch_stepper_progress(
 ):
     """Update stepper_max_step in both R2/disk progress.json and MongoDB (best-effort)."""
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     oid = ObjectId(session_id)
-    session = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    session = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not session:
         raise HTTPException(404, "Session not found")
 
@@ -303,7 +392,7 @@ async def patch_stepper_progress(
 
     # Also update MongoDB for quick restore
     await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"$max": {"stepper_max_step": step_index}, "$set": {"updated_at": __import__("datetime").datetime.utcnow()}},
     )
     return {"ok": True, "stepper_max_step": step_index}
@@ -317,8 +406,9 @@ async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Hea
     so the frontend can pre-fill the Default Configuration panel.
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     oid = ObjectId(session_id)
-    session = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    session = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not session:
         raise HTTPException(404, "Session not found")
 
@@ -340,6 +430,7 @@ async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Hea
 
 @session_router.get("")
 async def list_sessions(
+    x_app_id: Optional[str] = Header(None),
     x_tenant_id: Optional[str] = Header(None),
     status: Optional[str] = None,
     provider: Optional[str] = None,
@@ -347,9 +438,24 @@ async def list_sessions(
     skip: int = 0,
     limit: int = 50,
 ):
-    """List sessions for a tenant, optionally filtered by status, provider, service."""
-    tenant_id = _get_tenant(x_tenant_id)
-    query: dict = {"tenant_id": tenant_id}
+    """List sessions for this app install / tenant, filtered by status, provider, service.
+
+    Query priority:
+      1. app_id (X-App-ID header) — covers both pre-login and post-login sessions for this device.
+      2. tenant_id only (legacy: sessions created before app_id was introduced).
+    """
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
+
+    if app_id:
+        # Primary: all sessions for this installation regardless of login state
+        query: dict = {"app_id": app_id}
+    elif tenant_id:
+        # Legacy fallback: sessions created before app_id was introduced
+        query = {"tenant_id": tenant_id}
+    else:
+        raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
+
     if status:
         query["status"] = status
     if provider:
@@ -361,21 +467,17 @@ async def list_sessions(
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])
         doc["id"] = doc["_id"]
-        # If connector_name was never set by the user, derive a display-friendly fallback
-        # from the service slug (e.g. "gmail" → "Gmail").
-        # We intentionally do NOT overwrite a user-provided connector_name with anything
-        # from connector.json — the name the user typed at creation time is the canonical name.
         stored_name: str = doc.get("connector_name", "")
         if not stored_name:
             svc = doc.get("service", "")
             doc["connector_name"] = svc.replace("_", " ").replace("-", " ").title()
-        # Always include output_dir
         if not doc.get("output_dir"):
             try:
                 from integration.services.step_executor import _output_dir as _compute_out
                 _svc = doc.get("service") or ""
-                if _svc and tenant_id:
-                    doc["output_dir"] = str(_compute_out(tenant_id, _svc))
+                _tid = doc.get("tenant_id") or tenant_id or ""
+                if _svc and _tid:
+                    doc["output_dir"] = str(_compute_out(_tid, _svc))
             except Exception:
                 pass
         sessions.append(doc)
@@ -387,11 +489,12 @@ async def list_sessions(
 async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)):
     """Get a single session by ID."""
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         logger.warning("session.invalid_id", session_id=session_id)
         raise HTTPException(400, "Invalid session ID")
     oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    doc = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not doc:
         logger.warning("session.not_found", session_id=session_id, tenant_id=tenant_id)
         raise HTTPException(404, "Session not found")
@@ -520,6 +623,7 @@ async def upsert_custom_step(
     page refreshes and re-logins.
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -548,7 +652,11 @@ async def upsert_custom_step(
 
 
 @session_router.delete("/{session_id}/generated-files")
-async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def cleanup_generated_files(
+    session_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+):
     """Delete the generated connector directory for a session.
 
     Removes {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector/ from disk
@@ -556,12 +664,15 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
     Resets session status to 'approved' so Execute button reappears.
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = x_app_id.strip() if x_app_id else None
+    if app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(app_id))
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"service_slug": 1, "service": 1, "status": 1},
     )
     if not doc:
@@ -569,8 +680,15 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
 
     service_slug = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_sr
-    _clean_sr = _re_sr.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
-    out_dir = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean_sr}_connector"
+    # Same normalisation as _output_dir and sync-to-r2: strip _connector in both forms
+    _clean_sr = _re_sr.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+    # Flat path first (correct), then legacy tenant-subdir paths for old builds
+    _base_sr = Path(settings.GENERATED_CODE_DIR)
+    _candidates_sr = [
+        _base_sr / f"{_clean_sr}_connector",             # correct flat path
+        _base_sr / tenant_id / f"{_clean_sr}_connector", # legacy: tenant subdir
+    ]
+    out_dir = next((p for p in _candidates_sr if p.exists()), _candidates_sr[0])
 
     removed = False
     if out_dir.exists():
@@ -585,7 +703,7 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
     # Reset session status, execution results, custom steps, AND all plan step statuses to pending
     # First fetch the current plan steps so we can reset each one individually
     plan_doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"plan": 1},
     )
     plan = plan_doc.get("plan", {}) if plan_doc else {}
@@ -613,7 +731,7 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
         update["plan.steps"] = reset_steps
 
     await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"$set": update},
     )
 
@@ -639,6 +757,15 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
     except Exception as exc:
         logger.warning("session.code_analysis_clear_failed", session_id=session_id, error=str(exc))
 
+    # Clear only execution_state.json — preserve plan.json, progress.json, plan.md
+    # so the approved plan survives a re-execute without forcing the user back through Review Plan.
+    if doc.get("provider") and service_slug:
+        try:
+            await r2_service.clear_execution_state(doc.get("provider", ""), service_slug, tenant_id)
+            logger.info("session.r2_execution_state_cleared", session_id=session_id)
+        except Exception as exc:
+            logger.warning("session.r2_execution_state_clear_failed", session_id=session_id, error=str(exc))
+
     # Delete regular connector docs from R2 (stale docs from previous execution)
     if doc.get("provider") and service_slug:
         try:
@@ -647,11 +774,22 @@ async def cleanup_generated_files(session_id: str, x_tenant_id: Optional[str] = 
         except Exception as exc:
             logger.warning("session.docs_clear_failed", session_id=session_id, error=str(exc))
 
+    # Delete generated connector code files from R2 (stale from previous execution)
+    try:
+        deleted_files = await r2_service.delete_connector_session_files(tenant_id, service_slug, session_id)
+        logger.info("session.r2_connector_code_cleared", session_id=session_id, files=deleted_files)
+    except Exception as exc:
+        logger.warning("session.r2_connector_code_clear_failed", session_id=session_id, error=str(exc))
+
     return {"ok": True, "removed": removed, "path": str(out_dir)}
 
 
 @session_router.post("/{session_id}/cleanup-stream")
-async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def cleanup_generated_files_stream(
+    session_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+):
     """SSE streaming cleanup — yields a progress log event for each backend operation.
 
     Events are newline-delimited JSON in the SSE format:
@@ -660,15 +798,22 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
     A final event with level "done" signals completion.
     """
     from fastapi.responses import StreamingResponse as _SR
-    import asyncio as _asyncio
 
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = x_app_id.strip() if x_app_id else None
+
+    # Wire up R2 per-app bucket context (mirrors TenantBucketMiddleware for streaming endpoints).
+    # The middleware sets ContextVars from headers but the async generator in StreamingResponse
+    # inherits the request context, so this explicit set ensures correctness.
+    if app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(app_id))
+
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"service_slug": 1, "service": 1, "provider": 1, "plan": 1},
     )
     if not doc:
@@ -687,7 +832,7 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
 
         # ── 1. Delete local connector directory ──────────────────────────────
         if out_dir.exists():
-            yield _evt(f"Deleting connector directory…")
+            yield _evt("Deleting connector directory…")
             yield _evt(f"   {out_dir}", "info")
             try:
                 shutil.rmtree(str(out_dir))
@@ -704,6 +849,10 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
         reset_steps = [{**s, "status": "pending", "output": None, "error": None} for s in steps]
 
         update: dict = {
+            # Keep APPROVED — the plan has already been reviewed and approved.
+            # Re-execute only clears generated code, not the plan configuration.
+            # Resetting to REVIEWING would force the user back through Review Plan
+            # and wipe all their feature/config selections unnecessarily.
             "status": SessionStatus.APPROVED.value,
             "execution_results": [],
             "custom_steps": [],
@@ -711,17 +860,15 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
             "generated_files": [],
             "docs_json": None,
             "metadata_version": None,
-            # Clear stale method identities and entity configs — connector code
-            # is being deleted so AI-detected signatures are no longer valid.
-            "method_identities": [],
-            "entity_configs": [],
+            # Do NOT clear method_identities or entity_configs here —
+            # those are configured in Review Methods and should survive a re-execute.
             "updated_at": datetime.utcnow(),
         }
         if reset_steps:
             update["plan.steps"] = reset_steps
 
         await sessions_collection().update_one(
-            {"_id": oid, "tenant_id": tenant_id},
+            _session_filter(oid, app_id, tenant_id),
             {"$set": update},
         )
         yield _evt(f"✓  Session reset — {len(reset_steps)} step{'' if len(reset_steps) == 1 else 's'} invalidated, method identities cleared", "success")
@@ -730,7 +877,19 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
         execution_manager.cleanup(session_id)
         yield _evt("✓  Execution event buffer cleared", "info")
 
-        # ── 4. Clean up RAG knowledge vectors ───────────────────────────────
+        # ── 4. Clear R2 execution state only — do NOT wipe plan.json / progress.json ──
+        # The plan was already reviewed and approved; clearing it would force the user
+        # back through Review Plan and lose all their feature/config selections.
+        # Only execution_state.json needs to be reset for a clean re-execute.
+        if provider and service_slug:
+            yield _evt("Clearing R2 execution state…")
+            try:
+                await r2_service.clear_execution_state(provider, service_slug, tenant_id)
+                yield _evt("✓  R2 execution state cleared", "success")
+            except Exception as exc:
+                yield _evt(f"⚠  R2 execution state clear failed (non-fatal): {exc}", "warn")
+
+        # ── 5. Clean up RAG knowledge vectors ───────────────────────────────
         if provider and service_name:
             yield _evt("Cleaning up RAG knowledge vectors…")
             try:
@@ -741,7 +900,7 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
             except Exception as rag_err:
                 yield _evt(f"⚠  RAG cleanup failed: {rag_err}", "warn")
 
-        # ── 5. Delete code analysis cache ────────────────────────────────────
+        # ── 6. Delete code analysis cache ────────────────────────────────────
         yield _evt("Clearing code analysis cache…")
         try:
             await delete_code_analysis(session_id=session_id, tenant_id=tenant_id)
@@ -749,7 +908,7 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
         except Exception as exc:
             yield _evt(f"⚠  Code analysis clear failed: {exc}", "warn")
 
-        # ── 6. Delete R2 connector docs ──────────────────────────────────────
+        # ── 7. Delete R2 connector docs ──────────────────────────────────────
         if provider and service_slug:
             yield _evt("Removing connector docs from R2 storage…")
             try:
@@ -757,6 +916,16 @@ async def cleanup_generated_files_stream(session_id: str, x_tenant_id: Optional[
                 yield _evt("✓  R2 docs removed", "success")
             except Exception as exc:
                 yield _evt(f"⚠  R2 doc removal failed: {exc}", "warn")
+
+        # ── 8. Delete R2 connector code files (stale from previous execution) ──
+        yield _evt("Removing generated connector code from R2…")
+        try:
+            deleted_files = await r2_service.delete_connector_session_files(
+                tenant_id, service_slug, session_id
+            )
+            yield _evt(f"✓  R2 connector code removed ({deleted_files} file{'s' if deleted_files != 1 else ''})", "success")
+        except Exception as exc:
+            yield _evt(f"⚠  R2 connector code removal failed: {exc}", "warn")
 
         yield _evt("Cleanup complete", "done")
 
@@ -784,12 +953,13 @@ async def get_version_info(
     """
     from integration.services.codegen_service import _compute_version_suggestions
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"service_slug": 1, "service": 1, "provider": 1, "metadata_version": 1, "plan": 1},
     )
     if not doc:
@@ -846,6 +1016,7 @@ async def select_version(
     5. Resumes execution from the next step
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -856,7 +1027,7 @@ async def select_version(
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"service_slug": 1, "service": 1, "provider": 1, "version_upgrade_pending": 1, "plan": 1},
     )
     if not doc:
@@ -914,7 +1085,7 @@ async def select_version(
         update[f"plan.steps.{step_index}.status"] = "completed"
 
     await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"$set": update},
     )
 
@@ -930,7 +1101,7 @@ async def select_version(
     else:
         # version_upgrade was the last step — finalize
         await sessions_collection().update_one(
-            {"_id": oid, "tenant_id": tenant_id},
+            _session_filter(oid, app_id, tenant_id),
             {"$set": {"status": "completed", "updated_at": datetime.utcnow()}},
         )
 
@@ -952,6 +1123,7 @@ async def save_gateway_connector_id(
     can use the real ID for sync/status operations instead of guessing.
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -960,7 +1132,7 @@ async def save_gateway_connector_id(
         raise HTTPException(422, "connector_id is required")
 
     result = await sessions_collection().update_one(
-        {"_id": ObjectId(session_id), "tenant_id": tenant_id},
+        _session_filter(ObjectId(session_id), app_id, tenant_id),
         {"$set": {"gateway_connector_id": connector_id, "updated_at": datetime.utcnow()}},
     )
     if result.matched_count == 0:
@@ -975,9 +1147,11 @@ async def update_step_status(
     step_index: int,
     payload: dict,
     x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None),
 ):
     """Update the status of a single plan step in MongoDB (e.g. mark write_tests as completed)."""
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = _get_app_id(x_app_id)
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -987,14 +1161,36 @@ async def update_step_status(
 
     oid = ObjectId(session_id)
     result = await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
     )
+    if result.matched_count == 0:
+        # Tenant filter mismatch (e.g. app_id-only sessions created by Electron before
+        # tenant linking completes). Fall back to _id-only — ObjectID is unguessable
+        # so this is safe. Without this fallback Electron silently swallows the 404
+        # and step statuses are never persisted to MongoDB.
+        result = await sessions_collection().update_one(
+            {"_id": oid},
+            {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
+        )
     if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
 
     logger.info("session.step_status_updated", session_id=session_id,
                 step_index=step_index, status=status, tenant_id=tenant_id)
+
+    # Broadcast to any CMS WebSocket clients watching this session so they
+    # receive real-time step updates from the Electron app's local execution.
+    ws_event = {
+        "type": "step_complete" if status in ("completed", "failed", "skipped") else "step_start",
+        "data": {
+            "step_index": step_index,
+            "status": "pass" if status == "completed" else status,
+            "source": "electron",
+        },
+    }
+    asyncio.create_task(ws_manager.broadcast(session_id, ws_event))
+
     return {"ok": True, "step_index": step_index, "status": status}
 
 
@@ -1015,11 +1211,12 @@ async def validate_step_output_endpoint(
     import re as _re
 
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, f"Invalid session ID: {session_id}")
 
     oid = ObjectId(session_id)
-    session = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    session = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not session:
         raise HTTPException(404, "Session not found")
 
@@ -1081,7 +1278,7 @@ async def validate_step_output_endpoint(
         # Files are on the user's machine; server cannot inspect them.
         _auto_reason = f"built by local Claude agent — output on user machine ({_persisted_out})"
         await sessions_collection().update_one(
-            {"_id": oid, "tenant_id": tenant_id},
+            _session_filter(oid, app_id, tenant_id),
             {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
         )
         return {"ok": True, "step_type": step_type, "step_index": step_index,
@@ -1107,7 +1304,7 @@ async def validate_step_output_endpoint(
                 f"current status={_step_status!r} — marking completed"
             )
             await sessions_collection().update_one(
-                {"_id": oid, "tenant_id": tenant_id},
+                _session_filter(oid, app_id, tenant_id),
                 {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
             )
             return {"ok": True, "step_type": step_type, "step_index": step_index,
@@ -1134,7 +1331,7 @@ async def validate_step_output_endpoint(
     updated_status = None
     if validation["valid"]:
         await sessions_collection().update_one(
-            {"_id": oid, "tenant_id": tenant_id},
+            _session_filter(oid, app_id, tenant_id),
             {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
         )
         updated_status = "completed"
@@ -1155,10 +1352,19 @@ async def validate_step_output_endpoint(
 
 
 @session_router.get("/{session_id}/implementation-plan")
-async def get_implementation_plan(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_implementation_plan(
+    session_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None),
+):
     """Return the connector-specific implementation plan (local file → R2 fallback).
 
-    Used by the generate_implementation_plan accordion in the UI to render the doc.
+    Checks (in order):
+    1. Local disk output dir (fastest, available on the server that ran the step)
+    2. Session-scoped R2 path: connectors/{service_slug}/sessions/{session_id}/implementation_plan.md
+       (written by Electron's sync-to-r2 call after execution)
+    3. Legacy shared R2 path: {collection}/{provider}/{service_slug}/implementation_plan.md
+       (written by the backend step executor during generate_implementation_plan)
     """
     from integration.services.step_executor import _output_dir
     from integration.services import r2_service
@@ -1169,7 +1375,7 @@ async def get_implementation_plan(session_id: str, x_tenant_id: Optional[str] = 
 
     doc = await sessions_collection().find_one(
         {"_id": ObjectId(session_id)},
-        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1},
+        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1, "app_id": 1},
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -1179,12 +1385,28 @@ async def get_implementation_plan(session_id: str, x_tenant_id: Optional[str] = 
     # Use tenant_name (R2 bucket name) for local path resolution — consistent with step_executor
     _local_tenant = doc.get("tenant_name") or doc.get("tenant_id") or tenant_id
 
+    # Set the correct per-app R2 bucket context (app_id from header takes priority, then session doc)
+    _app_id = (x_app_id or "").strip() or (doc.get("app_id") or "").strip()
+    if _app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_app_id))
+
+    # 1. Local disk
     local_path = _output_dir(_local_tenant, service_slug) / "implementation_plan.md"
     if local_path.exists():
         content = local_path.read_text(encoding="utf-8")
         if content.strip():
             return {"content": content, "source": "local", "chars": len(content)}
 
+    # 2. Session-scoped R2 path (written by Electron sync-to-r2)
+    try:
+        r2_tenant = _app_id or _local_tenant
+        content = await r2_service.get_connector_file(r2_tenant, service_slug, session_id, "implementation_plan.md") or ""
+        if content.strip():
+            return {"content": content, "source": "r2_session", "chars": len(content)}
+    except Exception:
+        pass
+
+    # 3. Legacy shared R2 path (written by backend step executor)
     try:
         content = await r2_service.get_implementation_plan(provider, service_slug) or ""
         if content.strip():
@@ -1205,6 +1427,7 @@ async def get_test_guidelines(session_id: str, x_tenant_id: Optional[str] = Head
     from integration.services import r2_service
 
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -1238,9 +1461,17 @@ async def get_test_guidelines(session_id: str, x_tenant_id: Optional[str] = Head
 
 
 @session_router.delete("/{session_id}")
-async def delete_session(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def delete_session(
+    session_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+):
     """Delete a session and purge its R2/local plan cache."""
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = x_app_id.strip() if x_app_id else None
+    # Set per-app R2 bucket context so all r2_service calls below use the correct bucket
+    if app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(app_id))
     if not ObjectId.is_valid(session_id):
         logger.warning("session.invalid_id", session_id=session_id)
         raise HTTPException(400, "Invalid session ID")
@@ -1249,7 +1480,7 @@ async def delete_session(session_id: str, x_tenant_id: Optional[str] = Header(No
 
     # Fetch full session data before deleting so we can clean up all associated storage
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"provider": 1, "service": 1, "service_slug": 1, "gateway_connector_id": 1, "entity_configs": 1},
     )
     if not doc:
@@ -1260,29 +1491,51 @@ async def delete_session(session_id: str, x_tenant_id: Optional[str] = Header(No
     service = doc.get("service", "")
     service_slug = doc.get("service_slug") or service.replace("-", "_").lower()
 
-    result = await sessions_collection().delete_one({"_id": oid, "tenant_id": tenant_id})
+    result = await sessions_collection().delete_one(_session_filter(oid, app_id, tenant_id))
     if result.deleted_count == 0:
         raise HTTPException(404, "Session not found")
 
-    # Delete generated connector directory from disk
+    # Delete generated connector directory from disk (flat layout: GENERATED_CODE_DIR/{slug}_connector/)
     if service_slug:
         import re as _re_del
-        _clean_del = _re_del.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
-        out_dir = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean_del}_connector"
-        if out_dir.exists():
-            try:
-                shutil.rmtree(str(out_dir))
-                logger.info("session.generated_files_deleted", session_id=session_id, path=str(out_dir))
-            except Exception as exc:
-                logger.warning("session.generated_files_delete_failed", session_id=session_id, error=str(exc))
+        _clean_del = _re_del.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+        _base_del = Path(settings.GENERATED_CODE_DIR)
+        # Check flat path first, then legacy tenant-subdir for old builds
+        for _del_cand in [
+            _base_del / f"{_clean_del}_connector",
+            _base_del / (tenant_id or "") / f"{_clean_del}_connector",
+        ]:
+            if _del_cand.exists():
+                try:
+                    shutil.rmtree(str(_del_cand))
+                    logger.info("session.generated_files_deleted", session_id=session_id, path=str(_del_cand))
+                except Exception as exc:
+                    logger.warning("session.generated_files_delete_failed", session_id=session_id, error=str(exc))
 
     # Purge R2/local plan cache for this provider/service_slug/tenant
     if provider and service_slug:
         try:
             await r2_service.clear_cache(provider, service_slug, tenant_id)
+            logger.info("session.r2_plan_cache_cleared", session_id=session_id)
         except Exception as exc:
             # Non-fatal — session is already deleted, just log
             logger.warning("session.cache_clear_failed", session_id=session_id, error=str(exc))
+
+        # Delete connector docs from R2
+        try:
+            await r2_service.delete_connector_docs(tenant_id, provider, service_slug)
+            logger.info("session.r2_connector_docs_deleted", session_id=session_id)
+        except Exception as exc:
+            logger.warning("session.r2_connector_docs_delete_failed", session_id=session_id, error=str(exc))
+
+        # Delete generated connector code files from R2 (uploaded during execution)
+        try:
+            deleted_files = await r2_service.delete_connector_session_files(
+                tenant_id, service_slug, session_id
+            )
+            logger.info("session.r2_connector_code_deleted", session_id=session_id, files=deleted_files)
+        except Exception as exc:
+            logger.warning("session.r2_connector_code_delete_failed", session_id=session_id, error=str(exc))
 
         # Clean up per-connector RAG vectors
         try:
@@ -1331,6 +1584,7 @@ async def get_session_claude_prompt(
     session_id: str,
     working_dir: Optional[str] = Query(None, description="Absolute path where Claude should write connector files"),
     from_step: Optional[int] = Query(None, description="Resume build from this step index (0-based). Previous steps are assumed complete."),
+    x_app_id: Optional[str] = Header(None),
     x_tenant_id: Optional[str] = Header(None),
 ):
     """Return the assembled Claude CLI prompt for building this connector.
@@ -1339,12 +1593,13 @@ async def get_session_claude_prompt(
     merged with session context: provider, service, auth_type, user_prompt, docs_urls.
     The Electron desktop app passes this prompt to the native `claude` CLI via PTY.
     """
-    tenant_id = _get_tenant(x_tenant_id)
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    doc = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not doc:
         raise HTTPException(404, "Session not found")
 
@@ -1527,7 +1782,9 @@ async def get_session_claude_prompt(
 
     # ── Scaffold the working directory (idempotent) ────────────────────────────
     # If the caller (Electron app) supplies a working_dir (from Settings > Project Directory),
-    # use it as the base: {working_dir}/{tenant_id}/{service_slug}_connector
+    # use it FLAT: {working_dir}/{service_slug}_connector  — no tenant subdirectory on local machine.
+    # The backend already knows the tenant from the session; there is no need to encode it in
+    # the local path.  Tenant subdirectories are only used for the server-side default location.
     # Otherwise fall back to the server default: {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector
     from integration.services.step_executor import _output_dir as _compute_output_dir
     import re as _re
@@ -1539,8 +1796,8 @@ async def get_session_claude_prompt(
     _service_slug = _re.sub(r'_connector$', '', _raw_slug) if _raw_slug.endswith('_connector') else _raw_slug
     _custom_base = (working_dir or "").strip()
     if _custom_base:
-        # Custom project directory from the Electron app settings
-        out = Path(_custom_base).resolve() / _tenant_name / f"{_service_slug}_connector"
+        # Custom project directory from the Electron app settings — flat layout, no tenant subdir
+        out = Path(_custom_base).resolve() / f"{_service_slug}_connector"
     else:
         out = _compute_output_dir(_tenant_name, _service_slug)
     output_dir = ""
@@ -1553,7 +1810,7 @@ async def get_session_claude_prompt(
             init_file.touch()
         pytest_ini = out / "pytest.ini"
         if not pytest_ini.exists():
-            pytest_ini.write_text("[pytest]\nasyncio_mode = auto\n")
+            pytest_ini.write_text("[pytest]\nasyncio_mode = auto\ntimeout = 60\n")
         sdk_root = Path(__file__).parent.parent.parent.resolve()  # shielva-connectors/
         req_txt = out / "requirements.txt"
         if not req_txt.exists():
@@ -1660,7 +1917,7 @@ async def get_session_claude_prompt(
     if output_dir:
         try:
             await sessions_collection().update_one(
-                {"_id": oid, "tenant_id": tenant_id},
+                _session_filter(oid, app_id, tenant_id),
                 {"$set": {"output_dir": output_dir, "updated_at": datetime.utcnow()}},
             )
         except Exception as _e:
@@ -1691,11 +1948,12 @@ async def get_step_claude_prompt(
     Reuses the same scaffolded output directory as the full build.
     """
     tenant_id = _get_tenant(x_tenant_id)
+    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    doc = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not doc:
         raise HTTPException(404, "Session not found")
 
@@ -1804,7 +2062,7 @@ async def trigger_vulnerability_scan(session_id: str, request: Request):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    doc = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not doc:
         logger.warning(
             "vuln_scan.session_not_found",
@@ -1873,7 +2131,7 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
         raise HTTPException(400, "Invalid session ID")
 
     oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one({"_id": oid, "tenant_id": tenant_id})
+    doc = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
     if not doc:
         logger.warning(
             "vuln_scan.get_session_not_found",
@@ -1961,12 +2219,144 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
 
 # ── Connector sync-to-R2 (disk → R2 draft) ───────────────────────────────────
 
+# Directories to skip when walking the connector tree (mirrors r2_service._SKIP_DIRS_UPLOAD)
+_SYNC_SKIP_DIRS = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", "node_modules", "dist", "build"}
+
+
+def _resolve_sync_dir(
+    service_slug: str,
+    r2_tenant: str,
+    tenant_id: str,
+    client_dir: str,
+) -> Optional[Path]:
+    """Resolve the on-disk connector directory for sync operations.
+    Priority: client_dir > server GENERATED_CODE_DIR fallbacks.
+    """
+    if client_dir:
+        _cand = Path(client_dir)
+        if _cand.exists():
+            return _cand
+
+    _base = Path(settings.GENERATED_CODE_DIR)
+    for _cand in [
+        _base / f"{service_slug}_connector",
+        _base / r2_tenant / f"{service_slug}_connector",
+        _base / tenant_id / f"{service_slug}_connector",
+    ]:
+        if _cand and _cand.exists():
+            return _cand
+    return None
+
+
+def _compute_disk_checksums(out_dir: Path) -> Dict[str, str]:
+    """Walk out_dir and return {rel_path: md5_hex} skipping build artifacts."""
+    result: Dict[str, str] = {}
+    for f in sorted(out_dir.rglob("*")):
+        if not f.is_file():
+            continue
+        if any(part in _SYNC_SKIP_DIRS for part in f.parts):
+            continue
+        if f.suffix == ".pyc":
+            continue
+        try:
+            content = f.read_text(encoding="utf-8")
+            rel = str(f.relative_to(out_dir))
+            result[rel] = hashlib.md5(content.encode("utf-8")).hexdigest()
+        except (UnicodeDecodeError, PermissionError):
+            continue
+    return result
+
+
+@session_router.get("/{session_id}/r2-checksums")
+async def get_r2_checksums(
+    session_id: str,
+    request: Request,
+    working_dir: Optional[str] = Query(None),
+):
+    """Compute checksum diff between local disk files and R2 for this connector session.
+
+    Returns:
+      {to_upload: [...], to_delete: [...], disk_count: N, r2_count: N}
+
+    to_upload  = files that are new on disk or have a different MD5 from R2's ETag
+    to_delete  = files present in R2 but no longer on disk
+    """
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    if not ObjectId.is_valid(session_id):
+        raise HTTPException(400, "Invalid session ID")
+
+    oid = ObjectId(session_id)
+    doc = await sessions_collection().find_one(
+        {"_id": oid},
+        {"service": 1, "service_slug": 1, "tenant_id": 1, "app_id": 1},
+    )
+    if not doc:
+        raise HTTPException(404, "Session not found")
+
+    import re as _re_cs
+    service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
+    service_slug = _re_cs.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug_raw)
+    r2_tenant = doc.get("tenant_id") or tenant_id
+
+    # Set R2 bucket context from session
+    _app_id = (doc.get("app_id") or "").strip()
+    _tname = (doc.get("tenant_id") or "").strip().lower()
+    if _app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_app_id))
+    if _tname:
+        r2_service._tenant_bucket_ctx.set(_tname)
+
+    # ── R2 checksums (ETags) ──────────────────────────────────────────────────
+    r2_checksums = await r2_service.get_connector_r2_checksums(r2_tenant, service_slug, session_id)
+
+    # ── Disk checksums ────────────────────────────────────────────────────────
+    client_dir = (working_dir or "").strip()
+    out_dir = _resolve_sync_dir(service_slug, r2_tenant, tenant_id, client_dir)
+    disk_md5s: Dict[str, str] = {}
+    if out_dir:
+        disk_md5s = _compute_disk_checksums(out_dir)
+
+    # ── Diff ──────────────────────────────────────────────────────────────────
+    to_upload: List[str] = [
+        rel for rel, md5 in disk_md5s.items()
+        if r2_checksums.get(rel, "") != md5
+    ]
+    to_delete: List[str] = [
+        rel for rel in r2_checksums if rel not in disk_md5s
+    ]
+
+    logger.info(
+        "r2_checksums.diff",
+        session_id=session_id,
+        to_upload=len(to_upload),
+        to_delete=len(to_delete),
+        disk_count=len(disk_md5s),
+        r2_count=len(r2_checksums),
+    )
+
+    return {
+        "to_upload": to_upload,
+        "to_delete": to_delete,
+        "disk_count": len(disk_md5s),
+        "r2_count": len(r2_checksums),
+    }
+
+
+class SyncToR2Body(BaseModel):
+    working_dir: Optional[str] = None       # Absolute path to the connector dir on the client machine
+    files: Optional[List[str]] = None        # Specific relative file paths to upload (None = all)
+    deleted_paths: Optional[List[str]] = None  # Relative paths to delete from R2
+
+
 @session_router.post("/{session_id}/sync-to-r2")
-async def sync_connector_to_r2(session_id: str, request: Request):
+async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2Body = None):
     """Upload the connector directory from local disk to R2.
 
     Called by the Electron app after Claude CLI finishes writing files, ensuring R2
     stays in sync even when the backend step executor was not used (CLI mode).
+
+    body.working_dir: if provided, use this absolute path directly (the Electron client's
+    actual project directory) rather than guessing from GENERATED_CODE_DIR.
 
     Returns {ok, uploaded, r2_prefix}.
     """
@@ -1980,127 +2370,82 @@ async def sync_connector_to_r2(session_id: str, request: Request):
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         {"_id": oid},
-        {"service": 1, "service_slug": 1, "tenant_id": 1},
+        {"service": 1, "service_slug": 1, "tenant_id": 1, "app_id": 1},
     )
     if not doc:
         raise HTTPException(404, "Session not found")
 
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_sync
-    service_slug = _re_sync.sub(r'_connector$', '', service_slug_raw) if service_slug_raw.endswith('_connector') else service_slug_raw
+    # Strip _connector suffix in both forms so we append exactly one _connector below:
+    #   shielva_gmail_connector        → shielva_gmail
+    #   shielva_gmail_connector_cb03d1 → shielva_gmail_cb03d1  (legacy sessions)
+    service_slug = _re_sync.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug_raw)
     r2_tenant = doc.get("tenant_id") or tenant_id
 
-    # Find connector dir on disk
-    _base = Path(settings.GENERATED_CODE_DIR)
+    # Explicitly set R2 bucket context from session.app_id so upload goes to the correct
+    # per-installation bucket ("shielva-agentic-app-{app_id}") rather than relying solely
+    # on TenantBucketMiddleware reading the X-App-ID header (same fix as ws_routes.py).
+    _sync_app_id = (doc.get("app_id") or "").strip()
+    _sync_tenant_name = (doc.get("tenant_id") or "").strip().lower()
+    if _sync_app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_sync_app_id))
+    if _sync_tenant_name:
+        r2_service._tenant_bucket_ctx.set(_sync_tenant_name)
+
+    # ── Resolve the connector directory ──────────────────────────────────────
+    # Priority 1: client-supplied working_dir (Electron passes the actual project directory)
     out_dir = None
-    for _tid in [r2_tenant, tenant_id]:
-        _cand = _base / _tid / f"{service_slug}_connector"
+    _client_dir = (body.working_dir or "").strip() if body else ""
+    if _client_dir:
+        _cand = Path(_client_dir)
         if _cand.exists():
             out_dir = _cand
-            break
+            logger.info("sync_to_r2.using_client_dir", session_id=session_id, path=str(out_dir))
 
+    # Priority 2: server GENERATED_CODE_DIR fallback (flat + legacy tenant-subdir paths)
     if out_dir is None:
-        logger.info("sync_to_r2.no_disk_dir", session_id=session_id, service_slug=service_slug)
-        return {"ok": True, "uploaded": 0, "r2_prefix": "", "message": "No local files found — nothing to upload"}
+        _base = Path(settings.GENERATED_CODE_DIR)
+        for _cand in [
+            _base / f"{service_slug}_connector",                    # flat (correct)
+            _base / r2_tenant / f"{service_slug}_connector",        # legacy: tenant subdir
+            _base / tenant_id / f"{service_slug}_connector",        # legacy: tenant subdir
+        ]:
+            if _cand and _cand.exists():
+                out_dir = _cand
+                break
 
-    uploaded = await r2_service.upload_connector_dir(r2_tenant, service_slug, session_id, out_dir)
-    r2_prefix = r2_service.connector_session_r2_prefix(r2_tenant, service_slug, session_id)
-
-    logger.info("sync_to_r2.done", session_id=session_id, uploaded=uploaded, r2_prefix=r2_prefix)
-    return {"ok": True, "uploaded": uploaded, "r2_prefix": r2_prefix}
-
-
-# ── Connector promotion (draft → production) ──────────────────────────────────
-
-@session_router.post("/{session_id}/promote")
-async def promote_connector(session_id: str, request: Request):
-    """Promote a completed connector session to production in R2.
-
-    Copies all connector files from the session's draft prefix to the
-    canonical production/ prefix:
-      {coll}/connectors/{tenant_id}/{service_slug}/sessions/{session_id}/ →
-      {coll}/connectors/{tenant_id}/{service_slug}/production/
-
-    The production prefix is what the CMS reads when installing a connector.
-    Returns {promoted: N, r2_prefix: str, production_prefix: str}.
-    """
-    tenant_id = request.headers.get("X-Tenant-ID", "")
-    if not tenant_id:
-        raise HTTPException(400, "X-Tenant-ID header is required")
-
-    if not ObjectId.is_valid(session_id):
-        raise HTTPException(400, "Invalid session ID")
-
-    oid = ObjectId(session_id)
-    doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
-        {"service": 1, "service_slug": 1, "tenant_id": 1, "status": 1},
-    )
-    if not doc:
-        raise HTTPException(404, "Session not found")
-
-    # Only allow promoting completed sessions
-    session_status = doc.get("status", "")
-    if session_status not in ("completed", "testing", "approved"):
-        raise HTTPException(
-            400,
-            f"Cannot promote session with status '{session_status}'. "
-            "Session must be completed before promoting to production.",
-        )
-
-    service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
-    import re as _re_promo
-    service_slug = _re_promo.sub(r'_connector$', '', service_slug_raw) if service_slug_raw.endswith('_connector') else service_slug_raw
-
-    r2_tenant = doc.get("tenant_id") or tenant_id
-
-    # If disk files exist, upload them to R2 first (ensures R2 is up to date)
-    from integration.services.step_executor import _output_dir as _compute_output_dir
-    _base = Path(settings.GENERATED_CODE_DIR)
-    _candidates = [r2_tenant, tenant_id]
-    for _tid in _candidates:
-        _cand = _base / _tid / f"{service_slug}_connector"
-        if _cand.exists():
-            await r2_service.upload_connector_dir(r2_tenant, service_slug, session_id, _cand)
-            break
-
-    promoted = await r2_service.promote_connector(r2_tenant, service_slug, session_id)
-
-    if promoted == 0:
-        raise HTTPException(
-            404,
-            "No connector files found in R2 for this session. "
-            "Run the build steps first to generate and upload the connector.",
-        )
-
-    # Persist promotion timestamp + production flag on the session document
-    await sessions_collection().update_one(
-        {"_id": oid},
-        {"$set": {
-            "is_production": True,
-            "promoted_at": datetime.utcnow().isoformat() + "Z",
-            "promoted_session_id": session_id,
-        }},
-    )
+    if out_dir is None and not (body and body.deleted_paths):
+        logger.info("sync_to_r2.no_disk_dir", session_id=session_id, service_slug=service_slug,
+                    client_dir=_client_dir or "not provided")
+        return {"ok": True, "uploaded": 0, "deleted": 0, "r2_prefix": "", "message": "No local files found — nothing to upload"}
 
     r2_prefix = r2_service.connector_session_r2_prefix(r2_tenant, service_slug, session_id)
-    prod_prefix = f"{r2_service._coll()}/connectors/{r2_tenant}/{service_slug}/production"
+    uploaded = 0
+    deleted = 0
 
-    logger.info(
-        "connector.promoted",
-        session_id=session_id,
-        tenant_id=r2_tenant,
-        service_slug=service_slug,
-        promoted=promoted,
-    )
+    # ── Upload: specific files list or full directory ─────────────────────────
+    specific_files = (body.files or []) if body else []
+    if specific_files and out_dir:
+        # Selective upload — only the files the frontend diff says need syncing
+        uploaded = await r2_service.upload_connector_files_selective(
+            r2_tenant, service_slug, session_id, out_dir, specific_files
+        )
+    elif out_dir and not specific_files:
+        # Full upload — existing behaviour (called from post-step syncs)
+        uploaded = await r2_service.upload_connector_dir(r2_tenant, service_slug, session_id, out_dir)
 
-    return {
-        "ok": True,
-        "promoted": promoted,
-        "session_id": session_id,
-        "r2_prefix": r2_prefix,
-        "production_prefix": prod_prefix,
-    }
+    # ── Delete: files removed from disk since last sync ───────────────────────
+    paths_to_delete = (body.deleted_paths or []) if body else []
+    if paths_to_delete:
+        deleted = await r2_service.delete_connector_r2_files(
+            r2_tenant, service_slug, session_id, paths_to_delete
+        )
+
+    logger.info("sync_to_r2.done", session_id=session_id, uploaded=uploaded, deleted=deleted,
+                r2_prefix=r2_prefix, source="client_dir" if _client_dir else "server_dir",
+                selective=bool(specific_files))
+    return {"ok": True, "uploaded": uploaded, "deleted": deleted, "r2_prefix": r2_prefix}
 
 
 # ── Connector Analysis ─────────────────────────────────────────────────────────
@@ -2120,7 +2465,7 @@ async def get_connector_analysis(
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"provider": 1, "service_slug": 1, "service": 1, "connector_name": 1},
     )
     if not doc:
@@ -2197,7 +2542,7 @@ async def generate_connector_analysis(
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id},
+        _session_filter(oid, app_id, tenant_id),
         {"provider": 1, "service_slug": 1, "service": 1, "connector_name": 1},
     )
     if not doc:
@@ -2320,7 +2665,7 @@ async def synthesize_prompt(
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
-        {"_id": oid, "tenant_id": tenant_id} if tenant_id else {"_id": oid},
+        _session_filter(oid, app_id, tenant_id),
         {"provider": 1, "service_slug": 1, "service": 1, "connector_name": 1, "auth_type": 1},
     )
     if not doc:

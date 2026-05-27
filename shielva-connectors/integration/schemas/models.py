@@ -152,8 +152,14 @@ class MongoProvisionConfig(BaseModel):
 # ── Session (top-level document) ──────────────────────────────────────
 
 class IntegrationSession(BaseModel):
-    tenant_id: str
-    tenant_name: str = ""   # R2 bucket name — captured from X-Tenant-Name at session creation
+    # ── Identity fields ───────────────────────────────────────────────────────
+    # app_id  : stable per-install identifier from the Electron app (MAC-based hash).
+    #           Primary key for pre-login sessions. Mapped to tenant post-login.
+    # tenant_id / tenant_name : populated after user logs in (via /app/link-tenant).
+    #           Optional pre-login so sessions can be created before authentication.
+    app_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    tenant_name: str = ""   # R2 bucket path prefix — set after login
     provider: str
     service: str
     connector_name: str = ""   # human-readable name for this connector instance

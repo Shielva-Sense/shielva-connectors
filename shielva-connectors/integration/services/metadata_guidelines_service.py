@@ -733,7 +733,7 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
         else:
             loop = asyncio.get_event_loop()
             client = r2._get_client()
-            bucket = settings.R2_BUCKET_NAME
+            bucket = settings.R2_SHARED_BUCKET  # guidelines live in the shared admin bucket
             await loop.run_in_executor(
                 None, partial(r2._sync_write, client, bucket, key, content, "text/plain")
             )

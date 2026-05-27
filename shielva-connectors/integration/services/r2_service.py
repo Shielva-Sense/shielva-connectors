@@ -29,26 +29,51 @@ import structlog
 
 from integration.core.config import settings
 
-# ── Per-request tenant bucket (set by middleware from X-Tenant-Name header) ──
-# At request time this always has the correct bucket (tenant_name.lower()).
-# Outside a request context (startup sync, background tasks) it falls back to
-# _get_bucket().
+# ── Per-request bucket resolution ────────────────────────────────────────────
+# Priority (highest → lowest):
+#   1. R2_BUCKET_NAME env var  — explicit per-deployment override, always wins
+#   2. _app_bucket_ctx         — set from X-App-ID header: "shielva-agentic-app-{app_id}"
+#   3. _tenant_bucket_ctx      — set from X-Tenant-Name header (legacy / post-login)
 _tenant_bucket_ctx: ContextVar[str] = ContextVar("tenant_bucket", default="")
+_app_bucket_ctx:    ContextVar[str] = ContextVar("app_bucket",    default="")
+
+
+def app_id_to_bucket(app_id: str) -> str:
+    """Derive the R2 bucket name from a stable app installation ID.
+    Convention: shielva-agentic-app-{app_id}
+    """
+    return f"shielva-agentic-app-{app_id}"
+
+
+def _get_shared_bucket() -> str:
+    """Return the fixed shared R2 bucket that holds global/shared read-only resources.
+
+    This bucket (default: "shielvasense") contains:
+      - STEP_PROMPTS/          — versioned LLM prompts managed by Shielva admins
+      - CODE_EXECUTION_GUIDELINES/  — connector development standards
+      - CONNECTOR_DOCUMENTATION_GUIDELINES/
+      - METADATA_WRITING_GUIDELINES/
+      - INSTRUCTION_SETUP_GUIDELINES/
+
+    It is the same bucket for every app installation and never contains
+    per-connector or per-session data.
+    """
+    return settings.R2_SHARED_BUCKET or "shielvasense"
 
 
 def _get_bucket() -> str:
-    """Return the R2 bucket name for the current context.
+    """Return the per-app R2 bucket for the current request context.
+
+    Used for all connector-specific data: plan.json, progress.json, execution
+    state, generated code, test guidelines, setup instructions, etc.
 
     Priority:
-      1. settings.R2_BUCKET_NAME (explicit .env config — always correct bucket name)
-      2. ContextVar set by TenantBucketMiddleware (X-Tenant-Name header, lowercased)
-         — used only in multi-bucket deployments where R2_BUCKET_NAME is intentionally blank.
-
-    Reason for this order: the tenant ID sent in X-Tenant-Name (e.g. "shielva-sense")
-    often differs from the actual R2 bucket name (e.g. "shielvasense"). The configured
-    R2_BUCKET_NAME is always the canonical bucket and must take precedence.
+      1. settings.R2_BUCKET_NAME — explicit .env override (always wins)
+      2. _app_bucket_ctx  — "shielva-agentic-app-{app_id}" set from X-App-ID header
+                            (covers both pre-login and post-login for the same installation)
+      3. _tenant_bucket_ctx — tenant name from X-Tenant-Name header (legacy fallback)
     """
-    return settings.R2_BUCKET_NAME or _tenant_bucket_ctx.get()
+    return settings.R2_BUCKET_NAME or _app_bucket_ctx.get() or _tenant_bucket_ctx.get()
 
 logger = structlog.get_logger(__name__)
 
@@ -218,18 +243,30 @@ def _build_plan_markdown(
 # ── Storage mode detection ───────────────────────────────────────────
 
 def is_configured() -> bool:
-    """Return True if all R2 credentials are present in config."""
+    """Return True if R2 credentials are present.
+
+    Bucket is resolved per-request from X-App-ID (or X-Tenant-Name for legacy).
+    We intentionally do NOT require _get_bucket() here — the bucket is always
+    resolvable at request time even when R2_BUCKET_NAME is left empty in .env.
+    """
     return bool(
         settings.R2_ACCOUNT_ID
         and settings.R2_ACCESS_KEY_ID
         and settings.R2_SECRET_ACCESS_KEY
-        and _get_bucket()
     )
 
 
 def _use_local() -> bool:
-    """True when R2 is not configured — use local filesystem fallback."""
-    return not is_configured()
+    """True when R2 credentials are not configured — use local filesystem fallback.
+
+    Falls back to local FS also when the per-request bucket cannot be resolved
+    (e.g. startup-time calls with no request context and no R2_BUCKET_NAME set).
+    """
+    if not is_configured():
+        return True
+    # At request time: use local FS only if no bucket can be resolved
+    bucket = _get_bucket()
+    return not bucket
 
 
 # ── Local filesystem helpers ─────────────────────────────────────────
@@ -279,25 +316,53 @@ def _get_client():
 
 
 def _coll() -> str:
-    """Return the collection key prefix (no trailing slash)."""
+    """Return the collection key prefix for the current bucket context (no trailing slash).
+
+    Per-app buckets (shielva-agentic-app-*) are already namespaced by the bucket
+    name itself, so no prefix is needed — returns "".
+
+    Legacy/shared buckets (shielvasense, tenant-name) namespace connector data
+    inside the shared bucket using the configured prefix.
+
+    Examples:
+      shielva-agentic-app-abc123  →  ""
+        key: google/shielva_gmail_5403cd/plan.json
+
+      shielvasense                →  "shielvasense-integration-plans"
+        key: shielvasense-integration-plans/google/shielva_gmail_5403cd/plan.json
+    """
+    bucket = _get_bucket()
+    if bucket.startswith("shielva-agentic-app-"):
+        return ""
     return settings.R2_COLLECTION_PREFIX
+
+
+def _k(*parts: str) -> str:
+    """Build an R2 key from path segments, dropping empty parts (safe prefix handling).
+
+    Prevents leading slashes when the collection prefix is "" for per-app buckets:
+      _k("", "google", "slug", "plan.json")  →  "google/slug/plan.json"
+      _k("shielvasense-integration-plans", "google", "slug", "plan.json")
+        →  "shielvasense-integration-plans/google/slug/plan.json"
+    """
+    return "/".join(p for p in parts if p)
 
 
 def _csv_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
     # tenant_id removed from path — the R2 bucket itself is already tenant-scoped
-    return f"{_coll()}/{provider}/{service_slug}/prompts.csv"
+    return _k(_coll(), provider, service_slug, "prompts.csv")
 
 
 def _plan_json_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
-    return f"{_coll()}/{provider}/{service_slug}/plan.json"
+    return _k(_coll(), provider, service_slug, "plan.json")
 
 
 def _plan_md_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
-    return f"{_coll()}/{provider}/{service_slug}/plan.md"
+    return _k(_coll(), provider, service_slug, "plan.md")
 
 
 def _progress_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
-    return f"{_coll()}/{provider}/{service_slug}/progress.json"
+    return _k(_coll(), provider, service_slug, "progress.json")
 
 
 def _sync_read(client, bucket: str, key: str) -> Optional[str]:
@@ -325,10 +390,14 @@ def _sync_write(
 
 
 def ensure_bucket() -> None:
-    """Verify the tenant-root R2 bucket is accessible. Called at service startup.
+    """Ensure the per-app R2 bucket exists, creating it if necessary.
 
-    The bucket (shielvasense) is shared across all services and must already exist.
-    Integration plans live at key prefix: {R2_COLLECTION_PREFIX}/
+    Per-app buckets (shielva-agentic-app-{app_id}) are created on-demand the
+    first time a plan is saved for an installation.  The shared bucket
+    (shielvasense) is pre-existing and managed separately.
+
+    Called from save_prompt_and_plan() at request time — _get_bucket() will
+    return the correct per-app bucket from the X-App-ID ContextVar.
     """
     if _use_local():
         # Ensure local cache root exists
@@ -340,13 +409,36 @@ def ensure_bucket() -> None:
 
     client = _get_client()
     bucket = _get_bucket()
+    if not bucket:
+        logger.warning("r2.ensure_bucket_skipped", reason="no bucket resolved — no request context?")
+        return
+
     coll = settings.R2_COLLECTION_PREFIX
     try:
         client.head_bucket(Bucket=bucket)
         logger.info("r2.bucket_accessible", bucket=bucket, collection=coll)
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
-        logger.warning("r2.bucket_check_failed", bucket=bucket, collection=coll, error_code=code)
+        if code in ("NoSuchBucket", "404", "NoSuchBucketError"):
+            # Per-app bucket doesn't exist yet — create it now
+            try:
+                client.create_bucket(Bucket=bucket)
+                logger.info("r2.bucket_created", bucket=bucket, collection=coll)
+            except ClientError as create_err:
+                create_code = create_err.response.get("Error", {}).get("Code", "")
+                if create_code == "BucketAlreadyOwnedByYou":
+                    # Race condition: another request created it first — that's fine
+                    logger.info("r2.bucket_already_exists", bucket=bucket)
+                else:
+                    logger.error(
+                        "r2.bucket_create_failed",
+                        bucket=bucket,
+                        error_code=create_code,
+                        error=str(create_err),
+                    )
+                    raise
+        else:
+            logger.warning("r2.bucket_check_failed", bucket=bucket, collection=coll, error_code=code)
 
 
 # ── Public async API ──────────────────────────────────────────────────
@@ -748,7 +840,7 @@ async def invalidate_stale_plan(
 
 def _execution_state_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
     # tenant_id removed — bucket is already tenant-scoped
-    return f"{_coll()}/{provider}/{service_slug}/execution_state.json"
+    return _k(_coll(), provider, service_slug, "execution_state.json")
 
 
 async def get_execution_state(
@@ -941,10 +1033,38 @@ async def update_approval_status(
 
 # ── Cache purge (called on session delete) ────────────────────────────
 
+async def clear_execution_state(provider: str, service_slug: str, tenant_id: str) -> None:
+    """Delete only execution_state.json — preserves plan.json, progress.json, plan.md.
+
+    Called on re-execute so the plan and approval status are NOT wiped.
+    Works with both R2 and local filesystem.
+    """
+    key = _execution_state_key(provider, service_slug, tenant_id)
+
+    if _use_local():
+        path = _local_path(key)
+        if path.exists():
+            try:
+                path.unlink()
+            except Exception as exc:
+                logger.warning("cache.local_execution_state_clear_failed", error=str(exc))
+        return
+
+    loop = asyncio.get_event_loop()
+    client = _get_client()
+    bucket = _get_bucket()
+    try:
+        await loop.run_in_executor(None, partial(client.delete_object, Bucket=bucket, Key=key))
+        logger.info("r2.execution_state_cleared", provider=provider, service_slug=service_slug)
+    except Exception as exc:
+        logger.warning("r2.execution_state_clear_failed", error=str(exc))
+
+
 async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
     """Delete all cached plan/execution/failure files for a provider/service_slug/tenant.
 
-    Called when a connector session is deleted so a fresh run starts from scratch.
+    Called when a connector session is DELETED so a fresh run starts from scratch.
+    Do NOT call this on re-execute — use clear_execution_state() instead to preserve the plan.
     Works with both R2 and local filesystem.
     """
     # All known keys for this provider/service_slug/tenant
@@ -968,7 +1088,7 @@ async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
                     logger.warning("cache.local_clear_failed", key=key, error=str(exc))
 
         # Also remove the failures/ subdirectory
-        failures_dir = _local_path(f"{_coll()}/{provider}/{service_slug}/failures")
+        failures_dir = _local_path(_k(_coll(), provider, service_slug, "failures"))
         if failures_dir.exists() and failures_dir.is_dir():
             import shutil
             try:
@@ -998,7 +1118,7 @@ async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
     await asyncio.gather(*[_delete_key(k) for k in keys])
 
     # List and delete all failures/ objects under this prefix
-    failures_prefix = f"{_coll()}/{provider}/{service_slug}/failures/"
+    failures_prefix = _k(_coll(), provider, service_slug, "failures") + "/"
     try:
         resp = await loop.run_in_executor(
             None,
@@ -1039,7 +1159,9 @@ _step_prompt_cache: Dict[str, str] = {}
 
 
 def _step_prompt_key(prompt_name: str) -> str:
-    return f"{_coll()}/{_STEP_PROMPTS_PREFIX}/{prompt_name}.txt"
+    # Step prompts always live in the shared bucket — always use the full collection prefix
+    # regardless of the current per-app bucket context.
+    return f"{settings.R2_COLLECTION_PREFIX}/{_STEP_PROMPTS_PREFIX}/{prompt_name}.txt"
 
 
 async def _load_raw_step_prompt(prompt_name: str, local_fallback: str) -> str:
@@ -1059,12 +1181,14 @@ async def _load_raw_step_prompt(prompt_name: str, local_fallback: str) -> str:
         try:
             loop = asyncio.get_event_loop()
             client = _get_client()
-            bucket = _get_bucket()
+            # Step prompts live in the shared bucket (shielvasense-integration-plans),
+            # NOT in the per-app bucket — they are global admin-managed resources.
+            bucket = _get_shared_bucket()
             raw = await loop.run_in_executor(
                 None, partial(_sync_read, client, bucket, key)
             )
             if raw:
-                logger.debug("step_prompt.loaded_r2", prompt=prompt_name)
+                logger.debug("step_prompt.loaded_r2", prompt=prompt_name, bucket=bucket)
                 return raw
         except Exception as exc:
             logger.warning("step_prompt.r2_read_failed", prompt=prompt_name, error=str(exc))
@@ -1157,12 +1281,13 @@ async def save_step_prompt(prompt_name: str, content: str) -> None:
 
     loop = asyncio.get_event_loop()
     client = _get_client()
-    bucket = _get_bucket()
+    # Step prompts are saved to the shared bucket — admin-managed, global resource.
+    bucket = _get_shared_bucket()
     await loop.run_in_executor(
         None,
         partial(_sync_write, client, bucket, key, content, "text/plain"),
     )
-    logger.info("step_prompt.saved_r2", prompt=prompt_name, chars=len(content))
+    logger.info("step_prompt.saved_r2", prompt=prompt_name, bucket=bucket, chars=len(content))
 
 
 async def sync_all_step_prompts_to_r2() -> Dict[str, str]:
@@ -1181,6 +1306,7 @@ async def sync_all_step_prompts_to_r2() -> Dict[str, str]:
     from integration.prompts.codegen_prompt import (
         CONNECTOR_SYSTEM_PROMPT,
         TEST_SYSTEM_PROMPT,
+        INTEGRATION_TEST_SYSTEM_PROMPT,
         FIX_CODE_PROMPT,
         FIX_TESTS_PROMPT,
         FIX_CONNECTOR_FOR_TESTS_PROMPT,
@@ -1208,6 +1334,7 @@ async def sync_all_step_prompts_to_r2() -> Dict[str, str]:
     prompts = {
         "CONNECTOR_SYSTEM_PROMPT": CONNECTOR_SYSTEM_PROMPT,
         "TEST_SYSTEM_PROMPT": TEST_SYSTEM_PROMPT,
+        "INTEGRATION_TEST_SYSTEM_PROMPT": INTEGRATION_TEST_SYSTEM_PROMPT,
         "FIX_CODE_PROMPT": FIX_CODE_PROMPT,
         "FIX_TESTS_PROMPT": FIX_TESTS_PROMPT,
         "FIX_CONNECTOR_FOR_TESTS_PROMPT": FIX_CONNECTOR_FOR_TESTS_PROMPT,
@@ -1283,8 +1410,9 @@ Limit to 4–8 packages. Prefer widely-used, well-maintained packages.""",
             else:
                 loop = asyncio.get_event_loop()
                 client = _get_client()
+                # Read from shared bucket — step prompts are global admin resources
                 existing = await loop.run_in_executor(
-                    None, partial(_sync_read, client, _get_bucket(), key)
+                    None, partial(_sync_read, client, _get_shared_bucket(), key)
                 )
 
             if existing and existing.strip() == content.strip():
@@ -1316,7 +1444,7 @@ _DOCS_PREFIX = "CONNECTOR_DOCS"
 
 def _docs_key(tenant_id: str, provider: str, service_slug: str) -> str:
     # tenant_id intentionally omitted from path — bucket is tenant-scoped
-    return f"{_coll()}/{_DOCS_PREFIX}/{provider}/{service_slug}/docs.json"
+    return _k(_coll(), _DOCS_PREFIX, provider, service_slug, "docs.json")
 
 
 async def get_connector_docs(
@@ -1371,7 +1499,7 @@ async def save_connector_docs(
 
 def _implementation_plan_key(provider: str, service_slug: str) -> str:
     """R2 key: {collection}/{provider}/{service_slug}/implementation_plan.md"""
-    return f"{_coll()}/{provider}/{service_slug}/implementation_plan.md"
+    return _k(_coll(), provider, service_slug, "implementation_plan.md")
 
 
 async def get_implementation_plan(provider: str, service_slug: str) -> Optional[str]:
@@ -1428,7 +1556,7 @@ async def store_implementation_plan(provider: str, service_slug: str, content: s
 
 def _test_guidelines_key(provider: str, service_slug: str) -> str:
     """R2 key: {collection}/{provider}/{service_slug}/test_guidelines.md"""
-    return f"{_coll()}/{provider}/{service_slug}/test_guidelines.md"
+    return _k(_coll(), provider, service_slug, "test_guidelines.md")
 
 
 async def get_test_guidelines(provider: str, service_slug: str) -> Optional[str]:
@@ -1485,7 +1613,7 @@ async def store_test_guidelines(provider: str, service_slug: str, content: str) 
 
 def _setup_instructions_key(provider: str, service_slug: str) -> str:
     """R2 key: {collection}/{provider}/{service_slug}/setup_instructions.md"""
-    return f"{_coll()}/{provider}/{service_slug}/setup_instructions.md"
+    return _k(_coll(), provider, service_slug, "setup_instructions.md")
 
 
 async def get_setup_instructions(provider: str, service_slug: str) -> Optional[str]:
@@ -1544,7 +1672,7 @@ async def store_setup_instructions(provider: str, service_slug: str, content: st
 
 def _entity_builder_key(provider: str, service_slug: str, method_name: str) -> str:
     """R2 key: {collection}/{provider}/{service_slug}/entity_builder_{method_name}.json"""
-    return f"{_coll()}/{provider}/{service_slug}/entity_builder_{method_name}.json"
+    return _k(_coll(), provider, service_slug, f"entity_builder_{method_name}.json")
 
 
 async def store_entity_builder_config(
@@ -1596,6 +1724,61 @@ async def get_entity_builder_config(
         return None
 
 
+async def delete_connector_session_files(
+    tenant_id: str, service_slug: str, session_id: str
+) -> int:
+    """Delete all connector code files for a session from R2 (or local cache).
+
+    Called on session delete so generated connector code doesn't accumulate in R2.
+    Returns the number of files deleted.
+    """
+    prefix = connector_session_r2_prefix(tenant_id, service_slug, session_id)
+    loop = asyncio.get_event_loop()
+
+    if _use_local():
+        local_root = _local_path(prefix)
+        if not local_root.exists():
+            return 0
+        count = 0
+        import shutil as _shutil
+        try:
+            _shutil.rmtree(str(local_root))
+            count = 1  # treat the whole dir as one deletion unit
+            logger.info("connector_code.local_session_deleted", tenant_id=tenant_id,
+                        service_slug=service_slug, session_id=session_id)
+        except Exception as exc:
+            logger.warning("connector_code.local_session_delete_failed", error=str(exc))
+        return count
+
+    try:
+        client = _get_client()
+        bucket = _get_bucket()
+
+        def _list_and_delete() -> int:
+            keys: list[str] = []
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix + "/"):
+                for obj in page.get("Contents", []):
+                    keys.append(obj["Key"])
+            if not keys:
+                return 0
+            # boto3 batch delete (up to 1000 per call)
+            for i in range(0, len(keys), 1000):
+                batch = [{"Key": k} for k in keys[i : i + 1000]]
+                client.delete_objects(Bucket=bucket, Delete={"Objects": batch})
+            return len(keys)
+
+        deleted = await loop.run_in_executor(None, _list_and_delete)
+        logger.info("connector_code.r2_session_deleted", tenant_id=tenant_id,
+                    service_slug=service_slug, session_id=session_id, count=deleted)
+        return deleted
+    except Exception as exc:
+        logger.warning("connector_code.r2_session_delete_failed",
+                       tenant_id=tenant_id, service_slug=service_slug,
+                       session_id=session_id, error=str(exc))
+        return 0
+
+
 async def delete_connector_docs(
     tenant_id: str, provider: str, service_slug: str
 ) -> bool:
@@ -1619,12 +1802,12 @@ async def delete_connector_docs(
         return False
 
 
-# ── Connector code storage (production-grade R2 backend) ──────────────────────
+# ── Connector code storage (R2 backend) ───────────────────────────────────────
 #
 # Key layout (tenant is already in the bucket name — no tenant prefix in key):
 #   {coll}/connectors/{tenant_id}/{service_slug}/sessions/{session_id}/{rel_path}  ← draft
-#   {coll}/connectors/{tenant_id}/{service_slug}/production/{rel_path}             ← promoted
 #
+# Deployment to production is handled via GitHub CI/CD — not via R2 promotion.
 # When R2 is not configured the same paths are mirrored under _LOCAL_CACHE_DIR so
 # the local-dev and production code paths are identical.
 
@@ -1632,16 +1815,19 @@ _SKIP_DIRS_UPLOAD = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", "nod
 
 
 def _connector_draft_key(tenant_id: str, service_slug: str, session_id: str, rel_path: str) -> str:
-    return f"{_coll()}/connectors/{tenant_id}/{service_slug}/sessions/{session_id}/{rel_path}"
-
-
-def _connector_prod_key(tenant_id: str, service_slug: str, rel_path: str) -> str:
-    return f"{_coll()}/connectors/{tenant_id}/{service_slug}/production/{rel_path}"
+    # Per-app buckets (shielva-agentic-app-*) are already installation-scoped —
+    # no collection prefix and no tenant_id segment needed in the key.
+    # Shared/legacy buckets keep the tenant_id for multi-tenant namespacing.
+    if _get_bucket().startswith("shielva-agentic-app-"):
+        return _k("connectors", service_slug, "sessions", session_id, rel_path)
+    return _k(_coll(), "connectors", tenant_id, service_slug, "sessions", session_id, rel_path)
 
 
 def connector_session_r2_prefix(tenant_id: str, service_slug: str, session_id: str) -> str:
     """Return the R2 key prefix (no trailing slash) for a session's connector code."""
-    return f"{_coll()}/connectors/{tenant_id}/{service_slug}/sessions/{session_id}"
+    if _get_bucket().startswith("shielva-agentic-app-"):
+        return _k("connectors", service_slug, "sessions", session_id)
+    return _k(_coll(), "connectors", tenant_id, service_slug, "sessions", session_id)
 
 
 def _content_type_for(rel_path: str) -> str:
@@ -1742,7 +1928,7 @@ async def list_connector_files(
     loop = asyncio.get_event_loop()
 
     if _use_local():
-        local_root = _local_path(f"{_coll()}/connectors/{tenant_id}/{service_slug}/sessions/{session_id}")
+        local_root = _local_path(connector_session_r2_prefix(tenant_id, service_slug, session_id))
         if not local_root.exists():
             return []
         return sorted(str(f.relative_to(local_root)) for f in local_root.rglob("*") if f.is_file())
@@ -1784,86 +1970,152 @@ async def get_connector_file(
         return None
 
 
-async def promote_connector(
+async def get_connector_r2_checksums(
     tenant_id: str, service_slug: str, session_id: str
-) -> int:
-    """Promote a connector session to production by copying session files → production/ prefix.
-
-    This is the approval gate: callers should verify the session is complete before calling.
-    Returns the number of files promoted.
+) -> dict:
+    """Return {rel_path: md5_hex} for all files currently stored in R2 (or local cache)
+    for this connector session.  For real R2, the ETag is the MD5 (no quotes).
     """
-    file_list = await list_connector_files(tenant_id, service_slug, session_id)
-    if not file_list:
+    import hashlib as _hashlib
+
+    prefix = connector_session_r2_prefix(tenant_id, service_slug, session_id) + "/"
+    loop = asyncio.get_event_loop()
+
+    if _use_local():
+        local_root = _local_path(connector_session_r2_prefix(tenant_id, service_slug, session_id))
+        if not local_root.exists():
+            return {}
+        result: dict = {}
+        for f in local_root.rglob("*"):
+            if f.is_file():
+                rel = str(f.relative_to(local_root))
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    result[rel] = _hashlib.md5(content.encode("utf-8")).hexdigest()
+                except Exception:
+                    pass
+        return result
+
+    try:
+        client = _get_client()
+        bucket = _get_bucket()
+
+        def _list_with_etags() -> dict:
+            r: dict = {}
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    rel = obj["Key"][len(prefix):]
+                    if rel:
+                        # ETag comes wrapped in quotes — strip them
+                        etag = obj.get("ETag", "").strip('"').strip("'").lower()
+                        r[rel] = etag
+            return r
+
+        return await loop.run_in_executor(None, _list_with_etags)
+    except Exception as exc:
         logger.warning(
-            "connector_code.promote_empty",
-            tenant_id=tenant_id, service_slug=service_slug, session_id=session_id,
+            "connector_code.r2_checksums_failed",
+            tenant_id=tenant_id, session_id=session_id, error=str(exc)
         )
+        return {}
+
+
+async def upload_connector_files_selective(
+    tenant_id: str, service_slug: str, session_id: str, out_dir: "Path", files: list
+) -> int:
+    """Upload only the specified relative-path files from out_dir to R2 (or local cache).
+    Returns the number of files actually uploaded.
+    """
+    out_dir = Path(out_dir)
+    if not out_dir.exists() or not files:
+        return 0
+
+    files_to_upload: list = []
+    for rel in files:
+        f = out_dir / rel
+        if not f.is_file():
+            continue
+        try:
+            content = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, PermissionError):
+            continue
+        files_to_upload.append((rel, content))
+
+    if not files_to_upload:
         return 0
 
     loop = asyncio.get_event_loop()
 
     if _use_local():
-        for rel in file_list:
-            src_key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
-            dst_key = _connector_prod_key(tenant_id, service_slug, rel)
-            content = await loop.run_in_executor(None, partial(_local_read, src_key))
-            if content is not None:
-                await loop.run_in_executor(None, partial(_local_write, dst_key, content))
-        logger.info(
-            "connector_code.local_promote_done",
-            tenant_id=tenant_id, service_slug=service_slug,
-            session_id=session_id, count=len(file_list),
-        )
-        return len(file_list)
+        for rel, content in files_to_upload:
+            key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
+            await loop.run_in_executor(None, partial(_local_write, key, content))
+        return len(files_to_upload)
 
     client = _get_client()
     bucket = _get_bucket()
 
-    async def _copy_one(rel: str) -> None:
-        src_key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
-        dst_key = _connector_prod_key(tenant_id, service_slug, rel)
-        # R2 supports same-bucket copy via copy_object
+    async def _upload_one(rel: str, content: str) -> None:
+        key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
+        ct = _content_type_for(rel)
         await loop.run_in_executor(
-            None,
-            partial(
-                client.copy_object,
-                Bucket=bucket,
-                CopySource={"Bucket": bucket, "Key": src_key},
-                Key=dst_key,
-            ),
+            None, partial(_sync_write, client, bucket, key, content, ct)
         )
 
-    BATCH = 10
-    promoted = 0
-    for i in range(0, len(file_list), BATCH):
-        batch = file_list[i : i + BATCH]
-        await asyncio.gather(*[_copy_one(rel) for rel in batch])
-        promoted += len(batch)
-
+    await asyncio.gather(*[_upload_one(rel, content) for rel, content in files_to_upload])
     logger.info(
-        "connector_code.r2_promote_done",
-        tenant_id=tenant_id, service_slug=service_slug,
-        session_id=session_id, count=promoted,
+        "connector_code.selective_upload_done",
+        tenant_id=tenant_id, session_id=session_id, count=len(files_to_upload),
     )
-    return promoted
+    return len(files_to_upload)
 
 
-async def get_production_file(
-    tenant_id: str, service_slug: str, rel_path: str
-) -> Optional[str]:
-    """Fetch a file from the production/ prefix. Used by CMS to read deployed connectors."""
-    key = _connector_prod_key(tenant_id, service_slug, rel_path)
+async def delete_connector_r2_files(
+    tenant_id: str, service_slug: str, session_id: str, rel_paths: list
+) -> int:
+    """Delete specific files from R2 (or local cache) by relative path.
+    Returns count deleted.
+    """
+    if not rel_paths:
+        return 0
+
     loop = asyncio.get_event_loop()
 
     if _use_local():
-        return await loop.run_in_executor(None, partial(_local_read, key))
+        deleted = 0
+        for rel in rel_paths:
+            key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
+            if await loop.run_in_executor(None, partial(_local_delete, key)):
+                deleted += 1
+        return deleted
 
-    try:
-        client = _get_client()
-        return await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
-    except Exception as exc:
-        logger.warning("connector_code.get_production_failed", key=key, error=str(exc))
-        return None
+    client = _get_client()
+    bucket = _get_bucket()
+
+    # Build full R2 keys
+    r2_keys = [
+        _connector_draft_key(tenant_id, service_slug, session_id, rel)
+        for rel in rel_paths
+    ]
+
+    def _delete_batch(keys_batch: list) -> int:
+        objects = [{"Key": k} for k in keys_batch]
+        resp = client.delete_objects(Bucket=bucket, Delete={"Objects": objects})
+        return len(resp.get("Deleted", []))
+
+    # S3 delete_objects limit is 1000 per call
+    deleted = 0
+    BATCH = 1000
+    for i in range(0, len(r2_keys), BATCH):
+        batch = r2_keys[i : i + BATCH]
+        deleted += await loop.run_in_executor(None, partial(_delete_batch, batch))
+
+    logger.info(
+        "connector_code.r2_delete_done",
+        tenant_id=tenant_id, session_id=session_id, count=deleted,
+    )
+    return deleted
 
 
 # ── Connector AI Analysis (docs research + top prompts) ───────────────────────
@@ -1871,7 +2123,7 @@ async def get_production_file(
 #   {coll}/{provider}/{service_slug}/connector_analysis.json
 
 def _analysis_key(provider: str, service_slug: str) -> str:
-    return f"{_coll()}/{provider}/{service_slug}/connector_analysis.json"
+    return _k(_coll(), provider, service_slug, "connector_analysis.json")
 
 
 async def get_connector_analysis(provider: str, service_slug: str) -> Optional[Dict[str, Any]]:

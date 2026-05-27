@@ -10,3 +10,7 @@ httpx>=0.27.0
 redis>=5.0.0
 boto3>=1.34.0
 ptyprocess>=0.7.0
+
+# Shielva Security SDK — vulnerability scanning platform client
+# Installed as editable from local source: pip install -e ../../../shielva-security/shielva-security/shielva-security-sdk
+shielva-security>=2.0.0

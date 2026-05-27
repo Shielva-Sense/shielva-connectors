@@ -994,6 +994,91 @@ def _default_record() -> Dict[str, Any]:
     }
 
 
+# ── R2 key for TEST_CASE_WRITING_GUIDELINES.md ───────────────────────
+_TEST_GUIDELINES_R2_KEY = f"{_GUIDELINES_R2_PREFIX}/TEST_CASE_WRITING_GUIDELINES.md"
+
+# Local fallback path — resolves relative to this file's repo location
+# <repo-root>/shielva-integrations/shielva-integration-plans/CODE_EXECUTION_GUIDELINES/
+_TEST_GUIDELINES_LOCAL_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent.parent
+    / "shielva-integrations"
+    / "shielva-integration-plans"
+    / "CODE_EXECUTION_GUIDELINES"
+    / "TEST_CASE_WRITING_GUIDELINES.md"
+)
+
+
+async def seed_test_case_writing_guidelines() -> None:
+    """Seed TEST_CASE_WRITING_GUIDELINES.md to R2 on startup.
+
+    Mirrors seed_default_guidelines() — reads from local disk and uploads
+    to R2 shared bucket if the key is absent.  No-op if already present.
+    Called from main.py lifespan.
+    """
+    try:
+        r2 = _get_r2()
+        # Check if already in R2
+        existing = await _r2_get_text(r2, _TEST_GUIDELINES_R2_KEY)
+        if existing:
+            logger.info("test_guidelines.seed_skipped", reason="already_in_r2",
+                        key=_TEST_GUIDELINES_R2_KEY)
+            return
+
+        # Read from local disk
+        if not _TEST_GUIDELINES_LOCAL_PATH.exists():
+            logger.warning(
+                "test_guidelines.seed_skipped",
+                reason="local_file_not_found",
+                path=str(_TEST_GUIDELINES_LOCAL_PATH),
+            )
+            return
+
+        content = _TEST_GUIDELINES_LOCAL_PATH.read_text(encoding="utf-8")
+        await _r2_put_text(r2, _TEST_GUIDELINES_R2_KEY, content)
+        logger.info("test_guidelines.seeded_to_r2", key=_TEST_GUIDELINES_R2_KEY)
+
+    except Exception as exc:
+        logger.warning("test_guidelines.seed_failed", error=str(exc))
+
+
+async def get_test_case_writing_guidelines() -> Optional[str]:
+    """Return the content of TEST_CASE_WRITING_GUIDELINES.md.
+
+    Lookup hierarchy:
+      1. R2 shared bucket  — shielvasense-integration-plans/CODE_EXECUTION_GUIDELINES/TEST_CASE_WRITING_GUIDELINES.md
+      2. Local disk        — shielva-integrations/shielva-integration-plans/CODE_EXECUTION_GUIDELINES/ (dev fallback)
+      3. None              — caller handles missing case
+
+    This file is the single source of truth for import rules, mock patterns,
+    SDK dataclass field names, and Python 3.14 compatibility constraints used
+    by the test generation and fix steps.
+    """
+    try:
+        # 1. Try R2 shared bucket
+        r2 = _get_r2()
+        content = await _r2_get_text(r2, _TEST_GUIDELINES_R2_KEY)
+        if content:
+            logger.debug("test_guidelines.r2_hit", key=_TEST_GUIDELINES_R2_KEY)
+            return content
+
+        # 2. Local disk fallback (dev environment / monorepo clone)
+        if _TEST_GUIDELINES_LOCAL_PATH.exists():
+            logger.debug("test_guidelines.local_fallback", path=str(_TEST_GUIDELINES_LOCAL_PATH))
+            return _TEST_GUIDELINES_LOCAL_PATH.read_text(encoding="utf-8")
+
+        logger.warning(
+            "test_guidelines.not_found",
+            r2_key=_TEST_GUIDELINES_R2_KEY,
+            local_path=str(_TEST_GUIDELINES_LOCAL_PATH),
+            note="Upload TEST_CASE_WRITING_GUIDELINES.md to R2 shared bucket to fix this",
+        )
+        return None
+
+    except Exception as exc:
+        logger.error("test_guidelines.load_failed", error=str(exc))
+        return None
+
+
 async def _r2_get_text(r2, key: str) -> Optional[str]:
     """Read text from R2 or local cache. Returns None if not found."""
     try:
@@ -1012,7 +1097,7 @@ async def _r2_get_text(r2, key: str) -> Optional[str]:
             aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
             region_name="auto",
         )
-        get_fn = partial(s3.get_object, Bucket=settings.R2_BUCKET_NAME, Key=key)
+        get_fn = partial(s3.get_object, Bucket=settings.R2_SHARED_BUCKET, Key=key)
         resp = await loop.run_in_executor(None, get_fn)
         return resp["Body"].read().decode("utf-8")
     except Exception:
@@ -1038,7 +1123,7 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
         )
         put_fn = partial(
             s3.put_object,
-            Bucket=settings.R2_BUCKET_NAME,
+            Bucket=settings.R2_SHARED_BUCKET,
             Key=key,
             Body=content.encode("utf-8"),
             ContentType="text/markdown",

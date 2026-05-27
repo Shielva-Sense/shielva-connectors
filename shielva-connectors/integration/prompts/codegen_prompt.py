@@ -717,6 +717,45 @@ mock_instance.get_status.side_effect = [
 - [ ] Does every test that calls an API method set `mock_instance.method.return_value = {...}`?
 - [ ] Are `side_effect` lists filled with plain dicts/values (not `AsyncMock(return_value=...)`)?
 - [ ] Are all BaseConnector storage methods mocked (`get_token`, `set_token`, `save_config`, `ingest_batch`)?
+- [ ] Does the default list/search mock response omit any pagination continuation token? (see rule below)
+
+## ❌ CRITICAL: Default list mock MUST NOT include a pagination continuation token — causes infinite loop
+
+Connectors that fetch multiple pages use a loop pattern like:
+```python
+while True:
+    page = await client.list_items(page_token=next_token)
+    next_token = page.get("nextToken")  # or "cursor", "next_cursor", "pageToken", etc.
+    if not next_token:
+        break
+```
+If the default mock fixture **always** returns the same continuation token, this loop **never breaks** — the test hangs indefinitely and must be killed.
+
+**Rule — default mock must signal "last page" (no more pages):**
+```python
+# WRONG — always returns a token → sync() / list() loops forever → test hangs
+mock_instance.list_items.return_value = {
+    "items": [{"id": "1"}],
+    "nextToken": "token_abc",   # connector loops again → hangs
+}
+
+# CORRECT — omit the token entirely → connector sees falsy value → loop exits cleanly
+mock_instance.list_items.return_value = {
+    "items": [{"id": "1"}],
+    # no nextToken / cursor / pageToken → last page → loop exits after one iteration
+}
+```
+
+**To test pagination specifically**, use `side_effect` with a sequence:
+```python
+mock_instance.list_items.side_effect = [
+    {"items": [{"id": "1"}], "nextToken": "token_abc"},  # first page
+    {"items": [{"id": "2"}]},                            # last page — no token
+]
+```
+
+This applies regardless of what the continuation field is named: `nextToken`, `nextPageToken`,
+`cursor`, `next_cursor`, `pageToken`, `after`, `offset`, `continuation_token`, etc.
 
 ## Test Writing Rules
 1. `asyncio_mode = auto` is set in pytest.ini — `@pytest.mark.asyncio` is OPTIONAL on async tests
@@ -1549,3 +1588,110 @@ Only output files that need to be created or changed — skip unchanged files.""
 
 
 # (deploy_form step rules removed — credential testing handled by integration tests step)
+
+
+# ── Integration test generation ──────────────────────────────────────
+
+INTEGRATION_TEST_SYSTEM_PROMPT = """You are an expert Python test engineer writing REAL integration tests for the Shielva platform.
+
+## CONNECTOR IDENTITY
+- **Provider**: {provider}
+- **Service**: {service_name}
+- **Connector Name**: {connector_name}
+- **Auth Type**: {auth_type}
+- **User Requirement**: {user_prompt}
+
+## WHAT HAS ALREADY BEEN BUILT (step memory)
+{step_memory_summary}
+
+## Connector Code (use ONLY for: class name, method signatures, config keys)
+```python
+{connector_code}
+```
+
+## Install Fields (config keys the user fills in)
+{install_fields_detail}
+
+## ⚡ CRITICAL DIFFERENCE FROM UNIT TESTS — READ CAREFULLY
+This is a REAL integration test file: `tests/test_integration.py`.
+**DO NOT use MagicMock, AsyncMock, or patch.** The connector will call the REAL API.
+Credentials are supplied at runtime as environment variables — the same key names as install_fields:
+```
+INTEGRATION_TEST=true {install_fields_env_example}  python3 -m pytest tests/test_integration.py -v
+```
+
+## Mandatory Pattern
+
+```python
+import os
+import pytest
+from connector import {class_name}
+from shared.base_connector import ConnectorHealth, AuthStatus, ConnectorStatus
+
+# Skip entire file unless INTEGRATION_TEST=true is set
+INTEGRATION = os.environ.get("INTEGRATION_TEST", "").lower() == "true"
+
+def _real_config() -> dict:
+    \"\"\"Build config dict from env vars — must match connector install_fields exactly.\"\"\"
+    return {{
+        # ← replace with actual install_fields key: os.environ.get("key", "")
+        {install_fields_config_dict}
+    }}
+
+
+@pytest.mark.skipif(not INTEGRATION, reason="Set INTEGRATION_TEST=true to run real API tests")
+class TestIntegration:
+
+    @pytest.fixture
+    def connector(self):
+        return {class_name}(
+            tenant_id="integration-tenant",
+            connector_id="integration-test",
+            config=_real_config(),
+        )
+
+    async def test_health_check_returns_healthy(self, connector):
+        \"\"\"Real API call — expects HEALTHY with valid credentials.\"\"\"
+        status = await connector.health_check()
+        assert status.health == ConnectorHealth.HEALTHY, (
+            f"health_check() returned {{status.health}} — message: {{status.message}}"
+        )
+        assert status.auth_status == AuthStatus.CONNECTED
+
+    async def test_install_validates_credentials(self, connector):
+        \"\"\"install() should succeed when credentials are present and valid.\"\"\"
+        status = await connector.install()
+        # For OAuth2 connectors: install() returns OFFLINE+PENDING (user must authorize)
+        # For api_key/bearer: returns HEALTHY+CONNECTED
+        assert status.health in (ConnectorHealth.HEALTHY, ConnectorHealth.OFFLINE), (
+            f"install() returned unexpected health: {{status.health}} — {{status.message}}"
+        )
+```
+
+## Rules — MANDATORY
+1. **NEVER import or use `MagicMock`, `AsyncMock`, `patch`, or any `unittest.mock` symbols** — this is a real test.
+2. **NEVER mock any method or attribute** — all calls go to the real API.
+3. **ALWAYS guard the test class** with `@pytest.mark.skipif(not INTEGRATION, ...)`.
+4. **Read ALL credentials from `os.environ`** using the exact install_fields key names (see Install Fields above).
+5. The config dict keys MUST match exactly what the connector reads from `self.config` (inspect Connector Code above).
+6. **Do NOT use `pytest.ini` fixtures that hit Redis** — no `save_config`, `get_token`, `set_token` patches needed; the connector will handle storage itself during the real run.
+7. **`asyncio_mode = auto` is set in pytest.ini** — `@pytest.mark.asyncio` is OPTIONAL.
+8. **Do NOT store tokens to disk or assert on token internals** — treat the connector as a black box; assert on `ConnectorStatus` fields only.
+9. For **`oauth2_code` / `oauth2_pkce`** connectors: `install()` will return `OFFLINE + PENDING` because it needs a browser redirect. Test this explicitly — do NOT expect `HEALTHY`.
+10. For **`api_key` / `bearer` / `basic_auth`** connectors: `install()` should return `HEALTHY + CONNECTED`. Also call `health_check()` and assert `HEALTHY`.
+11. If the connector has domain-specific methods beyond `health_check` (e.g. `list_campaigns`, `get_orders`, `search_emails`), add a basic smoke test for each — call it with minimal args and assert the return type is a list or SyncResult.
+12. Add a test for **missing credentials** — construct a connector with an empty config dict and call `install()`; assert `auth_status == AuthStatus.MISSING_CREDENTIALS`.
+
+## Import Rules
+```python
+from connector import {class_name}                   # ✅ CORRECT
+from shared.base_connector import ConnectorHealth, AuthStatus, ConnectorStatus, SyncResult, SyncStatus
+```
+NEVER use relative imports. NEVER import from client/ subdirectory.
+
+## Output
+Return ONLY valid Python code for `tests/test_integration.py`.
+Do NOT include markdown code fences.
+Do NOT say "I will write..." or explain anything. Just output the code directly.
+Include all imports at the top.
+The file MUST be self-contained and importable by pytest."""

@@ -504,7 +504,7 @@ def _extract_plan_parts(llm_result: Any) -> Dict[str, Any]:
 
 async def generate_plan(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
 ) -> Dict[str, Any]:
     """Generate an integration plan for a session using Claude.
 
@@ -622,8 +622,8 @@ async def generate_plan(
                 service_slug=service_slug, guidelines_version=guidelines_version,
                 extracted_ops=extracted_ops)
 
-    # Propagate tenant_id to LLM ContextVar (needed for MCP mode)
-    set_llm_tenant_id(tenant_id)
+    # Propagate tenant_id to LLM ContextVar (needed for MCP mode; empty string pre-login)
+    set_llm_tenant_id(tenant_id or "")
 
     llm_result, updated_history = await _claude.chat(
         user_message=user_msg,
@@ -899,8 +899,9 @@ async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str,
 
 async def generate_plan_stream(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
     new_prompt: Optional[str] = None,
+    app_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Generate a plan and yield SSE events with real-time logs.
 
@@ -933,8 +934,19 @@ async def generate_plan_stream(
             yield _sse("planning_error", {"message": f"Session {session_id} not found"})
             return
 
-        # Propagate tenant_id to LLM ContextVar (needed for MCP mode)
-        set_llm_tenant_id(tenant_id)
+        # Propagate tenant_id to LLM ContextVar (needed for MCP mode; empty string pre-login)
+        set_llm_tenant_id(tenant_id or "")
+
+        # Set R2 bucket context so save_prompt_and_plan writes to the correct per-installation
+        # bucket ("shielva-agentic-app-{app_id}").  app_id comes from the query param (SSE
+        # EventSource can't send custom headers) or falls back to the session document.
+        # Same fix pattern as execute_plan / ws_routes.py / sync-to-r2.
+        _plan_app_id = (app_id or session.get("app_id") or "").strip()
+        _plan_tenant_name = (session.get("tenant_name") or tenant_id or "").strip().lower()
+        if _plan_app_id:
+            r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_plan_app_id))
+        if _plan_tenant_name:
+            r2_service._tenant_bucket_ctx.set(_plan_tenant_name)
 
         provider = session["provider"]
         service = session["service"]
@@ -1304,7 +1316,7 @@ async def generate_plan_stream(
 
 async def replan(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
     step_index: int,
     user_comment: str,
 ) -> Dict[str, Any]:
@@ -1454,9 +1466,10 @@ async def replan(
 
 async def replan_stream(
     session_id: str,
-    tenant_id: str,
+    tenant_id: Optional[str],
     step_index: int,
     user_comment: str,
+    app_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Regenerate the plan with user feedback — streams SSE events for real-time UI logs."""
     t0 = time.time()
@@ -1474,8 +1487,16 @@ async def replan_stream(
             yield _sse("replan_error", {"message": f"Session {session_id} not found"})
             return
 
-        # Propagate tenant_id to LLM ContextVar (needed for MCP mode)
-        set_llm_tenant_id(tenant_id)
+        # Propagate tenant_id to LLM ContextVar (needed for MCP mode; empty string pre-login)
+        set_llm_tenant_id(tenant_id or "")
+
+        # Set R2 bucket context — same fix as generate_plan_stream / execute_plan / sync-to-r2.
+        _replan_app_id = (app_id or session.get("app_id") or "").strip()
+        _replan_tenant_name = (session.get("tenant_name") or tenant_id or "").strip().lower()
+        if _replan_app_id:
+            r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_replan_app_id))
+        if _replan_tenant_name:
+            r2_service._tenant_bucket_ctx.set(_replan_tenant_name)
 
         provider = session["provider"]
         service = session["service"]
@@ -1654,7 +1675,7 @@ async def replan_stream(
 
 # ── Approve ───────────────────────────────────────────────────────────
 
-async def approve_plan(session_id: str, tenant_id: str) -> Dict[str, Any]:
+async def approve_plan(session_id: str, tenant_id: Optional[str]) -> Dict[str, Any]:
     """Mark all steps as approved and transition session to APPROVED."""
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one({"_id": oid})

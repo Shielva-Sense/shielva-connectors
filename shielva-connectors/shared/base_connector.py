@@ -36,6 +36,7 @@ class AuthStatus(str, Enum):
     MISSING_CREDENTIALS = "missing_credentials"
     TOKEN_EXPIRED = "token_expired"
     AUTHENTICATED = "authenticated"
+    UNAUTHENTICATED = "unauthenticated"
     INVALID_CREDENTIALS = "invalid_credentials"
 
 
@@ -198,7 +199,7 @@ class BaseConnector(ABC):
             tenant_id=tenant_id
         )
 
-        self.ingestion_url = os.getenv("INGESTION_SERVICE_URL", "http://localhost:8007")
+        self.ingestion_url = os.getenv("INGESTION_SERVICE_URL", "https://localhost:8007")
 
     async def save_config(self, config: Dict[str, Any]) -> None:
         """Persist connector configuration by merging into self.config.

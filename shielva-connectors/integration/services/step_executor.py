@@ -599,15 +599,20 @@ def _output_dir(tenant_id: str, service_slug: str) -> Path:
     session_id is NOT in the path — same tenant+service always maps to the same directory,
     preventing duplicate folders across sessions.
 
-    Strips a trailing '_connector' from service_slug before appending it to avoid
-    the double-suffix 'paytm_upi_connector_connector' when the connector_name already
-    ends with 'connector' and the slug was stored before the strip fix.
+    Strips '_connector' from the slug before appending it to avoid double-suffix dirs.
+    Handles two cases:
+      1. slug ends with '_connector'           → shielva_gmail_connector      → shielva_gmail_connector
+      2. slug has '_connector' before the hash → shielva_gmail_connector_cb03d1 → shielva_gmail_cb03d1
+    Both produce a clean '{name}_connector' directory name.
     """
     import re as _re
     base = Path(settings.GENERATED_CODE_DIR).resolve()
-    # Prevent double-suffix: strip trailing _connector if already present in slug
-    clean_slug = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
-    return base / tenant_id / f"{clean_slug}_connector"
+    # Case 1: trailing _connector (no hash suffix)
+    # Case 2: _connector immediately before a 6-char hex hash at end of slug (legacy sessions)
+    clean_slug = _re.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+    # Local disk is always flat: GENERATED_CODE_DIR/{slug}_connector/
+    # Tenant/app scoping lives in R2 keys, not on the local filesystem.
+    return base / f"{clean_slug}_connector"
 
 
 async def _load_test_guidelines(out_dir: Path, provider: str, service_slug: str) -> str:
@@ -964,6 +969,9 @@ def validate_step_output(step_type: str, out_dir: Path, result: Dict[str, Any]) 
 
     if step_type in ("write_tests", "run_tests"):
         checks["tests/test_connector.py"] = _file_ok(out_dir / "tests" / "test_connector.py")
+
+    if step_type == "write_integration_tests":
+        checks["tests/test_integration.py"] = _file_ok(out_dir / "tests" / "test_integration.py")
 
     if step_type == "run_integration_tests":
         # No file checks — UI-driven step, always valid
@@ -1793,28 +1801,76 @@ async def handle_write_connector(
             _init.write_text(_comment, encoding="utf-8")
             await _emit(log_cb, "success", f"  ✓ {_subdir}/__init__.py scaffolded")
 
-    # ── Gemini agentic generation (reads base_connector.py, writes + validates) ──
-    try:
-        from integration.services.agentic_fix import gemini_agentic_generate_connector
-        result = await gemini_agentic_generate_connector(
-            out_dir,
-            context={**context, "plan_constraints": plan_constraints},
-            log_cb=log_cb,
-        )
-        if not result["success"] or not (out_dir / "connector.py").exists():
-            _fail_reason = result.get("message") or result.get("result") or "Agentic loop did not complete successfully"
-            await _emit(log_cb, "error", f"Connector generation failed: {_fail_reason}")
-            return {"status": "fail", "output": _fail_reason}
+    # ── Connector generation: Gemini agentic OR Claude CLI ───────────────────
+    if settings.TEST_LLM_MODE.lower() == "gemini":
+        # Gemini agentic path (reads base_connector.py, writes + validates in a tool-call loop)
+        try:
+            from integration.services.agentic_fix import gemini_agentic_generate_connector
+            result = await gemini_agentic_generate_connector(
+                out_dir,
+                context={**context, "plan_constraints": plan_constraints},
+                log_cb=log_cb,
+            )
+            if not result["success"] or not (out_dir / "connector.py").exists():
+                _fail_reason = result.get("message") or result.get("result") or "Agentic loop did not complete successfully"
+                await _emit(log_cb, "error", f"Connector generation failed: {_fail_reason}")
+                return {"status": "fail", "output": _fail_reason}
 
-        connector_path = out_dir / "connector.py"
-        code = connector_path.read_text(encoding="utf-8")
-        await _emit(log_cb, "success", f"✅ Connector generated ({len(code.splitlines())} lines) in {result['iterations']} iteration(s)")
-        _sync_init_with_connector(out_dir, context)
+            connector_path = out_dir / "connector.py"
+            code = connector_path.read_text(encoding="utf-8")
+            await _emit(log_cb, "success", f"✅ Connector generated ({len(code.splitlines())} lines) in {result['iterations']} iteration(s)")
+            _sync_init_with_connector(out_dir, context)
 
-    except Exception as _agentic_err:
-        _emsg = str(_agentic_err)
-        await _emit(log_cb, "error", f"Connector generation failed: {_emsg[:200]}")
-        return {"status": "fail", "output": _emsg}
+        except Exception as _agentic_err:
+            _emsg = str(_agentic_err)
+            await _emit(log_cb, "error", f"Connector generation failed: {_emsg[:200]}")
+            return {"status": "fail", "output": _emsg}
+
+    else:
+        # Claude CLI path — direct single-shot generation
+        await _emit(log_cb, "info", f"Generating connector via {_llm_label()}...")
+        try:
+            _conn_system = (await _get_prompt("CONNECTOR_SYSTEM_PROMPT", CONNECTOR_SYSTEM_PROMPT)).format(
+                base_connector_interface=BASE_CONNECTOR_INTERFACE,
+                provider=_get_ctx(context, "provider", "unknown"),
+                service_name=_get_ctx(context, "service_name", "Unknown Service"),
+                connector_name=_get_ctx(context, "connector_name", _get_ctx(context, "service_name")),
+                auth_type=_get_ctx(context, "auth_type", "api_key"),
+                sdk_package=_get_ctx(context, "sdk_package", "httpx"),
+                docs_url=_get_ctx(context, "docs_url", ""),
+                default_scopes=_get_ctx(context, "default_scopes", ""),
+                user_prompt=_get_ctx(context, "user_prompt", "(not provided)"),
+                plan_constraints=plan_constraints,
+                step_memory_summary=_build_step_memory_summary(context),
+            )
+            _conn_system = await _inject_rag_context(_conn_system, context)
+
+            code = await call_llm_fix(
+                [{"role": "user", "content": "Generate the connector.py for this service. Return ONLY raw Python code — no markdown fences, no prose."}],
+                system=_conn_system,
+                max_tokens=60000,
+            )
+            code = _clean_llm_code_response(code)
+
+            if not code or len(code) < 100 or not code.lstrip().startswith(_VALID_PYTHON_STARTS):
+                await _emit(log_cb, "error", f"Claude returned invalid connector code: {code[:120]}")
+                return {"status": "fail", "output": f"LLM did not return valid Python: {code[:200]}"}
+
+            try:
+                ast.parse(code)
+            except SyntaxError as _syn:
+                await _emit(log_cb, "warn", f"Syntax error at line {_syn.lineno} — {_syn}")
+                return {"status": "fail", "output": f"Generated connector has syntax error: {_syn}"}
+
+            connector_path = out_dir / "connector.py"
+            connector_path.write_text(code, encoding="utf-8")
+            await _emit(log_cb, "success", f"✅ Connector generated ({len(code.splitlines())} lines)")
+            _sync_init_with_connector(out_dir, context)
+
+        except Exception as _claude_err:
+            _emsg = str(_claude_err)
+            await _emit(log_cb, "error", f"Connector generation failed: {_emsg[:200]}")
+            return {"status": "fail", "output": _emsg}
 
     # ── Re-read connector.py from disk to get the final version Gemini produced ──
     # (Gemini may have self-corrected the file after its first write)
@@ -1901,26 +1957,21 @@ async def handle_write_tests(
     await _emit(log_cb, "info", f"  Connector class detected: {class_name}")
 
     # ── Load TEST_CASE_WRITING_GUIDELINES.md and prepend to system prompt ──
-    # These guidelines are the single source of truth for import rules, mock patterns,
-    # dataclass field names, and Python 3.14 compatibility constraints.
-    _guidelines_path = (
-        Path(__file__).resolve().parent.parent.parent.parent
-        / "shielva-integration-plans"
-        / "CODE_EXECUTION_GUIDELINES"
-        / "TEST_CASE_WRITING_GUIDELINES.md"
-    )
+    # R2 shared bucket → local disk fallback (via guidelines_service)
+    from integration.services.guidelines_service import get_test_case_writing_guidelines
+    _guidelines_content = await get_test_case_writing_guidelines()
     _guidelines_header = ""
-    if _guidelines_path.exists():
+    if _guidelines_content:
         _guidelines_header = (
             "## ══════════════════════════════════════════════════════════\n"
             "## SHIELVA TEST CASE WRITING GUIDELINES — READ BEFORE CODING\n"
             "## ══════════════════════════════════════════════════════════\n"
-            + _guidelines_path.read_text(encoding="utf-8")
+            + _guidelines_content
             + "\n## ══════════════ END OF GUIDELINES ══════════════\n\n"
         )
         await _emit(log_cb, "info", "📋 TEST_CASE_WRITING_GUIDELINES.md loaded into prompt")
     else:
-        await _emit(log_cb, "warn", f"⚠ Guidelines file not found at {_guidelines_path} — using inline rules only")
+        await _emit(log_cb, "warn", "⚠ TEST_CASE_WRITING_GUIDELINES.md not found in R2 or local disk — using inline rules only")
 
 
     system = (await _get_prompt("TEST_SYSTEM_PROMPT", TEST_SYSTEM_PROMPT)).format(
@@ -4029,18 +4080,14 @@ async def handle_fix_tests(
     if _fix_valid_methods:
         await _emit(log_cb, "info", f"Valid connector methods for fix: {', '.join(_fix_valid_methods)}")
 
-    # Load TEST_CASE_WRITING_GUIDELINES.md for the fix path too
-    _fix_guidelines_path = (
-        Path(__file__).resolve().parent.parent.parent.parent
-        / "shielva-integration-plans"
-        / "CODE_EXECUTION_GUIDELINES"
-        / "TEST_CASE_WRITING_GUIDELINES.md"
-    )
+    # Load TEST_CASE_WRITING_GUIDELINES.md for the fix path too — R2 → local fallback
+    from integration.services.guidelines_service import get_test_case_writing_guidelines
+    _fix_guidelines_content = await get_test_case_writing_guidelines()
     _fix_guidelines = ""
-    if _fix_guidelines_path.exists():
+    if _fix_guidelines_content:
         _fix_guidelines = (
             "## ══ SHIELVA TEST CASE WRITING GUIDELINES (read before fixing) ══\n"
-            + _fix_guidelines_path.read_text(encoding="utf-8")
+            + _fix_guidelines_content
             + "\n## ══ END OF GUIDELINES ══\n\n"
         )
 
@@ -4050,7 +4097,8 @@ async def handle_fix_tests(
     _fix_service = context.get("service_name", "").lower().replace(" ", "_")
     if _fix_provider and _fix_service:
         _fix_service_rules_path = (
-            Path(__file__).resolve().parent.parent.parent.parent
+            Path(__file__).resolve().parent.parent.parent.parent.parent
+            / "shielva-integrations"
             / "shielva-integration-plans"
             / _fix_provider
             / _fix_service
@@ -5751,18 +5799,22 @@ Auth type for this connector: **{auth_type}**
 Provider: **{provider}**, Service slug: **{service_slug}**
 """
 
-    # ── Use Gemini agentic or Claude fallback ─────────────────────────────────
+    # ── Use Gemini agentic or Claude fallback — hard 3-min timeout ───────────
+    _GUIDELINES_TIMEOUT = 180  # seconds — fail fast rather than hang forever
     guidelines_content = None
 
     if settings.TEST_LLM_MODE.lower() == "gemini":
         try:
             from integration.services.agentic_fix import gemini_agentic_generate_test_guidelines
-            result = await gemini_agentic_generate_test_guidelines(
-                out_dir,
-                context=context,
-                system_prompt=_TEST_GUIDELINES_SYSTEM,
-                user_message=user_message,
-                log_cb=log_cb,
+            result = await asyncio.wait_for(
+                gemini_agentic_generate_test_guidelines(
+                    out_dir,
+                    context=context,
+                    system_prompt=_TEST_GUIDELINES_SYSTEM,
+                    user_message=user_message,
+                    log_cb=log_cb,
+                ),
+                timeout=_GUIDELINES_TIMEOUT,
             )
             if result["success"]:
                 guidelines_path = out_dir / "test_guidelines.md"
@@ -5770,20 +5822,28 @@ Provider: **{provider}**, Service slug: **{service_slug}**
                     guidelines_content = guidelines_path.read_text(encoding="utf-8")
                 else:
                     guidelines_content = result.get("result", "")
+        except asyncio.TimeoutError:
+            await _emit(log_cb, "warn", f"Gemini guidelines gen timed out after {_GUIDELINES_TIMEOUT}s — falling back to Claude")
         except Exception as e:
             await _emit(log_cb, "warn", f"Gemini guidelines gen failed ({e}) — falling back to Claude")
 
     if not guidelines_content:
-        # Claude fallback — direct call
+        # Claude fallback — with its own timeout
         try:
             from integration.services.llm_client import call_llm
             system_prompt = await _get_prompt("TEST_GUIDELINES_SYSTEM", _TEST_GUIDELINES_SYSTEM)
-            guidelines_content = await call_llm(
-                messages=[{"role": "user", "content": user_message}],
-                system=system_prompt,
-                max_tokens=8000,
-                expect_code=False,
+            guidelines_content = await asyncio.wait_for(
+                call_llm(
+                    messages=[{"role": "user", "content": user_message}],
+                    system=system_prompt,
+                    max_tokens=8000,
+                    expect_code=False,
+                ),
+                timeout=_GUIDELINES_TIMEOUT,
             )
+        except asyncio.TimeoutError:
+            await _emit(log_cb, "error", f"Claude guidelines gen timed out after {_GUIDELINES_TIMEOUT}s")
+            return {"status": "fail", "output": f"Guidelines generation timed out after {_GUIDELINES_TIMEOUT}s — step failed"}
         except Exception as e:
             await _emit(log_cb, "error", f"Claude guidelines gen failed: {e}")
             return {"status": "fail", "output": str(e)}
@@ -6517,6 +6577,132 @@ class {repo_class_name}(BaseRepository):
     }
 
 
+# ── write_integration_tests ──────────────────────────────────────────
+
+async def handle_write_integration_tests(
+    config: Dict[str, Any],
+    context: Dict[str, Any],
+    log_cb: LogCallback = None,
+) -> Dict[str, Any]:
+    """Use LLM to generate tests/test_integration.py — real API calls with user credentials."""
+    from integration.prompts.codegen_prompt import INTEGRATION_TEST_SYSTEM_PROMPT
+    import json as _json
+
+    out_dir = _output_dir(context["tenant_id"], context["service_slug"])
+    connector_path = out_dir / "connector.py"
+
+    if not connector_path.exists():
+        await _emit(log_cb, "error", "connector.py not found — run write_connector first")
+        return {"status": "fail", "output": "connector.py missing"}
+
+    connector_code = connector_path.read_text(encoding="utf-8")
+
+    # Extract class name from connector.py
+    _class_match = re.search(r"^class\s+(\w+)\s*\(BaseConnector\)", connector_code, re.MULTILINE)
+    class_name = _class_match.group(1) if _class_match else context.get("class_name", "Connector")
+
+    # Load install_fields from connector.json if present
+    install_fields: list = []
+    connector_json_path = out_dir / "connector.json"
+    if not connector_json_path.exists():
+        connector_json_path = out_dir / "metadata" / "connector.json"
+    if connector_json_path.exists():
+        try:
+            _meta = _json.loads(connector_json_path.read_text(encoding="utf-8"))
+            install_fields = _meta.get("install_fields", [])
+        except Exception:
+            pass
+
+    # Fallback: extract field keys from AST (self.config.get("key", ...))
+    if not install_fields:
+        _facts = _extract_connector_ground_truth(out_dir)
+        # _extract_connector_ground_truth returns a string; parse field keys separately
+        try:
+            _tree = ast.parse(connector_code)
+            for _node in ast.walk(_tree):
+                if (isinstance(_node, ast.Call)
+                        and isinstance(getattr(_node.func, "attr", None), str)
+                        and _node.func.attr == "get"
+                        and isinstance(getattr(_node.func, "value", None), ast.Attribute)
+                        and _node.func.value.attr == "config"):
+                    if _node.args and isinstance(_node.args[0], ast.Constant):
+                        _k = str(_node.args[0].value)
+                        if _k not in install_fields:
+                            install_fields.append(_k)
+        except Exception:
+            pass
+
+    # Build prompt template variables
+    _field_keys = [f["key"] if isinstance(f, dict) else str(f) for f in install_fields]
+    # Filter out generic/internal keys that aren't user-supplied credentials
+    _skip_keys = {"redirect_uri", "scopes", "webhook_secret"}
+    _cred_keys = [k for k in _field_keys if k not in _skip_keys]
+
+    _env_example = " ".join(f'{k}="<your_{k}>"' for k in _cred_keys) if _cred_keys else 'api_key="<your_api_key>"'
+    _config_dict = "\n        ".join(
+        f'"{k}": os.environ.get("{k}", ""),' for k in _cred_keys
+    ) if _cred_keys else '"api_key": os.environ.get("api_key", ""),'
+    _fields_detail = "\n".join(
+        f"  - `{k}`" for k in _cred_keys
+    ) if _cred_keys else "  - (no install_fields found — check connector.json)"
+
+    await _emit(log_cb, "info", f"Generating integration tests via {_llm_label()} (class={class_name}, fields={_cred_keys})...")
+
+    system = (await _get_prompt("INTEGRATION_TEST_SYSTEM_PROMPT", INTEGRATION_TEST_SYSTEM_PROMPT)).format(
+        connector_code=connector_code,
+        provider=_get_ctx(context, "provider", "unknown"),
+        service_name=_get_ctx(context, "service_name", "Unknown Service"),
+        connector_name=_get_ctx(context, "connector_name", _get_ctx(context, "service_name")),
+        auth_type=_get_ctx(context, "auth_type", "unknown"),
+        user_prompt=_get_ctx(context, "user_prompt", "(not provided)"),
+        step_memory_summary=_build_step_memory_summary(context),
+        class_name=class_name,
+        install_fields_env_example=_env_example,
+        install_fields_config_dict=_config_dict,
+        install_fields_detail=_fields_detail,
+    )
+
+    messages = [
+        {"role": "user", "content": "Output integration test code for tests/test_integration.py. Return ONLY raw Python — no prose, no markdown, no tool calls."},
+    ]
+
+    try:
+        code = await call_llm_fix(messages, system=system, max_tokens=16000)
+        code = _clean_llm_code_response(code)
+
+        if not code or len(code) < 50 or not code.lstrip().startswith(_VALID_PYTHON_STARTS):
+            await _emit(log_cb, "error", f"LLM returned invalid response for integration tests: {code[:120]}")
+            return {"status": "fail", "output": f"LLM did not return valid Python: {code[:200]}"}
+
+        # Validate syntax
+        try:
+            ast.parse(code)
+        except SyntaxError as exc:
+            await _emit(log_cb, "warn", f"Integration test syntax error at line {exc.lineno} — {exc}")
+            return {"status": "fail", "output": f"Generated integration test code has syntax error: {exc}"}
+
+        # Fix connector import path
+        code = _fix_connector_import(code, class_name)
+
+        tests_dir = out_dir / "tests"
+        tests_dir.mkdir(exist_ok=True)
+        integ_path = tests_dir / "test_integration.py"
+        integ_path.write_text(code, encoding="utf-8")
+        await _emit(log_cb, "success", f"✅ tests/test_integration.py written ({len(code.splitlines())} lines, fields: {_cred_keys})")
+
+        return {
+            "status": "pass",
+            "output": {
+                "test_file": str(integ_path),
+                "lines": len(code.splitlines()),
+                "install_fields": _cred_keys,
+            },
+        }
+    except Exception as exc:
+        await _emit(log_cb, "error", f"Integration test generation failed: {exc}")
+        return {"status": "fail", "output": str(exc)}
+
+
 # ── Handler dispatch map ─────────────────────────────────────────────
 
 async def handle_run_integration_tests(
@@ -6543,6 +6729,7 @@ STEP_HANDLERS = {
     "implement_persistence": handle_implement_persistence,
     "write_tests": handle_write_tests,
     "run_tests": handle_run_tests,
+    "write_integration_tests": handle_write_integration_tests,
     "run_integration_tests": handle_run_integration_tests,
     "generate_metadata": handle_generate_metadata,
     "setup_instructions": handle_setup_instructions,

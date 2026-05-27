@@ -53,22 +53,32 @@ async def stream_execution(
     session_id: str,
     from_event: int = 0,
     skip_llm: bool = Query(False),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    app_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
 ):
     """Execute the approved plan with SSE streaming progress.
 
     Execution runs as a background task (survives page refresh).
     SSE stream reads from an event buffer — reconnectable via ?from_event=N.
 
+    Accepts app_id + tenant_id as query params (required for EventSource connections
+    which cannot send custom headers). Falls back to X-App-ID / X-Tenant-ID headers.
+
     If execution is already running (e.g., after page refresh), this endpoint
     re-attaches and streams events from where the client left off.
     """
-    logger.info("codegen.execute_stream_start", session_id=session_id, tenant_id=x_tenant_id,
+    resolved_app_id    = app_id or x_app_id
+    resolved_tenant_id = tenant_id or x_tenant_id
+    logger.info("codegen.execute_stream_start", session_id=session_id,
+                app_id=resolved_app_id, tenant_id=resolved_tenant_id,
                 from_event=from_event, already_running=execution_manager.is_running(session_id))
 
     # Start execution if not already running
     if not execution_manager.is_running(session_id):
-        started = await execution_manager.start_execution(session_id, x_tenant_id, skip_llm=skip_llm)
+        started = await execution_manager.start_execution(session_id, resolved_tenant_id,
+                                                           skip_llm=skip_llm, app_id=resolved_app_id)
         if not started:
             # Already running from a previous request — just re-attach
             logger.info("codegen.reattaching", session_id=session_id)

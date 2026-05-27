@@ -53,16 +53,24 @@ class IntegrationSettings(BaseSettings):
     GENERATED_CODE_DIR: str = "./generated_connectors"
 
     # Cloudflare R2 (for caching integration prompts and plans)
-    # Tenant-root-bucket architecture: one bucket per tenant, collections = key prefixes.
+    # Two-bucket architecture:
+    #   1. R2_SHARED_BUCKET  — shared read-only bucket for global resources:
+    #                           guidelines, step prompts, docs templates.
+    #                           Path: shielvasense / shielvasense-integration-plans/
+    #   2. Per-app bucket    — derived from X-App-ID: "shielva-agentic-app-{app_id}"
+    #                           Used for all connector-specific data:
+    #                           plan.json, progress.json, generated code, etc.
     # Leave R2_ACCOUNT_ID empty to disable R2 caching (local filesystem fallback).
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
-    # R2_BUCKET_NAME — fallback used only at startup (before any request arrives).
-    # At request time the bucket is resolved from the X-Tenant-Name header (tenant_name.lower()).
-    # Leave empty to always derive from X-Tenant-Name.
+    # R2_SHARED_BUCKET — fixed shared bucket holding guidelines + step prompts.
+    # This bucket is the same for every installation and is managed by Shielva admins.
+    R2_SHARED_BUCKET: str = "shielvasense"
+    # R2_BUCKET_NAME — kept for backward compat / startup-time bucket check.
+    # At runtime the per-app bucket is derived from X-App-ID (see r2_service._get_bucket).
     R2_BUCKET_NAME: str = ""
-    R2_COLLECTION_PREFIX: str = "shielvasense-integration-plans"  # key prefix inside bucket — tenant is already in the bucket name, never repeat it here
+    R2_COLLECTION_PREFIX: str = "shielvasense-integration-plans"  # key prefix inside bucket
 
     # shielva-mcp (used when LLM_MODE=mcp)
     # Set INTEGRATION_MCP_URL in .env to point at the running MCP server.

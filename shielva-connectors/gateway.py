@@ -2251,7 +2251,7 @@ def main():
     import os
     
     host = "0.0.0.0"
-    port = int(os.getenv("CONNECTOR_PORT", 8003))
+    port = int(os.getenv("CONNECTORS_PORT", 8003))
     debug = os.getenv("ENVIRONMENT") == "development"
     
     if debug:
