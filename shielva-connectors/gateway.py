@@ -82,30 +82,15 @@ class ConnectorStatusResponse(BaseModel):
 
 # ===== Connector Registry =====
 
-# Import connectors
-from confluence.connector import ConfluenceConnector
-from gdrive.connector import GoogleDriveConnector
-from slack.connector import SlackConnector
-from jira.connector import JiraConnector
-from salesforce.connector import SalesforceConnector
-from sharepoint.connector import SharePointConnector
-from notion.connector import NotionConnector
-from _github_old.connector import GitHubConnector
-from zendesk.connector import ZendeskConnector
-from hubspot.connector import HubSpotConnector
-
-CONNECTOR_CLASSES = {
-    "confluence": ConfluenceConnector,
-    "gdrive": GoogleDriveConnector,
-    "slack": SlackConnector,
-    "jira": JiraConnector,
-    "salesforce": SalesforceConnector,
-    "sharepoint": SharePointConnector,
-    "notion": NotionConnector,
-    "github": GitHubConnector,
-    "zendesk": ZendeskConnector,
-    "hubspot": HubSpotConnector,
-}
+# Connector registry.
+#
+# The legacy hardcoded vendor connectors (Slack, Notion, GDrive, Confluence, Jira,
+# Salesforce, GitHub, SharePoint, Zendesk, HubSpot) have been removed. Connectors are
+# now authored exclusively via the Integration Builder (see ./integration), which
+# generates BaseConnector subclasses into ./generated_connectors and registers them
+# here at runtime through _load_generated_connectors(). This dict starts empty and is
+# populated dynamically on startup and on each install/reload.
+CONNECTOR_CLASSES = {}
 
 
 def _resolve_connector_type(connector_type: str) -> str:
@@ -400,7 +385,7 @@ async def lifespan(app: FastAPI):
     from shared.discovery_client import DiscoveryClient
     
     # Startup: Discovery Registration
-    gateway_url = os.getenv("GATEWAY_URL", "http://localhost:8000")
+    gateway_url = os.getenv("GATEWAY_URL", "https://localhost:8000")
     api_port = int(os.getenv("CONNECTOR_PORT", 8003))
     
     app.state.discovery = DiscoveryClient(
@@ -665,68 +650,15 @@ async def list_tenant_connectors(
 @app.get("/connectors/types")
 async def list_connector_types():
     """List available connector types"""
+    # Legacy hardcoded vendor connectors removed — connectors are authored via the
+    # Integration Builder and loaded dynamically into CONNECTOR_CLASSES. Surface the
+    # live (generated) connectors plus the remaining coming-soon placeholders.
+    generated = [
+        {"type": ct, "name": ct, "description": "Integration Builder connector", "auth_type": "oauth2"}
+        for ct in sorted(CONNECTOR_CLASSES.keys())
+    ]
     return {
-        "connector_types": [
-            {
-                "type": "confluence",
-                "name": "Atlassian Confluence",
-                "description": "Connect to Confluence wiki pages",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "gdrive",
-                "name": "Google Drive",
-                "description": "Connect to Google Drive files",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "slack",
-                "name": "Slack",
-                "description": "Connect to Slack channels and messages",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "jira",
-                "name": "Atlassian Jira",
-                "description": "Connect to Jira issues",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "salesforce",
-                "name": "Salesforce",
-                "description": "Connect to Salesforce CRM",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "sharepoint",
-                "name": "Microsoft SharePoint",
-                "description": "Connect to SharePoint documents and lists",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "notion",
-                "name": "Notion",
-                "description": "Connect to Notion pages and databases",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "github",
-                "name": "GitHub",
-                "description": "Connect to GitHub repos, issues, and docs",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "zendesk",
-                "name": "Zendesk",
-                "description": "Connect to Zendesk tickets and help center",
-                "auth_type": "oauth2"
-            },
-            {
-                "type": "hubspot",
-                "name": "HubSpot",
-                "description": "Connect to HubSpot CRM and knowledge base",
-                "auth_type": "oauth2"
-            },
+        "connector_types": generated + [
             {
                 "type": "teams",
                 "name": "Microsoft Teams",
@@ -2256,7 +2188,19 @@ def main():
     
     if debug:
         print(f"🔌 Starting Connector Gateway in DEVELOPMENT mode (port {port})")
-        uvicorn.run("gateway:app", host=host, port=port, reload=True)
+        # Serve HTTPS when the dev cert/key are present. The whole local stack runs
+        # TLS with the localhost cert and callers reach this gateway at
+        # https://localhost:8003 (platform-core CONNECTORS_URL / CONNECTOR_BASE_URL).
+        # Without TLS here, those calls fail the handshake and the auto-sync /
+        # resync / schedule endpoints time out at the gateway (504). Falls back to
+        # plain HTTP when no certs are set.
+        ssl_certfile = os.getenv("CERT_FILE") or os.getenv("SSL_CERTFILE")
+        ssl_keyfile = os.getenv("KEY_FILE") or os.getenv("SSL_KEYFILE")
+        run_kwargs = {"host": host, "port": port, "reload": True}
+        if ssl_certfile and ssl_keyfile and os.path.exists(ssl_certfile) and os.path.exists(ssl_keyfile):
+            run_kwargs["ssl_certfile"] = ssl_certfile
+            run_kwargs["ssl_keyfile"] = ssl_keyfile
+        uvicorn.run("gateway:app", **run_kwargs)
     else:
         worker_count = int(os.getenv("WORKERS", (multiprocessing.cpu_count() * 2) + 1))
         # Scheduler inside gunicorn workers is tricky (multiple schedulers!).

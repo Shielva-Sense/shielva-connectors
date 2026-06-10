@@ -128,20 +128,32 @@ async def v3_list_providers():
         seen_keys.add(key)
         result.append(p)
 
-    # 2. connector_catalog.json — providers NOT already in static catalog
+    # 2. connector_catalog.json — providers NOT already in static catalog.
+    # These are single-service providers: the service key matches the provider key.
     for key, meta in _CONNECTOR_CATALOG.items():
         if key in seen_keys:
             continue
+        display_name = meta.get("display_name", key.replace("_", " ").title())
+        # Synthesise a single service entry so the UI can navigate to it
+        single_service = {
+            "key": key,
+            "service": key,
+            "display_name": display_name,
+            "description": meta.get("description", ""),
+            "auth_type": "api_key",
+            "category": meta.get("category", "general"),
+            "logo_url": _logo_cdn_url(key),
+        }
         result.append({
             "key": key,
             "provider": key,
-            "display_name": meta.get("display_name", key.replace("_", " ").title()),
+            "display_name": display_name,
             "description": meta.get("description", ""),
             "brand_color": meta.get("brand_color", "#14B8A6"),
-            "service_count": 0,
+            "service_count": 1,
             "logo_url": _logo_cdn_url(key),
             "is_custom": False,
-            "services": [],
+            "services": [single_service],
         })
         seen_keys.add(key)
 
@@ -227,10 +239,22 @@ async def v3_list_services(provider: str):
     except Exception as exc:
         logger.warning("catalog_v3.custom_service_fetch_failed", provider=provider, error=str(exc))
 
-    # 3. Provider exists in connector_catalog.json but has no services yet
+    # 3. Provider exists in connector_catalog.json — synthesise one service
+    # matching the provider key so the UI can navigate to it.
     if provider in _CONNECTOR_CATALOG:
-        logger.info("catalog_v3.list_services", provider=provider, count=0, source="catalog_json")
-        return {"services": [], "provider": provider}
+        meta = _CONNECTOR_CATALOG[provider]
+        display_name = meta.get("display_name", provider.replace("_", " ").title())
+        service = {
+            "key": provider,
+            "service": provider,
+            "display_name": display_name,
+            "description": meta.get("description", ""),
+            "auth_type": "api_key",
+            "category": meta.get("category", "general"),
+            "logo_url": _logo_cdn_url(provider),
+        }
+        logger.info("catalog_v3.list_services", provider=provider, count=1, source="catalog_json")
+        return {"services": [service], "provider": provider}
 
     raise HTTPException(404, f"Provider '{provider}' not found")
 
