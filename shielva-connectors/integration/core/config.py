@@ -74,10 +74,10 @@ class IntegrationSettings(BaseSettings):
 
     # shielva-mcp (used when LLM_MODE=mcp)
     # Set INTEGRATION_MCP_URL in .env to point at the running MCP server.
-    MCP_URL: str = "http://localhost:8004"
+    MCP_URL: str = "https://localhost:8004"
 
     # MCP ingestion worker (used for RAG knowledge upload)
-    MCP_INGESTION_URL: str = "http://localhost:8007"
+    MCP_INGESTION_URL: str = "https://localhost:8007"
 
     # Credential encryption — server-side HMAC secret for local credential files.
     # Frontend mixes this HMAC into AES-256-GCM key derivation so credentials
@@ -102,6 +102,11 @@ class IntegrationSettings(BaseSettings):
     # Can be a 32-byte url-safe base64 key (44 chars ending in =) or any passphrase
     # (will be SHA-256 hashed into a valid Fernet key). Empty = store tokens in plain text.
     SYNC_TOKEN_ENCRYPTION_KEY: str = ""
+
+    # Observability — LOG_LEVEL controls structlog / uvicorn verbosity.
+    # Accepted values: DEBUG | INFO | WARNING | ERROR | CRITICAL (case-insensitive).
+    # NEVER set to DEBUG or TRACE in production (CC7.2 / C1.1).
+    LOG_LEVEL: str = "INFO"
 
     # SSL
     SSL_CERTFILE: Optional[str] = None
