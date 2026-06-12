@@ -30,3 +30,6 @@ cryptography>=41.0.0
 sqlalchemy>=2.0.0
 redis>=5.0.0
 APScheduler>=3.10.4
+
+# Shared resilient discovery client + sop_sdk live here (v1.1.0+).
+shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@shielva-common-v1.1.0#subdirectory=shielva-common

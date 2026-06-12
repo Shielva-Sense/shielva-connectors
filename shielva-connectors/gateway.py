@@ -382,7 +382,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan"""
     import os
     import asyncio
-    from shared.discovery_client import DiscoveryClient
+    from shielva_common.discovery_client import DiscoveryClient
     
     # Startup: Discovery Registration
     gateway_url = os.getenv("GATEWAY_URL", "https://localhost:8000")
