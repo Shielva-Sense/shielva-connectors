@@ -282,7 +282,7 @@ async def lifespan(app: FastAPI):
     _connectors_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
     if _connectors_root not in _sys.path:
         _sys.path.insert(0, _connectors_root)
-    from shared.discovery_client import DiscoveryClient
+    from shielva_common.discovery_client import DiscoveryClient
     ssl_up = bool(settings.SSL_CERTFILE and settings.SSL_KEYFILE)
     scheme = "https" if ssl_up else "http"
     app.state.discovery = DiscoveryClient(
