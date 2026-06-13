@@ -48,6 +48,10 @@ sync_request_router = APIRouter(prefix="/sync-requests", tags=["sync-requests"])
 # ── Branch access by role ────────────────────────────────────────────────────
 
 BRANCH_ACCESS: Dict[str, List[str]] = {
+    # Platform identity roles (issued by the identity service in the JWT `role` claim)
+    "platform_owner": ["connector-development", "qa", "uat", "master", "main"],
+    "org_owner": ["connector-development", "qa", "uat"],
+    # Sync-route operational roles
     "super_admin": ["connector-development", "qa", "uat", "master", "main"],
     "tenant_admin": ["connector-development", "qa", "uat"],
     "bot_manager": ["connector-development", "qa"],
@@ -58,6 +62,10 @@ BRANCH_ACCESS: Dict[str, List[str]] = {
 DEFAULT_GITHUB_REPO = "git@github.com:shielvaAdmin/shielva-connectors"
 
 SYNC_PERMISSIONS: Dict[str, Dict[str, bool]] = {
+    # Platform identity roles (issued by the identity service in the JWT `role` claim)
+    "platform_owner": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
+    "org_owner": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
+    # Sync-route operational roles
     "super_admin": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
     "tenant_admin": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
     "bot_manager": {"can_raise": True, "can_approve": False, "can_hold": False, "can_configure_approvers": False},
@@ -1180,30 +1188,53 @@ async def _run_ci_pipeline(
             "gate": gate_result,
         })
 
-    # ── Pre-CI: push connector files to GitHub (for PR creation later) ───────────
-    # The branch is NOT used for security scanning (that now runs locally).
-    # It is stored so raise_pr_for_sync_request can open the PR without re-uploading.
+    # ── Gate: GitHub Sync — push connector files to GitHub (for PR creation later) ─
+    # The branch is NOT used for security scanning (that now runs locally); it is
+    # stored so raise_pr_for_sync_request can open the PR without re-uploading.
+    # This is a first-class CI gate: if the push fails (bad/expired token, repo
+    # access, network), the whole sync request FAILS with a clear reason instead of
+    # silently reporting ci_passed while nothing reached GitHub.
+    _broadcast(tenant_id, "sync:ci_progress", {
+        "sync_request_id": sync_request_id,
+        "gate": {"gate": "github_sync", "status": "running", "summary": "Pushing branch to GitHub..."},
+    })
     branch_commit_sha: Optional[str] = None
-    if branch_name and sync_settings and sync_settings.get("github_repo_url") and sync_settings.get("github_token"):
-        try:
-            owner, repo = _parse_repo(sync_settings["github_repo_url"])
-            token = sync_settings["github_token"]
-            sr_doc = await col.find_one({"_id": oid}, {"target_branch": 1})
-            target_branch = (sr_doc or {}).get("target_branch", "connector-development")
-            branch_commit_sha = await _push_branch(
-                owner, repo, token,
-                branch_name, target_branch,
-                files,
-                commit_message=f"[Shielva CI] {branch_name}",
-            )
-            await col.update_one(
-                {"_id": oid},
-                {"$set": {"branch_commit_sha": branch_commit_sha, "updated_at": datetime.utcnow()}},
-            )
-            logger.info("ci_branch_pushed", sync_request_id=sync_request_id, branch=branch_name, sha=branch_commit_sha[:8])
-        except Exception as push_err:
-            logger.warning("ci_branch_push_failed", error=str(push_err)[:300], sync_request_id=sync_request_id)
-            branch_commit_sha = None
+    if not (branch_name and sync_settings and sync_settings.get("github_repo_url") and sync_settings.get("github_token")):
+        await _update_gate({
+            "gate": "github_sync", "status": "failed",
+            "summary": "GitHub not configured",
+            "details": "GitHub repo URL and token must be configured in Sync Settings before the branch can be pushed.",
+        })
+        return ci_results, files
+    try:
+        owner, repo = _parse_repo(sync_settings["github_repo_url"])
+        token = sync_settings["github_token"]
+        sr_doc = await col.find_one({"_id": oid}, {"target_branch": 1})
+        target_branch = (sr_doc or {}).get("target_branch", "connector-development")
+        branch_commit_sha = await _push_branch(
+            owner, repo, token,
+            branch_name, target_branch,
+            files,
+            commit_message=f"[Shielva CI] {branch_name}",
+        )
+        await col.update_one(
+            {"_id": oid},
+            {"$set": {"branch_commit_sha": branch_commit_sha, "updated_at": datetime.utcnow()}},
+        )
+        logger.info("ci_branch_pushed", sync_request_id=sync_request_id, branch=branch_name, sha=branch_commit_sha[:8])
+        await _update_gate({
+            "gate": "github_sync", "status": "passed",
+            "summary": f"Branch pushed to GitHub ({branch_commit_sha[:8]})",
+        })
+    except Exception as push_err:
+        logger.warning("ci_branch_push_failed", error=str(push_err)[:300], sync_request_id=sync_request_id)
+        await _update_gate({
+            "gate": "github_sync", "status": "failed",
+            "summary": "GitHub push failed",
+            "details": str(push_err)[:1000],
+        })
+        # Abort the pipeline — a sync request that can't reach GitHub is a failure.
+        return ci_results, files
 
     # Gate 1: Security Audit — full scan via SDK (local files) or regex fallback
     _broadcast(tenant_id, "sync:ci_progress", {
@@ -1266,7 +1297,20 @@ async def _run_ci_pipeline(
         out_dir = _import_tmpdir
 
         import sys as _sys
-        pythonpath = str(out_dir)
+        # Connectors import the platform-provided `shared.base_connector` package,
+        # which lives at the connectors repo root (sibling of generated_connectors/),
+        # NOT in the synced connector files. The isolated import check must put that
+        # repo root on the path so it resolves the SAME base class the connector uses
+        # at runtime — otherwise every connector fails with
+        # "No module named 'shared.base_connector'" even though it runs fine.
+        _shared_parent = Path(settings.GENERATED_CODE_DIR).resolve().parent
+        if not (_shared_parent / "shared" / "base_connector.py").exists():
+            _alt = Path(__file__).resolve().parents[2]
+            if (_alt / "shared" / "base_connector.py").exists():
+                _shared_parent = _alt
+        # out_dir (the temp dir) stays first so the connector's own modules always
+        # take precedence over any same-named module at the repo root.
+        pythonpath = os.pathsep.join([str(out_dir), str(_shared_parent)])
 
         check_script = (
             "import sys, pathlib, py_compile, ast, subprocess, traceback\n"

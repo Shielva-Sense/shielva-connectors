@@ -1,7 +1,20 @@
 """Integration Builder — Configuration."""
 
+import shutil
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from typing import Optional
+
+
+def _resolve_claude_cli() -> str:
+    """Resolve the Claude CLI at startup.
+
+    Homebrew's Caskroom path is VERSION-PINNED (e.g. .../claude-code/2.1.59/claude)
+    and breaks on every Claude Code update. Resolve via PATH (`which claude`) first,
+    then fall back to the stable Homebrew symlink which always tracks the current
+    version. Override with the CLAUDE_CLI_PATH env var when needed.
+    """
+    return shutil.which("claude") or "/opt/homebrew/bin/claude"
 
 
 class IntegrationSettings(BaseSettings):
@@ -26,7 +39,9 @@ class IntegrationSettings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     LLM_MODEL: str = "claude-sonnet-4-20250514"
     LLM_MAX_TOKENS: int = 8192
-    CLAUDE_CLI_PATH: str = "/opt/homebrew/Caskroom/claude-code/2.1.59/claude"  # path to claude CLI binary
+    # Resolved dynamically (PATH → stable Homebrew symlink) so Claude Code
+    # version bumps don't break it. Override via CLAUDE_CLI_PATH env var.
+    CLAUDE_CLI_PATH: str = Field(default_factory=_resolve_claude_cli)
 
     # Test LLM — separate model for test generation (faster + cheaper than Claude CLI)
     # TEST_LLM_MODE options: "gemini" | "kimi" | "" (empty = use default Claude LLM)

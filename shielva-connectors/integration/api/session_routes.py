@@ -99,6 +99,22 @@ async def autofill_credentials(session_id: str, body: AutofillCredentialsRequest
         # Only send class-level constants section (first 60 lines) to keep prompt lean
         snippet = "\n".join(body.connector_py.splitlines()[:80])
         connector_context += f"\n\nconnector.py (first 80 lines):\n```python\n{snippet}\n```"
+        # Extract method signatures from the WHOLE file so the LLM knows what
+        # operations the connector performs — critical for choosing OAuth scopes
+        # that actually cover them (e.g. send/create needs write scopes, not just
+        # read-only). The first-80-lines snippet is class constants, not methods.
+        import re as _re_methods
+        method_sigs = _re_methods.findall(
+            r'^\s*(?:async\s+)?def\s+([a-zA-Z_]\w*)\s*\(',
+            body.connector_py,
+            _re_methods.MULTILINE,
+        )
+        ops = [m for m in method_sigs if not m.startswith("_")]
+        if ops:
+            connector_context += (
+                "\n\nConnector operations (public methods — scopes MUST cover all of these):\n"
+                + "\n".join(f"- {m}()" for m in ops)
+            )
     if body.connector_json:
         try:
             cj = json.loads(body.connector_json)
@@ -115,14 +131,19 @@ Given these credential/configuration fields:
 Return ONLY a JSON object mapping field keys to their standard values.
 Rules:
 - For API endpoints and URLs: use the official documented URL (research if needed).
-- For scopes: use the minimal recommended OAuth2 scopes for basic read+write access.
+- For scopes: choose the LEAST-PRIVILEGE OAuth2 scopes that still cover EVERY
+  operation this connector performs (see "Connector operations" above). If any
+  method sends, creates, updates, deletes, or otherwise writes, you MUST include
+  the corresponding write/send scope — do NOT default to a read-only scope.
+  Example: a Gmail connector that sends or drafts needs send/compose scopes
+  (e.g. gmail.send, gmail.compose), NOT gmail.readonly. Space-separate multiple scopes.
 - For rate limits, pagination types, api versions: use the documented defaults.
 - For secrets (client_id, client_secret, access_token, api_key, password): set value to "" (empty) — user must provide these.
 - For redirect_uri: use "http://localhost:8080/oauth/callback" unless connector.py shows otherwise.
 - Do NOT include markdown, only raw JSON.
 
-Example output:
-{{"auth_url": "https://accounts.google.com/o/oauth2/v2/auth", "token_url": "https://oauth2.googleapis.com/token", "scopes": "https://www.googleapis.com/auth/gmail.readonly", "client_id": "", "client_secret": ""}}"""
+Output format (values shown are placeholders — fill with the REAL values for {body.provider} {body.service}):
+{{"auth_url": "<provider authorize URL>", "token_url": "<provider token URL>", "scopes": "<scopes covering ALL operations above>", "client_id": "", "client_secret": ""}}"""
 
     try:
         raw = await call_llm(
@@ -2460,6 +2481,7 @@ async def get_connector_analysis(
     Returns {analysis: null} when not yet generated.
     """
     tenant_id = request.headers.get("X-Tenant-ID", "")
+    app_id = request.headers.get("X-App-ID", "")  # was referenced but never read → NameError → 500
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -2537,6 +2559,7 @@ async def generate_connector_analysis(
     Saves result to R2 so subsequent GET calls return the cached version.
     """
     tenant_id = request.headers.get("X-Tenant-ID", "")
+    app_id = request.headers.get("X-App-ID", "")  # was referenced but never read → NameError → 500
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 

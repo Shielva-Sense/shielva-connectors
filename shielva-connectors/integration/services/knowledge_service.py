@@ -30,6 +30,32 @@ _GLOBAL_KB_ID = "codegen-guidelines-{tenant_id}"
 _CONNECTOR_KB_ID = "codegen-docs-{tenant_id}-{provider}-{service}"
 
 
+def _mcp_headers(tenant_id: str) -> Dict[str, str]:
+    """Canonical internal service-to-service headers for MCP calls.
+
+    Per the platform contract (docs/architecture/MCP_LLM_BROKER.md → "Auth
+    (internal service-to-service)"), internal callers identify with the REAL
+    per-request tenant plus the internal-service identity. MCP's
+    ``require_principal`` needs user-id + email (this was the missing
+    ``X-User-Email`` causing the 401 principal_header_missing). Mirrors the
+    integration's own ``mcp_client.py`` client.
+    """
+    return {
+        # Legacy form (consumed by codegen-style header readers)
+        "X-Tenant-ID": tenant_id,
+        "X-User-ID": "integration-builder",
+        "X-User-Email": "internal@shielva.ai",
+        "X-Auth-Method": "service",
+        # Canonical X-Shielva-* form (consumed by require_principal on the tools
+        # path — it needs user-id + email + auth-method).
+        "X-Shielva-Tenant-Id": tenant_id,
+        "X-Shielva-User-Id": "integration-builder",
+        "X-Shielva-Email": "internal@shielva.ai",
+        "X-Shielva-Auth-Method": "service",
+        "Content-Type": "application/json",
+    }
+
+
 # ── MongoDB helpers ──────────────────────────────────────────────────
 
 def _knowledge_collection():
@@ -86,10 +112,7 @@ async def _ingest_to_mcp(
         ],
     }
 
-    headers = {
-        "X-Tenant-ID": tenant_id,
-        "Content-Type": "application/json",
-    }
+    headers = _mcp_headers(tenant_id)
 
     logger.info(
         "knowledge.ingesting",
@@ -240,11 +263,7 @@ async def query_knowledge(
             "top_k": top_k,
         },
     }
-    headers = {
-        "X-Tenant-ID": tenant_id,
-        "X-User-ID": "integration-builder",
-        "Content-Type": "application/json",
-    }
+    headers = _mcp_headers(tenant_id)
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -489,7 +508,7 @@ async def cleanup_connector_knowledge(
     # 2. Delete the KB from MCP ingestion worker (best-effort)
     try:
         url = f"{settings.MCP_INGESTION_URL}/kb/{kb_id}"
-        headers = {"X-Tenant-ID": tenant_id}
+        headers = _mcp_headers(tenant_id)
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.delete(url, headers=headers)
             if resp.status_code in (200, 204, 404):
@@ -532,7 +551,7 @@ async def get_connector_vector_count(
     vector_count = 0
     try:
         url = f"{settings.MCP_INGESTION_URL}/kb/{kb_id}/info"
-        headers = {"X-Tenant-ID": tenant_id}
+        headers = _mcp_headers(tenant_id)
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
@@ -553,7 +572,7 @@ async def get_global_vector_count(tenant_id: str) -> Dict[str, Any]:
     vector_count = 0
     try:
         url = f"{settings.MCP_INGESTION_URL}/kb/{kb_id}/info"
-        headers = {"X-Tenant-ID": tenant_id}
+        headers = _mcp_headers(tenant_id)
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
