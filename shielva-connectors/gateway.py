@@ -10,6 +10,9 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 import json
+import ast
+import socket
+import asyncio
 import structlog
 import uvicorn
 import sys
@@ -158,6 +161,201 @@ def _validate_required_fields(config: dict, install_fields: list) -> list[str]:
     return errors
 
 
+# ===== Advanced-connector hardening (isolation + HA reload) =====
+#
+# Generated connectors are AI-authored Python executed IN-PROCESS in this gateway
+# (importlib.exec_module). With no OS sandbox, one hostile/buggy connector could
+# read another tenant's in-memory secrets, shell out, or hang the event loop —
+# blast radius = every tenant's advanced connectors. We apply three pragmatic
+# defense-in-depth layers without a subprocess rewrite (see
+# docs/CONNECTOR_ISOLATION.md):
+#   1. Static AST scan that BLOCKS sandbox-escape / shell-out patterns at load.
+#   2. Wall-clock timeout around module import (hang-on-import DoS).
+#   3. Wall-clock timeout + thread offload around method invocation (runaway loop
+#      / event-loop starvation that would freeze the gateway for all tenants).
+#
+# This is HARDENING, not a true sandbox: a static scan cannot stop every native
+# escape. For fully-untrusted code the documented next step is subprocess/
+# container workers (tracked separately). The scan kills the obvious classes.
+
+CONNECTOR_AST_SCAN = os.getenv("CONNECTOR_AST_SCAN", "enforce").lower()      # enforce | warn | off
+CONNECTOR_IMPORT_TIMEOUT_S = float(os.getenv("CONNECTOR_IMPORT_TIMEOUT_S", "10"))
+CONNECTOR_INVOKE_TIMEOUT_S = float(os.getenv("CONNECTOR_INVOKE_TIMEOUT_S", "30"))
+
+# Modules an HTTP/API connector never legitimately needs — importing any is a
+# hard block (process / host escape surface).
+_BLOCKED_IMPORTS = frozenset({
+    "subprocess", "ctypes", "multiprocessing", "pty", "fcntl",
+    "resource", "signal", "mmap", "_thread",
+})
+# CPython namespace-escape attributes (e.g. ().__class__.__bases__[0].__subclasses__()).
+# None appear in legitimate connector logic.
+_BLOCKED_ATTRS = frozenset({
+    "__subclasses__", "__globals__", "__bases__", "__mro__",
+    "__builtins__", "__code__", "__closure__",
+})
+# Bare callables that execute arbitrary code.
+_BLOCKED_CALLS = frozenset({"eval", "exec", "compile", "__import__"})
+# os.<attr> shell-out / process-control calls (os itself stays allowed for os.environ).
+_BLOCKED_OS_ATTRS = frozenset({
+    "system", "popen", "fork", "forkpty", "kill", "killpg", "setuid", "setgid",
+    "execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp",
+    "spawnv", "spawnve", "spawnl", "spawnlp",
+})
+
+
+def _scan_connector_source(path: Path) -> list[str]:
+    """Static AST scan of one generated connector source file.
+
+    Returns a list of human-readable BLOCK reasons; empty list = clean.
+    Best-effort defense-in-depth — see the hardening header above.
+    """
+    findings: list[str] = []
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError as exc:
+        return [f"unparseable source ({exc})"]
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in _BLOCKED_IMPORTS:
+                    findings.append(f"imports blocked module '{alias.name}'")
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] in _BLOCKED_IMPORTS:
+                findings.append(f"imports from blocked module '{node.module}'")
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            if isinstance(fn, ast.Name) and fn.id in _BLOCKED_CALLS:
+                findings.append(f"calls '{fn.id}()'")
+            elif isinstance(fn, ast.Attribute) and fn.attr in _BLOCKED_OS_ATTRS \
+                    and isinstance(fn.value, ast.Name) and fn.value.id == "os":
+                findings.append(f"calls 'os.{fn.attr}()'")
+        elif isinstance(node, ast.Attribute) and node.attr in _BLOCKED_ATTRS:
+            findings.append(f"accesses escape attribute '{node.attr}'")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and node.value in _BLOCKED_ATTRS:
+            findings.append(f"references escape-attribute string '{node.value}'")
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for f in findings:
+        if f not in seen:
+            seen.add(f)
+            ordered.append(f)
+    return ordered
+
+
+def _scan_connector_package(pkg_dir: Path) -> list[str]:
+    """Scan every .py in a generated connector package (connector.py + sub-pkgs).
+
+    Returns BLOCK reasons prefixed with the offending file's relative path.
+    """
+    reasons: list[str] = []
+    for py_file in sorted(pkg_dir.rglob("*.py")):
+        for reason in _scan_connector_source(py_file):
+            reasons.append(f"{py_file.relative_to(pkg_dir)}: {reason}")
+    return reasons
+
+
+def _exec_module_with_timeout(exec_fn, timeout: float, label: str) -> None:
+    """Run a *synchronous* module exec under a wall-clock timeout.
+
+    importlib's exec_module blocks; a connector that hangs at import (infinite
+    loop or blocking network call at module scope) would otherwise stall startup
+    or a hot-reload for every tenant. We run the exec in a daemon thread and stop
+    WAITING after `timeout`s — the runaway thread is a daemon, so it cannot block
+    the gateway and dies with the process.
+    """
+    import threading
+
+    error_box: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            exec_fn()
+        except BaseException as exc:  # noqa: BLE001 — re-raised to caller below
+            error_box.append(exc)
+
+    thread = threading.Thread(target=_run, daemon=True, name=f"connimport-{label}")
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise TimeoutError(f"module import exceeded {timeout}s (possible hang at module scope)")
+    if error_box:
+        raise error_box[0]
+
+
+# Cluster-wide connector-reload fan-out (HA). Shared mutable state — the
+# in-process CONNECTOR_CLASSES registry — must reconcile across every gateway
+# replica, per the project HA rule. A deploy/reload on any pod publishes here;
+# every pod's subscriber reloads from the (shared) generated_connectors volume.
+CONNECTOR_RELOAD_CHANNEL = os.getenv("CONNECTOR_RELOAD_CHANNEL", "shielva:connectors:reload")
+POD_ID = f"{socket.gethostname()}-{os.getpid()}"
+
+
+async def _publish_connector_reload(connector_type: str = None) -> None:
+    """Broadcast a reload event to all gateway pods (fire-and-forget)."""
+    from services.redis_service import redis_service
+    try:
+        message = json.dumps({"action": "reload", "origin": POD_ID, "connector_type": connector_type})
+        subscribers = await redis_service.publish(CONNECTOR_RELOAD_CHANNEL, message)
+        logger.info(
+            "connector_reload.published",
+            channel=CONNECTOR_RELOAD_CHANNEL, subscribers=subscribers,
+            pod=POD_ID, connector_type=connector_type,
+        )
+    except Exception as exc:
+        # Local reload already succeeded; cross-pod fan-out is best-effort.
+        logger.warning("connector_reload.publish_failed", error=str(exc)[:200], pod=POD_ID)
+
+
+async def _connector_reload_subscriber() -> None:
+    """Subscribe to the cluster-wide reload channel and reload on every event.
+
+    HA: a connector deploy/update on ANY pod publishes a reload; every other pod
+    reloads its CONNECTOR_CLASSES from the shared generated_connectors volume, so
+    no pod 404s a new connector or serves stale code. Assumes generated_connectors
+    is a shared (RWX) volume or that each pod has pulled the same code — documented
+    in docs/CONNECTOR_ISOLATION.md.
+    """
+    from services.redis_service import redis_service
+
+    await redis_service.connect()
+    if not redis_service.client:
+        logger.warning("connector_reload_subscriber.no_redis — single-pod reload only", pod=POD_ID)
+        return
+
+    pubsub = redis_service.client.pubsub()
+    await pubsub.subscribe(CONNECTOR_RELOAD_CHANNEL)
+    logger.info("connector_reload_subscriber.listening", channel=CONNECTOR_RELOAD_CHANNEL, pod=POD_ID)
+    loop = asyncio.get_event_loop()
+    try:
+        async for message in pubsub.listen():
+            if message.get("type") != "message":
+                continue
+            try:
+                payload = json.loads(message.get("data") or "{}")
+            except Exception:
+                payload = {}
+            if payload.get("origin") == POD_ID:
+                continue  # our own echo — we already reloaded locally
+            logger.info("connector_reload_subscriber.received", origin=payload.get("origin"), pod=POD_ID)
+            try:
+                # Reload off the event loop so fan-out never blocks request serving.
+                result = await loop.run_in_executor(None, _reload_generated_connectors)
+                logger.info("connector_reload_subscriber.reloaded", pod=POD_ID, **result)
+            except Exception as exc:
+                logger.error("connector_reload_subscriber.reload_failed", error=str(exc)[:200], pod=POD_ID)
+    except asyncio.CancelledError:
+        try:
+            await pubsub.unsubscribe(CONNECTOR_RELOAD_CHANNEL)
+            await pubsub.aclose()
+        except Exception:
+            pass
+        raise
+
+
 def _load_generated_connectors(generated_root: str = None) -> None:
     """Dynamically discover and register AI-generated connectors from generated_connectors/.
 
@@ -184,6 +382,24 @@ def _load_generated_connectors(generated_root: str = None) -> None:
             connector_file = pkg_dir / "connector.py"
             if not connector_file.exists():
                 continue
+
+            # Layer 1 — static AST scan BEFORE executing any of this package's code.
+            if CONNECTOR_AST_SCAN != "off":
+                scan_findings = _scan_connector_package(pkg_dir)
+                if scan_findings:
+                    if CONNECTOR_AST_SCAN == "enforce":
+                        logger.error(
+                            "connector_blocked_by_scan",
+                            package=pkg_dir.name, tenant=tenant_dir.name,
+                            findings=scan_findings,
+                            hint="set CONNECTOR_AST_SCAN=warn to load anyway (not recommended)",
+                        )
+                        continue
+                    logger.warning(
+                        "connector_scan_findings (loaded anyway — CONNECTOR_AST_SCAN=warn)",
+                        package=pkg_dir.name, tenant=tenant_dir.name, findings=scan_findings,
+                    )
+
             try:
                 # Add package root and shared path to sys.path if needed
                 connectors_root = str(Path(__file__).resolve().parent)
@@ -215,7 +431,10 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                         sys.modules[subpkg_mod_name] = subpkg_mod
                         # Also register as bare name so unqualified import works
                         sys.modules.setdefault(subpkg, subpkg_mod)
-                        subpkg_spec.loader.exec_module(subpkg_mod)
+                        _exec_module_with_timeout(
+                            lambda m=subpkg_mod, s=subpkg_spec: s.loader.exec_module(m),
+                            CONNECTOR_IMPORT_TIMEOUT_S, f"{mod_name}.{subpkg}",
+                        )
                         # Register each .py file inside the subpackage
                         for child_py in subpkg_dir.glob("*.py"):
                             if child_py.name == "__init__.py":
@@ -225,14 +444,22 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                             child_mod = importlib.util.module_from_spec(child_spec)
                             sys.modules[child_mod_name] = child_mod
                             sys.modules.setdefault(f"{subpkg}.{child_py.stem}", child_mod)
-                            child_spec.loader.exec_module(child_mod)
+                            _exec_module_with_timeout(
+                                lambda m=child_mod, s=child_spec: s.loader.exec_module(m),
+                                CONNECTOR_IMPORT_TIMEOUT_S, child_mod_name,
+                            )
 
                 spec = importlib.util.spec_from_file_location(mod_name, connector_file)
                 mod = importlib.util.module_from_spec(spec)
                 # Register before exec so module-level constants (AUTH_URI, TOKEN_URI)
                 # are accessible via sys.modules when base_connector resolves them.
                 sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
+                # Layer 2 — bound import wall-clock so a hang-on-import can't stall
+                # startup / reload for every tenant.
+                _exec_module_with_timeout(
+                    lambda m=mod, s=spec: s.loader.exec_module(m),
+                    CONNECTOR_IMPORT_TIMEOUT_S, mod_name,
+                )
 
                 # Find BaseConnector subclass
                 from shared.base_connector import BaseConnector as _BaseConnector
@@ -402,6 +629,10 @@ async def lifespan(app: FastAPI):
     # Load AI-generated connectors dynamically
     _load_generated_connectors()
 
+    # HA: subscribe to the cluster-wide connector-reload channel so a deploy/reload
+    # on any pod fans out to this one (no stale/404 connectors across replicas).
+    app.state.reload_sub = asyncio.create_task(_connector_reload_subscriber())
+
     # Startup: Restore Connectors
     stored_connectors = await connector_store.list_connectors()
     for config in stored_connectors:
@@ -443,6 +674,14 @@ async def lifespan(app: FastAPI):
 
     yield
     
+    # Shutdown: stop the reload subscriber
+    if hasattr(app.state, "reload_sub"):
+        app.state.reload_sub.cancel()
+        try:
+            await app.state.reload_sub
+        except asyncio.CancelledError:
+            pass
+
     # Shutdown: Discovery Cleanup
     if hasattr(app.state, "discovery"):
         await app.state.discovery.stop()
@@ -502,6 +741,8 @@ async def reload_connectors():
     """
     try:
         result = _reload_generated_connectors()
+        # HA: fan out to every other gateway pod so the whole cluster converges.
+        await _publish_connector_reload()
         return {"status": "reloaded", **result}
     except Exception as e:
         logger.error("reload_connectors_failed", error=str(e))
@@ -597,6 +838,9 @@ async def pull_and_reload(
         reload_result = _reload_generated_connectors()
         result["reload"] = reload_result
         logger.info("pull_and_reload.reload_success", loaded=reload_result.get("loaded"), updated=reload_result.get("updated"))
+        # HA: every pod shares the generated_connectors volume; tell the others to
+        # reload now that this pod has pulled the new code.
+        await _publish_connector_reload()
     except Exception as e:
         result["reload"] = f"error: {str(e)[:100]}"
         logger.error("pull_and_reload.reload_error", error=str(e)[:200])
@@ -1630,7 +1874,17 @@ async def test_connector_method(
         logger.warning("test_method.hydrate_failed", connector_id=connector_id, error=str(_hydrate_err))
 
     try:
-        result = await method(**params) if inspect.iscoroutinefunction(method) else method(**params)
+        # Layer 3 — bound the invocation wall-clock, and offload SYNC connector
+        # methods to a worker thread so a runaway/blocking method can't freeze the
+        # gateway event loop for every other tenant.
+        if inspect.iscoroutinefunction(method):
+            result = await asyncio.wait_for(method(**params), timeout=CONNECTOR_INVOKE_TIMEOUT_S)
+        else:
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: method(**params)),
+                timeout=CONNECTOR_INVOKE_TIMEOUT_S,
+            )
 
         # Serialize dataclasses / Pydantic models to dict
         if dataclasses.is_dataclass(result):
@@ -1642,6 +1896,15 @@ async def test_connector_method(
 
         return {"status": "ok", "method": method_name, "result": result}
 
+    except asyncio.TimeoutError:
+        logger.error(
+            "test_connector_method timeout",
+            connector_id=connector_id, method=method_name, timeout=CONNECTOR_INVOKE_TIMEOUT_S,
+        )
+        return {
+            "status": "error", "method": method_name,
+            "error": f"Connector method timed out after {CONNECTOR_INVOKE_TIMEOUT_S}s",
+        }
     except Exception as e:
         logger.error("test_connector_method failed", connector_id=connector_id, method=method_name, error=str(e))
         return {"status": "error", "method": method_name, "error": str(e)}
