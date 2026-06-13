@@ -1,0 +1,22 @@
+# Shielva connector SDK — provides BaseConnector and shared utilities.
+# For local development this installs directly from the monorepo.
+# For production replace with: shielva-connector-sdk>=1.0.0
+-e /Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/shielva-connectors
+
+# ── Connector-specific dependencies ──────────────────────────────
+# IMPORTANT: Do NOT add packages that are pre-installed in the shared
+# venv (pydantic, httpx, structlog, google-auth libs, pytest plugins).
+# Pinning old versions of those causes wheel-build failures on Python 3.13+.
+# Use >= minimum-floor specifiers for any packages you do add.
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.1.0
+aiohttp>=3.9.0
+tenacity>=8.2.0
+pytest-timeout==2.4.0
+
+# ── Test dependencies ──────────────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.1
+pytest-cov>=4.1.0

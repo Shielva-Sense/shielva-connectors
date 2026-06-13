@@ -1,0 +1,113 @@
+{
+  "name": "GmailConnector",
+  "display_name": "Google Gmail",
+  "version": "1.0.0",
+  "description": "Connects to Google Gmail via OAuth2 to ingest email messages from a user's inbox into Shielva.",
+  "provider": "google",
+  "service": "google_gmail_connector",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Google OAuth2 Client ID from the GCP Console (APIs & Services > Credentials)."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "secret",
+      "required": true,
+      "help": "Google OAuth2 Client Secret from the GCP Console (APIs & Services > Credentials)."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth Scopes",
+      "type": "string",
+      "required": false,
+      "help": "Space-separated OAuth scopes. Defaults to 'https://www.googleapis.com/auth/gmail.readonly'."
+    },
+    {
+      "key": "auth_url",
+      "label": "Authorization URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the OAuth2 authorization endpoint. Defaults to 'https://accounts.google.com/o/oauth2/v2/auth'."
+    },
+    {
+      "key": "token_url",
+      "label": "Token URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the OAuth2 token endpoint. Defaults to 'https://oauth2.googleapis.com/token'."
+    },
+    {
+      "key": "base_url",
+      "label": "Base API URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the Gmail API base URL. Defaults to 'https://gmail.googleapis.com'."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (quota units/min)",
+      "type": "string",
+      "required": false,
+      "help": "Maximum Gmail API quota units per minute. Leave blank to use the Google-imposed default."
+    },
+    {
+      "key": "pagination_type",
+      "label": "Pagination Type",
+      "type": "string",
+      "required": false,
+      "help": "Pagination strategy identifier. Defaults to 'page_token' (Gmail's nextPageToken mechanism)."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "help": "Gmail API version to use. Defaults to 'v1'."
+    }
+  ],
+  "methods": [
+    {
+      "name": "install",
+      "description": "Validate and persist the connector configuration (client_id, client_secret, and optional fields). Returns a ConnectorStatus with PENDING auth status and a prompt to authorize.",
+      "returns": "ConnectorStatus"
+    },
+    {
+      "name": "authorize",
+      "description": "Exchange an OAuth2 authorization code for access and refresh tokens. Called after the user completes the OAuth2 consent screen.",
+      "returns": "TokenInfo"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify token validity by calling users.getProfile. Returns HEALTHY+CONNECTED on success, UNHEALTHY+TOKEN_EXPIRED on auth error.",
+      "returns": "ConnectorStatus"
+    },
+    {
+      "name": "sync",
+      "description": "Fetch and ingest Gmail messages. Supports full sync (all messages) and incremental sync (messages after a given datetime via after: query filter).",
+      "returns": "SyncResult"
+    },
+    {
+      "name": "list_email",
+      "description": "Fetch all matching email metadata with full pagination. Calls execute_list_messages() for stubs then execute_get_message() per message. Returns a flat list of raw message dicts.",
+      "returns": "List[Dict]"
+    },
+    {
+      "name": "on_token_refresh",
+      "description": "Refresh the OAuth2 access token using the stored refresh_token. Sole owner of token-refresh logic — called automatically by ensure_token() when the token is expired.",
+      "returns": "TokenInfo"
+    }
+  ],
+  "dependencies": [
+    "google-api-python-client>=2.100.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.1.0",
+    "aiohttp>=3.9.0",
+    "tenacity>=8.2.0"
+  ]
+}
