@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Header, Query, Request
 from pydantic import BaseModel
 
 from integration.core.config import settings
+from integration.api.ws_routes import ws_manager
 from integration.db.database import sessions_collection
 from integration.services import r2_service
 from integration.services import knowledge_service
@@ -98,6 +99,22 @@ async def autofill_credentials(session_id: str, body: AutofillCredentialsRequest
         # Only send class-level constants section (first 60 lines) to keep prompt lean
         snippet = "\n".join(body.connector_py.splitlines()[:80])
         connector_context += f"\n\nconnector.py (first 80 lines):\n```python\n{snippet}\n```"
+        # Extract method signatures from the WHOLE file so the LLM knows what
+        # operations the connector performs — critical for choosing OAuth scopes
+        # that actually cover them (e.g. send/create needs write scopes, not just
+        # read-only). The first-80-lines snippet is class constants, not methods.
+        import re as _re_methods
+        method_sigs = _re_methods.findall(
+            r'^\s*(?:async\s+)?def\s+([a-zA-Z_]\w*)\s*\(',
+            body.connector_py,
+            _re_methods.MULTILINE,
+        )
+        ops = [m for m in method_sigs if not m.startswith("_")]
+        if ops:
+            connector_context += (
+                "\n\nConnector operations (public methods — scopes MUST cover all of these):\n"
+                + "\n".join(f"- {m}()" for m in ops)
+            )
     if body.connector_json:
         try:
             cj = json.loads(body.connector_json)
@@ -114,14 +131,19 @@ Given these credential/configuration fields:
 Return ONLY a JSON object mapping field keys to their standard values.
 Rules:
 - For API endpoints and URLs: use the official documented URL (research if needed).
-- For scopes: use the minimal recommended OAuth2 scopes for basic read+write access.
+- For scopes: choose the LEAST-PRIVILEGE OAuth2 scopes that still cover EVERY
+  operation this connector performs (see "Connector operations" above). If any
+  method sends, creates, updates, deletes, or otherwise writes, you MUST include
+  the corresponding write/send scope — do NOT default to a read-only scope.
+  Example: a Gmail connector that sends or drafts needs send/compose scopes
+  (e.g. gmail.send, gmail.compose), NOT gmail.readonly. Space-separate multiple scopes.
 - For rate limits, pagination types, api versions: use the documented defaults.
 - For secrets (client_id, client_secret, access_token, api_key, password): set value to "" (empty) — user must provide these.
 - For redirect_uri: use "http://localhost:8080/oauth/callback" unless connector.py shows otherwise.
 - Do NOT include markdown, only raw JSON.
 
-Example output:
-{{"auth_url": "https://accounts.google.com/o/oauth2/v2/auth", "token_url": "https://oauth2.googleapis.com/token", "scopes": "https://www.googleapis.com/auth/gmail.readonly", "client_id": "", "client_secret": ""}}"""
+Output format (values shown are placeholders — fill with the REAL values for {body.provider} {body.service}):
+{{"auth_url": "<provider authorize URL>", "token_url": "<provider token URL>", "scopes": "<scopes covering ALL operations above>", "client_id": "", "client_secret": ""}}"""
 
     try:
         raw = await call_llm(
@@ -1146,10 +1168,11 @@ async def update_step_status(
     step_index: int,
     payload: dict,
     x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None),
 ):
     """Update the status of a single plan step in MongoDB (e.g. mark write_tests as completed)."""
     tenant_id = _get_tenant(x_tenant_id)
-    app_id = None  # TODO: add x_app_id header to this endpoint
+    app_id = _get_app_id(x_app_id)
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -1163,10 +1186,32 @@ async def update_step_status(
         {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
     )
     if result.matched_count == 0:
+        # Tenant filter mismatch (e.g. app_id-only sessions created by Electron before
+        # tenant linking completes). Fall back to _id-only — ObjectID is unguessable
+        # so this is safe. Without this fallback Electron silently swallows the 404
+        # and step statuses are never persisted to MongoDB.
+        result = await sessions_collection().update_one(
+            {"_id": oid},
+            {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
+        )
+    if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
 
     logger.info("session.step_status_updated", session_id=session_id,
                 step_index=step_index, status=status, tenant_id=tenant_id)
+
+    # Broadcast to any CMS WebSocket clients watching this session so they
+    # receive real-time step updates from the Electron app's local execution.
+    ws_event = {
+        "type": "step_complete" if status in ("completed", "failed", "skipped") else "step_start",
+        "data": {
+            "step_index": step_index,
+            "status": "pass" if status == "completed" else status,
+            "source": "electron",
+        },
+    }
+    asyncio.create_task(ws_manager.broadcast(session_id, ws_event))
+
     return {"ok": True, "step_index": step_index, "status": status}
 
 
@@ -1328,22 +1373,30 @@ async def validate_step_output_endpoint(
 
 
 @session_router.get("/{session_id}/implementation-plan")
-async def get_implementation_plan(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_implementation_plan(
+    session_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: Optional[str] = Header(None),
+):
     """Return the connector-specific implementation plan (local file → R2 fallback).
 
-    Used by the generate_implementation_plan accordion in the UI to render the doc.
+    Checks (in order):
+    1. Local disk output dir (fastest, available on the server that ran the step)
+    2. Session-scoped R2 path: connectors/{service_slug}/sessions/{session_id}/implementation_plan.md
+       (written by Electron's sync-to-r2 call after execution)
+    3. Legacy shared R2 path: {collection}/{provider}/{service_slug}/implementation_plan.md
+       (written by the backend step executor during generate_implementation_plan)
     """
     from integration.services.step_executor import _output_dir
     from integration.services import r2_service
 
     tenant_id = _get_tenant(x_tenant_id)
-    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     doc = await sessions_collection().find_one(
         {"_id": ObjectId(session_id)},
-        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1},
+        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1, "app_id": 1},
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -1353,12 +1406,28 @@ async def get_implementation_plan(session_id: str, x_tenant_id: Optional[str] = 
     # Use tenant_name (R2 bucket name) for local path resolution — consistent with step_executor
     _local_tenant = doc.get("tenant_name") or doc.get("tenant_id") or tenant_id
 
+    # Set the correct per-app R2 bucket context (app_id from header takes priority, then session doc)
+    _app_id = (x_app_id or "").strip() or (doc.get("app_id") or "").strip()
+    if _app_id:
+        r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(_app_id))
+
+    # 1. Local disk
     local_path = _output_dir(_local_tenant, service_slug) / "implementation_plan.md"
     if local_path.exists():
         content = local_path.read_text(encoding="utf-8")
         if content.strip():
             return {"content": content, "source": "local", "chars": len(content)}
 
+    # 2. Session-scoped R2 path (written by Electron sync-to-r2)
+    try:
+        r2_tenant = _app_id or _local_tenant
+        content = await r2_service.get_connector_file(r2_tenant, service_slug, session_id, "implementation_plan.md") or ""
+        if content.strip():
+            return {"content": content, "source": "r2_session", "chars": len(content)}
+    except Exception:
+        pass
+
+    # 3. Legacy shared R2 path (written by backend step executor)
     try:
         content = await r2_service.get_implementation_plan(provider, service_slug) or ""
         if content.strip():
@@ -2412,6 +2481,7 @@ async def get_connector_analysis(
     Returns {analysis: null} when not yet generated.
     """
     tenant_id = request.headers.get("X-Tenant-ID", "")
+    app_id = request.headers.get("X-App-ID", "")  # was referenced but never read → NameError → 500
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -2489,6 +2559,7 @@ async def generate_connector_analysis(
     Saves result to R2 so subsequent GET calls return the cached version.
     """
     tenant_id = request.headers.get("X-Tenant-ID", "")
+    app_id = request.headers.get("X-App-ID", "")  # was referenced but never read → NameError → 500
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 

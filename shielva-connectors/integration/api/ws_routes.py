@@ -27,6 +27,47 @@ logger = structlog.get_logger(__name__)
 ws_router = APIRouter()
 
 
+# ── Shared connection registry ────────────────────────────────────────────────
+class _SessionWsManager:
+    """Global registry of active WebSocket connections per session.
+
+    Allows session_routes (PATCH /steps/.../status) to broadcast step updates
+    to all CMS clients currently watching a session — without a dedicated
+    Electron→CMS WebSocket channel.
+    """
+
+    def __init__(self) -> None:
+        self._connections: Dict[str, set] = {}
+
+    def register(self, session_id: str, ws: WebSocket) -> None:
+        self._connections.setdefault(session_id, set()).add(ws)
+
+    def unregister(self, session_id: str, ws: WebSocket) -> None:
+        bucket = self._connections.get(session_id)
+        if bucket:
+            bucket.discard(ws)
+            if not bucket:
+                del self._connections[session_id]
+
+    async def broadcast(self, session_id: str, message: Dict[str, Any]) -> None:
+        """Send *message* to every live WebSocket watching *session_id*."""
+        dead: set = set()
+        for ws in list(self._connections.get(session_id, [])):
+            try:
+                if _ws_is_open(ws):
+                    await ws.send_json(message)
+                else:
+                    dead.add(ws)
+            except Exception:
+                dead.add(ws)
+        for ws in dead:
+            self.unregister(session_id, ws)
+
+
+# Module-level singleton — imported by session_routes for PATCH broadcasts
+ws_manager = _SessionWsManager()
+
+
 def _parse_sse_event(sse_chunk: str) -> Optional[Dict[str, Any]]:
     """Parse an SSE string like 'event: X\\ndata: {...}\\n\\n' into a dict."""
     event_type = ""
@@ -131,6 +172,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                        note="session has no app_id and no tenant_name — r2_service uses R2_BUCKET_NAME env fallback")
 
     logger.info("ws.connected", session_id=session_id, tenant_id=tenant_id)
+    ws_manager.register(session_id, websocket)
 
     # Shared state
     phase = "idle"  # idle | executing | processing_prompt
@@ -562,4 +604,5 @@ async def ws_execute(websocket: WebSocket, session_id: str):
             except Exception:
                 pass
 
+        ws_manager.unregister(session_id, websocket)
         logger.info("ws.cleanup", session_id=session_id)

@@ -51,25 +51,15 @@ from integration.api.sync_webhook_routes import sync_webhook_router
 
 
 # ── Logging setup ────────────────────────────────────────────────────
+# LOG_LEVEL from config — NEVER "debug"/"trace" in production (SOC 2 CC7.2 / C1.1).
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
-# Shared processors for structlog
-shared_processors = [
-    structlog.contextvars.merge_contextvars,
-    structlog.stdlib.add_log_level,
-    structlog.stdlib.add_logger_name,
-    structlog.processors.TimeStamper(fmt="iso"),
-    structlog.processors.StackInfoRenderer(),
-    structlog.processors.format_exc_info,
-    structlog.processors.UnicodeDecoder(),
-]
-
-# Configure stdlib logging to write to file + console
+# Configure stdlib routing so uvicorn / third-party loggers write via structlog.
 logging.basicConfig(
     format="%(message)s",
-    level=logging.INFO,
+    level=logging.getLevelName(settings.LOG_LEVEL.upper()),
     handlers=[
         logging.StreamHandler(sys.stdout),
         logging.FileHandler(LOG_DIR / "integration-builder.log", encoding="utf-8"),
@@ -78,21 +68,21 @@ logging.basicConfig(
 
 structlog.configure(
     processors=[
-        *shared_processors,
-        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        # add_logger_name requires a stdlib logger (.name attr) — use
+        # stdlib.LoggerFactory(), not PrintLoggerFactory() (structlog ≥24.1).
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.JSONRenderer(),
     ],
+    wrapper_class=structlog.make_filtering_bound_logger(
+        logging.getLevelName(settings.LOG_LEVEL.upper())
+    ),
+    context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
 )
-
-# Formatter for stdlib handlers — renders structlog events as JSON
-formatter = structlog.stdlib.ProcessorFormatter(
-    processor=structlog.processors.JSONRenderer(),
-    foreign_pre_chain=shared_processors,
-)
-for handler in logging.root.handlers:
-    handler.setFormatter(formatter)
 
 logger = structlog.get_logger(__name__)
 
@@ -143,15 +133,26 @@ class TenantBucketMiddleware(BaseHTTPMiddleware):
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Logs every HTTP request with method, path, status, and duration."""
+    """Logs every HTTP request with method, path, status, and duration.
+
+    Reads ``X-Correlation-Id`` from the inbound request (or generates a fresh
+    UUID hex) and binds it into structlog contextvars so every log line emitted
+    during that request carries ``correlation_id`` automatically.  The value is
+    also echoed back in the response header.
+    """
 
     async def dispatch(self, request: Request, call_next):
+        # Prefer inbound X-Correlation-Id; fall back to a new UUID hex.
+        correlation_id = request.headers.get("X-Correlation-Id") or uuid.uuid4().hex
         request_id = str(uuid.uuid4())[:8]
         start = time.perf_counter()
 
-        # Bind request_id to structlog context for this request
+        # Bind correlation_id + request_id to structlog context for this request.
         structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(request_id=request_id)
+        structlog.contextvars.bind_contextvars(
+            correlation_id=correlation_id,
+            request_id=request_id,
+        )
 
         logger.info(
             "http.request_started",
@@ -187,6 +188,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         )
 
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-Correlation-Id"] = correlation_id
         return response
 
 
@@ -280,7 +282,7 @@ async def lifespan(app: FastAPI):
     _connectors_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
     if _connectors_root not in _sys.path:
         _sys.path.insert(0, _connectors_root)
-    from shared.discovery_client import DiscoveryClient
+    from shielva_common.discovery_client import DiscoveryClient
     ssl_up = bool(settings.SSL_CERTFILE and settings.SSL_KEYFILE)
     scheme = "https" if ssl_up else "http"
     app.state.discovery = DiscoveryClient(
@@ -314,6 +316,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Global exception handlers — structured JSON error envelope for all error classes.
+from integration.core.error_handlers import install_exception_handlers  # noqa: E402
+install_exception_handlers(app)
+
+# SOP observability — traces + /sop-metrics. Single SDK call wires the
+# Prometheus middleware ahead of the per-request stack below.
+from shielva_common.sop_sdk import setup_sop
+setup_sop(app, service_name="shielva-integration-builder")
 
 # Middleware (order matters: first added = outermost)
 app.add_middleware(

@@ -1,0 +1,100 @@
+{
+  "connector_type": "gmail",
+  "name": "Shielva Gmail Connector",
+  "display_name": "Gmail",
+  "version": "1.0.0",
+  "description": "Connects to a Google account to read recent Gmail messages and send email on the user's behalf via the Gmail API.",
+  "auth_type": "oauth2_code",
+  "module": "connector",
+  "class_name": "GmailConnector",
+  "capabilities": ["read", "send", "sync"],
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Google Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "971554707993-xxxx.apps.googleusercontent.com",
+      "help": "OAuth 2.0 Client ID from your Google Cloud project (APIs & Services → Credentials)."
+    },
+    {
+      "key": "client_secret",
+      "label": "Google Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "GOCSPX-...",
+      "help": "OAuth 2.0 Client Secret. Stored AES-256-GCM encrypted at rest — never persisted in plaintext."
+    },
+    {
+      "key": "scopes",
+      "label": "Scopes",
+      "type": "multiselect",
+      "required": false,
+      "help": "Gmail OAuth scopes. Defaults to read-only + send.",
+      "multi_select": true,
+      "suggestions": [
+        {"label": "Read Only", "value": "https://www.googleapis.com/auth/gmail.readonly", "description": "Read emails and metadata only"},
+        {"label": "Send", "value": "https://www.googleapis.com/auth/gmail.send", "description": "Send emails on behalf of the user"}
+      ]
+    },
+    {
+      "key": "sync_query",
+      "label": "Sync Filter Query",
+      "type": "text",
+      "required": false,
+      "placeholder": "newer_than:7d",
+      "help": "Optional Gmail search query to scope which messages sync() reads (e.g. 'in:inbox newer_than:7d')."
+    },
+    {
+      "key": "max_results",
+      "label": "Max Messages per Sync",
+      "type": "number",
+      "required": false,
+      "placeholder": "10",
+      "help": "How many recent messages each sync run reads (default 10)."
+    }
+  ],
+  "apis": [
+    {
+      "name": "sync",
+      "method": "sync",
+      "description": "List recent Gmail messages, fetch and normalize each, and ingest them into the knowledge base.",
+      "params": []
+    },
+    {
+      "name": "send_email",
+      "method": "send_email",
+      "description": "Send an email on behalf of the authenticated Gmail user.",
+      "params": [
+        {"name": "to", "type": "string", "required": true, "description": "Recipient email address"},
+        {"name": "subject", "type": "string", "required": true, "description": "Email subject line"},
+        {"name": "body", "type": "string", "required": true, "description": "Plain-text email body"}
+      ]
+    }
+  ],
+  "painter": {
+    "painter_type": "form",
+    "config": {
+      "title": "Connect to Gmail",
+      "submit_label": "Connect",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "Google Client ID",
+          "type": "text",
+          "required": true,
+          "placeholder": "971554707993-xxxx.apps.googleusercontent.com",
+          "help": "OAuth 2.0 Client ID from your Google Cloud project."
+        },
+        {
+          "key": "client_secret",
+          "label": "Google Client Secret",
+          "type": "password",
+          "required": true,
+          "placeholder": "GOCSPX-...",
+          "help": "OAuth 2.0 Client Secret. Stored encrypted at rest."
+        }
+      ]
+    }
+  }
+}
