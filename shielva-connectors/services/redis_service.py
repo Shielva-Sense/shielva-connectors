@@ -68,5 +68,18 @@ class RedisService:
             return await self.client.keys(pattern)
         return []
 
+    async def publish(self, channel: str, message: str) -> int:
+        """Publish a message to a Redis pub/sub channel.
+
+        Returns the number of subscribers that received it (0 if Redis is down).
+        Used for cluster-wide fan-out (e.g. connector hot-reload across gateway
+        pods) so shared mutable state stays consistent across replicas.
+        """
+        if not self.client:
+            await self.connect()
+        if self.client:
+            return await self.client.publish(channel, message)
+        return 0
+
 # Singleton instance
 redis_service = RedisService()
