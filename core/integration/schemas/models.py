@@ -164,6 +164,15 @@ class IntegrationSession(BaseModel):
     service: str
     connector_name: str = ""   # human-readable name for this connector instance
     user_prompt: str = ""
+    # ── Run lineage ───────────────────────────────────────────────────────────
+    # A session is one "run" of the builder against a connector. The first run is
+    # a "build"; subsequent "enhance" runs link back to the originating build via
+    # parent_session_id. Each run owns its OWN scratch state (plan, stepper, exec
+    # results, tests, draft docs) — runs never clobber each other. The PUBLISHED
+    # artifact (generated_connectors/{tenant}/{name}_connector) is name-keyed and
+    # shared, so an enhance run updates the same canonical connector.
+    run_kind: str = "build"                       # "build" | "enhance"
+    parent_session_id: Optional[str] = None       # set on enhance runs → originating build session id
     status: SessionStatus = SessionStatus.PLANNING
     plan: PlanDocument = Field(default_factory=PlanDocument)
     comments: List[StepComment] = Field(default_factory=list)

@@ -1520,6 +1520,18 @@ async def raise_sync_request(
         if not _validate_path(f.path):
             raise HTTPException(status_code=400, detail=f"Invalid file path: {f.path}")
 
+    # Enforce the tenant segment from the AUTHENTICATED tenant — never client input.
+    # The desktop app builds `generated_connectors/{tenantId}/...` from a LOCAL setting
+    # that can be a placeholder (e.g. "shielva-sense"), but the gateway + connector loader
+    # key on the JWT-derived tenant ({x_tenant_id}). Without this rewrite the PR lands at
+    # generated_connectors/<placeholder>/... and the loader never picks it up under the
+    # real tenant. (Also a CC6.7 tenant-isolation fix: path derives from auth, not client.)
+    import re as _re_tenant
+    _gc_prefix = _re_tenant.compile(r'^generated_connectors/[^/]+/')
+    for f in body.files:
+        if f.path.startswith("generated_connectors/") and _gc_prefix.match(f.path):
+            f.path = _gc_prefix.sub(f"generated_connectors/{x_tenant_id}/", f.path)
+
     col = _sync_requests_col()
 
     # Atomic hold check — use find_one with conditions to avoid race window

@@ -255,7 +255,103 @@ async def link_app_to_tenant(
     return {"ok": True, "sessions_updated": result.modified_count}
 
 
+# ── Slug helper ───────────────────────────────────────────────────────
+
+def _compute_unique_slug(session_id_str: str, connector_name: str, service: str, seed: str) -> str:
+    """Derive a per-session service_slug: {base_slug}_{6-char-hash}  e.g. gmail_a3f9c1.
+
+    The base is the connector name (or provider service as fallback) with any
+    trailing 'connector' word stripped; the 6-char suffix is md5(session_id + seed)
+    so every session — build OR enhance — gets its own isolated workspace + R2 scratch.
+    """
+    import re as _slug_re, hashlib as _slug_hash
+
+    _cn = (connector_name or "").strip().lower()
+    _cn = _slug_re.sub(r'[\s_]+connector\s*$', '', _cn)
+    _cn = _slug_re.sub(r'[\s\-]+', '_', _cn)
+    _cn = _slug_re.sub(r'[^\w]', '', _cn)
+    _cn = _slug_re.sub(r'_connector$', '', _cn)
+    _base_slug = _cn or service.replace("-", "_").lower()
+    _suffix = _slug_hash.md5(f"{session_id_str}{seed}".encode()).hexdigest()[:6]
+    return f"{_base_slug}_{_suffix}"
+
+
 # ── CRUD ──────────────────────────────────────────────────────────────
+
+@session_router.post("/{session_id}/enhance-run")
+async def create_enhance_run(
+    session_id: str,
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_name: Optional[str] = Header(None),
+):
+    """Start a NEW enhancement run against an existing connector.
+
+    An enhance run is its own session (own slug → own plan/stepper/exec/tests/docs
+    scratch) linked to the originating build via parent_session_id. It copies the
+    parent's connector identity (provider/service/connector_name/llm_model) but starts
+    with a fresh workflow, so it never clobbers the build run's history. The published
+    artifact stays name-keyed, so on merge the SAME canonical connector is updated.
+
+    Returns the new run's id + slug AND the parent's slug/name so the caller can seed
+    the new run's local workspace from the parent connector's files.
+    """
+    from bson import ObjectId
+    app_id    = x_app_id or None
+    tenant_id = x_tenant_id or None
+    tenant_name = (x_tenant_name or "").strip().lower()
+
+    try:
+        parent_oid = ObjectId(session_id)
+    except Exception:
+        raise HTTPException(400, "Invalid session_id")
+
+    parent = await sessions_collection().find_one(_session_filter(parent_oid, app_id, tenant_id))
+    if not parent:
+        raise HTTPException(404, "Parent connector session not found")
+
+    child = IntegrationSession(
+        app_id=parent.get("app_id") or app_id,
+        tenant_id=parent.get("tenant_id") or tenant_id,
+        tenant_name=parent.get("tenant_name") or tenant_name,
+        provider=parent["provider"],
+        service=parent["service"],
+        connector_name=parent.get("connector_name", ""),
+        llm_model=parent.get("llm_model", ""),
+        user_prompt="",
+        status=SessionStatus.PLANNING,
+        run_kind="enhance",
+        parent_session_id=session_id,
+    )
+    doc = child.model_dump()
+    result = await sessions_collection().insert_one(doc)
+    child_id = str(result.inserted_id)
+
+    unique_slug = _compute_unique_slug(
+        child_id, parent.get("connector_name", ""), parent["service"],
+        (parent.get("app_id") or parent.get("tenant_id") or child_id),
+    )
+    await sessions_collection().update_one(
+        {"_id": result.inserted_id},
+        {"$set": {"service_slug": unique_slug}},
+    )
+
+    logger.info(
+        "session.enhance_run_created",
+        run_id=child_id, parent_id=session_id,
+        tenant_id=child.tenant_id, service_slug=unique_slug,
+    )
+    return {
+        "id": child_id,
+        "service_slug": unique_slug,
+        "run_kind": "enhance",
+        "parent_session_id": session_id,
+        "parent_service_slug": parent.get("service_slug", ""),
+        "connector_name": parent.get("connector_name", ""),
+        "provider": parent["provider"],
+        "service": parent["service"],
+    }
+
 
 @session_router.post("")
 async def create_session(
@@ -295,29 +391,10 @@ async def create_session(
 
     # ── Unique service_slug ──────────────────────────────────────────────────
     # Each session gets its own isolated output directory even when the same
-    # connector name is used multiple times. The slug is derived from the
-    # connector name (or provider+service as fallback) plus a 6-char suffix
-    # built from the ObjectId's embedded timestamp bytes and tenant_id.
-    # Format: {base_slug}_{6-char-hash}  e.g.  gmail_a3f9c1
-    import re as _slug_re, hashlib as _slug_hash
-
-    _cn = (body.connector_name or "").strip().lower()
-    # Strip trailing "connector" word in all forms the user might type:
-    #   "Shielva Gmail Connector" → "shielva_gmail"
-    #   "shielva_gmail_connector" → "shielva_gmail"
-    _cn = _slug_re.sub(r'[\s_]+connector\s*$', '', _cn)
-    _cn = _slug_re.sub(r'[\s\-]+', '_', _cn)
-    _cn = _slug_re.sub(r'[^\w]', '', _cn)
-    # Final safety: strip any residual _connector suffix after replacements
-    _cn = _slug_re.sub(r'_connector$', '', _cn)
-    _base_slug = _cn or body.service.replace("-", "_").lower()
-
-    # 6 alphanumeric chars: md5( objectId_hex + tenant_id )[:6]
-    # Use app_id as hash seed (pre-login) or tenant_id (legacy fallback)
-    _hash_seed = app_id or tenant_id or session_id_str
-    _hash_input = f"{session_id_str}{_hash_seed}"
-    _suffix = _slug_hash.md5(_hash_input.encode()).hexdigest()[:6]
-    _unique_slug = f"{_base_slug}_{_suffix}"
+    # connector name is used multiple times (build run + every enhance run).
+    _unique_slug = _compute_unique_slug(
+        session_id_str, body.connector_name, body.service, app_id or tenant_id or session_id_str
+    )
 
     await sessions_collection().update_one(
         {"_id": result.inserted_id},

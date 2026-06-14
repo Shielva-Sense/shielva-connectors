@@ -198,9 +198,13 @@ async def reconstruct_user_prompt(
     )
 
     try:
-        response, _ = await _claude.chat(
-            user_msg,
-            system=_RECONSTRUCT_SYSTEM,
+        # Hard timeout: this is an external LLM call. Without it, a slow/unreachable
+        # model hangs the /plan-prompt endpoint indefinitely (the bare try/except only
+        # catches errors, not hangs). On timeout we honor the documented contract below
+        # and fall back to the raw prompt rather than blocking plan generation.
+        response, _ = await asyncio.wait_for(
+            _claude.chat(user_msg, system=_RECONSTRUCT_SYSTEM),
+            timeout=25.0,
         )
         reconstructed = (response or "").strip()
         if len(reconstructed) > 50:
@@ -212,6 +216,8 @@ async def reconstruct_user_prompt(
                 reconstructed_len=len(reconstructed),
             )
             return reconstructed
+    except asyncio.TimeoutError:
+        logger.warning("plan.prompt_reconstruct_timeout", provider=provider, service=service)
     except Exception as exc:
         logger.warning("plan.prompt_reconstruct_failed", error=str(exc))
 
@@ -811,14 +817,12 @@ async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str,
 
     guidelines_content, guidelines_version = await _get_guidelines_for_planning()
 
-    # Reconstruct / expand informal user prompt into structured spec before planning
-    if user_prompt:
-        user_prompt = await reconstruct_user_prompt(
-            raw_prompt=user_prompt,
-            provider=provider,
-            service=service_slug,
-            auth_type=catalog.get("auth_type", "api_key"),
-        )
+    # NOTE: do NOT reconstruct/expand the prompt here. This function exists solely to
+    # hand the assembled prompt to the desktop app's LOCAL Claude CLI, which expands the
+    # requirements itself during planning. Calling reconstruct_user_prompt() would spawn
+    # a redundant SERVER-SIDE Claude CLI subprocess (900s timeout) that blocks this
+    # endpoint for seconds-to-minutes and makes "Generate Plan" look frozen. The local
+    # planning run does the expansion — keep the raw user_prompt as-is.
 
     _rcf = catalog.get("required_config_fields", [])
     required_config_fields_section = (
