@@ -198,8 +198,19 @@ class GmailConnector(BaseConnector):
         full: bool = False,
         kb_id: str = None,
         webhook_url: str = None,
+        count: int = None,
+        offset: int = None,
+        page_no: int = None,
     ) -> SyncResult:
-        """List recent messages, fetch + normalize each, and ingest the batch."""
+        """List messages (paginated), fetch + normalize each, and ingest the batch.
+
+        Pagination params:
+          count   — page size (how many messages to return; capped at 500).
+          offset  — how many messages to skip from the start ("skip previous N").
+          page_no — 1-based page; offset takes precedence when both are given.
+        Gmail itself is cursor-based, so offset/page_no are served by walking its
+        pageToken cursor; shallow offsets cost little, deep offsets cost extra list calls.
+        """
         result = SyncResult(
             status=SyncStatus.SYNCING,
             connector_id=self.connector_id,
@@ -214,14 +225,35 @@ class GmailConnector(BaseConnector):
             result.completed_at = datetime.utcnow()
             return result
 
-        max_results = int(self.config.get("max_results", 10))
+        # Resolve pagination: count = page size, skip = messages to skip.
+        page_size = int(count) if count else int(self.config.get("max_results", 10))
+        page_size = max(1, min(page_size, 500))
+        skip = int(offset) if offset is not None else (max(1, int(page_no or 1)) - 1) * page_size
         query = self.config.get("sync_query") or None
 
         try:
-            refs = await self._client.list_messages(
-                access_token=token.access_token, max_results=max_results, query=query
-            )
-            result.documents_found = len(refs)
+            # Walk Gmail's cursor, skipping `skip` ids and collecting `page_size`.
+            ids: List[str] = []
+            skipped = 0
+            page_token = None
+            while len(ids) < page_size:
+                refs, page_token = await self._client.list_messages(
+                    access_token=token.access_token, max_results=page_size,
+                    query=query, page_token=page_token,
+                )
+                for r in refs:
+                    mid = r.get("id")
+                    if not mid:
+                        continue
+                    if skipped < skip:
+                        skipped += 1
+                        continue
+                    if len(ids) < page_size:
+                        ids.append(mid)
+                if not page_token:  # no more pages
+                    break
+            result.documents_found = len(ids)
+            refs = [{"id": i} for i in ids]  # downstream uses refs/ids below
 
             # Fetch all message bodies in ONE batched round-trip (Gmail /batch
             # endpoint) instead of N sequential messages.get calls — N sequential

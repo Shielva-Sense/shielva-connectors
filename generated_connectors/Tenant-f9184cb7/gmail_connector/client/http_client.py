@@ -136,17 +136,25 @@ class GmailClient:
         access_token: str,
         max_results: int = 10,
         query: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
-        """GET /users/me/messages — returns [{id, threadId}, ...]."""
+        page_token: Optional[str] = None,
+    ) -> tuple[List[Dict[str, str]], Optional[str]]:
+        """GET /users/me/messages — returns ([{id, threadId}, ...], next_page_token).
+
+        Gmail paginates with a cursor (pageToken/nextPageToken), not offset/page —
+        pass the returned next_page_token back as page_token to walk forward.
+        """
         params: Dict[str, Any] = {"maxResults": max_results}
         if query:
             params["q"] = query
+        if page_token:
+            params["pageToken"] = page_token
         url = f"{self.api_base}/users/me/messages"
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as http:
             resp = await http.get(url, headers=self._auth_headers(access_token), params=params)
             if resp.status_code != 200:
                 raise RuntimeError(f"list messages failed ({resp.status_code}): {resp.text[:300]}")
-            return resp.json().get("messages", []) or []
+            data = resp.json()
+            return (data.get("messages", []) or [], data.get("nextPageToken"))
 
     async def get_message(self, *, access_token: str, message_id: str, fmt: str = "full") -> Dict[str, Any]:
         """GET /users/me/messages/{id} — full message resource."""
