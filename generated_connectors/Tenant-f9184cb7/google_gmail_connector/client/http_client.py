@@ -19,7 +19,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from exceptions import GmailAPIError, GmailAuthError, GmailRateLimitError
+from exceptions import GmailAPIError, GmailAuthError, GmailNotFoundError, GmailRateLimitError
 from helpers.utils import retry_on_rate_limit, retry_on_server_error
 
 logger = structlog.get_logger(__name__)
@@ -28,6 +28,7 @@ logger = structlog.get_logger(__name__)
 _HTTP_ERROR_MAP: Dict[int, tuple] = {
     401: (GmailAuthError, "HTTP 401"),
     403: (GmailAuthError, "HTTP 403"),
+    404: (GmailNotFoundError, "HTTP 404 not found"),
     429: (GmailRateLimitError, "HTTP 429 rate limit"),
 }
 
@@ -140,6 +141,111 @@ class GmailHTTPClient:
                     format=format,
                     metadataHeaders=metadata_headers,
                 )
+                .execute(),
+            )
+        except HttpError as exc:
+            raise self._map_http_error(exc) from exc
+        except TransportError as exc:
+            raise GmailAPIError(f"Transport error: {exc}") from exc
+
+    @retry_on_server_error
+    async def execute_modify_message(
+        self,
+        msg_id: str,
+        add_label_ids: Optional[List[str]] = None,
+        remove_label_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Call users.messages.modify to add/remove labels on a message."""
+        try:
+            service = await self._get_service()
+            loop = asyncio.get_event_loop()
+            body: Dict[str, Any] = {
+                "addLabelIds": add_label_ids or [],
+                "removeLabelIds": remove_label_ids or [],
+            }
+            return await loop.run_in_executor(
+                None,
+                lambda: service.users()
+                .messages()
+                .modify(userId="me", id=msg_id, body=body)
+                .execute(),
+            )
+        except HttpError as exc:
+            raise self._map_http_error(exc) from exc
+        except TransportError as exc:
+            raise GmailAPIError(f"Transport error: {exc}") from exc
+
+    @retry_on_server_error
+    async def execute_import_message(self, raw_b64: str) -> Dict[str, Any]:
+        """Call users.messages.import to insert an RFC 2822 message into the mailbox."""
+        try:
+            service = await self._get_service()
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: service.users()
+                .messages()
+                .import_(userId="me", body={"raw": raw_b64})
+                .execute(),
+            )
+        except HttpError as exc:
+            raise self._map_http_error(exc) from exc
+        except TransportError as exc:
+            raise GmailAPIError(f"Transport error: {exc}") from exc
+
+    @retry_on_rate_limit
+    async def execute_trash_message(self, msg_id: str) -> Dict[str, Any]:
+        """Call users.messages.trash — moves message to Trash (reversible).
+
+        Requires gmail.modify scope.
+        Returns the full message resource with TRASH in labelIds.
+        """
+        try:
+            service = await self._get_service()
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: service.users().messages().trash(userId="me", id=msg_id).execute(),
+            )
+        except HttpError as exc:
+            raise self._map_http_error(exc) from exc
+        except TransportError as exc:
+            raise GmailAPIError(f"Transport error: {exc}") from exc
+
+    @retry_on_rate_limit
+    async def execute_delete_message(self, msg_id: str) -> None:
+        """Call users.messages.delete — permanently removes a message (irreversible).
+
+        Requires https://mail.google.com/ scope.
+        Returns None on success (HTTP 204).
+        """
+        try:
+            service = await self._get_service()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: service.users().messages().delete(userId="me", id=msg_id).execute(),
+            )
+        except HttpError as exc:
+            raise self._map_http_error(exc) from exc
+        except TransportError as exc:
+            raise GmailAPIError(f"Transport error: {exc}") from exc
+
+    @retry_on_rate_limit
+    async def execute_batch_delete_messages(self, msg_ids: List[str]) -> None:
+        """Call users.messages.batchDelete — permanently removes up to 1000 messages.
+
+        Requires https://mail.google.com/ scope.
+        Returns None on success (HTTP 204).
+        """
+        try:
+            service = await self._get_service()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: service.users()
+                .messages()
+                .batchDelete(userId="me", body={"ids": msg_ids})
                 .execute(),
             )
         except HttpError as exc:
