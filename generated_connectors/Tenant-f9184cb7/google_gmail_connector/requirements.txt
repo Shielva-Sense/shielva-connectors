@@ -1,7 +1,7 @@
 # Shielva connector SDK — provides BaseConnector and shared utilities.
 # For local development this installs directly from the monorepo.
 # For production replace with: shielva-connector-sdk>=1.0.0
--e /Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/shielva-connectors
+-e /Users/vivekvarshavaishvik/Documents/Shielva Automation/shielva-connectors
 
 # ── Connector-specific dependencies ──────────────────────────────
 # IMPORTANT: Do NOT add packages that are pre-installed in the shared

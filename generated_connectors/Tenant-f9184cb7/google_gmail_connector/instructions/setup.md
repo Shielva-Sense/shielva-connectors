@@ -1,10 +1,8 @@
-# Setup Instructions: Google Gmail
+# Setup Instructions: Google Gmail Connector
 
 ## Overview
 
-The Google Gmail connector allows the Shielva platform to ingest email messages from a Gmail inbox. It reads message metadata and body previews from the authenticated user's INBOX using the Gmail REST API v1. After setup, Shielva can run full or incremental syncs to keep its knowledge base up to date with incoming email.
-
-This connector uses the **OAuth2 Authorization Code** flow. You will need to create a Google Cloud project and register an OAuth2 client — no manual token generation is required. Once your credentials are entered, Shielva will redirect you through Google's consent screen automatically.
+The Google Gmail connector lets Shielva read, manage, and delete email messages from a Gmail mailbox using the Google Gmail REST API. It authenticates via OAuth2, so end users authorize Shielva to access their Gmail account through a standard Google consent screen — no passwords are shared. Once connected, the connector can ingest emails, move messages to Trash, permanently delete individual or batches of messages, and apply or remove labels. This connector is intended for workspace administrators or end users who want to index or automate actions on Gmail content within Shielva.
 
 ---
 
@@ -12,116 +10,154 @@ This connector uses the **OAuth2 Authorization Code** flow. You will need to cre
 
 Before starting, make sure you have:
 
-- A **Google account** that owns or has access to the Gmail inbox you want to connect.
-- A **Google Cloud project** (free tier is sufficient). Create one at [Google Cloud Console](https://console.cloud.google.com/).
-- The **Gmail API enabled** on your Google Cloud project.
-- Permission to create **OAuth2 credentials** (Client ID and Client Secret) in that project.
+- A **Google account** with access to the Gmail mailbox you want to connect.
+- Access to the **Google Cloud Console** (console.cloud.google.com) with permission to create or manage a project.
+- A **GCP project** with the Gmail API enabled (see Step 1 below).
+- An **OAuth2 client** of type "Web application" created in that project (see Step 2 below).
+- The Shielva platform **redirect URI** provided by your Shielva administrator — you will paste it into the GCP Console during setup.
 
 ---
 
 ## Step-by-Step Configuration
 
-### Step 1: Enable the Gmail API
+### Step 1: Enable the Gmail API in Google Cloud Console
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) and select your project.
-2. In the left menu, click **APIs & Services** → **Library**.
-3. Search for **"Gmail API"** and click on it.
-4. Click **Enable**. If it already shows **Manage**, it is already enabled.
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and sign in.
+2. Select or create a GCP project using the project selector at the top of the page.
+3. In the left-hand navigation, click **APIs & Services** → **Library**.
+4. Search for **Gmail API** and click the result.
+5. Click **Enable**. Wait for the status to change to "Enabled".
 
 ---
 
-### Step 2: Create an OAuth2 Client ID (`client_id`)
+### Step 2: Create an OAuth2 Client Credential
 
-1. In the left menu, click **APIs & Services** → **Credentials**.
-2. Click **+ Create Credentials** at the top, then select **OAuth client ID**.
-3. If prompted, complete the **OAuth consent screen** first:
-   - Set **User type** to **External** (unless this is an internal organization app).
-   - Fill in **App name**, **User support email**, and **Developer contact information**.
-   - Under **Scopes**, add `https://www.googleapis.com/auth/gmail.readonly`.
-   - Save and continue until the consent screen is published.
-4. Back at **Create OAuth client ID**, set **Application type** to **Web application**.
-5. Under **Authorized redirect URIs**, add the redirect URI provided by Shielva (shown on the connector setup page).
+1. In the left-hand navigation, click **APIs & Services** → **Credentials**.
+2. Click **+ Create Credentials** → **OAuth client ID**.
+3. If prompted, click **Configure consent screen** first:
+   - Choose **Internal** (if this is a Google Workspace org) or **External**.
+   - Fill in the required fields (App name, support email, developer contact).
+   - Under **Scopes**, add the following scopes (click "Add or remove scopes"):
+     - `https://www.googleapis.com/auth/gmail.modify`
+     - `https://mail.google.com/`
+   - Save and return to the Credentials page.
+4. For **Application type**, select **Web application**.
+5. Under **Authorized redirect URIs**, click **+ Add URI** and paste the Shielva redirect URI provided by your administrator.
 6. Click **Create**.
-7. Copy the **Client ID** value — this is your `client_id`.
-
-   Example format: `123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com`
+7. A dialog will show your **Client ID** and **Client Secret** — copy both now (you will need them in Steps 3 and 4 below).
 
 ---
 
-### Step 3: Copy the OAuth Client Secret (`client_secret`)
+### Step 3: OAuth Client ID (`client_id`)
 
-1. On the same **OAuth 2.0 Client IDs** page (from Step 2), click the pencil icon next to your client.
-2. Find the **Client secret** field and click **Copy**.
-3. Store this value securely — you will not be able to see it again without regenerating it.
+- **Where to find it**: The "Client ID" value shown after creating the OAuth credential in Step 2, or visible in **APIs & Services → Credentials** by clicking the pencil icon next to your OAuth client.
+- **Format**: A long string ending in `.apps.googleusercontent.com` — for example: `123456789-abcdefg.apps.googleusercontent.com`
+- **Tip**: Copy it exactly — do not include any surrounding quotes or spaces.
 
-   Example format: `GOCSPX-aBcDeFgHiJkLmNoPqRsTuVwXyZ`
-
----
-
-### Step 4: Enter credentials in Shielva
-
-On the Shielva connector setup page, fill in:
-
-| Field | Where to get it | Required |
-|---|---|---|
-| **OAuth Client ID** (`client_id`) | GCP Console → APIs & Services → Credentials → your OAuth client | ✅ Required |
-| **OAuth Client Secret** (`client_secret`) | GCP Console → APIs & Services → Credentials → your OAuth client | ✅ Required |
-
-The following fields are **optional** and have sensible defaults — leave them blank unless you need to override them:
-
-| Field | Default | When to change |
-|---|---|---|
-| **OAuth Scopes** (`scopes`) | `https://www.googleapis.com/auth/gmail.readonly` | Only if your use case requires additional Gmail scopes |
-| **Authorization URL** (`auth_url`) | `https://accounts.google.com/o/oauth2/v2/auth` | Do not change unless directed by Shielva support |
-| **Token URL** (`token_url`) | `https://oauth2.googleapis.com/token` | Do not change unless directed by Shielva support |
-| **Base API URL** (`base_url`) | `https://gmail.googleapis.com` | Do not change unless directed by Shielva support |
-| **Rate Limit (quota units/min)** (`rate_limit_per_min`) | Google-imposed default | Set a lower number if you are hitting Gmail quota limits |
-| **Pagination Type** (`pagination_type`) | `page_token` | Do not change |
-| **API Version** (`api_version`) | `v1` | Do not change |
+**In Shielva**, paste this value into the **OAuth Client ID** field.
 
 ---
 
-### Step 5: Authorize with Google
+### Step 4: OAuth Client Secret (`client_secret`)
 
-1. After saving your credentials, click **Authorize** on the Shielva connector page.
-2. You will be redirected to a Google sign-in and consent screen.
-3. Sign in with the Google account whose Gmail inbox you want to connect.
-4. Click **Allow** to grant Shielva read-only access to Gmail.
-5. You will be redirected back to Shielva. The connector status should change to **Connected**.
+- **Where to find it**: The "Client Secret" value shown immediately after creating the OAuth credential, or by clicking **Download JSON** on the Credentials page and reading the `client_secret` field.
+- **Tip**: If you did not copy it during creation, click the pencil icon on your OAuth client in the Credentials list and then click **Reset Secret** to generate a new one (the old secret will stop working immediately).
+
+**In Shielva**, paste this value into the **OAuth Client Secret** field.
+
+---
+
+### Step 5 (Optional): OAuth Scopes (`scopes`)
+
+- **What it is**: The set of Gmail API permissions Shielva will request during OAuth authorization.
+- **Default**: `https://www.googleapis.com/auth/gmail.modify https://mail.google.com/` — covers reading, trashing, labeling, and permanently deleting messages.
+- **Format**: Space-separated scope URLs.
+- **When to change**: Only if your organization restricts which scopes are allowed, or if you need read-only access (`https://www.googleapis.com/auth/gmail.readonly`). Narrowing the scope will disable trash and delete operations.
+
+**In Shielva**, leave the **OAuth Scopes** field blank to use the defaults, or enter a space-separated list of scope URLs.
+
+---
+
+### Step 6 (Optional): Authorization URL (`auth_url`)
+
+- **What it is**: The Google OAuth2 authorization endpoint that Shielva redirects users to during the consent flow.
+- **Default**: `https://accounts.google.com/o/oauth2/v2/auth`
+- **When to change**: Only if your organization uses a custom identity provider. Leave blank in almost all cases.
+
+**In Shielva**, leave the **Authorization URL** field blank to use the Google default.
+
+---
+
+### Step 7 (Optional): Token URL (`token_url`)
+
+- **What it is**: The endpoint Shielva calls to exchange the OAuth2 authorization code for tokens.
+- **Default**: `https://oauth2.googleapis.com/token`
+- **When to change**: Only for non-standard Google setups. Leave blank in almost all cases.
+
+**In Shielva**, leave the **Token URL** field blank to use the Google default.
+
+---
+
+### Step 8 (Optional): Base API URL (`base_url`)
+
+- **What it is**: The root URL for Gmail REST API calls.
+- **Default**: `https://gmail.googleapis.com`
+- **When to change**: Only if your organization uses a VPC Service Control perimeter or a custom API proxy. Leave blank in almost all cases.
+
+**In Shielva**, leave the **Base API URL** field blank to use the Google default.
+
+---
+
+### Step 9 (Optional): Rate Limit (`rate_limit_per_min`)
+
+- **What it is**: Maximum Gmail API quota units per minute the connector will consume.
+- **Default**: Blank (uses the Google-imposed project quota).
+- **Format**: A whole number, for example `250`.
+- **When to change**: If you want to throttle Shielva's API usage to avoid affecting other applications sharing the same GCP project.
+
+**In Shielva**, enter a number in the **Rate Limit (quota units/min)** field, or leave it blank.
+
+---
+
+### Step 10 (Optional): Pagination Type (`pagination_type`)
+
+- **What it is**: The pagination strategy used when listing messages.
+- **Default**: `page_token` (Gmail's `nextPageToken` cursor-based mechanism).
+- **When to change**: Do not change this unless instructed by Shielva support.
+
+**In Shielva**, leave the **Pagination Type** field blank to use the default.
+
+---
+
+### Step 11 (Optional): API Version (`api_version`)
+
+- **What it is**: The Gmail REST API version the connector will call.
+- **Default**: `v1` (the current stable version).
+- **When to change**: Do not change this unless instructed by Shielva support.
+
+**In Shielva**, leave the **API Version** field blank to use `v1`.
 
 ---
 
 ## Testing the Connection
 
-After completing authorization:
-
-1. On the connector detail page, click **Health Check** (or **Test Connection**).
-2. If the status shows **Healthy — Connected as user@gmail.com**, the connection is working.
-3. Click **Sync Now** → **Full Sync** to run an initial sync and verify that emails are ingested.
+1. After saving all fields, click **Authorize** (or **Connect**) in the Shielva connector setup page.
+2. You will be redirected to a Google sign-in and consent screen.
+3. Sign in with the Gmail account you want to connect, then click **Allow** to grant Shielva the requested permissions.
+4. You will be redirected back to Shielva. The connector status should change to **Connected**.
+5. Click **Run Health Check** (if available) to confirm the connector can reach the Gmail API.
 
 ---
 
 ## Troubleshooting
 
-### "Invalid client_id or client_secret"
-- Double-check that you copied the credentials from the correct GCP project and the correct OAuth2 client.
-- Make sure you did not copy the **Client ID** into the **Client Secret** field by mistake.
-- If you regenerated the client secret, enter the new value — the old one is no longer valid.
-
-### "Redirect URI mismatch"
-- The redirect URI registered in your GCP OAuth client must exactly match the URI shown on the Shielva connector setup page.
-- Go to GCP Console → **APIs & Services** → **Credentials** → your OAuth client → **Authorized redirect URIs** and add the exact URI Shielva displays.
-
-### "Access blocked: this app is not verified"
-- Your OAuth consent screen is in **Testing** mode and the authorizing account is not listed as a test user.
-- Go to GCP Console → **APIs & Services** → **OAuth consent screen** → **Test users** → add the Gmail account you are authorizing.
-- Alternatively, publish the consent screen to allow any Google account.
-
-### "Token expired — re-authorize required"
-- The refresh token has been revoked (e.g. the user changed their Google password or revoked app access).
-- Go to [myaccount.google.com/permissions](https://myaccount.google.com/permissions), remove the Shielva app, then re-authorize from the Shielva connector page.
-
-### "Quota exceeded (HTTP 429)"
-- Your GCP project has hit the Gmail API quota limit.
-- Go to GCP Console → **APIs & Services** → **Quotas** → search **Gmail API** and request a quota increase.
-- You can also reduce the sync frequency in Shielva or set a lower `rate_limit_per_min` value.
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| "client_id is required" on save | The Client ID field was left blank | Paste the Client ID from the GCP Credentials page |
+| "client_secret is required" on save | The Client Secret field was left blank | Paste the Client Secret; reset it in GCP if lost |
+| Redirect to Google fails with "redirect_uri_mismatch" | The redirect URI in GCP does not match Shielva's URI | In GCP, add the exact Shielva redirect URI to "Authorized redirect URIs" and save |
+| Google consent screen shows "Access blocked: app has not been verified" | OAuth consent screen is in test mode | Add the target Gmail account as a test user in **APIs & Services → OAuth consent screen → Test users** |
+| Connector status shows "Token Expired" | Refresh token was revoked or the session expired | Re-authorize by clicking **Authorize** again |
+| 403 "Insufficient scope" when trashing or deleting emails | Granted scopes do not include `gmail.modify` or `https://mail.google.com/` | Re-authorize after clearing the Scopes field to use the defaults |
+| 404 "Message not found" error | The message ID no longer exists in the mailbox | The message was already deleted — no action needed |
+| Rate limit errors (429) | Too many API calls per minute | Set **Rate Limit (quota units/min)** to a lower value, or request a quota increase in GCP |

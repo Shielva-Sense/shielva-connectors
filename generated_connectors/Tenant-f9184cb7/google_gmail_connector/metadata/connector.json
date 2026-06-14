@@ -1,8 +1,8 @@
 {
   "name": "GmailConnector",
   "display_name": "Google Gmail",
-  "version": "1.0.0",
-  "description": "Connects to Google Gmail via OAuth2 to ingest email messages from a user's inbox into Shielva.",
+  "version": "1.1.0",
+  "description": "Connects to Google Gmail via OAuth2 to ingest, manage, and delete email messages from a user's mailbox into Shielva.",
   "provider": "google",
   "service": "google_gmail_connector",
   "auth_type": "oauth2_code",
@@ -26,7 +26,7 @@
       "label": "OAuth Scopes",
       "type": "string",
       "required": false,
-      "help": "Space-separated OAuth scopes. Defaults to 'https://www.googleapis.com/auth/gmail.readonly'."
+      "help": "Space-separated OAuth scopes. Defaults to 'https://www.googleapis.com/auth/gmail.modify https://mail.google.com/' which enables read, trash, label, and permanent delete operations."
     },
     {
       "key": "auth_url",
@@ -94,13 +94,58 @@
     },
     {
       "name": "list_email",
-      "description": "Fetch all matching email metadata with full pagination. Calls execute_list_messages() for stubs then execute_get_message() per message. Returns a flat list of raw message dicts.",
+      "description": "Fetch all matching email metadata with full auto-pagination. Calls execute_list_messages() for stubs then execute_get_message() per message. Returns a flat list of raw message dicts.",
       "returns": "List[Dict]"
     },
     {
       "name": "on_token_refresh",
       "description": "Refresh the OAuth2 access token using the stored refresh_token. Sole owner of token-refresh logic — called automatically by ensure_token() when the token is expired.",
       "returns": "TokenInfo"
+    },
+    {
+      "name": "read_email",
+      "description": "Fetch a single email message by ID using users.messages.get. Supports format='metadata' or 'full'. Returns the raw message resource dict.",
+      "returns": "Dict"
+    },
+    {
+      "name": "add_email",
+      "description": "Import an RFC 2822 message (base64url-encoded) into the mailbox using users.messages.import. Returns the created message resource.",
+      "returns": "Dict"
+    },
+    {
+      "name": "list_message",
+      "description": "Fetch a single page of message stubs (id, threadId) from Gmail. Returns the raw API response including nextPageToken for caller-controlled pagination.",
+      "returns": "Dict"
+    },
+    {
+      "name": "update_email",
+      "description": "Modify label membership of an email message using users.messages.modify. Accepts separate add_label_ids and remove_label_ids lists.",
+      "returns": "Dict"
+    },
+    {
+      "name": "label_email",
+      "description": "Apply one or more label IDs to an email message (additive — existing labels are preserved). Delegates to execute_modify_message() with an empty remove_label_ids list.",
+      "returns": "Dict"
+    },
+    {
+      "name": "trash_email",
+      "description": "Move an email to Trash (reversible) using users.messages.trash. Requires gmail.modify scope. Returns the full message resource with TRASH in labelIds.",
+      "returns": "Dict"
+    },
+    {
+      "name": "delete_email",
+      "description": "Permanently delete a single email (irreversible) using users.messages.delete. Requires https://mail.google.com/ scope. Emits a WARN-level audit log entry.",
+      "returns": "None"
+    },
+    {
+      "name": "remove_email",
+      "description": "Alias for delete_email — permanently deletes a single email. Provided for API consistency.",
+      "returns": "None"
+    },
+    {
+      "name": "batch_delete_emails",
+      "description": "Permanently delete a batch of emails in a single API call using users.messages.batchDelete. Requires https://mail.google.com/ scope. Maximum 1000 IDs per call. Emits a WARN-level audit log entry.",
+      "returns": "None"
     }
   ],
   "dependencies": [
