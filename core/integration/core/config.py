@@ -1,6 +1,7 @@
 """Integration Builder — Configuration."""
 
 import shutil
+from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from typing import Optional
@@ -64,8 +65,12 @@ class IntegrationSettings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     LLM_WORKER_TIMEOUT: int = 300  # seconds to wait for worker result
 
-    # Generated code output directory
-    GENERATED_CODE_DIR: str = "./generated_connectors"
+    # Generated code output directory — the repo-root generated_connectors/, matching
+    # the gateway's loader. Resolved from this file's location (core/integration/core/
+    # config.py → parents[3] = repo root) so it's machine-agnostic and cwd-independent.
+    # Its .parent is the repo root, and the test-runner falls back to core/ for shared/.
+    # plan_cache + CONNECTOR_DOCS live under it, inside the single canonical dir.
+    GENERATED_CODE_DIR: str = str(Path(__file__).resolve().parents[3] / "generated_connectors")
 
     # Cloudflare R2 (for caching integration prompts and plans)
     # Two-bucket architecture:

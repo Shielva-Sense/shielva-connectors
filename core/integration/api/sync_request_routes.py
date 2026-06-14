@@ -1677,6 +1677,101 @@ async def list_sync_requests(
     return results
 
 
+class ReconcileRequest(BaseModel):
+    # When set, reconcile only this one sync request (per-card refresh icon).
+    # When omitted, reconcile every non-terminal sync request for the tenant
+    # (login-time bulk reconcile).
+    sync_request_id: Optional[str] = None
+
+
+def _parse_gh_ts(ts: Optional[str]) -> Optional[datetime]:
+    """Parse a GitHub ISO-8601 timestamp (e.g. '2026-06-14T07:57:04Z')."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+@sync_request_router.post("/reconcile")
+async def reconcile_sync_requests(
+    body: ReconcileRequest = ReconcileRequest(),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Reconcile sync-request PR status against GitHub (pull-based truth).
+
+    For each tracked sync request in a non-terminal state with a PR number,
+    fetch the PR's real state from GitHub and update Mongo if it diverged —
+    merged on GitHub but still ``ready`` locally, or closed-without-merge.
+    Broadcasts the same SSE events the webhook does, so connected cards update live.
+
+    This is the pull-based complement to the push-based GitHub webhook: it catches
+    merges/closes that were never delivered (tunnel down, server restart, or a PR
+    merged directly on GitHub). Used by the login-time bulk reconcile (no id) and
+    the per-card refresh icon (with ``sync_request_id``).
+    """
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    token = sync_settings.get("github_token", "")
+    repo_url = sync_settings.get("github_repo_url", "")
+    if not token or not repo_url:
+        raise HTTPException(status_code=400, detail="GitHub token and repo URL must be configured first.")
+    owner, repo = _parse_repo(repo_url)
+
+    col = _sync_requests_col()
+    # Non-terminal statuses whose PR can still change on GitHub.
+    open_states = ["validating", "ci_passed", "ready", "approving"]
+    query: Dict[str, Any] = {"tenant_id": x_tenant_id, "pr_number": {"$ne": None}}
+    if body.sync_request_id:
+        try:
+            query["_id"] = ObjectId(body.sync_request_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid sync request ID")
+    else:
+        query["status"] = {"$in": open_states}
+
+    reconciled: List[Dict[str, Any]] = []
+    async for doc in col.find(query):
+        pr_number = doc.get("pr_number")
+        if not pr_number:
+            continue
+        try:
+            pr = await _github_request("GET", f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+        except HTTPException as exc:
+            logger.warning("reconcile.pr_fetch_failed", pr_number=pr_number, status=exc.status_code)
+            continue
+
+        gh_merged = bool(pr.get("merged", False))
+        gh_state = pr.get("state")  # "open" | "closed"
+        local_status = doc.get("status")
+        sid = str(doc["_id"])
+        now = datetime.utcnow()
+
+        if gh_merged and local_status != "merged":
+            merged_at = _parse_gh_ts(pr.get("merged_at")) or now
+            await col.update_one({"_id": doc["_id"]}, {"$set": {
+                "status": "merged", "merged_at": merged_at, "updated_at": now,
+            }})
+            _broadcast(x_tenant_id, "sync:request_merged", {
+                "sync_request_id": sid,
+                "approved_by": "github-reconcile",
+                "merged_at": merged_at.isoformat(),
+            })
+            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "merged"})
+        elif gh_state == "closed" and not gh_merged and local_status not in ("merged", "dismissed"):
+            await col.update_one({"_id": doc["_id"]}, {"$set": {
+                "status": "dismissed", "updated_at": now,
+            }})
+            _broadcast(x_tenant_id, "sync:request_dismissed", {
+                "sync_request_id": sid, "reason": "closed_on_github",
+            })
+            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "dismissed"})
+
+    logger.info("reconcile.done", tenant_id=x_tenant_id, reconciled=len(reconciled),
+                scope=("single" if body.sync_request_id else "all"))
+    return {"reconciled_count": len(reconciled), "reconciled": reconciled}
+
+
 @sync_request_router.get("/events")
 async def sync_events_stream(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
@@ -2321,6 +2416,36 @@ class WebhookConfigBody(BaseModel):
     webhook_url: str  # The public URL where GitHub should send events
 
 
+_WEBHOOK_PATH_SUFFIX = "/api/v3/sync-webhooks/github"
+
+
+async def _cleanup_stale_webhooks(owner: str, repo: str, token: str, keep_hook_id) -> int:
+    """Delete every OTHER Shielva sync webhook on the repo except ``keep_hook_id``.
+
+    Ephemeral Cloudflare quick-tunnels hand out a new hostname on each restart, so
+    each tunnel start used to register a fresh hook and leave the old (now-dead) one
+    behind — they pile up and every one fails delivery with 502. We identify ours by
+    the fixed path suffix and prune all but the one we just (re)registered.
+    """
+    try:
+        hooks = await _github_request("GET", f"/repos/{owner}/{repo}/hooks", token)
+    except HTTPException:
+        return 0
+    removed = 0
+    for h in hooks if isinstance(hooks, list) else []:
+        hid = h.get("id")
+        url = h.get("config", {}).get("url", "")
+        if hid != keep_hook_id and url.endswith(_WEBHOOK_PATH_SUFFIX):
+            try:
+                await _github_request("DELETE", f"/repos/{owner}/{repo}/hooks/{hid}", token)
+                removed += 1
+            except HTTPException as exc:
+                logger.warning("webhook.stale_delete_failed", hook_id=hid, status=exc.status_code)
+    if removed:
+        logger.info("webhook.stale_cleaned", owner=owner, repo=repo, removed=removed, kept=keep_hook_id)
+    return removed
+
+
 @sync_request_router.post("/webhook/register")
 async def register_webhook(
     body: WebhookConfigBody,
@@ -2388,6 +2513,8 @@ async def register_webhook(
             )
             # Also update the server config so HMAC verification uses the new secret
             settings.GITHUB_WEBHOOK_SECRET = webhook_secret
+            # Prune any other stale Shielva hooks (old tunnel URLs)
+            await _cleanup_stale_webhooks(owner, repo, token, hook_id)
             return {
                 "status": "updated",
                 "hook_id": hook_id,
@@ -2425,6 +2552,9 @@ async def register_webhook(
     )
     # Update server config for HMAC verification
     settings.GITHUB_WEBHOOK_SECRET = webhook_secret
+
+    # Prune any other stale Shielva hooks (old tunnel URLs) so they stop piling up.
+    await _cleanup_stale_webhooks(owner, repo, token, hook_id)
 
     return {
         "status": "created",

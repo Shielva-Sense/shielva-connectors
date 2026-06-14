@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
+from datetime import datetime
 
 from integration.db.database import sessions_collection
 from integration.services.docs_builder_service import (
@@ -36,6 +37,60 @@ class GenerateDocsRequest(BaseModel):
 class UpdateDocsRequest(BaseModel):
     prompt: str
     current_json: Dict[str, Any]
+
+
+class SaveDocsRequest(BaseModel):
+    docs: Dict[str, Any]
+
+
+@docs_router.post("/{session_id}/docs/save")
+async def save_session_docs(
+    session_id: str,
+    body: SaveDocsRequest,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Persist client-supplied docs JSON (e.g. regenerated locally in SAD) to BOTH
+    Mongo ``session.docs_json`` AND R2 ``CONNECTOR_DOCS``.
+
+    The docs reader (``GET /{id}/docs``) prefers R2 and falls back to Mongo, so
+    writing both makes a SAD-side regenerate show up immediately in ACP — the
+    previously-missing bridge between local docs and the store ACP reads.
+    """
+    docs_json = body.docs
+    if not isinstance(docs_json, dict) or not docs_json.get("sections"):
+        raise HTTPException(status_code=400, detail="docs must be a JSON object with a non-empty 'sections' array")
+    try:
+        oid = ObjectId(session_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+
+    now = datetime.utcnow()
+    result = await sessions_collection().update_one(
+        {"_id": oid, "tenant_id": x_tenant_id},
+        {"$set": {"docs_json": docs_json, "docs_updated_at": now}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Also persist to R2 (the reader prefers R2 when it has sections).
+    session_meta = await sessions_collection().find_one(
+        {"_id": oid, "tenant_id": x_tenant_id},
+        {"provider": 1, "service_slug": 1},
+    )
+    if session_meta and session_meta.get("provider") and session_meta.get("service_slug"):
+        try:
+            await r2_service.save_connector_docs(
+                tenant_id=x_tenant_id,
+                provider=session_meta.get("provider", ""),
+                service_slug=session_meta.get("service_slug", ""),
+                docs=docs_json,
+            )
+        except Exception as exc:
+            # Mongo is updated regardless; R2 is best-effort (and the reader falls back to Mongo).
+            logger.warning("docs_routes.save_r2_failed", session_id=session_id, error=str(exc)[:200])
+
+    logger.info("docs_routes.saved", session_id=session_id, tenant_id=x_tenant_id, sections=len(docs_json.get("sections", [])))
+    return {"saved": True, "updated_at": str(now)}
 
 
 class DocsSection(BaseModel):

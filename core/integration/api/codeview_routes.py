@@ -59,10 +59,35 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
 
     return {
         "service_slug": clean,
+        "service": service,
+        "provider": session.get("provider", "") or "",
         "stored_tenant_id": session.get("tenant_id", ""),
         "stored_tenant_name": (session.get("tenant_name") or "").strip().lower(),
         "session_id": session_id,
     }
+
+
+def _slug_candidates(meta: dict) -> list[str]:
+    """Candidate output-dir slugs for a session, most-specific first.
+
+    The directory a connector was written to can follow different slug
+    conventions depending on where it was built — the session's service_slug
+    (e.g. "google_gmail_168e0e"), the bare service ("gmail"), or
+    provider_service ("google_gmail"). Try each so resolution doesn't 404 when
+    the dir name doesn't match service_slug exactly.
+    """
+    provider = (meta.get("provider") or "").strip().lower()
+    service = (meta.get("service") or "").strip().lower()
+    raw = [
+        meta.get("service_slug") or "",
+        service,
+        f"{provider}_{service}" if provider and service else "",
+    ]
+    out: list[str] = []
+    for s in raw:
+        if s and s not in out:
+            out.append(s)
+    return out
 
 
 async def _resolve_output_dir(session_id: str, tenant_id: str) -> Path:
@@ -71,16 +96,15 @@ async def _resolve_output_dir(session_id: str, tenant_id: str) -> Path:
     Tries local disk first; raises 404 if not found (use _resolve_output_dir_or_r2 for R2 fallback).
     """
     meta = await _resolve_session_meta(session_id, tenant_id)
-    clean = meta["service_slug"]
     _base = Path(settings.GENERATED_CODE_DIR)
-    _candidates = [meta["stored_tenant_id"], tenant_id, meta["stored_tenant_name"]]
-    for _tid in _candidates:
+    for _tid in [meta["stored_tenant_id"], tenant_id, meta["stored_tenant_name"]]:
         if not _tid:
             continue
-        _candidate = _base / _tid / f"{clean}_connector"
-        if _candidate.exists():
-            return _candidate
-    raise HTTPException(status_code=404, detail=f"No generated files found for {clean}")
+        for _slug in _slug_candidates(meta):
+            _candidate = _base / _tid / f"{_slug}_connector"
+            if _candidate.exists():
+                return _candidate
+    raise HTTPException(status_code=404, detail=f"No generated files found for {meta['service_slug']}")
 
 
 async def _disk_or_r2(
@@ -101,11 +125,12 @@ async def _disk_or_r2(
     for _tid in [meta["stored_tenant_id"], tenant_id, meta["stored_tenant_name"]]:
         if not _tid:
             continue
-        _candidate = _base / _tid / f"{clean}_connector"
-        if _candidate.exists():
-            return _candidate, None
+        for _slug in _slug_candidates(meta):
+            _candidate = _base / _tid / f"{_slug}_connector"
+            if _candidate.exists():
+                return _candidate, None
 
-    # Disk missing — fall back to R2
+    # Disk missing — fall back to R2 (uploaded under the canonical service_slug)
     r2_tenant = meta["stored_tenant_id"] or tenant_id
     return None, {
         "service_slug": clean,

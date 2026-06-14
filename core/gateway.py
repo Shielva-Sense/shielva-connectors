@@ -128,7 +128,7 @@ def _find_connector_json(connector_type: str) -> dict | None:
     and returns the first match whose CONNECTOR_TYPE matches.
     Returns None if not found.
     """
-    root = Path(os.getenv("GENERATED_CODE_DIR", "generated_connectors")).resolve()
+    root = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     if not root.exists():
         return None
     for tenant_dir in root.iterdir():
@@ -181,6 +181,13 @@ def _validate_required_fields(config: dict, install_fields: list) -> list[str]:
 CONNECTOR_AST_SCAN = os.getenv("CONNECTOR_AST_SCAN", "enforce").lower()      # enforce | warn | off
 CONNECTOR_IMPORT_TIMEOUT_S = float(os.getenv("CONNECTOR_IMPORT_TIMEOUT_S", "10"))
 CONNECTOR_INVOKE_TIMEOUT_S = float(os.getenv("CONNECTOR_INVOKE_TIMEOUT_S", "30"))
+
+# Canonical connector tree lives at <repo-root>/generated_connectors/{tenant_id}/{name}_connector/.
+# Resolved from this file's location (…/shielva-connectors/core/gateway.py →
+# repo root …/shielva-connectors) so it's correct regardless of the process working directory —
+# previously it defaulted to a cwd-relative "generated_connectors", which is the NESTED dir and
+# does NOT match where SAD sync pushes connectors. Override with GENERATED_CODE_DIR if needed.
+_DEFAULT_GENERATED_DIR = str(Path(__file__).resolve().parent.parent / "generated_connectors")
 
 # Modules an HTTP/API connector never legitimately needs — importing any is a
 # hard block (process / host escape surface).
@@ -367,7 +374,7 @@ def _load_generated_connectors(generated_root: str = None) -> None:
     """
     import importlib.util
 
-    root = Path(generated_root or os.getenv("GENERATED_CODE_DIR", "generated_connectors")).resolve()
+    root = Path(generated_root or os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     if not root.exists():
         logger.info("generated_connectors directory not found — skipping dynamic load", path=str(root))
         return
@@ -429,8 +436,13 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                         )
                         subpkg_mod = importlib.util.module_from_spec(subpkg_spec)
                         sys.modules[subpkg_mod_name] = subpkg_mod
-                        # Also register as bare name so unqualified import works
-                        sys.modules.setdefault(subpkg, subpkg_mod)
+                        # Also register as bare name so the connector's unqualified
+                        # `from helpers.X import Y` resolves. OVERWRITE (not setdefault):
+                        # each connector execs synchronously, so the currently-loading
+                        # connector's package must win the bare name during its own exec —
+                        # otherwise the first connector's `helpers` shadows every sibling
+                        # (e.g. gmail's `helpers.gmail_utils` resolving against google's).
+                        sys.modules[subpkg] = subpkg_mod
                         _exec_module_with_timeout(
                             lambda m=subpkg_mod, s=subpkg_spec: s.loader.exec_module(m),
                             CONNECTOR_IMPORT_TIMEOUT_S, f"{mod_name}.{subpkg}",
@@ -443,7 +455,8 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                             child_spec = importlib.util.spec_from_file_location(child_mod_name, child_py)
                             child_mod = importlib.util.module_from_spec(child_spec)
                             sys.modules[child_mod_name] = child_mod
-                            sys.modules.setdefault(f"{subpkg}.{child_py.stem}", child_mod)
+                            # Overwrite the bare submodule name too (see note above).
+                            sys.modules[f"{subpkg}.{child_py.stem}"] = child_mod
                             _exec_module_with_timeout(
                                 lambda m=child_mod, s=child_spec: s.loader.exec_module(m),
                                 CONNECTOR_IMPORT_TIMEOUT_S, child_mod_name,
@@ -505,7 +518,7 @@ def _reload_generated_connectors(generated_root: str = None) -> dict:
     """
     import importlib.util
 
-    root = Path(generated_root or os.getenv("GENERATED_CODE_DIR", "generated_connectors")).resolve()
+    root = Path(generated_root or os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     if not root.exists():
         return {"loaded": 0, "updated": 0, "evicted_modules": 0}
 
@@ -803,35 +816,42 @@ async def pull_and_reload(
     result = {"git_pull": None, "reload": None}
     repo_root = Path(__file__).resolve().parent  # shielva-connectors/
 
-    # ── Step 1: git pull using PAT-authenticated HTTPS URL ──────────────────
+    # ── Step 1: fetch + checkout the target branch (PAT-authenticated) ───────
+    # The gateway tracks the connector merge branch (e.g. connector-development).
+    # FETCH that branch, then CHECKOUT it at the fetched tip — instead of
+    # `pull --ff-only`, which fails the moment the local branch and the remote
+    # target diverge, leaving merged connector code stranded. `checkout -B`
+    # makes the local branch deterministically match the freshly-fetched remote.
     try:
         owner, repo = _parse_repo_for_pull(body.github_repo_url)
         # Build authenticated HTTPS remote: https://<PAT>@github.com/owner/repo.git
         auth_remote = f"https://{body.github_token}@github.com/{owner}/{repo}.git"
 
-        proc = await _asyncio.to_thread(
-            _sp.run,
-            ["git", "pull", "--ff-only", auth_remote, body.target_branch],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        output = (proc.stdout + proc.stderr).strip()
-        # Sanitize — never include the PAT in responses or logs
-        safe_output = output.replace(body.github_token, "***")
+        def _run_git(*args: str):
+            return _sp.run(
+                ["git", *args],
+                cwd=str(repo_root), capture_output=True, text=True, timeout=30,
+            )
 
-        if proc.returncode == 0:
-            result["git_pull"] = "success"
-            logger.info("pull_and_reload.git_pull_success", branch=body.target_branch, output=safe_output[:200])
+        fetch_proc = await _asyncio.to_thread(_run_git, "fetch", auth_remote, body.target_branch)
+        fetch_out = (fetch_proc.stdout + fetch_proc.stderr).strip().replace(body.github_token, "***")
+        if fetch_proc.returncode != 0:
+            result["git_pull"] = f"fetch failed: {fetch_out[:200]}"
+            logger.error("pull_and_reload.git_fetch_failed", branch=body.target_branch, output=fetch_out[:500])
         else:
-            result["git_pull"] = f"failed: {safe_output[:200]}"
-            logger.error("pull_and_reload.git_pull_failed", branch=body.target_branch, output=safe_output[:500])
+            co_proc = await _asyncio.to_thread(_run_git, "checkout", "-B", body.target_branch, "FETCH_HEAD")
+            co_out = (co_proc.stdout + co_proc.stderr).strip().replace(body.github_token, "***")
+            if co_proc.returncode == 0:
+                result["git_pull"] = "success"
+                logger.info("pull_and_reload.git_checkout_success", branch=body.target_branch, output=co_out[:200])
+            else:
+                result["git_pull"] = f"checkout failed: {co_out[:200]}"
+                logger.error("pull_and_reload.git_checkout_failed", branch=body.target_branch, output=co_out[:500])
     except ValueError as e:
         result["git_pull"] = f"invalid repo URL: {str(e)[:100]}"
     except Exception as e:
         result["git_pull"] = f"error: {str(e)[:100]}"
-        logger.error("pull_and_reload.git_pull_error", error=str(e)[:200])
+        logger.error("pull_and_reload.git_error", error=str(e)[:200])
 
     # ── Step 2: Hot-reload connectors from disk ─────────────────────────────
     try:
@@ -1752,7 +1772,7 @@ async def list_connector_apis(
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Try reading connector.json from generated_connectors
-    generated_root = Path(os.getenv("GENERATED_CODE_DIR", "generated_connectors")).resolve()
+    generated_root = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     connector_type = connector.CONNECTOR_TYPE
 
     # Search all tenant dirs for this connector_type
@@ -1922,7 +1942,7 @@ async def get_connector_metadata(
     if connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    generated_root = Path(os.getenv("GENERATED_CODE_DIR", "generated_connectors")).resolve()
+    generated_root = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     connector_type = connector.CONNECTOR_TYPE
 
     for tenant_dir in generated_root.iterdir():
