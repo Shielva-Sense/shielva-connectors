@@ -26,7 +26,7 @@ from shared.base_connector import (
 )
 
 from client.http_client import GmailHTTPClient
-from exceptions import GmailAPIError, GmailAuthError, GmailNotFoundError, GmailRateLimitError
+from exceptions import GmailAPIError, GmailAuthError, GmailRateLimitError
 from helpers import normalizer
 from helpers.utils import build_after_query
 
@@ -39,10 +39,7 @@ class GmailConnector(BaseConnector):
     AUTH_TYPE = "oauth2_code"
     AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
     TOKEN_URI = "https://oauth2.googleapis.com/token"
-    REQUIRED_SCOPES = [
-        "https://www.googleapis.com/auth/gmail.modify",
-        "https://mail.google.com/",
-    ]
+    REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
     # OCP: config keys declared as class constant — install() validates from this list
     REQUIRED_CONFIG_KEYS = [
@@ -346,142 +343,3 @@ class GmailConnector(BaseConnector):
         await self.set_token(new_token)
         logger.info("gmail.token.refreshed", connector_id=self.connector_id)
         return new_token
-
-    # ── Standalone user-requested methods ─────────────────────────────────
-
-    async def read_email(
-        self,
-        msg_id: str,
-        format: str = "metadata",
-        metadata_headers: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Fetch a single email by message ID."""
-        if metadata_headers is None:
-            metadata_headers = ["Subject", "From", "Date"]
-        http = await self._build_http_client()
-        return await http.execute_get_message(
-            msg_id=msg_id,
-            format=format,
-            metadata_headers=metadata_headers,
-        )
-
-    async def add_email(self, raw_b64: str) -> Dict[str, Any]:
-        """Import an RFC 2822 message (base64url-encoded) into the mailbox."""
-        http = await self._build_http_client()
-        result = await http.execute_import_message(raw_b64=raw_b64)
-        logger.info(
-            "gmail.add_email.ok",
-            connector_id=self.connector_id,
-            msg_id=result.get("id"),
-        )
-        return result
-
-    async def list_message(
-        self,
-        label_ids: Optional[List[str]] = None,
-        query: Optional[str] = None,
-        page_token: Optional[str] = None,
-        max_results: int = 100,
-    ) -> Dict[str, Any]:
-        """Fetch one page of message stubs (id, threadId) from Gmail.
-
-        Returns the raw API response including nextPageToken.
-        Use list_email() for auto-paginated full retrieval.
-        """
-        if label_ids is None:
-            label_ids = ["INBOX"]
-        http = await self._build_http_client()
-        return await http.execute_list_messages(
-            label_ids=label_ids,
-            page_token=page_token,
-            max_results=max_results,
-            query=query,
-        )
-
-    async def update_email(
-        self,
-        msg_id: str,
-        add_label_ids: Optional[List[str]] = None,
-        remove_label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Modify label membership of an email message."""
-        http = await self._build_http_client()
-        return await http.execute_modify_message(
-            msg_id=msg_id,
-            add_label_ids=add_label_ids,
-            remove_label_ids=remove_label_ids,
-        )
-
-    async def label_email(
-        self,
-        msg_id: str,
-        label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Apply label_ids to an email message (additive — existing labels preserved)."""
-        http = await self._build_http_client()
-        return await http.execute_modify_message(
-            msg_id=msg_id,
-            add_label_ids=label_ids or [],
-            remove_label_ids=[],
-        )
-
-    async def trash_email(self, msg_id: str) -> Dict[str, Any]:
-        """Move an email to Trash (reversible).
-
-        Requires gmail.modify scope (included in REQUIRED_SCOPES).
-        Returns the full message resource with TRASH in labelIds.
-        Raises GmailNotFoundError if the message does not exist.
-        """
-        http = await self._build_http_client()
-        result = await http.execute_trash_message(msg_id=msg_id)
-        logger.info(
-            "gmail.trash_email.ok",
-            op="trash_email",
-            msg_id=msg_id,
-            tenant_id=self.tenant_id,
-            connector_id=self.connector_id,
-        )
-        return result
-
-    async def delete_email(self, msg_id: str) -> None:
-        """Permanently delete a single email (irreversible).
-
-        Requires https://mail.google.com/ scope (included in REQUIRED_SCOPES).
-        Raises GmailNotFoundError if the message does not exist.
-        Emits a WARN-level audit log with tenant_id and msg_id.
-        """
-        http = await self._build_http_client()
-        await http.execute_delete_message(msg_id=msg_id)
-        logger.warning(
-            "gmail.delete_email.audit",
-            op="delete_email",
-            msg_id=msg_id,
-            tenant_id=self.tenant_id,
-            connector_id=self.connector_id,
-        )
-
-    async def remove_email(self, msg_id: str) -> None:
-        """Alias for delete_email — permanently deletes a single email."""
-        await self.delete_email(msg_id=msg_id)
-
-    async def batch_delete_emails(self, msg_ids: List[str]) -> None:
-        """Permanently delete a batch of emails in a single API call (irreversible).
-
-        Requires https://mail.google.com/ scope (included in REQUIRED_SCOPES).
-        Gmail API allows a maximum of 1000 IDs per call.
-        Raises ValueError for an empty list or a list exceeding 1000 IDs.
-        Emits a WARN-level audit log with tenant_id and count.
-        """
-        if not msg_ids:
-            raise ValueError("msg_ids must be a non-empty list")
-        if len(msg_ids) > 1000:
-            raise ValueError("batch_delete_emails supports at most 1000 message IDs per call")
-        http = await self._build_http_client()
-        await http.execute_batch_delete_messages(msg_ids=msg_ids)
-        logger.warning(
-            "gmail.batch_delete_emails.audit",
-            op="batch_delete_emails",
-            count=len(msg_ids),
-            tenant_id=self.tenant_id,
-            connector_id=self.connector_id,
-        )

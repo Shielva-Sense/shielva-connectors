@@ -15,7 +15,7 @@ from shared.base_connector import AuthStatus, ConnectorHealth, TokenInfo
 CONNECTOR_CONFIG = {
     "client_id":          "test_client_id",
     "client_secret":      "test_client_secret",
-    "scopes":             "https://www.googleapis.com/auth/gmail.modify https://mail.google.com/",
+    "scopes":             "https://www.googleapis.com/auth/gmail.readonly",
     "auth_url":           "https://accounts.google.com/o/oauth2/v2/auth",
     "token_url":          "https://oauth2.googleapis.com/token",
     "base_url":           "https://gmail.googleapis.com",
@@ -38,8 +38,6 @@ RAW_MESSAGE = {
         ]
     },
 }
-
-RAW_TRASHED_MESSAGE = {**RAW_MESSAGE, "labelIds": ["TRASH"]}
 
 
 @pytest.fixture(autouse=True)
@@ -78,10 +76,7 @@ def valid_token():
         refresh_token="test_refresh_token",
         expires_at=datetime(2099, 12, 31),
         token_type="Bearer",
-        scopes=[
-            "https://www.googleapis.com/auth/gmail.modify",
-            "https://mail.google.com/",
-        ],
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"],
     )
 
 
@@ -106,12 +101,5 @@ def mock_http_client(mocker):
         "nextPageToken": None,
     })
     mock_instance.execute_get_message = AsyncMock(return_value=dict(RAW_MESSAGE))
-    mock_instance.execute_modify_message = AsyncMock(return_value=dict(RAW_MESSAGE))
-    mock_instance.execute_import_message = AsyncMock(return_value={
-        "id": "new_msg_id", "threadId": "t1", "labelIds": [],
-    })
-    mock_instance.execute_trash_message = AsyncMock(return_value=dict(RAW_TRASHED_MESSAGE))
-    mock_instance.execute_delete_message = AsyncMock(return_value=None)
-    mock_instance.execute_batch_delete_messages = AsyncMock(return_value=None)
     mocker.patch("connector.GmailHTTPClient", return_value=mock_instance)
     return mock_instance

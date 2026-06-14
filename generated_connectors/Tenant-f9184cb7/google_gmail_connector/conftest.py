@@ -2,4 +2,4 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/Users/vivekvarshavaishvik/Documents/Shielva Automation/shielva-connectors")
+sys.path.insert(0, "/Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/shielva-connectors")

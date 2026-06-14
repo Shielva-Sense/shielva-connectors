@@ -15,7 +15,3 @@ class GmailRateLimitError(GmailBaseError):
 
 class GmailAPIError(GmailBaseError):
     """Raised on 5xx responses or transport-level failures."""
-
-
-class GmailNotFoundError(GmailBaseError):
-    """Raised on 404 responses — message does not exist or was already deleted."""
