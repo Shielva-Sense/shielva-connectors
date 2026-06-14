@@ -276,27 +276,22 @@ def _local_path(key: str) -> Path:
     return _LOCAL_CACHE_DIR / key
 
 
+# ── Local-disk fallback DISABLED ─────────────────────────────────────────────
+# The connector CLI generates everything locally in the connector's .shielva/ dir,
+# and the backend's durable store is MongoDB (plan lives in the session doc, docs in
+# session.docs_json) with R2 as the optional cloud layer. Writing a second copy to
+# local disk only polluted the repo (it created generated_connectors/plan_cache/...
+# via mkdir). So when R2 is not configured we persist nothing to disk — reads return
+# None and callers fall back to Mongo.
 def _local_read(key: str) -> Optional[str]:
-    """Read a file from local cache. Returns None if not found."""
-    path = _local_path(key)
-    if not path.exists():
-        return None
-    return path.read_text(encoding="utf-8")
+    return None
 
 
 def _local_write(key: str, content: str) -> None:
-    """Write a file to local cache, creating parent directories as needed."""
-    path = _local_path(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    return None
 
 
 def _local_delete(key: str) -> bool:
-    """Delete a file from local cache. Returns True if deleted, False if not found."""
-    path = _local_path(key)
-    if path.exists():
-        path.unlink()
-        return True
     return False
 
 
@@ -400,9 +395,9 @@ def ensure_bucket() -> None:
     return the correct per-app bucket from the X-App-ID ContextVar.
     """
     if _use_local():
-        # Ensure local cache root exists
-        _LOCAL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info("cache.local_dir_ready", path=str(_LOCAL_CACHE_DIR))
+        # Local-disk fallback is disabled — nothing is persisted to disk (Mongo is the
+        # store when R2 is off). Do NOT mkdir the cache root; that's what created the
+        # in-repo generated_connectors/plan_cache/ folder.
         return
 
     from botocore.exceptions import ClientError
@@ -1193,14 +1188,8 @@ async def _load_raw_step_prompt(prompt_name: str, local_fallback: str) -> str:
         except Exception as exc:
             logger.warning("step_prompt.r2_read_failed", prompt=prompt_name, error=str(exc))
 
-    # Seed local disk on first miss so future restarts read from disk
-    if local_fallback and _use_local():
-        local_path = _local_path(key)
-        if not local_path.exists():
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            local_path.write_text(local_fallback, encoding="utf-8")
-            logger.info("step_prompt.seeded_local", prompt=prompt_name, chars=len(local_fallback))
-
+    # Local-disk seeding disabled (no disk writes — that created the in-repo
+    # plan_cache folder). Reads fall back to the caller's hardcoded prompt.
     logger.debug("step_prompt.using_local_fallback", prompt=prompt_name)
     return local_fallback
 
@@ -1273,10 +1262,9 @@ async def save_step_prompt(prompt_name: str, content: str) -> None:
         _step_prompt_cache.pop(k, None)
 
     if _use_local():
-        local_path = _local_path(key)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_text(content, encoding="utf-8")
-        logger.info("step_prompt.saved_local", prompt=prompt_name, chars=len(content))
+        # Local-disk fallback disabled — no-op when R2 is off (admin prompt updates
+        # require R2; reads use the caller's hardcoded default).
+        logger.info("step_prompt.save_skipped_no_r2", prompt=prompt_name)
         return
 
     loop = asyncio.get_event_loop()
