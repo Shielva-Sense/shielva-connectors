@@ -223,13 +223,23 @@ class GmailConnector(BaseConnector):
             )
             result.documents_found = len(refs)
 
+            # Fetch all message bodies in ONE batched round-trip (Gmail /batch
+            # endpoint) instead of N sequential messages.get calls — N sequential
+            # calls (~1s each) blow past the connector invoke timeout on large
+            # max_results. The batch fans out concurrently and returns in seconds.
+            ids = [r.get("id") for r in refs if r.get("id")]
+            raw_by_id = await self._client.batch_get_messages(
+                access_token=token.access_token, message_ids=ids
+            )
+
             docs: List[NormalizedDocument] = []
-            for ref in refs:
-                mid = ref.get("id")
-                if not mid:
+            for mid in ids:
+                raw = raw_by_id.get(mid)
+                if raw is None:
+                    result.documents_failed += 1
+                    result.errors.append(f"message {mid}: not returned by batch")
                     continue
                 try:
-                    raw = await self._client.get_message(access_token=token.access_token, message_id=mid)
                     docs.append(
                         normalize_message(
                             raw, tenant_id=self.tenant_id, connector_id=self.connector_id
