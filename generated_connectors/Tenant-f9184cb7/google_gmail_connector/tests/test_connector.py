@@ -603,7 +603,7 @@ async def test_normalized_document_carries_tenant_id(authed_connector, mock_http
 
 
 async def test_different_tenant_has_own_connector_id(mock_http_client, mocker):
-    from datetime import timedelta
+    from datetime import timedelta, datetime
     mocker.patch("connector.logger")
     mocker.patch.object(GmailConnector, "get_token", new_callable=AsyncMock, return_value=None)
     mocker.patch.object(GmailConnector, "set_token", new_callable=AsyncMock)
@@ -619,7 +619,7 @@ async def test_different_tenant_has_own_connector_id(mock_http_client, mocker):
     )
     other._token_info = TokenInfo(
         access_token="tok",
-        expires_at=__import__("datetime").datetime.utcnow() + timedelta(hours=1),
+        expires_at=datetime.utcnow() + timedelta(hours=1),
     )
     patch_http_client(mocker, mock_http_client)
 

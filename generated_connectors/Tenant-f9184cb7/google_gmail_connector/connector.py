@@ -1,6 +1,6 @@
 """GmailConnector — orchestration only; zero raw HTTP, zero JSON parsing."""
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -143,7 +143,7 @@ class GmailConnector(BaseConnector):
         scopes_raw = data.get("scope", "")
         scopes = scopes_raw.split() if isinstance(scopes_raw, str) else list(scopes_raw)
         expires_in = int(data.get("expires_in", 3600))
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + __import__("datetime").timedelta(seconds=expires_in)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         token_info = TokenInfo(
             access_token=data["access_token"],
