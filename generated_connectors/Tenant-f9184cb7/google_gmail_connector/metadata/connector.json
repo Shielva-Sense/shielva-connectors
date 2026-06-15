@@ -2,29 +2,97 @@
   "connector_type": "google_gmail",
   "name": "GmailConnector",
   "display_name": "Google Gmail",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ingests, manages, and deletes Gmail messages and threads via the Gmail REST API v1 with OAuth 2.0 authorization.",
   "provider": "google",
   "service": "gmail",
   "auth_type": "oauth2_code",
   "install_fields": [
     {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "help": "The OAuth 2.0 Client ID from the Google Cloud Console. Required to initiate the authorization flow."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "secret",
+      "required": true,
+      "help": "The OAuth 2.0 Client Secret from the Google Cloud Console. Required to exchange authorization codes and refresh access tokens."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth Scopes",
+      "type": "string",
+      "required": false,
+      "help": "Space-separated OAuth 2.0 scopes to request. Defaults to 'https://www.googleapis.com/auth/gmail.modify'. Add 'https://mail.google.com/' to enable permanent delete."
+    },
+    {
+      "key": "authorization_url",
+      "label": "Authorization URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the OAuth 2.0 authorization endpoint. Defaults to 'https://accounts.google.com/o/oauth2/v2/auth'."
+    },
+    {
+      "key": "token_url",
+      "label": "Token URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the OAuth 2.0 token endpoint for code exchange and token refresh. Defaults to 'https://oauth2.googleapis.com/token'."
+    },
+    {
+      "key": "base_url",
+      "label": "Base API URL",
+      "type": "string",
+      "required": false,
+      "help": "Override the Gmail REST API base URL. Defaults to 'https://gmail.googleapis.com/gmail/v1'. Useful for proxied or self-hosted API endpoints."
+    },
+    {
       "key": "allow_permanent_delete",
       "label": "Allow Permanent Delete",
       "type": "boolean",
       "required": false,
       "help": "When enabled, the connector can permanently delete messages and threads (unrecoverable). Requires the https://mail.google.com/ OAuth scope. Defaults to false (trash/soft-delete only)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "string",
+      "required": false,
+      "help": "Maximum number of Gmail API requests per minute. Defaults to 250 (Gmail API default quota)."
+    },
+    {
+      "key": "pagination_type",
+      "label": "Pagination Type",
+      "type": "string",
+      "required": false,
+      "help": "Pagination strategy for list operations. Defaults to 'cursor' (Gmail pageToken-based pagination)."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "help": "Gmail REST API version to use. Defaults to 'v1'."
     }
   ],
   "methods": [
     {
       "name": "install",
-      "description": "Validates connector config and returns a PENDING ConnectorStatus — no API call.",
+      "description": "Validates connector config (requires client_id and client_secret) and returns a PENDING ConnectorStatus — no API call.",
       "returns": "ConnectorStatus"
     },
     {
       "name": "authorize",
-      "description": "Exchanges an OAuth 2.0 authorization code for access and refresh tokens.",
+      "description": "Exchanges an OAuth 2.0 authorization code for access and refresh tokens using config-driven client_id, client_secret, and token_url.",
+      "returns": "TokenInfo"
+    },
+    {
+      "name": "on_token_refresh",
+      "description": "Refreshes an expired access token using the stored refresh token, sending config-driven client_id and client_secret to the token endpoint.",
       "returns": "TokenInfo"
     },
     {
@@ -51,6 +119,21 @@
       "name": "add_email",
       "description": "Applies label IDs to a Gmail message via messages.modify.",
       "returns": "Dict"
+    },
+    {
+      "name": "move_email",
+      "description": "Moves a Gmail message to a destination label, removing specified source labels (defaults to removing INBOX).",
+      "returns": "Dict"
+    },
+    {
+      "name": "update_email",
+      "description": "Adds and/or removes label IDs on a Gmail message via messages.modify.",
+      "returns": "Dict"
+    },
+    {
+      "name": "get_email",
+      "description": "Fetches a single Gmail message by ID and returns a NormalizedDocument. Identical delegation pattern to read_email.",
+      "returns": "NormalizedDocument"
     },
     {
       "name": "delete_email",
