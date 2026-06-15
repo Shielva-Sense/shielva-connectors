@@ -34,6 +34,12 @@ class GmailConnector(BaseConnector):
     CONNECTOR_NAME = "Google Gmail"
     AUTH_TYPE = "oauth2_code"
 
+    # ── OAuth2 provider endpoints (provider-wide; BaseConnector.get_oauth_url
+    #    reads AUTH_URI to build the consent URL, authorize() uses TOKEN_URI) ──
+    AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
+    TOKEN_URI = "https://oauth2.googleapis.com/token"
+    REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
     # ── Provider-wide hardcoded constants (same for every tenant) ───────────
     RATE_LIMIT_PER_MIN = 250
     PAGINATION_TYPE = "cursor"
