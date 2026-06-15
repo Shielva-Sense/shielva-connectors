@@ -1,21 +1,21 @@
 """Custom exception hierarchy for the Gmail connector."""
 
 
-class GmailBaseError(Exception):
+class ConnectorError(Exception):
     """Base exception for all Gmail connector errors."""
 
 
-class GmailAuthError(GmailBaseError):
-    """Raised on 401/403 responses — maps to MISSING_CREDENTIALS or TOKEN_EXPIRED."""
+class ConnectorAuthError(ConnectorError):
+    """Raised on HTTP 401 — token invalid or missing."""
 
 
-class GmailRateLimitError(GmailBaseError):
-    """Raised on 429 responses — triggers exponential backoff in the caller."""
+class ConnectorPermissionError(ConnectorError):
+    """Raised on HTTP 403 — insufficient scope or access denied."""
 
 
-class GmailAPIError(GmailBaseError):
-    """Raised on 5xx responses or transport-level failures."""
+class ConnectorNotFoundError(ConnectorError):
+    """Raised on HTTP 404 — resource not found."""
 
 
-class GmailNotFoundError(GmailBaseError):
-    """Raised on 404 responses — message does not exist or was already deleted."""
+class ConnectorRateLimitError(ConnectorError):
+    """Raised on HTTP 429 — rate limit exceeded; triggers retry backoff."""

@@ -1,158 +1,89 @@
 {
+  "connector_type": "google_gmail",
   "name": "GmailConnector",
   "display_name": "Google Gmail",
-  "version": "1.1.0",
-  "description": "Connects to Google Gmail via OAuth2 to ingest, manage, and delete email messages from a user's mailbox into Shielva.",
+  "version": "1.0.0",
+  "description": "Ingests, manages, and deletes Gmail messages and threads via the Gmail REST API v1 with OAuth 2.0 authorization.",
   "provider": "google",
-  "service": "google_gmail_connector",
+  "service": "gmail",
   "auth_type": "oauth2_code",
   "install_fields": [
     {
-      "key": "client_id",
-      "label": "OAuth Client ID",
-      "type": "string",
-      "required": true,
-      "help": "Google OAuth2 Client ID from the GCP Console (APIs & Services > Credentials)."
-    },
-    {
-      "key": "client_secret",
-      "label": "OAuth Client Secret",
-      "type": "secret",
-      "required": true,
-      "help": "Google OAuth2 Client Secret from the GCP Console (APIs & Services > Credentials)."
-    },
-    {
-      "key": "scopes",
-      "label": "OAuth Scopes",
-      "type": "string",
+      "key": "allow_permanent_delete",
+      "label": "Allow Permanent Delete",
+      "type": "boolean",
       "required": false,
-      "help": "Space-separated OAuth scopes. Defaults to 'https://www.googleapis.com/auth/gmail.modify https://mail.google.com/' which enables read, trash, label, and permanent delete operations."
-    },
-    {
-      "key": "auth_url",
-      "label": "Authorization URL",
-      "type": "string",
-      "required": false,
-      "help": "Override the OAuth2 authorization endpoint. Defaults to 'https://accounts.google.com/o/oauth2/v2/auth'."
-    },
-    {
-      "key": "token_url",
-      "label": "Token URL",
-      "type": "string",
-      "required": false,
-      "help": "Override the OAuth2 token endpoint. Defaults to 'https://oauth2.googleapis.com/token'."
-    },
-    {
-      "key": "base_url",
-      "label": "Base API URL",
-      "type": "string",
-      "required": false,
-      "help": "Override the Gmail API base URL. Defaults to 'https://gmail.googleapis.com'."
-    },
-    {
-      "key": "rate_limit_per_min",
-      "label": "Rate Limit (quota units/min)",
-      "type": "string",
-      "required": false,
-      "help": "Maximum Gmail API quota units per minute. Leave blank to use the Google-imposed default."
-    },
-    {
-      "key": "pagination_type",
-      "label": "Pagination Type",
-      "type": "string",
-      "required": false,
-      "help": "Pagination strategy identifier. Defaults to 'page_token' (Gmail's nextPageToken mechanism)."
-    },
-    {
-      "key": "api_version",
-      "label": "API Version",
-      "type": "string",
-      "required": false,
-      "help": "Gmail API version to use. Defaults to 'v1'."
+      "help": "When enabled, the connector can permanently delete messages and threads (unrecoverable). Requires the https://mail.google.com/ OAuth scope. Defaults to false (trash/soft-delete only)."
     }
   ],
   "methods": [
     {
       "name": "install",
-      "description": "Validate and persist the connector configuration (client_id, client_secret, and optional fields). Returns a ConnectorStatus with PENDING auth status and a prompt to authorize.",
+      "description": "Validates connector config and returns a PENDING ConnectorStatus — no API call.",
       "returns": "ConnectorStatus"
     },
     {
       "name": "authorize",
-      "description": "Exchange an OAuth2 authorization code for access and refresh tokens. Called after the user completes the OAuth2 consent screen.",
+      "description": "Exchanges an OAuth 2.0 authorization code for access and refresh tokens.",
       "returns": "TokenInfo"
     },
     {
       "name": "health_check",
-      "description": "Verify token validity by calling users.getProfile. Returns HEALTHY+CONNECTED on success, UNHEALTHY+TOKEN_EXPIRED on auth error.",
+      "description": "Verifies token validity by calling the Gmail users/me/profile endpoint.",
       "returns": "ConnectorStatus"
     },
     {
       "name": "sync",
-      "description": "Fetch and ingest Gmail messages. Supports full sync (all messages) and incremental sync (messages after a given datetime via after: query filter).",
+      "description": "Ingests new or updated messages via the Gmail list/get API with pageToken pagination; propagates deletions by diffing known IDs against the current response.",
       "returns": "SyncResult"
     },
     {
       "name": "list_email",
-      "description": "Fetch all matching email metadata with full auto-pagination. Calls execute_list_messages() for stubs then execute_get_message() per message. Returns a flat list of raw message dicts.",
-      "returns": "List[Dict]"
-    },
-    {
-      "name": "on_token_refresh",
-      "description": "Refresh the OAuth2 access token using the stored refresh_token. Sole owner of token-refresh logic — called automatically by ensure_token() when the token is expired.",
-      "returns": "TokenInfo"
+      "description": "Lists Gmail messages matching a query string; returns raw page dict including nextPageToken.",
+      "returns": "Dict"
     },
     {
       "name": "read_email",
-      "description": "Fetch a single email message by ID using users.messages.get. Supports format='metadata' or 'full'. Returns the raw message resource dict.",
-      "returns": "Dict"
+      "description": "Fetches a single Gmail message by ID and returns a NormalizedDocument.",
+      "returns": "NormalizedDocument"
     },
     {
       "name": "add_email",
-      "description": "Import an RFC 2822 message (base64url-encoded) into the mailbox using users.messages.import. Returns the created message resource.",
-      "returns": "Dict"
-    },
-    {
-      "name": "list_message",
-      "description": "Fetch a single page of message stubs (id, threadId) from Gmail. Returns the raw API response including nextPageToken for caller-controlled pagination.",
-      "returns": "Dict"
-    },
-    {
-      "name": "update_email",
-      "description": "Modify label membership of an email message using users.messages.modify. Accepts separate add_label_ids and remove_label_ids lists.",
-      "returns": "Dict"
-    },
-    {
-      "name": "label_email",
-      "description": "Apply one or more label IDs to an email message (additive — existing labels are preserved). Delegates to execute_modify_message() with an empty remove_label_ids list.",
-      "returns": "Dict"
-    },
-    {
-      "name": "trash_email",
-      "description": "Move an email to Trash (reversible) using users.messages.trash. Requires gmail.modify scope. Returns the full message resource with TRASH in labelIds.",
+      "description": "Applies label IDs to a Gmail message via messages.modify.",
       "returns": "Dict"
     },
     {
       "name": "delete_email",
-      "description": "Permanently delete a single email (irreversible) using users.messages.delete. Requires https://mail.google.com/ scope. Emits a WARN-level audit log entry.",
-      "returns": "None"
+      "description": "Alias for delete_message — trashes or permanently deletes a message.",
+      "returns": "Any"
     },
     {
       "name": "remove_email",
-      "description": "Alias for delete_email — permanently deletes a single email. Provided for API consistency.",
-      "returns": "None"
+      "description": "Alias for soft-delete — moves a message to Trash.",
+      "returns": "Any"
     },
     {
-      "name": "batch_delete_emails",
-      "description": "Permanently delete a batch of emails in a single API call using users.messages.batchDelete. Requires https://mail.google.com/ scope. Maximum 1000 IDs per call. Emits a WARN-level audit log entry.",
+      "name": "delete_message",
+      "description": "Trashes (permanent=False) or permanently deletes (permanent=True) a single Gmail message. Permanent delete requires allow_permanent_delete=True in config.",
+      "returns": "Dict or None"
+    },
+    {
+      "name": "delete_thread",
+      "description": "Trashes (permanent=False) or permanently deletes (permanent=True) an entire Gmail thread. Permanent delete requires allow_permanent_delete=True in config.",
+      "returns": "Dict or None"
+    },
+    {
+      "name": "bulk_delete",
+      "description": "Deletes all messages matching a Gmail query; collects all IDs via pageToken pagination first, then deletes individually with per-message error catching.",
+      "returns": "BulkDeleteResult"
+    },
+    {
+      "name": "disconnect",
+      "description": "Clears stored OAuth tokens and resets the connector auth status to PENDING.",
       "returns": "None"
     }
   ],
   "dependencies": [
-    "google-api-python-client>=2.100.0",
-    "google-auth-httplib2>=0.2.0",
-    "google-auth-oauthlib>=1.1.0",
-    "aiohttp>=3.9.0",
-    "tenacity>=8.2.0"
+    "aiohttp>=3.9.0"
   ]
 }

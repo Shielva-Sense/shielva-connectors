@@ -1,254 +1,164 @@
-"""Gmail API HTTP client.
+"""GmailHTTPClient — all Gmail REST API calls live here; zero business logic."""
+from typing import Any, Dict, List, Optional, Tuple, Type
 
-Sole owner of:
-- Building the Google API service object from an access_token.
-- All execute_* methods that call the Gmail REST API.
-- Mapping HttpError status codes to custom exceptions.
-
-Does NOT own token refresh, OAuth flow, or credential persistence.
-Those live exclusively in connector.py / on_token_refresh().
-"""
-from __future__ import annotations
-
-import asyncio
-from typing import Any, Dict, List, Optional
-
+import aiohttp
 import structlog
-from google.auth.exceptions import TransportError
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
-from exceptions import GmailAPIError, GmailAuthError, GmailNotFoundError, GmailRateLimitError
-from helpers.utils import retry_on_rate_limit, retry_on_server_error
+from exceptions import (
+    ConnectorAuthError,
+    ConnectorError,
+    ConnectorNotFoundError,
+    ConnectorPermissionError,
+    ConnectorRateLimitError,
+)
+from helpers.utils import retry
 
 logger = structlog.get_logger(__name__)
 
-# Maps HttpError status codes → (exception_class, message_prefix)
-_HTTP_ERROR_MAP: Dict[int, tuple] = {
-    401: (GmailAuthError, "HTTP 401"),
-    403: (GmailAuthError, "HTTP 403"),
-    404: (GmailNotFoundError, "HTTP 404 not found"),
-    429: (GmailRateLimitError, "HTTP 429 rate limit"),
-}
+_PAGE_SIZE = 100
 
 
 class GmailHTTPClient:
-    """Executes Gmail API calls; no auth-flow or token-refresh logic here."""
+    """Thin async HTTP wrapper over the Gmail REST API v1."""
 
-    def __init__(
-        self,
-        access_token: str,
-        api_version: str = "v1",
-    ) -> None:
+    # OCP-4: status-code → (exception_class, message_prefix) lookup
+    _ERROR_MAP: Dict[int, Tuple[Type[ConnectorError], str]] = {
+        401: (ConnectorAuthError, "Authentication failed"),
+        403: (ConnectorPermissionError, "Permission denied"),
+        404: (ConnectorNotFoundError, "Not found"),
+        429: (ConnectorRateLimitError, "Rate limited"),
+    }
+
+    def __init__(self, access_token: str, base_url: str) -> None:
         self._access_token = access_token
-        self._api_version = api_version
+        self._base_url = base_url.rstrip("/")
 
-    # ── Credentials helper ─────────────────────────────────────────────────
+    # ── Internal helpers ─────────────────────────────────────────────────────
 
-    def _build_credentials(self) -> Credentials:
-        """Build a simple Credentials object from the current access token."""
-        return Credentials(token=self._access_token)
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json",
+        }
 
-    async def _get_service(self) -> Any:
-        """Build and return an authenticated Gmail service object."""
-        creds = self._build_credentials()
-        loop = asyncio.get_event_loop()
-        service = await loop.run_in_executor(
-            None,
-            lambda: build("gmail", self._api_version, credentials=creds, cache_discovery=False),
-        )
-        return service
+    def _raise_for_status(self, status: int, response_text: str, context: str = "") -> None:
+        """Translate HTTP status codes into typed connector exceptions via lookup dict."""
+        entry = self._ERROR_MAP.get(status)
+        if entry:
+            exc_class, prefix = entry
+            raise exc_class(f"{prefix} [{context}]: {response_text}")
+        raise ConnectorError(f"HTTP {status} [{context}]: {response_text}")
 
-    # ── Error mapping ──────────────────────────────────────────────────────
+    # ── Profile ──────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _map_http_error(exc: HttpError) -> Exception:
-        status = int(exc.resp.status)
-        exc_class, prefix = _HTTP_ERROR_MAP.get(status, (GmailAPIError, f"HTTP {status}"))
-        return exc_class(f"{prefix}: {exc}")
-
-    # ── Public execute_* methods ───────────────────────────────────────────
-
+    @retry()
     async def execute_get_profile(self) -> Dict[str, Any]:
-        """Call users.getProfile to verify token validity."""
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users().getProfile(userId="me").execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
+        """GET users/me/profile — used by health_check()."""
+        url = f"{self._base_url}/users/me/profile"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self._headers()) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, "get_profile")
+                return await resp.json(content_type=None)
 
-    @retry_on_rate_limit
+    # ── Messages ─────────────────────────────────────────────────────────────
+
+    @retry()
     async def execute_list_messages(
         self,
-        label_ids: Optional[List[str]] = None,
+        query: str = "",
+        max_results: int = _PAGE_SIZE,
         page_token: Optional[str] = None,
-        max_results: int = 100,
-        query: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Call users.messages.list for one page of message stubs."""
-        if label_ids is None:
-            label_ids = ["INBOX", "UNREAD"]
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
+        """GET users/me/messages — returns {messages, nextPageToken, resultSizeEstimate}."""
+        url = f"{self._base_url}/users/me/messages"
+        params: Dict[str, Any] = {"maxResults": max_results}
+        if query:
+            params["q"] = query
+        if page_token:
+            params["pageToken"] = page_token
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self._headers(), params=params) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, "list_messages")
+                return await resp.json(content_type=None)
 
-            kwargs: Dict[str, Any] = {
-                "userId": "me",
-                "labelIds": label_ids,
-                "maxResults": max_results,
-            }
-            if page_token:
-                kwargs["pageToken"] = page_token
-            if query:
-                kwargs["q"] = query
+    @retry()
+    async def execute_get_message(self, msg_id: str) -> Dict[str, Any]:
+        """GET users/me/messages/{id}?format=full — returns full message resource."""
+        url = f"{self._base_url}/users/me/messages/{msg_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=self._headers(), params={"format": "full"}
+            ) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, f"get_message:{msg_id}")
+                return await resp.json(content_type=None)
 
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users().messages().list(**kwargs).execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
-
-    @retry_on_server_error
-    async def execute_get_message(
-        self,
-        msg_id: str,
-        format: str = "metadata",
-        metadata_headers: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Call users.messages.get to fetch message metadata + snippet."""
-        if metadata_headers is None:
-            metadata_headers = ["Subject", "From", "Date"]
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users()
-                .messages()
-                .get(
-                    userId="me",
-                    id=msg_id,
-                    format=format,
-                    metadataHeaders=metadata_headers,
-                )
-                .execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
-
-    @retry_on_server_error
+    @retry()
     async def execute_modify_message(
         self,
         msg_id: str,
         add_label_ids: Optional[List[str]] = None,
         remove_label_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Call users.messages.modify to add/remove labels on a message."""
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            body: Dict[str, Any] = {
-                "addLabelIds": add_label_ids or [],
-                "removeLabelIds": remove_label_ids or [],
-            }
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users()
-                .messages()
-                .modify(userId="me", id=msg_id, body=body)
-                .execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
+        """POST users/me/messages/{id}/modify — adds/removes label IDs."""
+        url = f"{self._base_url}/users/me/messages/{msg_id}/modify"
+        payload: Dict[str, Any] = {}
+        if add_label_ids:
+            payload["addLabelIds"] = add_label_ids
+        if remove_label_ids:
+            payload["removeLabelIds"] = remove_label_ids
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self._headers(), json=payload) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, f"modify_message:{msg_id}")
+                return await resp.json(content_type=None)
 
-    @retry_on_server_error
-    async def execute_import_message(self, raw_b64: str) -> Dict[str, Any]:
-        """Call users.messages.import to insert an RFC 2822 message into the mailbox."""
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users()
-                .messages()
-                .import_(userId="me", body={"raw": raw_b64})
-                .execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
-
-    @retry_on_rate_limit
+    @retry()
     async def execute_trash_message(self, msg_id: str) -> Dict[str, Any]:
-        """Call users.messages.trash — moves message to Trash (reversible).
+        """POST users/me/messages/{id}/trash — moves to Trash; returns trashed resource."""
+        url = f"{self._base_url}/users/me/messages/{msg_id}/trash"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self._headers()) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, f"trash_message:{msg_id}")
+                return await resp.json(content_type=None)
 
-        Requires gmail.modify scope.
-        Returns the full message resource with TRASH in labelIds.
-        """
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                lambda: service.users().messages().trash(userId="me", id=msg_id).execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
-
-    @retry_on_rate_limit
+    @retry()
     async def execute_delete_message(self, msg_id: str) -> None:
-        """Call users.messages.delete — permanently removes a message (irreversible).
+        """DELETE users/me/messages/{id} — permanent delete; returns None (204)."""
+        url = f"{self._base_url}/users/me/messages/{msg_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(url, headers=self._headers()) as resp:
+                if resp.status not in (200, 204):
+                    text = await resp.text()
+                    self._raise_for_status(resp.status, text, f"delete_message:{msg_id}")
 
-        Requires https://mail.google.com/ scope.
-        Returns None on success (HTTP 204).
-        """
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: service.users().messages().delete(userId="me", id=msg_id).execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
+    # ── Threads ──────────────────────────────────────────────────────────────
 
-    @retry_on_rate_limit
-    async def execute_batch_delete_messages(self, msg_ids: List[str]) -> None:
-        """Call users.messages.batchDelete — permanently removes up to 1000 messages.
+    @retry()
+    async def execute_trash_thread(self, thread_id: str) -> Dict[str, Any]:
+        """POST users/me/threads/{id}/trash — moves thread to Trash; returns trashed thread."""
+        url = f"{self._base_url}/users/me/threads/{thread_id}/trash"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self._headers()) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, f"trash_thread:{thread_id}")
+                return await resp.json(content_type=None)
 
-        Requires https://mail.google.com/ scope.
-        Returns None on success (HTTP 204).
-        """
-        try:
-            service = await self._get_service()
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: service.users()
-                .messages()
-                .batchDelete(userId="me", body={"ids": msg_ids})
-                .execute(),
-            )
-        except HttpError as exc:
-            raise self._map_http_error(exc) from exc
-        except TransportError as exc:
-            raise GmailAPIError(f"Transport error: {exc}") from exc
+    @retry()
+    async def execute_delete_thread(self, thread_id: str) -> None:
+        """DELETE users/me/threads/{id} — permanent delete; returns None (204)."""
+        url = f"{self._base_url}/users/me/threads/{thread_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(url, headers=self._headers()) as resp:
+                if resp.status not in (200, 204):
+                    text = await resp.text()
+                    self._raise_for_status(resp.status, text, f"delete_thread:{thread_id}")
