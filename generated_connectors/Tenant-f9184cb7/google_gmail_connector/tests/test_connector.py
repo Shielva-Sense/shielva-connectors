@@ -49,6 +49,33 @@ async def test_install_returns_healthy_pending(connector):
     assert status.connector_id == CONNECTOR_ID
 
 
+async def test_install_missing_client_id_returns_degraded():
+    from connector import GmailConnector
+    from tests.conftest import BASE_CONFIG
+    cfg = {**BASE_CONFIG, "client_id": ""}
+    c = GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+    status = await c.install()
+    assert status.health == ConnectorHealth.DEGRADED
+    assert status.auth_status == AuthStatus.INVALID_CREDENTIALS
+    assert status.connector_id == CONNECTOR_ID
+
+
+async def test_install_missing_client_secret_returns_degraded():
+    from connector import GmailConnector
+    from tests.conftest import BASE_CONFIG
+    cfg = {**BASE_CONFIG, "client_secret": ""}
+    c = GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+    status = await c.install()
+    assert status.health == ConnectorHealth.DEGRADED
+    assert status.auth_status == AuthStatus.INVALID_CREDENTIALS
+
+
+async def test_install_missing_both_creds_returns_degraded(connector_no_creds):
+    status = await connector_no_creds.install()
+    assert status.health == ConnectorHealth.DEGRADED
+    assert status.auth_status == AuthStatus.INVALID_CREDENTIALS
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # authorize()
 # ═════════════════════════════════════════════════════════════════════════════
@@ -79,6 +106,53 @@ async def test_authorize_error_raises_connector_auth_error(connector, mocker):
 
     with pytest.raises(ConnectorAuthError, match="Token exchange failed"):
         await connector.authorize("bad-code")
+
+
+async def test_authorize_uses_config_client_id_and_secret(connector, mocker):
+    """authorize() must send config client_id/secret, not hardcoded class constants."""
+    token_response = {
+        "access_token": "acc",
+        "refresh_token": "ref",
+        "expires_in": 3600,
+        "scope": "https://www.googleapis.com/auth/gmail.modify",
+        "token_type": "Bearer",
+    }
+    mock_session_cm = make_aiohttp_post_mock(token_response, status=200)
+    mocker.patch("connector.aiohttp.ClientSession", return_value=mock_session_cm)
+
+    await connector.authorize("code-xyz")
+
+    mock_session = mock_session_cm.__aenter__.return_value
+    call_kwargs = mock_session.post.call_args
+    posted_data = call_kwargs[1].get("data", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {})
+    assert posted_data.get("client_id") == "test-client-id"
+    assert posted_data.get("client_secret") == "test-client-secret"
+
+
+async def test_authorize_uses_config_token_url(mocker):
+    """authorize() must POST to config token_url, not a hardcoded constant."""
+    from connector import GmailConnector
+    from tests.conftest import BASE_CONFIG
+    custom_url = "https://custom.idp.example.com/token"
+    cfg = {**BASE_CONFIG, "token_url": custom_url}
+    c = GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+
+    token_response = {
+        "access_token": "acc",
+        "refresh_token": "ref",
+        "expires_in": 3600,
+        "scope": "https://www.googleapis.com/auth/gmail.modify",
+        "token_type": "Bearer",
+    }
+    mock_session_cm = make_aiohttp_post_mock(token_response, status=200)
+    mocker.patch("connector.aiohttp.ClientSession", return_value=mock_session_cm)
+
+    await c.authorize("code-xyz")
+
+    mock_session = mock_session_cm.__aenter__.return_value
+    call_args = mock_session.post.call_args
+    posted_url = call_args[0][0] if call_args[0] else call_args[1].get("url")
+    assert posted_url == custom_url
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -113,6 +187,85 @@ async def test_on_token_refresh_bad_response_raises(authed_connector, mocker):
 
     with pytest.raises(ConnectorAuthError, match="Token refresh failed"):
         await authed_connector.on_token_refresh()
+
+
+async def test_on_token_refresh_uses_config_client_id_and_secret(authed_connector, mocker):
+    """on_token_refresh() must use config credentials, not class constants."""
+    token_response = {
+        "access_token": "new-acc",
+        "expires_in": 3600,
+        "scope": "https://www.googleapis.com/auth/gmail.modify",
+        "token_type": "Bearer",
+    }
+    mock_session_cm = make_aiohttp_post_mock(token_response, status=200)
+    mocker.patch("connector.aiohttp.ClientSession", return_value=mock_session_cm)
+
+    await authed_connector.on_token_refresh()
+
+    mock_session = mock_session_cm.__aenter__.return_value
+    call_kwargs = mock_session.post.call_args
+    posted_data = call_kwargs[1].get("data", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {})
+    assert posted_data.get("client_id") == "test-client-id"
+    assert posted_data.get("client_secret") == "test-client-secret"
+
+
+async def test_on_token_refresh_uses_config_token_url(mocker):
+    """on_token_refresh() must POST to config token_url."""
+    from datetime import datetime, timedelta
+    from connector import GmailConnector
+    from tests.conftest import BASE_CONFIG
+    custom_url = "https://custom.idp.example.com/token"
+    cfg = {**BASE_CONFIG, "token_url": custom_url}
+    c = GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+    c._token_info = TokenInfo(
+        access_token="old-tok",
+        refresh_token="ref-tok",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+
+    token_response = {
+        "access_token": "new-acc",
+        "expires_in": 3600,
+        "scope": "https://www.googleapis.com/auth/gmail.modify",
+        "token_type": "Bearer",
+    }
+    mock_session_cm = make_aiohttp_post_mock(token_response, status=200)
+    mocker.patch("connector.aiohttp.ClientSession", return_value=mock_session_cm)
+
+    await c.on_token_refresh()
+
+    mock_session = mock_session_cm.__aenter__.return_value
+    call_args = mock_session.post.call_args
+    posted_url = call_args[0][0] if call_args[0] else call_args[1].get("url")
+    assert posted_url == custom_url
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _build_http_client() — config base_url
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_build_http_client_uses_config_base_url(mocker):
+    """_build_http_client() must pass config base_url to GmailHTTPClient."""
+    from connector import GmailConnector
+    from tests.conftest import BASE_CONFIG
+    from datetime import datetime, timedelta
+
+    custom_base = "https://proxy.internal.example.com/gmail/v1"
+    cfg = {**BASE_CONFIG, "base_url": custom_base}
+    c = GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+    c._token_info = TokenInfo(
+        access_token="tok",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+
+    mock_cls = mocker.patch("connector.GmailHTTPClient")
+    mock_cls.return_value = MagicMock()
+
+    await c._build_http_client()
+
+    call_kwargs = mock_cls.call_args[1]
+    assert call_kwargs.get("base_url") == custom_base
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -252,6 +405,120 @@ async def test_add_email_propagates_permission_error(authed_connector, mock_http
 
     with pytest.raises(ConnectorPermissionError):
         await authed_connector.add_email("msg1", label_ids=["STARRED"])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# move_email()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_move_email_happy_path(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    result = await authed_connector.move_email("msg1", destination_label_id="LABEL_WORK")
+
+    assert result["id"] == "msg1"
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=["LABEL_WORK"],
+        remove_label_ids=["INBOX"],
+    )
+
+
+async def test_move_email_with_custom_remove_labels(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    await authed_connector.move_email(
+        "msg1", destination_label_id="LABEL_WORK", remove_label_ids=["LABEL_PERSONAL"]
+    )
+
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=["LABEL_WORK"],
+        remove_label_ids=["LABEL_PERSONAL"],
+    )
+
+
+async def test_move_email_propagates_permission_error(authed_connector, mock_http_client, mocker):
+    mock_http_client.execute_modify_message = AsyncMock(
+        side_effect=ConnectorPermissionError("read-only token")
+    )
+    patch_http_client(mocker, mock_http_client)
+
+    with pytest.raises(ConnectorPermissionError):
+        await authed_connector.move_email("msg1", destination_label_id="LABEL_WORK")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# update_email()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_update_email_happy_path(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    result = await authed_connector.update_email(
+        "msg1", add_label_ids=["STARRED"], remove_label_ids=["UNREAD"]
+    )
+
+    assert result["id"] == "msg1"
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=["STARRED"],
+        remove_label_ids=["UNREAD"],
+    )
+
+
+async def test_update_email_defaults_to_empty_lists(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    await authed_connector.update_email("msg1")
+
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=[],
+        remove_label_ids=[],
+    )
+
+
+async def test_update_email_propagates_permission_error(authed_connector, mock_http_client, mocker):
+    mock_http_client.execute_modify_message = AsyncMock(
+        side_effect=ConnectorPermissionError("read-only token")
+    )
+    patch_http_client(mocker, mock_http_client)
+
+    with pytest.raises(ConnectorPermissionError):
+        await authed_connector.update_email("msg1", add_label_ids=["STARRED"])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# get_email()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_get_email_returns_normalized_document(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    doc = await authed_connector.get_email("msg1")
+
+    assert isinstance(doc, NormalizedDocument)
+    assert doc.id == "msg1"
+    assert doc.source_id == "msg1"
+    assert doc.title == "Test Subject"
+    assert doc.tenant_id == TENANT_ID
+    assert doc.connector_id == CONNECTOR_ID
+    assert "Hello world" in doc.content
+    mock_http_client.execute_get_message.assert_called_once_with("msg1")
+
+
+async def test_get_email_propagates_not_found(authed_connector, mock_http_client, mocker):
+    mock_http_client.execute_get_message = AsyncMock(
+        side_effect=ConnectorNotFoundError("msg not found")
+    )
+    patch_http_client(mocker, mock_http_client)
+
+    with pytest.raises(ConnectorNotFoundError):
+        await authed_connector.get_email("missing-id")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -603,7 +870,8 @@ async def test_normalized_document_carries_tenant_id(authed_connector, mock_http
 
 
 async def test_different_tenant_has_own_connector_id(mock_http_client, mocker):
-    from datetime import timedelta
+    from datetime import timedelta, datetime
+    from tests.conftest import BASE_CONFIG
     mocker.patch("connector.logger")
     mocker.patch.object(GmailConnector, "get_token", new_callable=AsyncMock, return_value=None)
     mocker.patch.object(GmailConnector, "set_token", new_callable=AsyncMock)
@@ -615,11 +883,11 @@ async def test_different_tenant_has_own_connector_id(mock_http_client, mocker):
     other = GmailConnector(
         tenant_id="other-tenant",
         connector_id="other-connector",
-        config={"allow_permanent_delete": False},
+        config={**BASE_CONFIG},
     )
     other._token_info = TokenInfo(
         access_token="tok",
-        expires_at=__import__("datetime").datetime.utcnow() + timedelta(hours=1),
+        expires_at=datetime.utcnow() + timedelta(hours=1),
     )
     patch_http_client(mocker, mock_http_client)
 

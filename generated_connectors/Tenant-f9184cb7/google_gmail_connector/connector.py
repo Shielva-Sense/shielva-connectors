@@ -1,6 +1,6 @@
 """GmailConnector — orchestration only; zero raw HTTP, zero JSON parsing."""
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -35,14 +35,6 @@ class GmailConnector(BaseConnector):
     AUTH_TYPE = "oauth2_code"
 
     # ── Provider-wide hardcoded constants (same for every tenant) ───────────
-    CLIENT_ID = "your-google-client-id.apps.googleusercontent.com"
-    CLIENT_SECRET = "GOCSPX-placeholder"
-    REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
-    AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
-    AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-    TOKEN_URI = "https://oauth2.googleapis.com/token"
-    TOKEN_URL = "https://oauth2.googleapis.com/token"
-    BASE_URL = "https://gmail.googleapis.com/gmail/v1"
     RATE_LIMIT_PER_MIN = 250
     PAGINATION_TYPE = "cursor"
     API_VERSION = "v1"
@@ -57,7 +49,7 @@ class GmailConnector(BaseConnector):
     }
 
     # ── Config keys read from user-supplied install fields ──────────────────
-    REQUIRED_CONFIG_KEYS: List[str] = ["allow_permanent_delete"]
+    REQUIRED_CONFIG_KEYS: List[str] = ["allow_permanent_delete", "client_id", "client_secret"]
 
     def __init__(
         self,
@@ -78,7 +70,7 @@ class GmailConnector(BaseConnector):
         token = await self.ensure_token()
         return GmailHTTPClient(
             access_token=token.access_token,
-            base_url=self.BASE_URL,
+            base_url=self.config.get("base_url", "https://gmail.googleapis.com/gmail/v1"),
         )
 
     def _assert_permanent_delete_allowed(self) -> None:
@@ -116,6 +108,13 @@ class GmailConnector(BaseConnector):
 
     async def install(self) -> ConnectorStatus:
         """Validate config and return a PENDING ConnectorStatus (no API call)."""
+        if not self.config.get("client_id") or not self.config.get("client_secret"):
+            return ConnectorStatus(
+                connector_id=self.connector_id,
+                health=ConnectorHealth.DEGRADED,
+                auth_status=AuthStatus.INVALID_CREDENTIALS,
+                message="client_id and client_secret are required install fields",
+            )
         return ConnectorStatus(
             connector_id=self.connector_id,
             health=ConnectorHealth.HEALTHY,
@@ -126,15 +125,16 @@ class GmailConnector(BaseConnector):
     async def authorize(self, auth_code: str, state: Optional[str] = None) -> TokenInfo:
         """Exchange OAuth authorization code for access + refresh tokens."""
         redirect_uri = self.config.get("redirect_uri", "")
+        token_endpoint = self.config.get("token_url", "https://oauth2.googleapis.com/token")
         payload = {
             "code": auth_code,
-            "client_id": self.CLIENT_ID,
-            "client_secret": self.CLIENT_SECRET,
+            "client_id": self.config.get("client_id"),
+            "client_secret": self.config.get("client_secret"),
             "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.post(self.TOKEN_URL, data=payload) as resp:
+            async with session.post(token_endpoint, data=payload) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     raise ConnectorAuthError(f"Token exchange failed: {text}")
@@ -143,7 +143,7 @@ class GmailConnector(BaseConnector):
         scopes_raw = data.get("scope", "")
         scopes = scopes_raw.split() if isinstance(scopes_raw, str) else list(scopes_raw)
         expires_in = int(data.get("expires_in", 3600))
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + __import__("datetime").timedelta(seconds=expires_in)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         token_info = TokenInfo(
             access_token=data["access_token"],
@@ -160,14 +160,15 @@ class GmailConnector(BaseConnector):
         current = self._token_info
         if not current or not current.refresh_token:
             raise ConnectorAuthError("No refresh token available.")
+        token_endpoint = self.config.get("token_url", "https://oauth2.googleapis.com/token")
         payload = {
             "grant_type": "refresh_token",
             "refresh_token": current.refresh_token,
-            "client_id": self.CLIENT_ID,
-            "client_secret": self.CLIENT_SECRET,
+            "client_id": self.config.get("client_id"),
+            "client_secret": self.config.get("client_secret"),
         }
         async with aiohttp.ClientSession() as session:
-            async with session.post(self.TOKEN_URL, data=payload) as resp:
+            async with session.post(token_endpoint, data=payload) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     raise ConnectorAuthError(f"Token refresh failed: {text}")
@@ -327,6 +328,44 @@ class GmailConnector(BaseConnector):
         return await client.execute_modify_message(
             msg_id=msg_id, add_label_ids=label_ids or []
         )
+
+    async def move_email(
+        self,
+        msg_id: str,
+        destination_label_id: str,
+        remove_label_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Move message *msg_id* to *destination_label_id*, removing *remove_label_ids*."""
+        client = await self._build_http_client()
+        result = await client.execute_modify_message(
+            msg_id=msg_id,
+            add_label_ids=[destination_label_id],
+            remove_label_ids=remove_label_ids or ["INBOX"],
+        )
+        logger.info("gmail.move_email.ok", msg_id=msg_id, connector_id=self.connector_id)
+        return result
+
+    async def update_email(
+        self,
+        msg_id: str,
+        add_label_ids: Optional[List[str]] = None,
+        remove_label_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Add and/or remove labels on message *msg_id* via messages.modify."""
+        client = await self._build_http_client()
+        result = await client.execute_modify_message(
+            msg_id=msg_id,
+            add_label_ids=add_label_ids or [],
+            remove_label_ids=remove_label_ids or [],
+        )
+        logger.info("gmail.update_email.ok", msg_id=msg_id, connector_id=self.connector_id)
+        return result
+
+    async def get_email(self, msg_id: str) -> NormalizedDocument:
+        """Fetch a single message by ID and return a NormalizedDocument."""
+        client = await self._build_http_client()
+        raw = await client.execute_get_message(msg_id)
+        return normalize_message(raw, self.tenant_id, self.connector_id)
 
     async def delete_email(self, msg_id: str, permanent: bool = False) -> Any:
         """Alias for delete_message — kept for API surface consistency."""

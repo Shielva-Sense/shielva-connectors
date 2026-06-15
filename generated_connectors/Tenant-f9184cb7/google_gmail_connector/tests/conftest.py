@@ -15,6 +15,8 @@ from shared.base_connector import AuthStatus, ConnectorHealth, TokenInfo
 TENANT_ID = "test-tenant"
 CONNECTOR_ID = "test-connector"
 BASE_CONFIG = {
+    "client_id": "test-client-id",
+    "client_secret": "test-client-secret",
     "allow_permanent_delete": False,
     "redirect_uri": "https://example.com/callback",
     "known_message_ids": [],
@@ -59,6 +61,17 @@ def connector() -> GmailConnector:
         tenant_id=TENANT_ID,
         connector_id=CONNECTOR_ID,
         config=BASE_CONFIG.copy(),
+    )
+
+
+@pytest.fixture
+def connector_no_creds() -> GmailConnector:
+    """Connector with empty client_id and client_secret — for install() validation tests."""
+    cfg = {**BASE_CONFIG, "client_id": "", "client_secret": ""}
+    return GmailConnector(
+        tenant_id=TENANT_ID,
+        connector_id=CONNECTOR_ID,
+        config=cfg,
     )
 
 
