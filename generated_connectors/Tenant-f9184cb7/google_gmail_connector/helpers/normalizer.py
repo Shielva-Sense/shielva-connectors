@@ -1,81 +1,82 @@
-"""Maps raw Gmail API message dicts to NormalizedDocument."""
-from typing import Any, Dict, List
+"""Transforms raw Gmail API message dicts into NormalizedDocument instances."""
+import base64
+from typing import Any, Dict, List, Optional, Tuple
 
-import structlog
 from shared.base_connector import NormalizedDocument
 
-from helpers.utils import extract_header, parse_gmail_date, truncate_preview
+from helpers.utils import extract_header
 
-logger = structlog.get_logger(__name__)
+# OCP-2: ordered preference list — avoids if/elif branching on MIME types
+MIME_PRIORITY = ["text/plain", "text/html"]
+_MIME_CONTENT_TYPE = {"text/plain": "text", "text/html": "html"}
 
 
-def normalize(raw_message: Dict[str, Any], tenant_id: str, connector_id: str) -> NormalizedDocument:
-    """Convert a raw Gmail message dict to a NormalizedDocument.
-
-    Args:
-        raw_message: Dict returned by execute_get_message() with format='metadata'.
-        tenant_id:   Tenant identifier for multi-tenant ID namespacing.
-        connector_id: Connector instance identifier.
-
-    Returns:
-        NormalizedDocument ready for ingestion.
-    """
-    message_id: str = raw_message.get("id", "")
-    thread_id: str = raw_message.get("threadId", "")
-    snippet: str = raw_message.get("snippet", "")
-
-    headers: List[Dict[str, str]] = (
-        raw_message.get("payload", {}).get("headers", [])
-    )
+def normalize_message(
+    raw: Dict[str, Any],
+    tenant_id: str,
+    connector_id: str,
+) -> NormalizedDocument:
+    """Convert a Gmail messages.get (format=full) response to NormalizedDocument."""
+    msg_id = raw.get("id", "")
+    payload = raw.get("payload", {})
+    headers: List[Dict[str, str]] = payload.get("headers", [])
 
     subject = extract_header(headers, "Subject") or "(no subject)"
-    sender = extract_header(headers, "From") or ""
+    from_addr = extract_header(headers, "From")
+    to_addr = extract_header(headers, "To")
     date_str = extract_header(headers, "Date")
-    parsed_date = parse_gmail_date(date_str)
 
-    source_url = f"https://mail.google.com/mail/u/0/#inbox/{message_id}"
-
-    doc_id = f"{tenant_id}_{message_id}"
-
-    metadata: Dict[str, Any] = {
-        "sender": sender,
-        "thread_id": thread_id,
-        "source_url": source_url,
-        "labels": raw_message.get("labelIds", []),
-    }
-    if parsed_date is not None:
-        metadata["date"] = parsed_date.isoformat()
+    content, content_type = _extract_body(payload)
 
     return NormalizedDocument(
-        id=doc_id,
-        source_id=message_id,
+        id=msg_id,
+        source_id=msg_id,
         title=subject,
-        content=truncate_preview(snippet, max_chars=200),
-        content_type="text",
-        source_url=source_url,
-        author=sender,
-        created_at=parsed_date,
-        metadata=metadata,
-        source="google_gmail_connector",
+        content=content,
+        content_type=content_type,
+        author=from_addr,
+        metadata={
+            "from": from_addr,
+            "to": to_addr,
+            "date": date_str,
+            "labels": raw.get("labelIds", []),
+            "thread_id": raw.get("threadId", ""),
+            "snippet": raw.get("snippet", ""),
+        },
+        source="google_gmail",
         tenant_id=tenant_id,
         connector_id=connector_id,
     )
 
 
-def normalize_batch(
-    raw_messages: List[Dict[str, Any]],
-    tenant_id: str,
-    connector_id: str,
-) -> List[NormalizedDocument]:
-    """Normalize a list of raw Gmail messages, skipping any that fail."""
-    docs: List[NormalizedDocument] = []
-    for msg in raw_messages:
-        try:
-            docs.append(normalize(msg, tenant_id, connector_id))
-        except Exception as exc:
-            logger.warning(
-                "gmail.normalizer.skip",
-                message_id=msg.get("id"),
-                error=str(exc),
-            )
-    return docs
+def _extract_body(payload: Dict[str, Any]) -> Tuple[str, str]:
+    # Iterate MIME_PRIORITY — no if/elif branching (OCP-2)
+    for mime in MIME_PRIORITY:
+        part = _find_part(payload, mime)
+        if part is not None:
+            return _decode_part(part), _MIME_CONTENT_TYPE[mime]
+    # fallback: top-level body
+    data = payload.get("body", {}).get("data", "")
+    return _b64_decode(data), "text"
+
+
+def _find_part(payload: Dict[str, Any], mime_type: str) -> Optional[Dict[str, Any]]:
+    if payload.get("mimeType") == mime_type:
+        return payload
+    for part in payload.get("parts", []):
+        found = _find_part(part, mime_type)
+        if found is not None:
+            return found
+    return None
+
+
+def _decode_part(part: Dict[str, Any]) -> str:
+    data = part.get("body", {}).get("data", "")
+    return _b64_decode(data)
+
+
+def _b64_decode(data: str) -> str:
+    if not data:
+        return ""
+    padded = data + "=" * (4 - len(data) % 4 if len(data) % 4 else 0)
+    return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")

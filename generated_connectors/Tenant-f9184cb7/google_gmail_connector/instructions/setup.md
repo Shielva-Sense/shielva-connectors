@@ -1,163 +1,74 @@
-# Setup Instructions: Google Gmail Connector
+# Setup Instructions: Google Gmail
 
 ## Overview
 
-The Google Gmail connector lets Shielva read, manage, and delete email messages from a Gmail mailbox using the Google Gmail REST API. It authenticates via OAuth2, so end users authorize Shielva to access their Gmail account through a standard Google consent screen — no passwords are shared. Once connected, the connector can ingest emails, move messages to Trash, permanently delete individual or batches of messages, and apply or remove labels. This connector is intended for workspace administrators or end users who want to index or automate actions on Gmail content within Shielva.
+The Google Gmail connector allows the Shielva platform to ingest email messages from a Gmail account, keep the knowledge base in sync as messages are added or deleted, and perform message management operations such as trashing or permanently deleting messages and threads. It is intended for administrators who want to make a Gmail inbox searchable and manageable through the Shielva platform.
 
 ---
 
 ## Prerequisites
 
-Before starting, make sure you have:
+Before you begin, make sure you have:
 
-- A **Google account** with access to the Gmail mailbox you want to connect.
-- Access to the **Google Cloud Console** (console.cloud.google.com) with permission to create or manage a project.
-- A **GCP project** with the Gmail API enabled (see Step 1 below).
-- An **OAuth2 client** of type "Web application" created in that project (see Step 2 below).
-- The Shielva platform **redirect URI** provided by your Shielva administrator — you will paste it into the GCP Console during setup.
+- A Google account with access to the Gmail inbox you want to connect.
+- Permission to authorize third-party OAuth 2.0 applications in that Google account (some organizations restrict this via Google Workspace admin policy — check with your Google Workspace administrator if authorization fails).
+- Admin access to the Shielva platform to add and configure connectors.
 
 ---
 
 ## Step-by-Step Configuration
 
-### Step 1: Enable the Gmail API in Google Cloud Console
+### Step 1: Authorize Gmail Access (`allow_permanent_delete`)
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com) and sign in.
-2. Select or create a GCP project using the project selector at the top of the page.
-3. In the left-hand navigation, click **APIs & Services** → **Library**.
-4. Search for **Gmail API** and click the result.
-5. Click **Enable**. Wait for the status to change to "Enabled".
+**Field label**: Allow Permanent Delete  
+**Field key**: `allow_permanent_delete`  
+**Type**: Boolean (toggle)  
+**Required**: No (defaults to disabled)
 
----
+This setting controls whether the connector is allowed to **permanently delete** messages and threads from Gmail. When disabled (the default), the connector can only move messages to the Trash, which keeps them recoverable for 30 days. When enabled, the connector gains the ability to call the Gmail `messages.delete` and `threads.delete` endpoints, which remove messages immediately and irreversibly.
 
-### Step 2: Create an OAuth2 Client Credential
+**How to configure:**
 
-1. In the left-hand navigation, click **APIs & Services** → **Credentials**.
-2. Click **+ Create Credentials** → **OAuth client ID**.
-3. If prompted, click **Configure consent screen** first:
-   - Choose **Internal** (if this is a Google Workspace org) or **External**.
-   - Fill in the required fields (App name, support email, developer contact).
-   - Under **Scopes**, add the following scopes (click "Add or remove scopes"):
-     - `https://www.googleapis.com/auth/gmail.modify`
-     - `https://mail.google.com/`
-   - Save and return to the Credentials page.
-4. For **Application type**, select **Web application**.
-5. Under **Authorized redirect URIs**, click **+ Add URI** and paste the Shielva redirect URI provided by your administrator.
-6. Click **Create**.
-7. A dialog will show your **Client ID** and **Client Secret** — copy both now (you will need them in Steps 3 and 4 below).
+- If you only need soft-delete (Trash) behavior, leave this toggle **off**. No additional action is needed.
+- If your use case requires permanent, unrecoverable deletion, set this toggle to **on**.
+
+**Important:** Enabling permanent delete causes the connector to request an additional OAuth scope (`https://mail.google.com/`) during the authorization step. If you change this setting after the initial authorization, you must re-authorize the connector so Google issues a new access token with the updated scope.
 
 ---
 
-### Step 3: OAuth Client ID (`client_id`)
+### Step 2: Authorize the Connector
 
-- **Where to find it**: The "Client ID" value shown after creating the OAuth credential in Step 2, or visible in **APIs & Services → Credentials** by clicking the pencil icon next to your OAuth client.
-- **Format**: A long string ending in `.apps.googleusercontent.com` — for example: `123456789-abcdefg.apps.googleusercontent.com`
-- **Tip**: Copy it exactly — do not include any surrounding quotes or spaces.
+This connector uses **OAuth 2.0 Authorization Code** flow. You do not need to enter an API key or client secret — the Shielva platform manages the credentials automatically.
 
-**In Shielva**, paste this value into the **OAuth Client ID** field.
+1. After saving your configuration, click the **Connect** button on the connector settings page.
+2. You will be redirected to the Google sign-in page. Sign in with the Gmail account you want to connect.
+3. Google will display a consent screen listing the permissions the connector is requesting:
+   - `https://www.googleapis.com/auth/gmail.modify` — read and move messages to Trash (always requested)
+   - `https://mail.google.com/` — permanent delete (only requested if **Allow Permanent Delete** is enabled)
+4. Click **Allow** to grant access.
+5. You will be redirected back to the Shielva platform, and the connector status will change to **Connected**.
 
----
-
-### Step 4: OAuth Client Secret (`client_secret`)
-
-- **Where to find it**: The "Client Secret" value shown immediately after creating the OAuth credential, or by clicking **Download JSON** on the Credentials page and reading the `client_secret` field.
-- **Tip**: If you did not copy it during creation, click the pencil icon on your OAuth client in the Credentials list and then click **Reset Secret** to generate a new one (the old secret will stop working immediately).
-
-**In Shielva**, paste this value into the **OAuth Client Secret** field.
-
----
-
-### Step 5 (Optional): OAuth Scopes (`scopes`)
-
-- **What it is**: The set of Gmail API permissions Shielva will request during OAuth authorization.
-- **Default**: `https://www.googleapis.com/auth/gmail.modify https://mail.google.com/` — covers reading, trashing, labeling, and permanently deleting messages.
-- **Format**: Space-separated scope URLs.
-- **When to change**: Only if your organization restricts which scopes are allowed, or if you need read-only access (`https://www.googleapis.com/auth/gmail.readonly`). Narrowing the scope will disable trash and delete operations.
-
-**In Shielva**, leave the **OAuth Scopes** field blank to use the defaults, or enter a space-separated list of scope URLs.
-
----
-
-### Step 6 (Optional): Authorization URL (`auth_url`)
-
-- **What it is**: The Google OAuth2 authorization endpoint that Shielva redirects users to during the consent flow.
-- **Default**: `https://accounts.google.com/o/oauth2/v2/auth`
-- **When to change**: Only if your organization uses a custom identity provider. Leave blank in almost all cases.
-
-**In Shielva**, leave the **Authorization URL** field blank to use the Google default.
-
----
-
-### Step 7 (Optional): Token URL (`token_url`)
-
-- **What it is**: The endpoint Shielva calls to exchange the OAuth2 authorization code for tokens.
-- **Default**: `https://oauth2.googleapis.com/token`
-- **When to change**: Only for non-standard Google setups. Leave blank in almost all cases.
-
-**In Shielva**, leave the **Token URL** field blank to use the Google default.
-
----
-
-### Step 8 (Optional): Base API URL (`base_url`)
-
-- **What it is**: The root URL for Gmail REST API calls.
-- **Default**: `https://gmail.googleapis.com`
-- **When to change**: Only if your organization uses a VPC Service Control perimeter or a custom API proxy. Leave blank in almost all cases.
-
-**In Shielva**, leave the **Base API URL** field blank to use the Google default.
-
----
-
-### Step 9 (Optional): Rate Limit (`rate_limit_per_min`)
-
-- **What it is**: Maximum Gmail API quota units per minute the connector will consume.
-- **Default**: Blank (uses the Google-imposed project quota).
-- **Format**: A whole number, for example `250`.
-- **When to change**: If you want to throttle Shielva's API usage to avoid affecting other applications sharing the same GCP project.
-
-**In Shielva**, enter a number in the **Rate Limit (quota units/min)** field, or leave it blank.
-
----
-
-### Step 10 (Optional): Pagination Type (`pagination_type`)
-
-- **What it is**: The pagination strategy used when listing messages.
-- **Default**: `page_token` (Gmail's `nextPageToken` cursor-based mechanism).
-- **When to change**: Do not change this unless instructed by Shielva support.
-
-**In Shielva**, leave the **Pagination Type** field blank to use the default.
-
----
-
-### Step 11 (Optional): API Version (`api_version`)
-
-- **What it is**: The Gmail REST API version the connector will call.
-- **Default**: `v1` (the current stable version).
-- **When to change**: Do not change this unless instructed by Shielva support.
-
-**In Shielva**, leave the **API Version** field blank to use `v1`.
+**Tip:** If the consent screen shows "This app isn't verified," this is a Google warning for apps in development or review. Click **Advanced** → **Go to Shielva (unsafe)** to proceed if your organization's IT team has pre-approved this connector. For production deployments, the connector should be Google-verified and this warning will not appear.
 
 ---
 
 ## Testing the Connection
 
-1. After saving all fields, click **Authorize** (or **Connect**) in the Shielva connector setup page.
-2. You will be redirected to a Google sign-in and consent screen.
-3. Sign in with the Gmail account you want to connect, then click **Allow** to grant Shielva the requested permissions.
-4. You will be redirected back to Shielva. The connector status should change to **Connected**.
-5. Click **Run Health Check** (if available) to confirm the connector can reach the Gmail API.
+After completing the authorization step:
+
+1. On the connector settings page, click **Check Health** (or **Test Connection**).
+2. A successful health check returns a **Connected** status and displays the email address of the connected Gmail account (for example, `Connected as user@example.com`).
+3. Run a manual **Sync** from the connector dashboard to verify that messages are being ingested into your knowledge base. The sync result will display the number of messages found and successfully ingested.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Likely Cause | Fix |
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| "client_id is required" on save | The Client ID field was left blank | Paste the Client ID from the GCP Credentials page |
-| "client_secret is required" on save | The Client Secret field was left blank | Paste the Client Secret; reset it in GCP if lost |
-| Redirect to Google fails with "redirect_uri_mismatch" | The redirect URI in GCP does not match Shielva's URI | In GCP, add the exact Shielva redirect URI to "Authorized redirect URIs" and save |
-| Google consent screen shows "Access blocked: app has not been verified" | OAuth consent screen is in test mode | Add the target Gmail account as a test user in **APIs & Services → OAuth consent screen → Test users** |
-| Connector status shows "Token Expired" | Refresh token was revoked or the session expired | Re-authorize by clicking **Authorize** again |
-| 403 "Insufficient scope" when trashing or deleting emails | Granted scopes do not include `gmail.modify` or `https://mail.google.com/` | Re-authorize after clearing the Scopes field to use the defaults |
-| 404 "Message not found" error | The message ID no longer exists in the mailbox | The message was already deleted — no action needed |
-| Rate limit errors (429) | Too many API calls per minute | Set **Rate Limit (quota units/min)** to a lower value, or request a quota increase in GCP |
+| Health check shows **Token Expired** | The OAuth access token has expired and cannot be refreshed. | Click **Re-authorize** on the connector settings page and complete the Google consent flow again. |
+| Health check shows **Insufficient Scopes** | The connected account does not have the required OAuth scopes. | Click **Re-authorize** to go through the Google consent flow. Make sure to click **Allow** on the consent screen. If you changed the **Allow Permanent Delete** setting, re-authorization is required to request the new scope. |
+| Authorization fails immediately after clicking **Connect** | The Google account or Workspace organization restricts third-party OAuth applications. | Contact your Google Workspace administrator and ask them to allow OAuth access for the Shielva connector client ID. |
+| Permanent delete operations return a **Permission Denied** error | Permanent delete is enabled in config, but the OAuth token was issued before the `https://mail.google.com/` scope was requested. | Re-authorize the connector so a new token is issued with the full `mail.google.com` scope. |
+| Sync returns zero documents | The Gmail inbox may be empty, or the query filter may not match any messages. | Check the sync log for the `q=` query parameter used. For a full sync, trigger it with **full sync** mode from the dashboard. |
+| Sync shows deleted messages still in knowledge base | Deletion propagation requires at least one successful incremental sync after the messages were removed from Gmail. | Wait for the next scheduled sync or trigger a manual sync. The connector diffs the previous known IDs against the current Gmail list response and removes stale entries. |

@@ -1,45 +1,18 @@
-"""Pydantic request/response models for the Gmail connector."""
-from __future__ import annotations
-
-from datetime import datetime
+"""Typed models for Gmail connector request/response shapes."""
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
 
-
-class GmailMessageHeader(BaseModel):
-    name: str
-    value: str
-
-
-class GmailMessagePayload(BaseModel):
-    headers: List[GmailMessageHeader] = Field(default_factory=list)
-
-
-class GmailMessage(BaseModel):
+@dataclass
+class MessageStub:
+    """Lightweight reference returned by messages.list."""
     id: str
-    threadId: str = ""
-    snippet: str = ""
-    labelIds: List[str] = Field(default_factory=list)
-    payload: Optional[GmailMessagePayload] = None
+    thread_id: str = ""
 
 
-class GmailListResponse(BaseModel):
-    messages: List[Dict[str, str]] = Field(default_factory=list)
-    nextPageToken: Optional[str] = None
-    resultSizeEstimate: int = 0
-
-
-class GmailProfile(BaseModel):
-    emailAddress: str
-    messagesTotal: int = 0
-    threadsTotal: int = 0
-    historyId: str = ""
-
-
-class TokenExchangeResponse(BaseModel):
-    access_token: str
-    refresh_token: Optional[str] = None
-    expires_in: int = 3600
-    token_type: str = "Bearer"
-    scope: str = ""
+@dataclass
+class BulkDeleteResult:
+    """Return value of GmailConnector.bulk_delete()."""
+    deleted: int = 0
+    failed: int = 0
+    errors: List[str] = field(default_factory=list)

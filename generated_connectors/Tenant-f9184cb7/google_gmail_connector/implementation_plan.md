@@ -1,278 +1,190 @@
-# Gmail Connector — Implementation Plan (Scope Upgrade + Delete/Trash Methods)
+# Gmail Connector — Implementation Plan
 
 ## 1. Overview
 
-The Google Gmail connector wraps the Gmail REST API v1 to ingest email messages into the Shielva platform. It authenticates via OAuth2 Authorization Code flow (with offline access for token refresh), stores tokens via the `set_token()` / `get_token()` SDK abstractions, and surfaces email content as `NormalizedDocument` records for downstream indexing.
+The Google Gmail Connector integrates with the Gmail REST API (v1) to allow the Shielva platform to ingest, manage, and delete email messages and threads from a user's Gmail account. Auth is OAuth 2.0 Authorization Code Grant with offline access (to obtain a refresh token). The connector exposes full CRUD-style operations including list, read, add (label), delete (soft/hard), and bulk delete, plus an incremental sync that propagates deletions to the knowledge base.
 
-**This plan is ADDITIVE**: all existing functionality (install, authorize, health_check, sync, list_email, on_token_refresh) is preserved unchanged. Three new standalone methods are appended to the existing files:
-- `trash_email(msg_id)` — moves a message to Trash (reversible)
-- `delete_email(msg_id)` — permanently deletes a single message
-- `batch_delete_emails(msg_ids)` — permanently deletes a batch of messages in one API call
-
-The OAuth scope set is upgraded from `gmail.readonly` to `gmail.modify` + `https://mail.google.com/` to cover all write and delete operations.
+**Provider**: Google  
+**Service**: gmail  
+**Auth Type**: `oauth2_code`  
+**Base API**: `https://gmail.googleapis.com/gmail/v1/users/me`
 
 ---
 
 ## 2. SDK / Package Selection
 
+No new packages are required beyond what is already declared in `requirements.txt` and the shared venv.
+
 | Package | Version | Justification |
 |---|---|---|
-| `google-api-python-client` | `>=2.100.0` | Provides `googleapiclient.discovery.build()` and the typed Gmail service object already used in `http_client.py` |
-| `google-auth-httplib2` | `>=0.2.0` | Transport adapter required by google-api-python-client |
-| `google-auth-oauthlib` | `>=1.1.0` | OAuth2 helpers; `google.oauth2.credentials.Credentials` already imported in connector.py |
-| `aiohttp` | `>=3.9.0` | Used in `authorize()` for the token exchange POST; already a dependency |
-| `tenacity` | `>=8.2.0` | Retry decorators `retry_on_rate_limit` / `retry_on_server_error` already in utils.py |
-| `structlog` | (existing) | Structured logging already used throughout |
+| `google-api-python-client` | `>=2.0` | Gmail API discovery client used for `users.messages.*` and `users.threads.*` calls. Already in shared venv. |
+| `google-auth` / `google-auth-oauthlib` | `>=2.0` | OAuth2 token lifecycle. Already in shared venv. |
+| `aiohttp` | `>=3.9` | Async HTTP transport used by `GmailHTTPClient`. Already in shared venv. |
+| `structlog` | `>=23.0` | Structured logging. Already in shared venv via SDK. |
 
-No new packages required. All three new methods reuse existing service construction and retry infrastructure.
+```
+pip install  # no new packages — all deps are in the shared venv or requirements.txt
+```
 
 ---
 
 ## 3. Auth Flow
 
-1. **install()** — admin provides `client_id` and `client_secret` (plus optional overrides). Config is validated and persisted via `save_config()`. Returns `PENDING` auth status.
-2. **authorize()** — platform redirects user to Google consent screen with the upgraded `REQUIRED_SCOPES`. On redirect-back, platform calls `authorize(auth_data={"code": "..."})`. The connector POSTs to the token endpoint (aiohttp) and stores the returned `TokenInfo` via `set_token()`.
-3. **ensure_token()** (SDK-provided) — before every API call, `_build_http_client()` calls `ensure_token()`. If the access token is expired, the SDK calls `on_token_refresh()`.
-4. **on_token_refresh()** — uses `google.oauth2.credentials.Credentials.refresh()` with the stored `refresh_token`. Updates the stored token via `set_token()`.
-
-Token storage: delegated entirely to the SDK (`set_token` / `get_token`) — connector.py never touches Redis directly.
+1. **get_oauth_url()** — inherited from `BaseConnector`. Uses `AUTH_URI`, `CLIENT_ID`, `REQUIRED_SCOPES`, and forces `access_type=offline&prompt=consent` so a refresh token is always returned.
+2. **authorize(auth_code, state)** — POSTs `auth_code` to `TOKEN_URL` via `aiohttp`. Exchanges for `{access_token, refresh_token, expires_in, scope}`. Constructs `TokenInfo(access_token=…, refresh_token=…, expires_at=now+expires_in, scopes=[…])`. Calls `await self.set_token(token_info)` to persist to Redis.
+3. **on_token_refresh()** — POSTs `{grant_type=refresh_token, refresh_token=…, client_id=…, client_secret=…}` to `TOKEN_URL`. Returns new `TokenInfo`. Called automatically by `ensure_token()` before any API call.
+4. Token is retrieved via `await self.ensure_token()` inside `_build_http_client()` and passed as `Authorization: Bearer <access_token>`.
 
 ---
 
-## 4. Data Model
+## 4. Data Model — NormalizedDocument Mapping
 
-Gmail REST API `users.messages.get` (format=metadata) → `NormalizedDocument`:
+Gmail `messages.get` (format=full) response → `NormalizedDocument`:
 
-| NormalizedDocument field | Gmail API source |
-|---|---|
-| `id` | `f"{tenant_id}_{message['id']}"` |
-| `source_id` | `message['id']` |
-| `title` | `payload.headers[name='Subject']` or "(no subject)" |
-| `content` | `message['snippet']` (truncated to 200 chars) |
-| `content_type` | `"text"` (hardcoded) |
-| `source_url` | `f"https://mail.google.com/mail/u/0/#inbox/{id}"` |
-| `author` | `payload.headers[name='From']` |
-| `created_at` | `payload.headers[name='Date']` parsed via `parse_gmail_date()` |
-| `metadata.sender` | same as author |
-| `metadata.thread_id` | `message['threadId']` |
-| `metadata.source_url` | same as source_url |
-| `metadata.labels` | `message['labelIds']` |
-| `metadata.date` | `parsed_date.isoformat()` if available |
-
-The three new destructive methods (`trash_email`, `delete_email`, `batch_delete_emails`) do not produce `NormalizedDocument` output — they return `None` on success and raise on error.
+| Gmail field | NormalizedDocument field | Notes |
+|---|---|---|
+| `id` | `id` | Gmail message ID |
+| `id` | `source_id` | Same value, the external system's ID |
+| `payload.headers["Subject"]` | `title` | Header lookup; fallback `"(no subject)"` |
+| decoded body (text/plain preferred, text/html fallback) | `content` | Normalizer extracts and decodes |
+| `"text"` or `"html"` | `content_type` | Set by normalizer based on chosen part |
+| `payload.headers["From"]` | `metadata["from"]` | |
+| `payload.headers["To"]` | `metadata["to"]` | |
+| `payload.headers["Date"]` | `metadata["date"]` | |
+| `labelIds` | `metadata["labels"]` | |
+| `threadId` | `metadata["thread_id"]` | |
+| `snippet` | `metadata["snippet"]` | |
+| connector type | `source` | `"google_gmail"` |
+| `self.tenant_id` | `tenant_id` | |
+| `self.connector_id` | `connector_id` | |
 
 ---
 
 ## 5. Key API Endpoints & Methods
 
-### 5.1 `install(config)`
-- **Endpoint**: none (local validation only)
-- **Parameters**: `config: Dict[str, Any]` — must contain `client_id`, `client_secret`
-- **Returns**: `ConnectorStatus(health=HEALTHY, auth_status=PENDING)` on success; `UNHEALTHY + MISSING_CREDENTIALS` if either required key is absent
-- **NormalizedDocument**: N/A
+### 5.1 `install()`
+- **Purpose**: Validate config, return `ConnectorStatus` showing connector is offline-but-ready.
+- **API**: None (no external call).
+- **Returns**: `ConnectorStatus(connector_id=…, health=HEALTHY, auth_status=PENDING)`.
 
-### 5.2 `authorize(auth_data)`
-- **Endpoint**: `POST https://oauth2.googleapis.com/token` (or `token_url` override)
-- **Payload**: `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `client_secret`
-- **Response**: `{ access_token, refresh_token, expires_in, scope, token_type }`
-- **Returns**: `TokenInfo(access_token, refresh_token, expires_at, token_type, scopes)`
-- **NormalizedDocument**: N/A
+### 5.2 `authorize(auth_code, state)`
+- **Endpoint**: `POST https://oauth2.googleapis.com/token`
+- **Payload**: `{code, client_id, client_secret, redirect_uri, grant_type=authorization_code}`
+- **Response**: `{access_token, refresh_token, expires_in, scope, token_type}`
+- **Returns**: `TokenInfo(access_token, refresh_token, expires_at=now+expires_in, scopes=[…])`
 
 ### 5.3 `health_check()`
-- **Endpoint**: `GET /gmail/v1/users/me/profile` (via `execute_get_profile()`)
-- **Parameters**: none
-- **Response**: `{ emailAddress, messagesTotal, threadsTotal, historyId }`
-- **Returns**: `ConnectorStatus(health=HEALTHY, auth_status=CONNECTED, metadata={"email": ...})` on success
-- **Error mapping**: 401 → `TOKEN_EXPIRED`; 403 → `MISSING_CREDENTIALS`
+- **Endpoint**: `GET https://gmail.googleapis.com/gmail/v1/users/me/profile`
+- **Purpose**: Verify the token is valid and the Gmail account is accessible.
+- **Returns**: `ConnectorStatus(health=HEALTHY, auth_status=CONNECTED)` on success; `DEGRADED/FAILED` on error.
 
 ### 5.4 `sync(since, full, kb_id, webhook_url)`
-- **Delegates to**: `list_email()` then `normalizer.normalize_batch()` then `ingest_batch()`
-- **Incremental**: builds `after:{epoch}` query via `build_after_query(since)` when `full=False` and `since` is provided
-- **Full**: no query filter — fetches all INBOX+UNREAD messages
-- **Returns**: `SyncResult(status, documents_found, documents_synced, documents_failed)`
-- **NormalizedDocument**: produced by `normalizer.normalize()`
+- **Endpoint**: `GET users/me/messages` (list), then `GET users/me/messages/{id}` (get each)
+- **Pagination**: `pageToken` cursor; loop until `nextPageToken` is absent.
+- **Query params**: `q=after:{unix_ts}` for incremental; omit for full.
+- **Deletion propagation**:
+  - Load `known_ids: Set[str]` via `load_known_ids(self.config)`.
+  - Collect `current_ids` from the list response.
+  - For each id in `known_ids − current_ids` call `await self._remove_from_kb(msg_id)`.
+  - Log `gmail.sync.deletions_propagated` with count.
+  - Persist `current_ids` via `await self.save_config(save_known_ids(self.config, current_ids))`.
+- **Returns**: `SyncResult(status=COMPLETED, documents_synced=N, documents_found=M)`
 
-### 5.5 `read_email(msg_id)`
-- **Endpoint**: `GET /gmail/v1/users/me/messages/{id}` via `execute_get_message()`
-- **Parameters**: `msg_id: str`, `format="full"`, `metadata_headers=["Subject","From","Date"]`
-- **Response**: full message resource
-- **Returns**: raw dict from the API
-- **NormalizedDocument**: caller normalizes if needed
+### 5.5 `list_email(query, max_results, page_token)`
+- **Endpoint**: `GET users/me/messages?q={query}&maxResults={max_results}&pageToken={page_token}`
+- **Pagination**: returns `{messages: [{id, threadId}], nextPageToken, resultSizeEstimate}`.
+- **Returns**: list of message stub dicts + next page token.
 
-### 5.6 `add_email(raw_message_b64)`
-- **Endpoint**: `POST /gmail/v1/users/me/messages/import` (Gmail users.messages.import)
-- **Parameters**: `raw: str` — base64url-encoded RFC 2822 message
-- **Response**: minimal message resource `{ id, threadId, labelIds }`
-- **Returns**: raw dict
-- **NormalizedDocument**: N/A — import, not indexing
+### 5.6 `read_email(msg_id)`
+- **Endpoint**: `GET users/me/messages/{msg_id}?format=full`
+- **Returns**: `NormalizedDocument` via normalizer.
 
-### 5.7 `delete_email(msg_id)`
-- **Endpoint**: `DELETE /gmail/v1/users/me/messages/{id}` via `execute_delete_message(msg_id)`
-- **Parameters**: `msg_id: str`
-- **Scope required**: `https://mail.google.com/`
-- **Response**: HTTP 204 No Content on success (no body)
-- **Error mapping**: 404 → `GmailNotFoundError`; 403 → `GmailAuthError` (insufficient scope)
-- **Audit log**: `logger.warning("gmail.delete_email.audit", op="delete_email", msg_id=msg_id, tenant_id=self.tenant_id, connector_id=self.connector_id)`
-- **Returns**: `None`
-- **NormalizedDocument**: N/A
+### 5.7 `add_email(msg_id, label_ids)`
+- **Endpoint**: `POST users/me/messages/{msg_id}/modify` with `{addLabelIds: [...]}`
+- **Returns**: updated message stub dict.
 
-### 5.8 `remove_email(msg_id)`
-- **Endpoint**: Alias to `delete_email()` — delegates directly
-- **Returns**: `None`
-- **NormalizedDocument**: N/A
+### 5.8 `delete_email(msg_id, permanent)`
+- **Alias**: calls `delete_message(msg_id, permanent=permanent)`.
 
-### 5.9 `list_message(label_ids, query, page_token, max_results)`
-- **Endpoint**: `GET /gmail/v1/users/me/messages` via `execute_list_messages()`
-- **Parameters**: `label_ids`, `q` (query string), `pageToken`, `maxResults` (max 500)
-- **Response**: `{ messages: [{id, threadId}], nextPageToken, resultSizeEstimate }`
-- **Pagination**: cursor-based via `nextPageToken`; loop until absent
-- **Returns**: flat list of message stub dicts
-- **NormalizedDocument**: N/A (stubs only)
+### 5.9 `remove_email(msg_id)`
+- **Alias**: calls `delete_message(msg_id, permanent=False)` (soft/trash only).
 
-### 5.10 `update_email(msg_id, add_label_ids, remove_label_ids)`
-- **Endpoint**: `POST /gmail/v1/users/me/messages/{id}/modify` (users.messages.modify)
-- **Payload**: `{ addLabelIds: [...], removeLabelIds: [...] }`
-- **Response**: full message resource with updated `labelIds`
-- **Returns**: raw dict
-- **NormalizedDocument**: N/A
+### 5.10 `delete_message(msg_id, permanent=False)`
+- **Soft** (`permanent=False`): `POST users/me/messages/{msg_id}/trash` → returns trashed resource dict.
+- **Hard** (`permanent=True`):
+  - Calls `_assert_permanent_delete_allowed()` first.
+  - `DELETE users/me/messages/{msg_id}` → returns `None` (204 No Content).
+- **Logs**: `gmail.delete_message.ok`.
 
-### 5.11 `label_email(msg_id, label_ids)`
-- **Endpoint**: `POST /gmail/v1/users/me/messages/{id}/modify` via `execute_modify_message()`
-- **Payload**: `{ addLabelIds: label_ids, removeLabelIds: [] }`
-- **Response**: full message resource
-- **Returns**: raw dict
-- **NormalizedDocument**: N/A
+### 5.11 `delete_thread(thread_id, permanent=False)`
+- **Soft**: `POST users/me/threads/{thread_id}/trash` → returns trashed thread dict.
+- **Hard**:
+  - Calls `_assert_permanent_delete_allowed()` first.
+  - `DELETE users/me/threads/{thread_id}` → `None` (204 No Content).
+- **Logs**: `gmail.delete_thread.ok`.
 
-### 5.12 `trash_email(msg_id)`
-- **Endpoint**: `POST /gmail/v1/users/me/messages/{id}/trash` via `execute_trash_message(msg_id)`
-- **Parameters**: `msg_id: str`
-- **Scope required**: `https://www.googleapis.com/auth/gmail.modify`
-- **Response**: full message resource with `TRASH` added to `labelIds`
-- **Error mapping**: 404 → `GmailNotFoundError`; 403 → `GmailAuthError`
-- **Returns**: raw dict (message resource)
-- **NormalizedDocument**: N/A — reversible operation, not an ingestion event
-
-### 5.13 `batch_delete_emails(msg_ids)`
-- **Endpoint**: `POST /gmail/v1/users/me/messages/batchDelete` via `execute_batch_delete_messages(msg_ids)`
-- **Payload**: `{ ids: [msg_id, ...] }` — max 1000 IDs per call (Gmail API contract)
-- **Scope required**: `https://mail.google.com/`
-- **Response**: HTTP 204 No Content on success
-- **Validation** (in connector.py, before delegating): `len(msg_ids) == 0` → `ValueError`; `len(msg_ids) > 1000` → `ValueError`
-- **Audit log**: `logger.warning("gmail.batch_delete_emails.audit", op="batch_delete_emails", count=len(msg_ids), tenant_id=self.tenant_id, connector_id=self.connector_id)`
-- **Error mapping**: 403 → `GmailAuthError` (insufficient scope); 400 → `GmailAPIError`
-- **Returns**: `None`
-- **NormalizedDocument**: N/A
+### 5.12 `bulk_delete(query, permanent=False)`
+- Reuses the `list_email` pageToken loop to collect all matching `msg_id`s.
+- For each `msg_id`: calls `execute_trash_message` or `execute_delete_message`; catches per-message exceptions.
+- Returns `{"deleted": N, "failed": N, "errors": [...]}`.
+- **Logs**: `gmail.bulk_delete.ok` with deleted/failed counts.
 
 ---
 
 ## 6. Error Handling
 
-| HTTP Status | Trigger | Exception raised | Handler |
-|---|---|---|---|
-| 401 | Invalid/expired token | `GmailAuthError` | `_map_http_error()` in http_client.py |
-| 403 | Insufficient OAuth scope | `GmailAuthError` | `_map_http_error()` in http_client.py |
-| 404 | Message not found | `GmailNotFoundError` (new) | `_map_http_error()` in http_client.py |
-| 429 | Rate limit exceeded | `GmailRateLimitError` | `retry_on_rate_limit` decorator (existing) |
-| 5xx | Server error | `GmailAPIError` | `retry_on_server_error` decorator (existing) |
-| Transport | Network failure | `GmailAPIError` | Caught in each execute_* method |
+| HTTP Status | Exception | Handling |
+|---|---|---|
+| 401 | `ConnectorAuthError` | Raised in `_map_http_error`; triggers token refresh via `ensure_token()` |
+| 403 | `ConnectorPermissionError` | Raised in `_map_http_error`; re-raised to caller |
+| 404 | `ConnectorNotFoundError` | `Message not found: {msg_id}` |
+| 429 | `ConnectorRateLimitError` | `@retry` decorator with exponential backoff handles transparently |
+| 5xx | `ConnectorError` | Raised in `_map_http_error`; `@retry` handles with backoff |
 
-**New exception to add to exceptions.py:**
-```
-class GmailNotFoundError(GmailBaseError): ...
-```
-
-**_HTTP_ERROR_MAP update in http_client.py:**
-```
-404: (GmailNotFoundError, "HTTP 404 not found")
-```
-
-**Connector-layer validation (before http_client delegation):**
-- `batch_delete_emails([])` → `raise ValueError("msg_ids must be a non-empty list")`
-- `batch_delete_emails(list of 1001)` → `raise ValueError("batch_delete_emails supports at most 1000 message IDs per call")`
-
-**Retry strategy:**
-- Rate-limit errors (429): `retry_on_rate_limit` — up to 5 attempts, exponential backoff, max 60 s
-- Server errors (5xx): `retry_on_server_error` — up to 3 attempts, max 30 s
-- Auth errors (401/403): not retried — surfaced immediately to the caller
-- 404: not retried — surfaced immediately as `GmailNotFoundError`
+The `@retry` decorator in `helpers/utils.py` implements exponential backoff with jitter, max 3 retries, initial delay 1 s, multiplier 2.
 
 ---
 
 ## 7. Dependencies
 
-All packages already declared in `requirements.txt`. No new packages are needed for the three new methods:
+No new packages are required. All dependencies are in the shared venv or `requirements.txt`:
 
 ```
-pip install google-api-python-client>=2.100.0
-pip install google-auth-httplib2>=0.2.0
-pip install google-auth-oauthlib>=1.1.0
-pip install aiohttp>=3.9.0
-pip install tenacity>=8.2.0
+# No additional pip installs needed
+# google-api-python-client, google-auth, aiohttp, structlog — already available
 ```
-
-The new methods call `service.users().messages().trash()`, `.delete()`, and `.batchDelete()` — all provided by `google-api-python-client` with no additional SDK.
 
 ---
 
 ## 8. Config & Install Fields
 
-| Config key | Type | Required | Source | Read via |
+| Key | Type | Source | Required | Notes |
 |---|---|---|---|---|
-| `client_id` | string | Yes | install_field (user-provided) | `self.config.get("client_id")` |
-| `client_secret` | secret | Yes | install_field (user-provided) | `self.config.get("client_secret")` |
-| `scopes` | string | No | install_field (user-provided, space-separated) | `self.config.get("scopes")` |
-| `auth_url` | string | No | install_field (user-provided override) | `self.config.get("auth_url")` |
-| `token_url` | string | No | install_field (user-provided override) | `self.config.get("token_url")` |
-| `base_url` | string | No | install_field (user-provided override) | `self.config.get("base_url")` |
-| `rate_limit_per_min` | string | No | install_field (user-provided) | `self.config.get("rate_limit_per_min")` |
-| `pagination_type` | string | No | install_field (user-provided) | `self.config.get("pagination_type")` |
-| `api_version` | string | No | install_field (user-provided, default "v1") | `self.config.get("api_version")` |
-| `redirect_uri` | string | No | bind constant (set by platform at OAuth callback) | `self.config.get("redirect_uri")` |
+| `client_id` | `str` | Hardcoded class const `CLIENT_ID` | — | OAuth client ID |
+| `client_secret` | `str` | Hardcoded class const `CLIENT_SECRET` | — | OAuth client secret |
+| `scopes` | `List[str]` | Hardcoded class const `REQUIRED_SCOPES` | — | `gmail.modify`; `mail.google.com` added only when `allow_permanent_delete=True` |
+| `auth_url` | `str` | Hardcoded class const `AUTH_URL` | — | `https://accounts.google.com/o/oauth2/v2/auth` |
+| `token_url` | `str` | Hardcoded class const `TOKEN_URL` | — | `https://oauth2.googleapis.com/token` |
+| `base_url` | `str` | Hardcoded class const `BASE_URL` | — | `https://gmail.googleapis.com/gmail/v1` |
+| `rate_limit_per_min` | `int` | Hardcoded class const `RATE_LIMIT_PER_MIN` | — | `250` |
+| `pagination_type` | `str` | Hardcoded class const `PAGINATION_TYPE` | — | `"cursor"` |
+| `api_version` | `str` | Hardcoded class const `API_VERSION` | — | `"v1"` |
+| `allow_permanent_delete` | `bool` | **install_field** — `self.config.get("allow_permanent_delete", False)` | Optional | Default `False`; enables `DELETE` endpoint and `mail.google.com` scope |
+| `known_message_ids` | `List[str]` | Runtime checkpoint — `self.config.get("known_message_ids", [])` | — | Persisted by `sync()` via `save_config()` |
 
-**Hardcoded / internal constants (NOT install_fields, NOT documented to users):**
-- `AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"` (overridable via `auth_url`)
-- `TOKEN_URI = "https://oauth2.googleapis.com/token"` (overridable via `token_url`)
-- `REQUIRED_SCOPES` — not user-facing; shown in consent screen by Google
+**User-provided install fields**: only `allow_permanent_delete` is user-supplied.
 
 ---
 
 ## 9. SOC/OCP Architecture Plan
 
-### File responsibility table
-
-| File | Owns | Must NOT contain |
+| File | Responsibility | Must NOT contain |
 |---|---|---|
-| `connector.py` | Orchestration; calls http_client + normalizer; validates input; emits audit logs; returns SDK types | Raw HTTP calls; JSON parsing; retry logic |
-| `client/http_client.py` | All `execute_*` methods; builds Gmail service object; maps HttpError → custom exceptions | Token refresh; OAuth flow; business logic |
-| `helpers/normalizer.py` | `normalize()` and `normalize_batch()`; field mapping from raw dict to NormalizedDocument | HTTP calls; config access |
-| `helpers/utils.py` | `parse_gmail_date`, `extract_header`, `truncate_preview`, `build_after_query`, `make_retry_decorator`, pre-built decorators | HTTP calls; API-specific logic |
-| `exceptions.py` | Exception hierarchy: `GmailBaseError`, `GmailAuthError`, `GmailRateLimitError`, `GmailAPIError`, `GmailNotFoundError` (new) | Logic of any kind |
+| `connector.py` | Orchestration only: calls client methods, passes results to normalizer, calls `ingest_batch`, calls `set_token`, logs events | Raw HTTP, JSON parsing, regex, retry logic |
+| `client/http_client.py` | All HTTP calls to Gmail API: `execute_list_messages`, `execute_get_message`, `execute_trash_message`, `execute_delete_message`, `execute_modify_message`, `execute_trash_thread`, `execute_delete_thread`; maps HTTP errors via `_map_http_error`; applies `@retry` decorator | Business logic, normalization, config reads beyond token/base_url |
+| `helpers/normalizer.py` | `normalize_message(raw)→NormalizedDocument`: extracts headers, decodes body parts (text/plain > text/html), sets all `NormalizedDocument` fields | HTTP calls, config access |
+| `helpers/utils.py` | `retry` decorator with exponential backoff + jitter; `load_known_ids(config)→Set[str]`; `save_known_ids(config, ids)→dict`; `extract_header(headers, name)→str` | HTTP calls, Gmail-specific logic |
+| `exceptions.py` | `ConnectorError`, `ConnectorAuthError`, `ConnectorPermissionError`, `ConnectorNotFoundError`, `ConnectorRateLimitError` | Any logic |
+| `config.py` | Class-level constants: `CLIENT_ID`, `CLIENT_SECRET`, `TOKEN_URL`, `AUTH_URL`, `BASE_URL`, `REQUIRED_SCOPES`, `RATE_LIMIT_PER_MIN`, `PAGINATION_TYPE`, `API_VERSION`, `ALLOW_PERMANENT_DELETE` | Any logic |
 
-### SOC compliance — 5 checks
-
-1. `connector.py` orchestrates only — zero raw HTTP calls: **PASS** (all calls via `_build_http_client()` → `http_client.execute_*`)
-2. HTTP calls delegated to `client/http_client.py`: **PASS** (three new `execute_*` methods added there)
-3. Response transformations in `helpers/normalizer.py`: **PASS** (new destructive methods return None, no normalization needed)
-4. Utilities in `helpers/utils.py`: **PASS** (retry decorators reused, no new util code needed)
-5. `connector.py` imports from `client/` and `helpers/` only: **PASS**
-
-### OCP compliance — 5 checks
-
-6. Each operation is a standalone `async def` — not folded into `sync()`: **PASS** (`trash_email`, `delete_email`, `batch_delete_emails` are independent methods)
-7. New operations added without modifying `BaseConnector` or existing methods: **PASS** (append-only changes)
-8. Config from `self.config.get("key")` — no hardcoded credentials: **PASS**
-9. Retry implemented as composable decorators (`retry_on_rate_limit`, `retry_on_server_error`): **PASS** (reused from utils.py)
-10. Error mapping in `exceptions.py` + `_map_http_error()` — connector.py catches custom exceptions only: **PASS**
-
-**Projected SOC/OCP score: 10/10**
-
-### Additive changes summary
-
-| File | Change type | Description |
-|---|---|---|
-| `connector.py` | Edit | Upgrade `REQUIRED_SCOPES`; append `trash_email()`, `delete_email()`, `remove_email()`, `batch_delete_emails()` |
-| `client/http_client.py` | Edit | Add `404` to `_HTTP_ERROR_MAP`; append `execute_trash_message()`, `execute_delete_message()`, `execute_batch_delete_messages()` |
-| `exceptions.py` | Edit | Append `GmailNotFoundError` |
-| `metadata/connector.json` | Edit | Update `scopes` field default text; add new method entries |
-| `tests/test_connector.py` | Edit | Append unit tests for the three new connector methods |
-| `tests/conftest.py` | Edit if needed | Add mock fixtures for the three new http_client methods |
+**OCP — each user-requested operation is a standalone `async def` method in `connector.py`**, never folded into `sync()`. New operations can be added without touching `BaseConnector` or existing methods. Config values come from `self.config.get()`. Retry/backoff is the `@retry` decorator in `utils.py`. Error mapping is in `exceptions.py` and `_map_http_error`.
