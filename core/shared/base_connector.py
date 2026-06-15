@@ -368,8 +368,14 @@ class BaseConnector(ABC):
         import urllib.parse
 
         # ── resolve auth_uri ──────────────────────────────────────────
+        # Accept BOTH naming conventions: framework-internal `auth_uri` and the
+        # standard OAuth install-field name `authorization_url` that the codegen
+        # emits. A normal build sets AUTH_URI as a class constant; an enhanced
+        # build moves it to an `authorization_url` install field — support both
+        # so neither regresses.
         auth_uri = (
             self.config.get("auth_uri")
+            or self.config.get("authorization_url")
             or getattr(self.__class__, "AUTH_URI", None)
             # fall back to module-level constant in the connector's module
             or getattr(sys.modules.get(self.__class__.__module__, None), "AUTH_URI", None)
@@ -377,7 +383,8 @@ class BaseConnector(ABC):
         if not auth_uri:
             raise ValueError(
                 f"auth_uri is not set for connector '{self.CONNECTOR_TYPE}'. "
-                "Add AUTH_URI as a class attribute or pass it in config."
+                "Add AUTH_URI as a class attribute or pass it in config "
+                "(as 'auth_uri' or 'authorization_url')."
             )
 
         # ── resolve client_id ─────────────────────────────────────────

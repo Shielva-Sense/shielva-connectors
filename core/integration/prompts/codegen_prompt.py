@@ -225,6 +225,7 @@ For `oauth2_code`/`oauth2_pkce` connectors, `client_id` (required) and `client_s
         self.client_secret = self.config.get("client_secret", "")
     ```
     - ❌ CRITICAL: **NEVER omit `AUTH_URI`** — `BaseConnector.get_oauth_url()` uses it. If missing, the connector fails with "auth_uri is not set".
+    - ❌ CRITICAL (`oauth2_device` only): **set the class-level `DEVICE_AUTH_URI` constant** with the provider's device-authorization endpoint (e.g. `DEVICE_AUTH_URI = "https://oauth2.googleapis.com/device/code"`). `BaseConnector.start_device_flow()` uses it; if missing the connector fails with "DEVICE_AUTH_URI not set". (`TOKEN_URI` is still required for the device-flow token poll.)
     - ❌ CRITICAL: **NEVER use `os.getenv()` or `os.environ.get()` for credentials** — all credentials come from `self.config`.
     - **NEVER implement `get_oauth_url()`** — `BaseConnector` provides it automatically using `AUTH_URI`, `client_id`, and `self.config["scopes"]`.
     - `install()` signature MUST be `async def install(self) -> ConnectorStatus` — NO config param. Config is in `self.config` already.

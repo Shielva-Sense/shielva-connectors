@@ -157,12 +157,19 @@ class IntegrationSession(BaseModel):
     #           Primary key for pre-login sessions. Mapped to tenant post-login.
     # tenant_id / tenant_name : populated after user logs in (via /app/link-tenant).
     #           Optional pre-login so sessions can be created before authentication.
-    app_id: Optional[str] = None
-    tenant_id: Optional[str] = None
-    tenant_name: str = ""   # R2 bucket path prefix — set after login
-    provider: str
-    service: str
-    connector_name: str = ""   # human-readable name for this connector instance
+    # Fields tagged `enhance_inherit=True` are connector-IDENTITY / generation-INPUT
+    # config (dynamic per connector). An enhance run is a fresh run of the SAME
+    # connector, so it copies exactly these from its parent — driven by the tag, never
+    # a hardcoded list in the route handler (see `enhance_inherited_fields()`). Run
+    # SCRATCH (plan, exec results, tests, status, slug, …) is intentionally NOT tagged
+    # so each run starts clean.
+    app_id: Optional[str] = Field(default=None, json_schema_extra={"enhance_inherit": True})
+    tenant_id: Optional[str] = Field(default=None, json_schema_extra={"enhance_inherit": True})
+    tenant_name: str = Field(default="", json_schema_extra={"enhance_inherit": True})   # R2 bucket path prefix — set after login
+    provider: str = Field(json_schema_extra={"enhance_inherit": True})
+    service: str = Field(json_schema_extra={"enhance_inherit": True})
+    connector_name: str = Field(default="", json_schema_extra={"enhance_inherit": True})   # human-readable name for this connector instance
+    auth_type: str = Field(default="", json_schema_extra={"enhance_inherit": True})         # oauth2_code | api_key | … — drives the CONNECTOR_GEN_SYSTEM overlay at codegen time
     user_prompt: str = ""
     # ── Run lineage ───────────────────────────────────────────────────────────
     # A session is one "run" of the builder against a connector. The first run is
@@ -185,22 +192,33 @@ class IntegrationSession(BaseModel):
     # Conversation history for Claude recall — each entry is {role: "user"|"assistant", content: str}
     # Persisted across initial plan generation and replans so Claude recalls prior context.
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
-    docs_urls: List[str] = Field(default_factory=list)   # provider doc URLs to fetch + synthesize
-    custom_rules_md: str = ""                             # user-supplied Markdown rules
-    default_config: List[Dict[str, Any]] = Field(default_factory=list)  # user binding decisions per field
-    selected_features: List[str] = Field(default_factory=list)           # feature IDs the user has selected
-    selected_config_keys: List[str] = Field(default_factory=list)        # config field keys user wants as install_fields (user-provided)
-    test_type: str = "unit"                                               # "unit" | "both" — test mode chosen in Review Plan
+    docs_urls: List[str] = Field(default_factory=list, json_schema_extra={"enhance_inherit": True})   # provider doc URLs to fetch + synthesize
+    custom_rules_md: str = Field(default="", json_schema_extra={"enhance_inherit": True})              # user-supplied Markdown rules
+    default_config: List[Dict[str, Any]] = Field(default_factory=list, json_schema_extra={"enhance_inherit": True})  # user binding decisions per field
+    selected_features: List[str] = Field(default_factory=list)           # feature IDs the user has selected — fresh per run (enhance picks new ones)
+    selected_config_keys: List[str] = Field(default_factory=list, json_schema_extra={"enhance_inherit": True})        # config field keys user wants as install_fields (user-provided) — drives the install_fields/constant split
+    test_type: str = Field(default="unit", json_schema_extra={"enhance_inherit": True})                               # "unit" | "both" — test mode chosen in Review Plan
     # Method identity + entity configuration
-    method_identities: List[Dict[str, Any]] = Field(default_factory=list)
-    entity_configs: List[Dict[str, Any]] = Field(default_factory=list)
+    method_identities: List[Dict[str, Any]] = Field(default_factory=list, json_schema_extra={"enhance_inherit": True})
+    entity_configs: List[Dict[str, Any]] = Field(default_factory=list, json_schema_extra={"enhance_inherit": True})
     mongo_provision: Optional[Dict[str, Any]] = None
-    llm_model: str = ""                                      # preferred Claude model ID for this session
+    llm_model: str = Field(default="", json_schema_extra={"enhance_inherit": True})          # preferred Claude model ID for this session
     # Stepper UI progress — highest wizard tab index the user has reached.
     # Scoped per session (= per tenant + connector) so navigation state survives reloads.
     stepper_max_step: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @classmethod
+    def enhance_inherited_fields(cls) -> List[str]:
+        """Field names an enhance run copies from its parent — derived from the
+        per-field `enhance_inherit` tag, NOT a hardcoded list. Add a new
+        connector-config field with `json_schema_extra={"enhance_inherit": True}`
+        and it is inherited automatically; no change to the enhance handler."""
+        return [
+            name for name, f in cls.model_fields.items()
+            if isinstance(f.json_schema_extra, dict) and f.json_schema_extra.get("enhance_inherit")
+        ]
 
 
 # ── API request / response helpers ────────────────────────────────────

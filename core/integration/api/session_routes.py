@@ -360,14 +360,22 @@ async def create_enhance_run(
     if not parent:
         raise HTTPException(404, "Parent connector session not found")
 
+    # Inherit every connector-IDENTITY / generation-INPUT field the model tags with
+    # `enhance_inherit` (auth_type, selected_config_keys, default_config, docs_urls,
+    # custom_rules_md, method_identities, …). Driven by the model — NOT a hardcoded
+    # list here — so a new connector-config field is inherited automatically. Without
+    # this, an enhance run regenerates with empty config and regresses the connector
+    # (e.g. auth_type→api_key dropped AUTH_URI and broke OAuth).
+    inherited = {
+        f: parent[f] for f in IntegrationSession.enhance_inherited_fields() if f in parent
+    }
+    # Request headers win only as a fallback when the parent value is absent.
+    inherited["app_id"] = parent.get("app_id") or app_id
+    inherited["tenant_id"] = parent.get("tenant_id") or tenant_id
+    inherited["tenant_name"] = parent.get("tenant_name") or tenant_name
+
     child = IntegrationSession(
-        app_id=parent.get("app_id") or app_id,
-        tenant_id=parent.get("tenant_id") or tenant_id,
-        tenant_name=parent.get("tenant_name") or tenant_name,
-        provider=parent["provider"],
-        service=parent["service"],
-        connector_name=parent.get("connector_name", ""),
-        llm_model=parent.get("llm_model", ""),
+        **inherited,
         user_prompt="",
         status=SessionStatus.PLANNING,
         run_kind="enhance",
