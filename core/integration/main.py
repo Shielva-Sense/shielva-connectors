@@ -4,6 +4,17 @@ AI-assisted connector code generation service.
 Port: 8055 (default)
 """
 
+# Load core/.env (MASTER_KEY etc.) into the process env BEFORE any module reads
+# os.getenv at import time. override=False so server.sh-exported vars take priority.
+from dotenv import load_dotenv
+from pathlib import Path as _EnvPath
+# Load core/.env by EXPLICIT path — NOT load_dotenv()'s auto-discovery, which walks
+# up from this file (core/integration/) and stops at core/integration/.env, missing
+# the shared secrets (MASTER_KEY, CONNECTOR_INTERNAL_TOKEN) that live in core/.env.
+_core_dir = _EnvPath(__file__).resolve().parent.parent  # shielva-connectors/core
+load_dotenv(_core_dir / ".env", override=False)                       # shared secrets
+load_dotenv(_core_dir / "integration" / ".env", override=False)       # integration-specific vars
+
 import asyncio
 import logging
 import sys

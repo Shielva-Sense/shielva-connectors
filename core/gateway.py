@@ -18,6 +18,11 @@ import uvicorn
 import sys
 import os
 
+# Load core/.env into the process environment (MASTER_KEY etc.) before any
+# service singleton reads os.getenv. override=False so server.sh-exported vars win.
+from dotenv import load_dotenv
+load_dotenv(override=False)
+
 from services import credential_manager
 from services.connector_store import connector_store
 
@@ -718,6 +723,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Ship gateway logs/metrics/traces to shielva-sop (deploy/install/scan/health/sync
+# runtime logs). Uses the SOP_* env already in core/.env (SOP_INGESTION_KEY etc.).
+# Best-effort: never let observability setup break gateway startup.
+try:
+    from shielva_common.sop_sdk import setup_sop
+    setup_sop(app, service_name="shielva-connectors-gateway")
+except Exception as _sop_exc:  # pragma: no cover
+    logger.warning("sop_setup_skipped", error=str(_sop_exc))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=json.loads(os.getenv("CORS_ORIGINS", '["https://localhost:3010","https://localhost:3001","http://localhost:3010","http://localhost:3000","https://localhost:3000","https://localhost:3005","https://127.0.0.1:3010","http://127.0.0.1:3000"]')),
@@ -805,12 +819,19 @@ async def pull_and_reload(
     """
     import asyncio as _asyncio
     import subprocess as _sp
+    import hmac as _hmac
 
+    # Authorize EITHER as an internal service (valid X-Internal-Token) OR as an
+    # admin user (X-User-Role). Trusted backends (e.g. promote) present the shared
+    # token instead of spoofing a role.
+    _internal = os.getenv("CONNECTOR_INTERNAL_TOKEN") or ""
+    _provided = request.headers.get("X-Internal-Token") or ""
+    is_internal = bool(_internal) and _hmac.compare_digest(_provided, _internal)
     user_role = (request.headers.get("X-User-Role") or "viewer").lower()
-    if user_role not in ("super_admin", "tenant_admin", "admin"):
+    if not is_internal and user_role not in ("super_admin", "tenant_admin", "admin"):
         raise HTTPException(
             status_code=403,
-            detail=f"Role '{user_role}' cannot trigger pull-and-reload. Requires super_admin or tenant_admin.",
+            detail=f"Role '{user_role}' cannot trigger pull-and-reload. Requires super_admin/tenant_admin or a valid internal token.",
         )
 
     result = {"git_pull": None, "reload": None}
@@ -946,6 +967,23 @@ async def list_connector_types():
             }
         ]
     }
+
+
+@app.post("/credentials/rotate-key")
+async def rotate_credential_key(tenant_id: str = Depends(get_tenant_id)):
+    """Rotate this tenant's Data-Encryption-Key (DEK).
+
+    Declared BEFORE the parameterized POST so "rotate-key" isn't captured as a
+    connector_type. New credential writes use the new DEK version; existing
+    ciphertext keeps decrypting under its retained version. KEK is untouched.
+    """
+    from services import encryption_service
+    try:
+        new_version = await encryption_service.rotate_tenant(tenant_id)
+    except Exception as e:
+        logger.error("Failed to rotate DEK", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "rotated", "active_version": new_version}
 
 
 @app.post("/credentials/{connector_type}")
@@ -1643,7 +1681,16 @@ async def deploy_connector(
                 )
                 if _r.status_code == 200:
                     _meta = _r.json()
-                    connector_type = _meta.get("connector_type", connector_type)
+                    # The metadata response doesn't always carry an explicit
+                    # connector_type; fall back to `service` / `connector_name`,
+                    # which equal CONNECTOR_TYPE for generated connectors. Without
+                    # this the deploy 400s ("connector_type could not be resolved").
+                    connector_type = (
+                        _meta.get("connector_type")
+                        or _meta.get("service")
+                        or _meta.get("connector_name")
+                        or connector_type
+                    )
         except Exception as _ex:
             logger.warning("deploy.connector_type_resolution_failed", session_id=session_id, error=str(_ex))
 

@@ -17,14 +17,24 @@ async def test_encryption():
     service = EncryptionService(master_key=dummy_key)
     
     original_text = '{"api_key": "secret-123"}'
-    encrypted = service.encrypt(original_text)
-    print(f"Encrypted: {encrypted}")
-    
-    decrypted = service.decrypt(encrypted)
+    encrypted = await service.encrypt(original_text, "test-tenant")
+    print(f"Encrypted (version-tagged envelope): {encrypted}")
+    assert encrypted.split(":", 1)[0].isdigit(), "envelope must be version-tagged"
+
+    decrypted = await service.decrypt(encrypted, "test-tenant")
     print(f"Decrypted: {decrypted}")
-    
     assert original_text == decrypted
-    print("Encryption test PASSED")
+
+    # Per-tenant isolation: a different tenant's DEK must NOT decrypt.
+    assert await service.decrypt(encrypted, "other-tenant") != original_text
+
+    # Rotation: old ciphertext still decrypts; new writes use the new version.
+    new_v = await service.rotate_tenant("test-tenant")
+    assert await service.decrypt(encrypted, "test-tenant") == original_text, "old ciphertext must survive rotation"
+    re_encrypted = await service.encrypt(original_text, "test-tenant")
+    assert int(re_encrypted.split(":", 1)[0]) == new_v, "new writes use rotated version"
+    assert await service.decrypt(re_encrypted, "test-tenant") == original_text
+    print(f"Encryption test PASSED (per-tenant DEK + rotation → active v{new_v})")
     
     print("\nTesting CredentialManager...")
     manager = CredentialManager(service)

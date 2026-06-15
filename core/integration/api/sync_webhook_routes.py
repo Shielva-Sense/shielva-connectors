@@ -186,6 +186,7 @@ async def github_sync_webhook(
                         {"_id": doc["_id"]},
                         {"$set": {
                             "status": "merged",
+                            "pr_state": "merged",
                             "merged_at": datetime.utcnow(),
                             "updated_at": datetime.utcnow(),
                         }},
@@ -224,15 +225,24 @@ async def github_sync_webhook(
                     result=pull_result,
                 )
             else:
-                # PR was closed without merging (externally)
+                # PR was closed without merging (externally). Always reflect pr_state=closed
+                # (even if already locally dismissed) so the card never shows a stale "PR open".
                 if doc["status"] not in ("merged", "dismissed"):
                     await col.update_one(
                         {"_id": doc["_id"]},
-                        {"$set": {"status": "dismissed", "updated_at": datetime.utcnow()}},
+                        {"$set": {"status": "dismissed", "pr_state": "closed", "updated_at": datetime.utcnow()}},
                     )
                     _broadcast(tenant_id, "sync:request_dismissed", {
                         "sync_request_id": sync_request_id,
                         "reason": "closed_externally",
+                    })
+                elif doc.get("pr_state") != "closed":
+                    await col.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"pr_state": "closed", "updated_at": datetime.utcnow()}},
+                    )
+                    _broadcast(tenant_id, "sync:pr_state", {
+                        "sync_request_id": sync_request_id, "pr_state": "closed",
                     })
 
         elif action == "synchronize":

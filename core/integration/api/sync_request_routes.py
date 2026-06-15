@@ -605,8 +605,14 @@ async def _delete_ci_branch(branch_name: str, sync_settings: Dict) -> None:
         logger.warning("ci_branch_delete_failed", branch=branch_name, error=str(exc)[:200])
 
 
-def _smart_diff(files: List[SyncFilePayload]) -> tuple[List[SyncFilePayload], Dict[str, Any]]:
-    """Gate 2: Strip junk files (pycache, .pyc, IDE configs, etc.)."""
+def _smart_diff(files: List[SyncFilePayload], drop_empty: bool = True) -> tuple[List[SyncFilePayload], Dict[str, Any]]:
+    """Gate 2: Strip junk files (pycache, .pyc, IDE configs, etc.).
+
+    drop_empty: when True (sync push), whitespace-only files are also stripped.
+    For DIFF comparisons pass drop_empty=False — empty files (e.g. package
+    __init__.py) genuinely live on the branch, so dropping them only on the local
+    side makes them look falsely "removed" and produces phantom diffs.
+    """
     cleaned = []
     removed = []
     for f in files:
@@ -616,11 +622,12 @@ def _smart_diff(files: List[SyncFilePayload]) -> tuple[List[SyncFilePayload], Di
                 is_junk = True
                 removed.append(f.path)
                 break
-        # Skip whitespace-only files
-        if not is_junk and f.content.strip():
-            cleaned.append(f)
-        elif not is_junk and not f.content.strip():
+        if is_junk:
+            continue
+        if drop_empty and not f.content.strip():
             removed.append(f.path)
+        else:
+            cleaned.append(f)
 
     result = {
         "gate": "smart_diff",
@@ -1351,6 +1358,18 @@ async def _run_ci_pipeline(
             "    missing = (ann_names & TYPING_NAMES) - imported\n"
             "    if missing:\n"
             "        errors.append(f'Missing typing imports in {py_file.name}: add: from typing import {\", \".join(sorted(missing))}')\n"
+            # Security gate: mirror the gateway's AST scanner so banned calls fail the
+            # BUILD (with a clear message) instead of silently passing to install.
+            # Scans ALL .py files including tests (the gateway scans the whole package).
+            "BLOCKED_CALLS = {'eval', 'exec', 'compile', '__import__'}\n"
+            "for py_file in sorted(f for f in cwd.rglob('*.py') if '__pycache__' not in f.parts):\n"
+            "    try:\n"
+            "        btree = ast.parse(py_file.read_text(encoding='utf-8'))\n"
+            "    except SyntaxError:\n"
+            "        continue\n"
+            "    for bnode in ast.walk(btree):\n"
+            "        if isinstance(bnode, ast.Call) and isinstance(bnode.func, ast.Name) and bnode.func.id in BLOCKED_CALLS:\n"
+            "            errors.append(f'Security: {py_file.name} calls {bnode.func.id}() - banned; the gateway AST scanner will refuse to load this connector. Use a normal top-level import instead.')\n"
             "if not errors:\n"
             "    top_mods = sorted(f.stem for f in cwd.glob('*.py')\n"
             "                      if f.stem != '__init__' and not f.stem.startswith('test_'))\n"
@@ -1759,11 +1778,15 @@ async def reconcile_sync_requests(
         sid = str(doc["_id"])
         now = datetime.utcnow()
 
+        # Live PR lifecycle state, ALWAYS persisted (even for terminal local statuses)
+        # so the UI can show "PR closed"/"PR merged" instead of forever "PR open".
+        pr_state = "merged" if gh_merged else (gh_state or "open")  # open | closed | merged
+        set_fields: Dict[str, Any] = {"pr_state": pr_state, "updated_at": now}
+
         if gh_merged and local_status != "merged":
             merged_at = _parse_gh_ts(pr.get("merged_at")) or now
-            await col.update_one({"_id": doc["_id"]}, {"$set": {
-                "status": "merged", "merged_at": merged_at, "updated_at": now,
-            }})
+            set_fields.update({"status": "merged", "merged_at": merged_at})
+            await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
             _broadcast(x_tenant_id, "sync:request_merged", {
                 "sync_request_id": sid,
                 "approved_by": "github-reconcile",
@@ -1771,17 +1794,352 @@ async def reconcile_sync_requests(
             })
             reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "merged"})
         elif gh_state == "closed" and not gh_merged and local_status not in ("merged", "dismissed"):
-            await col.update_one({"_id": doc["_id"]}, {"$set": {
-                "status": "dismissed", "updated_at": now,
-            }})
+            set_fields["status"] = "dismissed"
+            await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
             _broadcast(x_tenant_id, "sync:request_dismissed", {
                 "sync_request_id": sid, "reason": "closed_on_github",
             })
             reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "dismissed"})
+        else:
+            # No status transition, but the PR state on GitHub may still have changed
+            # (e.g. an already-dismissed request whose PR was just closed). Persist it +
+            # broadcast so the open client re-renders the PR badge.
+            await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
+            _broadcast(x_tenant_id, "sync:pr_state", {"sync_request_id": sid, "pr_state": pr_state})
+            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": local_status, "pr_state": pr_state})
 
     logger.info("reconcile.done", tenant_id=x_tenant_id, reconciled=len(reconciled),
                 scope=("single" if body.sync_request_id else "all"))
     return {"reconciled_count": len(reconciled), "reconciled": reconciled}
+
+
+def _git_blob_sha(content: str) -> str:
+    """Git blob SHA-1 for text content — matches the SHA GitHub stores for a pushed file."""
+    import hashlib
+    data = content.encode("utf-8")
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+
+
+class DiffPreviewBody(BaseModel):
+    connector_name: str
+    target_branch: str = "connector-development"
+    files: List[SyncFilePayload]
+
+
+@sync_request_router.post("/diff-preview")
+async def diff_preview(
+    body: DiffPreviewBody,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Whether the submitted local files differ from what's already on the target branch.
+
+    Lets the UI HIDE "Raise Sync Request" when there's nothing to sync. Compares git blob
+    SHAs against generated_connectors/{tenant}/{connector}/ — one Trees API call, no diff
+    of file bodies. Safe default: when it can't determine, returns has_diff=true so the
+    button stays available (never hide a real change).
+    """
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    token = sync_settings.get("github_token", "")
+    repo_url = sync_settings.get("github_repo_url", "")
+    if not token or not repo_url:
+        return {"has_diff": True, "reason": "sync_not_configured"}
+    owner, repo = _parse_repo(repo_url)
+
+    # Normalize tenant segment + strip junk so we compare exactly what WOULD be pushed.
+    import re as _re_dp
+    _gc = _re_dp.compile(r'^generated_connectors/[^/]+/')
+    norm: List[SyncFilePayload] = []
+    for f in body.files:
+        p = _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path) if (f.path.startswith("generated_connectors/") and _gc.match(f.path)) else f.path
+        norm.append(SyncFilePayload(path=p, content=f.content))
+    cleaned, _ = _smart_diff(norm, drop_empty=False)  # keep empty files — branch has them too
+
+    prefix = f"generated_connectors/{x_tenant_id}/{body.connector_name}".rstrip("/")
+    local = {f.path: _git_blob_sha(f.content) for f in cleaned}
+
+    repo_tree: Dict[str, str] = {}
+    try:
+        tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1", token)
+        for item in tree.get("tree", []):
+            ipath = item.get("path", "")
+            if item.get("type") == "blob" and ipath.startswith(prefix + "/"):
+                repo_tree[ipath] = item.get("sha", "")
+    except HTTPException as exc:
+        # Branch/tree/connector dir not found → connector was never synced → all new.
+        logger.info("diff_preview.tree_unavailable", status=exc.status_code, prefix=prefix)
+        return {"has_diff": bool(local), "added": list(local.keys()), "modified": [], "removed": []}
+
+    added = [p for p in local if p not in repo_tree]
+    removed = [p for p in repo_tree if p not in local]
+    modified = [p for p in local if p in repo_tree and local[p] != repo_tree[p]]
+    return {"has_diff": bool(added or removed or modified), "added": added, "modified": modified, "removed": removed}
+
+
+class DiffDetailBody(BaseModel):
+    connector_name: str
+    target_branch: str = "connector-development"
+    files: List[SyncFilePayload]
+
+
+async def _fetch_branch_blob(owner: str, repo: str, sha: str, token: str) -> str:
+    """Fetch a git blob's text content by SHA from GitHub."""
+    blob = await _github_request("GET", f"/repos/{owner}/{repo}/git/blobs/{sha}", token)
+    import base64 as _b64
+    if blob.get("encoding") == "base64":
+        return _b64.b64decode(blob.get("content", "")).decode("utf-8", errors="replace")
+    return blob.get("content", "")
+
+
+@sync_request_router.post("/diff-detail")
+async def diff_detail(
+    body: DiffDetailBody,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Per-file unified diff between the LOCAL connector code and the target branch.
+
+    Powers the "View Changes" modal. Returns, for each changed file, a git-style
+    unified diff plus add/del line counts. `configured` is false when GitHub sync
+    isn't set up (so the UI can say so instead of implying a phantom diff).
+    """
+    import difflib
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    token = sync_settings.get("github_token", "")
+    repo_url = sync_settings.get("github_repo_url", "")
+    if not token or not repo_url:
+        return {"configured": False, "files": [], "reason": "sync_not_configured"}
+    owner, repo = _parse_repo(repo_url)
+
+    import re as _re_dd
+    _gc = _re_dd.compile(r'^generated_connectors/[^/]+/')
+    norm: List[SyncFilePayload] = []
+    for f in body.files:
+        p = _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path) if (f.path.startswith("generated_connectors/") and _gc.match(f.path)) else f.path
+        norm.append(SyncFilePayload(path=p, content=f.content))
+    cleaned, _ = _smart_diff(norm, drop_empty=False)  # keep empty files — branch has them too
+
+    prefix = f"generated_connectors/{x_tenant_id}/{body.connector_name}".rstrip("/")
+    local_content = {f.path: f.content for f in cleaned}
+    local_sha = {p: _git_blob_sha(c) for p, c in local_content.items()}
+
+    repo_tree: Dict[str, str] = {}
+    try:
+        tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1", token)
+        for item in tree.get("tree", []):
+            ipath = item.get("path", "")
+            if item.get("type") == "blob" and ipath.startswith(prefix + "/"):
+                repo_tree[ipath] = item.get("sha", "")
+    except HTTPException:
+        # Connector never synced → everything is "added".
+        repo_tree = {}
+
+    added = [p for p in local_content if p not in repo_tree]
+    removed = [p for p in repo_tree if p not in local_content]
+    modified = [p for p in local_content if p in repo_tree and local_sha[p] != repo_tree[p]]
+
+    def _unified(path: str, old: str, new: str) -> Dict[str, Any]:
+        ol, nl = old.splitlines(keepends=True), new.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(ol, nl, fromfile=f"a/{path}", tofile=f"b/{path}"))
+        adds = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
+        dels = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+        return {"diff": "".join(diff), "additions": adds, "deletions": dels}
+
+    out: List[Dict[str, Any]] = []
+    for p in sorted(added):
+        out.append({"path": p, "status": "added", **_unified(p, "", local_content[p])})
+    for p in sorted(modified):
+        branch_text = await _fetch_branch_blob(owner, repo, repo_tree[p], token)
+        out.append({"path": p, "status": "modified", **_unified(p, branch_text, local_content[p])})
+    for p in sorted(removed):
+        branch_text = await _fetch_branch_blob(owner, repo, repo_tree[p], token)
+        out.append({"path": p, "status": "removed", **_unified(p, branch_text, "")})
+
+    return {"configured": True, "has_diff": bool(out), "files": out}
+
+
+# ── Promote: supersede the previously-built connector with the enhanced version ──
+
+_PROMOTE_TARGET_BRANCH = "connector-development"
+# Files under the connector dir that aren't part of the connector's committed code.
+_OUTDATED_SKIP = re.compile(r'(^|/)(__pycache__|\.pytest_cache|\.ruff_cache|node_modules)(/|$)|\.pyc$')
+
+
+def _deployed_connector_dir(tenant_id: str, connector_name: str) -> Path:
+    """On-disk dir of the currently-built (deployed) connector for this tenant."""
+    return Path(settings.GENERATED_CODE_DIR) / tenant_id / connector_name
+
+
+def _read_deployed_files(tenant_id: str, connector_name: str) -> Dict[str, str]:
+    """Map of repo-relative path → git blob SHA for the deployed connector on disk."""
+    base = _deployed_connector_dir(tenant_id, connector_name)
+    out: Dict[str, str] = {}
+    if not base.exists():
+        return out
+    for fp in base.rglob("*"):
+        if not fp.is_file():
+            continue
+        rel = fp.relative_to(base).as_posix()
+        if _OUTDATED_SKIP.search(rel):
+            continue
+        try:
+            content = fp.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        out[f"generated_connectors/{tenant_id}/{connector_name}/{rel}"] = _git_blob_sha(content)
+    return out
+
+
+async def _merged_sync_request(tenant_id: str, connector_name: str) -> Optional[Dict]:
+    """Most recent sync request for this connector whose PR is merged to connector-development."""
+    return await _sync_requests_col().find_one(
+        {"tenant_id": tenant_id, "connector_name": connector_name, "status": "merged"},
+        sort=[("merged_at", -1)],
+    )
+
+
+@sync_request_router.get("/outdated")
+async def connector_outdated(
+    connector_name: str = Query(...),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Whether the deployed (previously-built) connector differs from connector-development.
+
+    `outdated` is true on ANY file difference. `promotable` is true when a merged PR
+    exists for this connector — i.e. the enhanced code is on connector-development and
+    can be pulled in. Drives the Outdated badge + Promote affordance and step gating.
+    """
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    token = sync_settings.get("github_token", "")
+    repo_url = sync_settings.get("github_repo_url", "")
+    merged = await _merged_sync_request(x_tenant_id, connector_name)
+    promotable = bool(merged)
+    if not token or not repo_url:
+        # Can't compare → don't cry wolf. Outdated only if we have a merged PR to pull.
+        return {"outdated": promotable, "promotable": promotable, "changed": [], "reason": "sync_not_configured",
+                "sync_request_id": str(merged["_id"]) if merged else None}
+    owner, repo = _parse_repo(repo_url)
+    target_branch = sync_settings.get("default_target_branch") or _PROMOTE_TARGET_BRANCH
+
+    local = _read_deployed_files(x_tenant_id, connector_name)
+    prefix = f"generated_connectors/{x_tenant_id}/{connector_name}"
+    repo_tree: Dict[str, str] = {}
+    try:
+        tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{target_branch}?recursive=1", token)
+        for item in tree.get("tree", []):
+            ipath = item.get("path", "")
+            if item.get("type") == "blob" and ipath.startswith(prefix + "/") and not _OUTDATED_SKIP.search(ipath):
+                repo_tree[ipath] = item.get("sha", "")
+    except HTTPException as exc:
+        logger.info("outdated.tree_unavailable", status=exc.status_code, prefix=prefix)
+        return {"outdated": False, "promotable": promotable, "changed": [],
+                "sync_request_id": str(merged["_id"]) if merged else None}
+
+    changed = (
+        [p for p in repo_tree if p not in local]                                   # added on dev
+        + [p for p in local if p not in repo_tree]                                  # removed on dev
+        + [p for p in local if p in repo_tree and local[p] != repo_tree[p]]         # modified
+    )
+    return {
+        "outdated": bool(changed),
+        "promotable": promotable,
+        "changed": changed,
+        "sync_request_id": str(merged["_id"]) if merged else None,
+    }
+
+
+class PromoteBody(BaseModel):
+    connector_name: str
+    session_id: str = ""   # the enhanced session to keep as primary (others are deleted)
+
+
+@sync_request_router.post("/promote")
+async def promote_connector(
+    body: PromoteBody,
+    request: Request,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Promote the enhanced connector to primary, superseding the previous build.
+
+    Requires the PR to be merged to connector-development. Pulls that code in-place
+    (connector_type unchanged → stored credentials are preserved), reloads the
+    connector, then deletes the superseded build/enhancement sessions.
+    """
+    merged = await _merged_sync_request(x_tenant_id, body.connector_name)
+    if not merged:
+        raise HTTPException(
+            status_code=409,
+            detail="Nothing to promote — no PR merged to connector-development for this connector yet.",
+        )
+
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    token = sync_settings.get("github_token", "")
+    repo_url = sync_settings.get("github_repo_url", "")
+    if not token or not repo_url:
+        raise HTTPException(status_code=400, detail="GitHub repo URL and token must be configured to promote.")
+
+    # ── Pull the merged code in-place + hot-reload (preserves connector_type + creds) ──
+    # Authenticate to the internal reload endpoint with the shared service token
+    # (NOT by spoofing a role). The caller's real role is forwarded for audit only.
+    target_branch = sync_settings.get("default_target_branch") or _PROMOTE_TARGET_BRANCH
+    import os as _os
+    internal_token = _os.getenv("CONNECTOR_INTERNAL_TOKEN", "")
+    if not internal_token:
+        # Robust fallback: read straight from core/.env by EXPLICIT path (auto-discovery
+        # finds core/integration/.env first, which lacks this secret).
+        try:
+            from dotenv import dotenv_values
+            from pathlib import Path as _P
+            _core_env = _P(__file__).resolve().parents[2] / ".env"   # core/.env
+            internal_token = (dotenv_values(_core_env) or {}).get("CONNECTOR_INTERNAL_TOKEN", "") or ""
+        except Exception:
+            internal_token = ""
+    logger.info("promote.reload_call", token_present=bool(internal_token), token_len=len(internal_token), gateway=settings.CONNECTOR_GATEWAY_URL)
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.CONNECTOR_GATEWAY_URL}/internal/pull-and-reload",
+                headers={
+                    "X-Tenant-ID": x_tenant_id,
+                    "X-Internal-Token": internal_token,
+                    "X-User-Role": (request.headers.get("X-User-Role") or ""),
+                },
+                json={"target_branch": target_branch, "github_token": token, "github_repo_url": repo_url},
+            )
+            resp.raise_for_status()
+            reload_result = resp.json()
+    except httpx.HTTPError as e:
+        logger.error("promote.pull_and_reload_failed", connector=body.connector_name, error=str(e))
+        raise HTTPException(status_code=502, detail=f"Failed to pull/reload promoted code: {e}")
+
+    # ── Delete superseded sessions: every session for this connector EXCEPT the kept one ──
+    # Safety: a kept session is REQUIRED. Without a valid session_id we must never
+    # mass-delete (that would wipe every session for the connector). Refuse instead.
+    from integration.db.database import sessions_collection
+    try:
+        keep_oid = ObjectId(body.session_id) if body.session_id else None
+    except Exception:
+        keep_oid = None
+    if keep_oid is None:
+        raise HTTPException(
+            status_code=400,
+            detail="promote requires a valid session_id to keep — refusing to delete all sessions.",
+        )
+    del_res = await sessions_collection().delete_many(
+        {"tenant_id": x_tenant_id, "connector_name": body.connector_name, "_id": {"$ne": keep_oid}}
+    )
+
+    _broadcast(x_tenant_id, "sync:connector_promoted", {
+        "connector_name": body.connector_name,
+        "kept_session_id": body.session_id or None,
+        "deleted_sessions": del_res.deleted_count,
+    })
+    logger.info("promote.success", connector=body.connector_name, tenant=x_tenant_id,
+                deleted_sessions=del_res.deleted_count, reload=reload_result.get("reload"))
+    return {
+        "promoted": True,
+        "connector_name": body.connector_name,
+        "deleted_sessions": del_res.deleted_count,
+        "reload": reload_result.get("reload"),
+    }
 
 
 @sync_request_router.get("/events")
@@ -2076,6 +2434,7 @@ async def raise_pr_for_sync_request(
                 "status": "ready",
                 "pr_number": pr_data["pr_number"],
                 "pr_url": pr_data["pr_url"],
+                "pr_state": "open",
                 "diff": diff,
                 "updated_at": now,
             }},
@@ -2151,7 +2510,7 @@ async def approve_sync_request(
         now = datetime.utcnow()
         await col.update_one(
             {"_id": ObjectId(sync_request_id)},
-            {"$set": {"status": "merged", "merged_at": now, "updated_at": now}},
+            {"$set": {"status": "merged", "pr_state": "merged", "merged_at": now, "updated_at": now}},
         )
 
         _broadcast(x_tenant_id, "sync:request_merged", {
@@ -2283,20 +2642,27 @@ async def dismiss_sync_request(
         raise HTTPException(status_code=404, detail="Sync request not found")
 
     # Close GitHub PR if exists
+    pr_closed = False
     if doc.get("pr_number"):
         try:
             sync_settings = await _get_tenant_sync_settings(x_tenant_id)
             owner, repo = _parse_repo(sync_settings["github_repo_url"])
             await _close_pr(owner, repo, sync_settings["github_token"], doc["pr_number"])
+            pr_closed = True
         except Exception:
             pass  # Non-critical
 
+    _dismiss_set: Dict[str, Any] = {"status": "dismissed", "updated_at": datetime.utcnow()}
+    if pr_closed:
+        _dismiss_set["pr_state"] = "closed"   # so the card shows "PR closed", not "PR open"
     await col.update_one(
         {"_id": ObjectId(sync_request_id)},
-        {"$set": {"status": "dismissed", "updated_at": datetime.utcnow()}},
+        {"$set": _dismiss_set},
     )
 
     _broadcast(x_tenant_id, "sync:request_dismissed", {"sync_request_id": sync_request_id})
+    if pr_closed:
+        _broadcast(x_tenant_id, "sync:pr_state", {"sync_request_id": sync_request_id, "pr_state": "closed"})
 
     # Check if queue is now empty
     open_count = await col.count_documents({

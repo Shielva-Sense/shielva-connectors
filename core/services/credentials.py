@@ -53,7 +53,7 @@ class CredentialManager:
         
         # 1. Serialize and encrypt
         json_str = json.dumps(credentials)
-        encrypted = self.encryption.encrypt(json_str)
+        encrypted = await self.encryption.encrypt(json_str, tenant_id)
         
         # 2. Create record
         cred_id = str(uuid.uuid4())
@@ -97,7 +97,7 @@ class CredentialManager:
                 return None
                 
             # Decrypt
-            json_str = self.encryption.decrypt(encrypted_data)
+            json_str = await self.encryption.decrypt(encrypted_data, tenant_id)
             if not json_str:
                 return None
                 

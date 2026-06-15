@@ -110,6 +110,24 @@ from shared.base_connector import (
 NEVER use relative imports (`from ..base import ...`, `from .shared import ...`).
 NEVER write `from base_connector import ...` (missing the `shared.` prefix).
 
+🔒 SECURITY SCAN — these are HARD-BLOCKED by the gateway's AST scanner; a connector
+that contains ANY of them will FAIL to load/install. NEVER emit them:
+- `__import__(...)`  → use a normal top-level `import` / `from ... import ...` instead.
+  (e.g. NOT `__import__("datetime").timedelta(...)` — instead `from datetime import timedelta`.)
+- `eval(...)`, `exec(...)`, `compile(...)` — never. There is always a direct alternative.
+- `os.system`, `subprocess`, `getattr(__builtins__, ...)`, dunder-escape access like
+  `obj.__globals__` / `.__class__.__bases__`.
+Put EVERY import you need at the TOP of the file with a normal `import` statement.
+
+🔑 NEVER HARDCODE CREDENTIALS. `client_id`, `client_secret`, API keys, tokens, and
+passwords are per-tenant secrets — read them from config (`self.config.get("client_id")`)
+and declare them as `install_fields` in connector.json. NEVER emit class constants like
+`CLIENT_ID = "your-google-client-id..."` or `CLIENT_SECRET = "GOCSPX-placeholder"` — a
+hardcoded/placeholder credential can never authenticate and is a secrets-in-source violation.
+For `oauth2_code`/`oauth2_pkce` connectors, `client_id` (required) and `client_secret`
+(required, type "secret") MUST be `install_fields` read from config. Non-secret endpoints
+(auth_url, token_url, scopes, base_url) may be class constants OR optional install_fields.
+
 ## Rules
 1. The connector MUST inherit from `BaseConnector`
 2. MUST implement: `install`, `health_check`, `sync` — always. Implement `authorize()` ONLY for `oauth2_code`/`oauth2_pkce`. Do NOT implement `authorize()` for any other auth type — the base class handles it.

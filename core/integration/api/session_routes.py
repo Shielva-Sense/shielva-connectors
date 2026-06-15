@@ -67,6 +67,56 @@ async def get_session_cred_hmac(session_id: str):
     return {"hmac": digest}
 
 
+# ── Shared install-credential vault (so ACP can pre-fill what SAD captured) ───
+class StoreSessionCredsBody(BaseModel):
+    connector_type: str
+    values: Dict[str, Any]
+
+
+@session_router.post("/{session_id}/credentials")
+async def store_session_credentials_endpoint(
+    session_id: str,
+    body: StoreSessionCredsBody,
+    x_tenant_id: Optional[str] = Header(None),
+):
+    """SAD publishes the install credentials it captured. Stored encrypted at rest
+    via the single-owner credential_manager (AES-256-GCM, per-tenant DEK) so the
+    ACP install form — which reads the same store — can pre-fill them later.
+
+    The storage key is the CANONICAL connector_type from connector.json (the same
+    value the install form reads via meta.connector_type), so a save from the main
+    build and a save from an enhancement run always land on the SAME tenant+type
+    slot — no split-brain, last-write-wins."""
+    tenant_id = _get_tenant(x_tenant_id)
+    from services import credential_manager
+    clean = {k: v for k, v in (body.values or {}).items() if v not in (None, "")}
+    if not clean:
+        return {"ok": True, "stored": 0}
+    connector_type = await _canonical_connector_type(session_id, tenant_id, body.connector_type)
+    await credential_manager.store_credentials(tenant_id, connector_type, clean)
+    logger.info("session.credentials_stored", session_id=session_id, connector_type=connector_type, fields=len(clean))
+    return {"ok": True, "stored": len(clean)}
+
+
+async def _canonical_connector_type(session_id: str, tenant_id: str, fallback: str) -> str:
+    """Resolve the canonical connector_type from connector.json for this session.
+
+    Falls back to the value the caller supplied if metadata isn't on disk yet.
+    Guarantees the credential storage key matches what the install form reads.
+    """
+    try:
+        from integration.api.codeview_routes import _resolve_output_dir
+        import json as _json
+        meta_path = (await _resolve_output_dir(session_id, tenant_id)) / "metadata" / "connector.json"
+        if meta_path.exists():
+            ct = _json.loads(meta_path.read_text(encoding="utf-8")).get("connector_type")
+            if ct:
+                return ct
+    except Exception:
+        pass
+    return fallback
+
+
 class AutofillCredentialsRequest(BaseModel):
     fields: List[Dict[str, str]]          # [{key, label, description, type}]
     connector_py: str = ""                 # content of connector.py (sent from frontend)
@@ -351,6 +401,170 @@ async def create_enhance_run(
         "provider": parent["provider"],
         "service": parent["service"],
     }
+
+
+class ImportConnectorSpec(BaseModel):
+    service_slug: str            # the dir slug, e.g. "google_gmail_168e0e"
+    provider: str
+    service: str
+    connector_name: str = ""
+    version: str = ""            # metadata_version to display
+    run_kind: str = "build"      # "build" | "enhance"
+
+
+class ImportExistingBody(BaseModel):
+    connectors: List[ImportConnectorSpec]
+
+
+@session_router.post("/restore-from-r2")
+async def restore_sessions_from_r2(
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_name: Optional[str] = Header(None),
+):
+    """Rebuild any session that exists in R2 but is missing from Mongo.
+
+    R2 is the durable copy of every connector run (files + plan_steps.json +
+    stepper_progress.json + connector.json), keyed by the original session id.
+    This reconstructs the full session doc — identity, output_dir, plan steps,
+    version, stepper progress — with the ORIGINAL _id, so a lost/partial session
+    is restored in one call. Idempotent: existing sessions are skipped.
+    """
+    import json as _json
+    import re as _re
+    from bson import ObjectId as _OID
+    from integration.services import r2_service
+    from integration.schemas.models import StepType, StepStatus
+
+    app_id = x_app_id or None
+    tenant_id = x_tenant_id or None
+    tenant_name = (x_tenant_name or "").strip().lower()
+    if not app_id:
+        raise HTTPException(400, "X-App-ID header is required to resolve the R2 bucket")
+
+    r2_service._app_bucket_ctx.set(r2_service.app_id_to_bucket(app_id))
+    bucket = r2_service._get_bucket()
+    client = r2_service._get_client()
+
+    # Enumerate connectors/{slug}/sessions/{session_id}/ in the app bucket.
+    pat = _re.compile(r"^connectors/([^/]+)/sessions/([^/]+)/")
+    found: set[tuple[str, str]] = set()
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix="connectors/"):
+        for obj in page.get("Contents", []):
+            m = pat.match(obj.get("Key", ""))
+            if m:
+                found.add((m.group(1), m.group(2)))
+
+    def _getj(slug: str, sid: str, rel: str):
+        try:
+            body = client.get_object(Bucket=bucket, Key=f"connectors/{slug}/sessions/{sid}/{rel}")["Body"].read()
+            return _json.loads(body)
+        except Exception:
+            return None
+
+    valid_types = {e.value for e in StepType}
+    valid_status = {e.value for e in StepStatus}
+    type_map = {"write_integration_tests": "run_integration_tests"}
+
+    col = sessions_collection()
+    restored: List[str] = []
+    skipped: List[str] = []
+    for slug, sid in found:
+        try:
+            oid = _OID(sid)
+        except Exception:
+            continue
+        if await col.find_one({"_id": oid}):
+            skipped.append(sid)
+            continue
+        cj = _getj(slug, sid, "metadata/connector.json") or {}
+        ps = _getj(slug, sid, "plan_steps.json") or {}
+        sp = _getj(slug, sid, "stepper_progress.json") or {}
+
+        steps = []
+        for s in ps.get("steps", []):
+            t = (s.get("type") or "").lower()
+            t = type_map.get(t, t)
+            if t not in valid_types:
+                t = "write_connector"
+            st = (s.get("status") or "").lower()
+            if st not in valid_status:
+                st = "completed"
+            steps.append({"index": s.get("index", len(steps)), "type": t, "title": s.get("title", ""),
+                          "description": s.get("title", ""), "estimated_duration_s": 30, "config": {}, "status": st})
+
+        session = IntegrationSession(
+            app_id=app_id, tenant_id=tenant_id, tenant_name=tenant_name,
+            provider=cj.get("provider", ""),
+            service=cj.get("service", slug),
+            connector_name=cj.get("connector_name") or cj.get("display_name") or slug,
+            run_kind="build",
+            status=SessionStatus.COMPLETED,
+        )
+        doc = session.model_dump()
+        doc["_id"] = oid
+        doc["service_slug"] = slug
+        if ps.get("output_dir"):
+            doc["output_dir"] = ps["output_dir"]
+        doc["metadata_version"] = cj.get("version")
+        doc["stepper_max_step"] = int(sp.get("maxReachedStep", 7) or 7)
+        doc["plan"] = {"steps": steps, "version": 1}
+        doc["restored_from_r2"] = True
+        await col.insert_one(doc)
+        restored.append(sid)
+        logger.info("session.restored_from_r2", session_id=sid, slug=slug, steps=len(steps))
+
+    return {"restored": restored, "skipped": skipped, "count": len(restored)}
+
+
+@session_router.post("/import-existing")
+async def import_existing_sessions(
+    body: ImportExistingBody,
+    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_name: Optional[str] = Header(None),
+):
+    """Recreate session rows for connectors that already exist on disk.
+
+    Idempotent per service_slug — a connector that already has a session is skipped,
+    so re-running is safe. Imported sessions are marked completed with the stepper at
+    the final step. NOTE: original event history / exact version are not on disk, so
+    metadata_version comes from the supplied (connector.json) value.
+    """
+    app_id = x_app_id or None
+    tenant_id = x_tenant_id or None
+    tenant_name = (x_tenant_name or "").strip().lower()
+    if not app_id and not tenant_id:
+        raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
+
+    col = sessions_collection()
+    created: List[str] = []
+    skipped: List[str] = []
+    for spec in body.connectors:
+        owner = {"app_id": app_id} if app_id else {"tenant_id": tenant_id}
+        if await col.find_one({**owner, "service_slug": spec.service_slug}):
+            skipped.append(spec.service_slug)
+            continue
+        session = IntegrationSession(
+            app_id=app_id,
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
+            provider=spec.provider,
+            service=spec.service,
+            connector_name=spec.connector_name or "",
+            run_kind=spec.run_kind if spec.run_kind in ("build", "enhance") else "build",
+            status=SessionStatus.COMPLETED,
+        )
+        doc = session.model_dump()
+        doc["service_slug"] = spec.service_slug
+        doc["stepper_max_step"] = 7                 # completed → all steps reachable
+        doc["metadata_version"] = spec.version or None
+        doc["imported_from_disk"] = True            # provenance marker (history is not reconstructed)
+        res = await col.insert_one(doc)
+        created.append(str(res.inserted_id))
+        logger.info("session.imported_from_disk", service_slug=spec.service_slug, session_id=str(res.inserted_id))
+
+    return {"created": created, "skipped": skipped, "imported": len(created)}
 
 
 @session_router.post("")

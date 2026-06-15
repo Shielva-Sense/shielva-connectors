@@ -1,6 +1,15 @@
 """
-Encryption Service
-Handles AES-GCM encryption and decryption of sensitive data.
+Encryption Service — envelope encryption over per-tenant, versioned DEKs.
+
+SOC 2 C1.1: secrets are encrypted under a per-tenant Data-Encryption-Key (DEK),
+not the master key directly. The master key (KEK) only wraps DEKs (see KeyManager).
+Each ciphertext is version-tagged so the right DEK is selected on decrypt, which
+makes key rotation transparent.
+
+Wire format: ``"{dek_version}:{base64(nonce[12] ‖ ciphertext ‖ tag[16])}"``
+
+Fail-CLOSED: with no master key configured, encrypt()/decrypt() raise rather than
+silently passing plaintext through.
 """
 import os
 import base64
@@ -8,85 +17,60 @@ import structlog
 from typing import Optional, Tuple
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .key_manager import KeyManager, KeyManagerMisconfigured
+
 logger = structlog.get_logger(__name__)
 
 
+class EncryptionMisconfigured(RuntimeError):
+    """Raised when encryption is required but no master key is configured."""
+
+
 class EncryptionService:
-    """
-    Encryption service using AES-GCM.
-    Requires a valid MASTER_KEY environment variable (32 bytes / 256 bits).
-    """
+    """AES-256-GCM over per-tenant DEKs, with versioned envelopes for rotation."""
 
     def __init__(self, master_key: str = None):
-        self.master_key = master_key or os.getenv("MASTER_KEY")
-        if not self.master_key:
-            logger.warning("MASTER_KEY not set. Encryption will be disabled or fail.")
-            self._aesgcm = None
-            return
+        self.key_manager = KeyManager(master_key)
 
+    async def encrypt(self, plaintext: str, tenant_id: str) -> str:
+        """Encrypt under the tenant's ACTIVE DEK. Returns a version-tagged envelope."""
+        if not tenant_id:
+            raise ValueError("tenant_id is required for per-tenant credential encryption.")
         try:
-            # key must be bytes
-            key_bytes = self._parse_key(self.master_key)
-            self._aesgcm = AESGCM(key_bytes)
-        except Exception as e:
-            logger.error("Failed to initialize encryption", error=str(e))
-            self._aesgcm = None
-
-    def _parse_key(self, key: str) -> bytes:
-        """Parse master key, handling hex or base64 encoding."""
-        try:
-            # Try hex
-            return bytes.fromhex(key)
-        except ValueError:
-            pass
-        
-        try:
-            # Try base64
-            decoded = base64.b64decode(key)
-            if len(decoded) in (16, 24, 32):
-                return decoded
-        except Exception:
-            pass
-            
-        # Fallback to raw bytes if length is correct
-        key_bytes = key.encode()
-        if len(key_bytes) not in (16, 24, 32):
-             # If completely invalid, generate a deterministic key for dev/test from the string
-             # WARN: Do not use in production
-             import hashlib
-             return hashlib.sha256(key_bytes).digest()
-        return key_bytes
-
-    def encrypt(self, plaintext: str) -> str:
-        """
-        Encrypt plaintext.
-        Returns: base64 encoded string containing nonce + ciphertext
-        """
-        if not self._aesgcm:
-            logger.warning("Encryption disabled, returning plaintext")
-            return plaintext
-
+            version, dek = await self.key_manager.active_dek(tenant_id)
+        except KeyManagerMisconfigured as e:
+            raise EncryptionMisconfigured(str(e)) from e
         nonce = os.urandom(12)
-        ciphertext = self._aesgcm.encrypt(nonce, plaintext.encode(), None)
-        
-        # Combine nonce + ciphertext
-        combined = nonce + ciphertext
-        return base64.b64encode(combined).decode('utf-8')
+        ciphertext = AESGCM(dek).encrypt(nonce, plaintext.encode(), None)
+        return f"{version}:{base64.b64encode(nonce + ciphertext).decode()}"
 
-    def decrypt(self, ciphertext_b64: str) -> Optional[str]:
-        """
-        Decrypt base64 encoded ciphertext.
-        """
-        if not self._aesgcm:
-            return ciphertext_b64
-
-        try:
-            data = base64.b64decode(ciphertext_b64)
-            nonce = data[:12]
-            ciphertext = data[12:]
-            
-            plaintext = self._aesgcm.decrypt(nonce, ciphertext, None)
-            return plaintext.decode('utf-8')
-        except Exception as e:
-            logger.error("Decryption failed", error=str(e))
+    async def decrypt(self, envelope: str, tenant_id: str) -> Optional[str]:
+        """Decrypt a version-tagged envelope under the DEK version it names."""
+        version, blob = self._split_envelope(envelope)
+        if version is None:
+            logger.error("Decryption failed: unrecognized envelope", tenant_id=tenant_id)
             return None
+        try:
+            dek = await self.key_manager.dek_for_version(tenant_id, version)
+            data = base64.b64decode(blob)
+            return AESGCM(dek).decrypt(data[:12], data[12:], None).decode("utf-8")
+        except Exception as e:
+            logger.error("Decryption failed", error=str(e), tenant_id=tenant_id, version=version)
+            return None
+
+    async def rotate_tenant(self, tenant_id: str) -> int:
+        """Rotate the tenant's DEK. New writes use the new version; old ciphertext
+        still decrypts under retained versions. Returns the new active version."""
+        version, _ = await self.key_manager.rotate(tenant_id)
+        return version
+
+    @staticmethod
+    def _split_envelope(envelope: str) -> Tuple[Optional[int], str]:
+        """Parse ``"{version}:{blob}"``; returns (None, "") for legacy/invalid input."""
+        if not isinstance(envelope, str) or ":" not in envelope:
+            return None, ""
+        vstr, _, blob = envelope.partition(":")
+        try:
+            return int(vstr), blob
+        except ValueError:
+            return None, ""
