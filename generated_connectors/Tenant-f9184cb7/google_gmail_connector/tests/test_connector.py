@@ -895,3 +895,183 @@ async def test_different_tenant_has_own_connector_id(mock_http_client, mocker):
 
     assert doc.tenant_id == "other-tenant"
     assert doc.connector_id == "other-connector"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# send_email()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_send_email_happy_path(authed_connector, mock_http_client, mocker):
+    """send_email builds MIME, encodes it, delegates to execute_send_message."""
+    patch_http_client(mocker, mock_http_client)
+    mocker.patch("connector.build_mime_raw", return_value="base64encodedraw==")
+
+    result = await authed_connector.send_email(
+        to="recipient@example.com",
+        subject="Hello",
+        body="World",
+    )
+
+    assert result["id"] == "sent1"
+    assert result["threadId"] == "t1"
+    mock_http_client.execute_send_message.assert_called_once_with("base64encodedraw==")
+
+
+async def test_send_email_passes_cc_bcc_to_mime_builder(authed_connector, mock_http_client, mocker):
+    """send_email forwards cc and bcc to build_mime_raw."""
+    patch_http_client(mocker, mock_http_client)
+    mock_builder = mocker.patch("connector.build_mime_raw", return_value="raw")
+
+    await authed_connector.send_email(
+        to="to@example.com",
+        subject="Subject",
+        body="Body",
+        cc="cc@example.com",
+        bcc="bcc@example.com",
+    )
+
+    mock_builder.assert_called_once_with(
+        to="to@example.com",
+        subject="Subject",
+        body="Body",
+        cc="cc@example.com",
+        bcc="bcc@example.com",
+    )
+
+
+async def test_send_email_propagates_permission_error(authed_connector, mock_http_client, mocker):
+    """403 from execute_send_message propagates as ConnectorPermissionError."""
+    patch_http_client(mocker, mock_http_client)
+    mocker.patch("connector.build_mime_raw", return_value="raw")
+    mock_http_client.execute_send_message = AsyncMock(
+        side_effect=ConnectorPermissionError(
+            "gmail.send scope missing — re-authorize the connector"
+        )
+    )
+
+    with pytest.raises(ConnectorPermissionError, match="gmail.send scope missing"):
+        await authed_connector.send_email(
+            to="to@example.com", subject="Sub", body="Body"
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# post_email()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_post_email_delegates_to_send_email(authed_connector, mock_http_client, mocker):
+    """post_email() is a thin alias — must call send_email with the same args."""
+    patch_http_client(mocker, mock_http_client)
+    mock_send = mocker.patch.object(
+        authed_connector, "send_email", new_callable=AsyncMock,
+        return_value={"id": "sent1", "threadId": "t1"},
+    )
+
+    result = await authed_connector.post_email(
+        to="to@example.com",
+        subject="Subject",
+        body="Body",
+        cc="cc@example.com",
+        bcc="bcc@example.com",
+    )
+
+    mock_send.assert_called_once_with(
+        to="to@example.com",
+        subject="Subject",
+        body="Body",
+        cc="cc@example.com",
+        bcc="bcc@example.com",
+    )
+    assert result["id"] == "sent1"
+
+
+async def test_post_email_propagates_permission_error(authed_connector, mock_http_client, mocker):
+    """post_email propagates ConnectorPermissionError from send_email."""
+    patch_http_client(mocker, mock_http_client)
+    mocker.patch.object(
+        authed_connector, "send_email",
+        new_callable=AsyncMock,
+        side_effect=ConnectorPermissionError("gmail.send scope missing"),
+    )
+
+    with pytest.raises(ConnectorPermissionError, match="gmail.send scope missing"):
+        await authed_connector.post_email(
+            to="to@example.com", subject="Sub", body="Body"
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# modify_message()
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def test_modify_message_happy_path(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    result = await authed_connector.modify_message(
+        "msg1",
+        add_label_ids=["STARRED"],
+        remove_label_ids=["UNREAD"],
+    )
+
+    assert result["id"] == "msg1"
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=["STARRED"],
+        remove_label_ids=["UNREAD"],
+    )
+
+
+async def test_modify_message_defaults_to_empty_lists(authed_connector, mock_http_client, mocker):
+    """Both label args default to [] when not provided."""
+    patch_http_client(mocker, mock_http_client)
+
+    await authed_connector.modify_message("msg1")
+
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=[],
+        remove_label_ids=[],
+    )
+
+
+async def test_modify_message_only_add(authed_connector, mock_http_client, mocker):
+    patch_http_client(mocker, mock_http_client)
+
+    await authed_connector.modify_message("msg1", add_label_ids=["IMPORTANT"])
+
+    mock_http_client.execute_modify_message.assert_called_once_with(
+        msg_id="msg1",
+        add_label_ids=["IMPORTANT"],
+        remove_label_ids=[],
+    )
+
+
+async def test_modify_message_propagates_not_found(authed_connector, mock_http_client, mocker):
+    mock_http_client.execute_modify_message = AsyncMock(
+        side_effect=ConnectorNotFoundError("msg not found")
+    )
+    patch_http_client(mocker, mock_http_client)
+
+    with pytest.raises(ConnectorNotFoundError):
+        await authed_connector.modify_message("missing-msg")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Gmail scope — REQUIRED_SCOPES includes gmail.send
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def test_required_scopes_includes_gmail_modify():
+    assert "https://www.googleapis.com/auth/gmail.modify" in GmailConnector.REQUIRED_SCOPES
+
+
+def test_required_scopes_includes_gmail_send():
+    """REQUIRED_SCOPES must include gmail.send — without it, send operations return 403."""
+    assert "https://www.googleapis.com/auth/gmail.send" in GmailConnector.REQUIRED_SCOPES
+
+
+def test_required_scopes_has_both_scopes():
+    assert len(GmailConnector.REQUIRED_SCOPES) >= 2

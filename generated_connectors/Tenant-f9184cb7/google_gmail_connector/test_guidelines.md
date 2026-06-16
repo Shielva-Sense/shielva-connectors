@@ -37,6 +37,9 @@ async def add_email(msg_id: str, label_ids=None) -> Dict[str, Any]
 async def move_email(msg_id: str, destination_label_id: str, remove_label_ids=None) -> Dict[str, Any]
 async def update_email(msg_id: str, add_label_ids=None, remove_label_ids=None) -> Dict[str, Any]
 async def get_email(msg_id: str) -> NormalizedDocument
+async def send_email(to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
+async def post_email(to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
+async def modify_message(msg_id: str, add_label_ids=None, remove_label_ids=None) -> Dict[str, Any]
 async def delete_email(msg_id: str, permanent=False) -> Any
 async def remove_email(msg_id: str) -> Any
 async def delete_message(msg_id: str, permanent=False) -> Any
@@ -64,6 +67,7 @@ Instantiated by `connector._build_http_client()` using:
 - `execute_modify_message(msg_id, add_label_ids, remove_label_ids) -> Dict`
 - `execute_trash_message(msg_id) -> Dict`
 - `execute_delete_message(msg_id) -> None`
+- `execute_send_message(raw_message: str) -> Dict`
 - `execute_trash_thread(thread_id) -> Dict`
 - `execute_delete_thread(thread_id) -> None`
 
@@ -199,6 +203,9 @@ def mock_http_client() -> MagicMock:
     client.execute_delete_message = AsyncMock(return_value=None)
     client.execute_modify_message = AsyncMock(
         return_value={"id": "msg1", "labelIds": ["INBOX", "STARRED"]}
+    )
+    client.execute_send_message = AsyncMock(
+        return_value={"id": "sent1", "threadId": "t1", "labelIds": ["SENT"]}
     )
     client.execute_trash_thread = AsyncMock(return_value={"id": "t1", "messages": []})
     client.execute_delete_thread = AsyncMock(return_value=None)
@@ -336,6 +343,20 @@ mocker.patch.object(connector, "_remove_from_kb", new_callable=AsyncMock)
 ### `get_email()`
 - **Happy path**: `NormalizedDocument` — identical assertions to `read_email()`
 - **Not found propagated**: raises `ConnectorNotFoundError`
+
+### `send_email()`
+- **Happy path**: mock `build_mime_raw` returns `"base64str"`, `execute_send_message` returns `{"id": "sent1", "threadId": "t1"}` → assert dict returned with correct `id`
+- **With cc/bcc**: assert `build_mime_raw` called with `cc` and `bcc` keyword args
+- **403 scope missing**: `execute_send_message` raises `ConnectorPermissionError("gmail.send scope missing...")` → assert `ConnectorPermissionError` propagated
+
+### `post_email()`
+- **Delegates to send_email**: patch `connector.send_email` as `AsyncMock`; call `post_email(to, subject, body)` → assert `send_email` called once with same args
+
+### `modify_message()`
+- **Happy path**: `execute_modify_message` returns modified message → assert dict returned
+- **add_label_ids forwarded**: assert passed to `execute_modify_message`
+- **remove_label_ids forwarded**: assert passed to `execute_modify_message`
+- **Both None default to empty lists**: assert `execute_modify_message` called with `add_label_ids=[]`, `remove_label_ids=[]`
 
 ### `delete_email()`
 - **Delegates to delete_message**: mock `delete_message` → called with `(msg_id, permanent=False)`
