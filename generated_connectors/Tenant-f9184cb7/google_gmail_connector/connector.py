@@ -20,7 +20,7 @@ from shared.base_connector import (
 from client.http_client import GmailHTTPClient
 from exceptions import ConnectorAuthError, ConnectorError, ConnectorPermissionError
 from helpers.normalizer import normalize_message
-from helpers.utils import load_known_ids, save_known_ids
+from helpers.utils import load_known_ids, save_known_ids, build_mime_raw
 from models import BulkDeleteResult
 
 logger = structlog.get_logger(__name__)
@@ -38,7 +38,10 @@ class GmailConnector(BaseConnector):
     #    reads AUTH_URI to build the consent URL, authorize() uses TOKEN_URI) ──
     AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
     TOKEN_URI = "https://oauth2.googleapis.com/token"
-    REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+    REQUIRED_SCOPES = [
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
 
     # ── Provider-wide hardcoded constants (same for every tenant) ───────────
     RATE_LIMIT_PER_MIN = 250
@@ -468,6 +471,61 @@ class GmailConnector(BaseConnector):
             deleted=result.deleted,
             failed=result.failed,
             permanent=permanent,
+            connector_id=self.connector_id,
+        )
+        return result
+
+    async def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: Optional[str] = None,
+        bcc: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build an RFC 2822 MIME message and send it via POST /users/me/messages/send.
+
+        Requires the gmail.send OAuth scope — call returns {id, threadId} on success.
+        Raises ConnectorPermissionError if the scope is absent.
+        """
+        raw = build_mime_raw(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        client = await self._build_http_client()
+        result = await client.execute_send_message(raw)
+        logger.info(
+            "gmail.send_email.ok",
+            to=to,
+            subject=subject,
+            connector_id=self.connector_id,
+        )
+        return result
+
+    async def post_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: Optional[str] = None,
+        bcc: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Public alias for send_email() — same behaviour, different API surface name."""
+        return await self.send_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+
+    async def modify_message(
+        self,
+        msg_id: str,
+        add_label_ids: Optional[List[str]] = None,
+        remove_label_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Add and/or remove label IDs on message *msg_id* via messages.modify."""
+        client = await self._build_http_client()
+        result = await client.execute_modify_message(
+            msg_id=msg_id,
+            add_label_ids=add_label_ids or [],
+            remove_label_ids=remove_label_ids or [],
+        )
+        logger.info(
+            "gmail.modify_message.ok",
+            msg_id=msg_id,
             connector_id=self.connector_id,
         )
         return result

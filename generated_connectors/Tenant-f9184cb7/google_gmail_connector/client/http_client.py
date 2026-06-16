@@ -120,6 +120,26 @@ class GmailHTTPClient:
                 return await resp.json(content_type=None)
 
     @retry()
+    async def execute_send_message(self, raw_message: str) -> Dict[str, Any]:
+        """POST users/me/messages/send — sends a base64url-encoded RFC 2822 message.
+
+        Returns {id, threadId, labelIds} on success.
+        Raises ConnectorPermissionError with a re-authorize hint on 403.
+        """
+        url = f"{self._base_url}/users/me/messages/send"
+        payload: Dict[str, Any] = {"raw": raw_message}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self._headers(), json=payload) as resp:
+                text = await resp.text()
+                if resp.status == 403:
+                    raise ConnectorPermissionError(
+                        "gmail.send scope missing — re-authorize the connector"
+                    )
+                if resp.status != 200:
+                    self._raise_for_status(resp.status, text, "send_message")
+                return await resp.json(content_type=None)
+
+    @retry()
     async def execute_trash_message(self, msg_id: str) -> Dict[str, Any]:
         """POST users/me/messages/{id}/trash — moves to Trash; returns trashed resource."""
         url = f"{self._base_url}/users/me/messages/{msg_id}/trash"

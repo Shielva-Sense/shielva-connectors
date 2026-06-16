@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Google Gmail connector allows the Shielva platform to ingest email messages from a Gmail account, keep the knowledge base in sync as messages are added or deleted, and perform message management operations such as reading, labeling, moving, and deleting messages and threads. It is intended for administrators who want to make a Gmail inbox searchable and manageable through the Shielva platform. The connector uses OAuth 2.0, so users authorize access by clicking "Connect" in the Shielva UI — no manual token copying is required.
+The Google Gmail connector allows the Shielva platform to ingest email messages from a Gmail account, keep the knowledge base in sync as messages are added or deleted, and perform message management operations such as reading, labeling, moving, deleting, and **sending** messages and threads. It is intended for administrators who want to make a Gmail inbox searchable and manageable through the Shielva platform, including sending email on behalf of the connected account. The connector uses OAuth 2.0, so users authorize access by clicking "Connect" in the Shielva UI — no manual token copying is required.
 
 ---
 
@@ -63,12 +63,21 @@ Before configuring the connector, make sure you have:
 
 ### Step 5: (Optional) OAuth Scopes — `scopes`
 
-Leave this field blank to use the default scope (`https://www.googleapis.com/auth/gmail.modify`), which covers reading, labeling, trashing, and modifying messages.
+Leave this field blank to use the default scopes, which cover reading, labeling, trashing, modifying, and **sending** messages:
+
+```
+https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send
+```
 
 If you need additional capabilities, enter a space-separated list of scopes:
-- Add `https://mail.google.com/` to enable permanent deletion of messages and threads.
+- `https://www.googleapis.com/auth/gmail.modify` — read, label, and trash messages (always required)
+- `https://www.googleapis.com/auth/gmail.send` — send new email via `send_email` / `post_email` (**included by default**)
+- `https://mail.google.com/` — full access including permanent deletion of messages and threads
 
-Example value: `https://www.googleapis.com/auth/gmail.modify https://mail.google.com/`
+> **Important:** If you remove the `gmail.send` scope, the `send_email` and `post_email` operations will fail with a 403 error. You must re-authorize the connector after any scope change.
+
+Example value with permanent delete enabled:
+`https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://mail.google.com/`
 
 ### Step 6: (Optional) Authorization URL — `authorization_url`
 
@@ -137,6 +146,7 @@ After authorization:
 | "Token exchange failed: redirect_uri_mismatch" | The redirect URI in Google Cloud does not match the one Shielva provided | Copy the exact Redirect URI from the Shielva install page and add it under **Authorized redirect URIs** in the Google Cloud OAuth client |
 | "Token exchange failed: invalid_client" | Wrong `client_id` or `client_secret` | Delete and re-create the OAuth client in Google Cloud Console, then update the Shielva fields |
 | "Insufficient scopes" (health check shows DEGRADED) | The authorized user did not grant the required Gmail permissions | Re-authorize by clicking **Reconnect** and accepting all requested permissions |
+| "gmail.send scope missing — re-authorize the connector" | The `gmail.send` scope was missing when the connector was authorized | Add `https://www.googleapis.com/auth/gmail.send` to the **OAuth Scopes** field, save, then click **Reconnect** |
 | "Permanent delete is disabled" error | `allow_permanent_delete` is not enabled | Enable the **Allow Permanent Delete** field and ensure `https://mail.google.com/` is in the **Scopes** field |
 | Rate limit errors during sync | API quota exceeded | Lower the **Rate Limit** field value or request a Gmail API quota increase in Google Cloud Console under **APIs & Services → Quotas** |
 | Connector shows OFFLINE after working | Access token expired and refresh failed | Click **Reconnect** to re-authorize. If the problem persists, verify the `client_id` and `client_secret` are still valid in Google Cloud Console |

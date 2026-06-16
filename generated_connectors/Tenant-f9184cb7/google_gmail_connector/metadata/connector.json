@@ -27,7 +27,7 @@
       "label": "OAuth Scopes",
       "type": "string",
       "required": false,
-      "help": "Space-separated OAuth 2.0 scopes to request. Defaults to 'https://www.googleapis.com/auth/gmail.modify'. Add 'https://mail.google.com/' to enable permanent delete."
+      "help": "Space-separated OAuth 2.0 scopes to request. Defaults to 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send'. The gmail.send scope is required to send email. Add 'https://mail.google.com/' to also enable permanent delete."
     },
     {
       "key": "authorization_url",
@@ -159,6 +159,21 @@
       "name": "bulk_delete",
       "description": "Deletes all messages matching a Gmail query; collects all IDs via pageToken pagination first, then deletes individually with per-message error catching.",
       "returns": "BulkDeleteResult"
+    },
+    {
+      "name": "send_email",
+      "description": "Sends an email by building an RFC 2822 MIME message, base64url-encoding it, and posting to POST /users/me/messages/send. Requires the gmail.send OAuth scope. Returns {id, threadId} of the sent message.",
+      "returns": "Dict"
+    },
+    {
+      "name": "post_email",
+      "description": "Public alias for send_email() — identical signature and behaviour. Provided for API surface completeness.",
+      "returns": "Dict"
+    },
+    {
+      "name": "modify_message",
+      "description": "Directly adds and/or removes label IDs on a Gmail message via POST /users/me/messages/{id}/modify. Standalone public method exposing the modify path independently of add_email/update_email.",
+      "returns": "Dict"
     },
     {
       "name": "disconnect",

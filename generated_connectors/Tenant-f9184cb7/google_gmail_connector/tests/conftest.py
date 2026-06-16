@@ -138,6 +138,9 @@ def mock_http_client() -> MagicMock:
     client.execute_modify_message = AsyncMock(
         return_value={"id": "msg1", "labelIds": ["INBOX", "STARRED"]}
     )
+    client.execute_send_message = AsyncMock(
+        return_value={"id": "sent1", "threadId": "t1", "labelIds": ["SENT"]}
+    )
     client.execute_trash_thread = AsyncMock(
         return_value={"id": "t1", "messages": []}
     )
