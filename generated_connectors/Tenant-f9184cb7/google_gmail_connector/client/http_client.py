@@ -1,184 +1,207 @@
-"""GmailHTTPClient — all Gmail REST API calls live here; zero business logic."""
-from typing import Any, Dict, List, Optional, Tuple, Type
+"""All Gmail API HTTP calls — zero business logic, zero normalization."""
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 import structlog
 
-from exceptions import (
-    ConnectorAuthError,
-    ConnectorError,
-    ConnectorNotFoundError,
-    ConnectorPermissionError,
-    ConnectorRateLimitError,
-)
-from helpers.utils import retry
+from exceptions import GmailAPIError, GmailAuthError, GmailRateLimitError
 
 logger = structlog.get_logger(__name__)
 
-_PAGE_SIZE = 100
+_GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1"
 
 
 class GmailHTTPClient:
-    """Thin async HTTP wrapper over the Gmail REST API v1."""
+    """Thin async HTTP client for the Gmail REST API.
 
-    # OCP-4: status-code → (exception_class, message_prefix) lookup
-    _ERROR_MAP: Dict[int, Tuple[Type[ConnectorError], str]] = {
-        401: (ConnectorAuthError, "Authentication failed"),
-        403: (ConnectorPermissionError, "Permission denied"),
-        404: (ConnectorNotFoundError, "Not found"),
-        429: (ConnectorRateLimitError, "Rate limited"),
-    }
+    All methods accept an *access_token* and return raw response dicts.
+    Retry logic is handled by the caller via helpers/utils.with_retry().
+    """
 
-    def __init__(self, access_token: str, base_url: str) -> None:
-        self._access_token = access_token
+    def __init__(self, base_url: str = _GMAIL_BASE):
         self._base_url = base_url.rstrip("/")
 
-    # ── Internal helpers ─────────────────────────────────────────────────────
+    def _auth_headers(self, access_token: str) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
 
-    def _headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._access_token}",
-            "Content-Type": "application/json",
-        }
+    async def _raise_for_status(self, response: aiohttp.ClientResponse, context: str = "") -> None:
+        """Map HTTP error codes to connector exceptions."""
+        status = response.status
+        if status < 400:
+            return
+        try:
+            body: Dict[str, Any] = await response.json(content_type=None)
+        except Exception:
+            body = {}
 
-    def _raise_for_status(self, status: int, response_text: str, context: str = "") -> None:
-        """Translate HTTP status codes into typed connector exceptions via lookup dict."""
-        entry = self._ERROR_MAP.get(status)
-        if entry:
-            exc_class, prefix = entry
-            raise exc_class(f"{prefix} [{context}]: {response_text}")
-        raise ConnectorError(f"HTTP {status} [{context}]: {response_text}")
+        error_obj = body.get("error", {})
+        if isinstance(error_obj, dict):
+            message = error_obj.get("message", "") or str(body)
+        else:
+            message = str(error_obj) or str(body)
 
-    # ── Profile ──────────────────────────────────────────────────────────────
+        if status == 401:
+            raise GmailAuthError(f"401 Unauthorized{': ' + context if context else ''}: {message}")
+        if status == 403:
+            raise GmailAPIError(message, status_code=403, response_body=body)
+        if status == 429:
+            raise GmailRateLimitError(f"429 Rate limit exceeded{': ' + context if context else ''}")
+        raise GmailAPIError(
+            f"HTTP {status}{': ' + context if context else ''}: {message}",
+            status_code=status,
+            response_body=body,
+        )
 
-    @retry()
-    async def execute_get_profile(self) -> Dict[str, Any]:
-        """GET users/me/profile — used by health_check()."""
+    async def get_profile(self, access_token: str) -> Dict[str, Any]:
+        """GET /users/me/profile — returns Gmail account profile."""
         url = f"{self._base_url}/users/me/profile"
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self._headers()) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, "get_profile")
-                return await resp.json(content_type=None)
+            async with session.get(url, headers=self._auth_headers(access_token)) as resp:
+                await self._raise_for_status(resp, "get_profile")
+                return await resp.json()
 
-    # ── Messages ─────────────────────────────────────────────────────────────
-
-    @retry()
-    async def execute_list_messages(
+    async def list_messages(
         self,
+        access_token: str,
         query: str = "",
-        max_results: int = _PAGE_SIZE,
+        max_results: int = 500,
         page_token: Optional[str] = None,
+        label_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """GET users/me/messages — returns {messages, nextPageToken, resultSizeEstimate}."""
+        """GET /users/me/messages — list message stubs."""
         url = f"{self._base_url}/users/me/messages"
         params: Dict[str, Any] = {"maxResults": max_results}
         if query:
             params["q"] = query
         if page_token:
             params["pageToken"] = page_token
+        if label_ids:
+            params["labelIds"] = label_ids
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self._headers(), params=params) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, "list_messages")
-                return await resp.json(content_type=None)
+            async with session.get(url, headers=self._auth_headers(access_token), params=params) as resp:
+                await self._raise_for_status(resp, "list_messages")
+                return await resp.json()
 
-    @retry()
-    async def execute_get_message(self, msg_id: str) -> Dict[str, Any]:
-        """GET users/me/messages/{id}?format=full — returns full message resource."""
-        url = f"{self._base_url}/users/me/messages/{msg_id}"
+    async def get_message(
+        self,
+        access_token: str,
+        message_id: str,
+        fmt: str = "full",
+    ) -> Dict[str, Any]:
+        """GET /users/me/messages/{id} — fetch full message."""
+        url = f"{self._base_url}/users/me/messages/{message_id}"
+        params = {"format": fmt}
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, headers=self._headers(), params={"format": "full"}
-            ) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, f"get_message:{msg_id}")
-                return await resp.json(content_type=None)
+            async with session.get(url, headers=self._auth_headers(access_token), params=params) as resp:
+                await self._raise_for_status(resp, f"get_message({message_id})")
+                return await resp.json()
 
-    @retry()
     async def execute_modify_message(
         self,
-        msg_id: str,
+        access_token: str,
+        message_id: str,
         add_label_ids: Optional[List[str]] = None,
         remove_label_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """POST users/me/messages/{id}/modify — adds/removes label IDs."""
-        url = f"{self._base_url}/users/me/messages/{msg_id}/modify"
-        payload: Dict[str, Any] = {}
-        if add_label_ids:
-            payload["addLabelIds"] = add_label_ids
-        if remove_label_ids:
-            payload["removeLabelIds"] = remove_label_ids
+        """POST /users/me/messages/{id}/modify — add/remove labels."""
+        url = f"{self._base_url}/users/me/messages/{message_id}/modify"
+        body = {
+            "addLabelIds": add_label_ids or [],
+            "removeLabelIds": remove_label_ids or [],
+        }
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=self._headers(), json=payload) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, f"modify_message:{msg_id}")
-                return await resp.json(content_type=None)
+            async with session.post(url, headers=self._auth_headers(access_token), json=body) as resp:
+                await self._raise_for_status(resp, f"modify_message({message_id})")
+                return await resp.json()
 
-    @retry()
-    async def execute_send_message(self, raw_message: str) -> Dict[str, Any]:
-        """POST users/me/messages/send — sends a base64url-encoded RFC 2822 message.
+    async def execute_send_message(
+        self,
+        access_token: str,
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        """POST /users/me/messages/send — send a base64url-encoded RFC 2822 message.
 
-        Returns {id, threadId, labelIds} on success.
-        Raises ConnectorPermissionError with a re-authorize hint on 403.
+        Mirrors execute_modify_message(): accepts the encoded payload, POSTs it,
+        and returns the full response dict.
+
+        Raises:
+            PermissionError: On 403 — gmail.send scope is missing.
+            ValueError: On 400 — bad request body (surfaces error_description).
+            GmailRateLimitError: On 429.
+            GmailAuthError: On 401.
+            GmailAPIError: On other 4xx/5xx.
         """
         url = f"{self._base_url}/users/me/messages/send"
-        payload: Dict[str, Any] = {"raw": raw_message}
+        body = {"raw": raw_message}
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=self._headers(), json=payload) as resp:
-                text = await resp.text()
-                if resp.status == 403:
-                    raise ConnectorPermissionError(
+            async with session.post(url, headers=self._auth_headers(access_token), json=body) as resp:
+                status = resp.status
+                if status == 403:
+                    raise PermissionError(
                         "gmail.send scope missing — re-authorize the connector"
                     )
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, "send_message")
-                return await resp.json(content_type=None)
+                if status == 400:
+                    try:
+                        err_body = await resp.json(content_type=None)
+                    except Exception:
+                        err_body = {}
+                    error_obj = err_body.get("error", {})
+                    description = (
+                        (error_obj.get("message") if isinstance(error_obj, dict) else str(error_obj))
+                        or str(err_body)
+                    )
+                    raise ValueError(description)
+                await self._raise_for_status(resp, "execute_send_message")
+                return await resp.json()
 
-    @retry()
-    async def execute_trash_message(self, msg_id: str) -> Dict[str, Any]:
-        """POST users/me/messages/{id}/trash — moves to Trash; returns trashed resource."""
-        url = f"{self._base_url}/users/me/messages/{msg_id}/trash"
+    async def execute_create_draft(
+        self,
+        access_token: str,
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        """POST /users/me/drafts — create a draft from a base64url-encoded MIME message."""
+        url = f"{self._base_url}/users/me/drafts"
+        body = {"message": {"raw": raw_message}}
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=self._headers()) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, f"trash_message:{msg_id}")
-                return await resp.json(content_type=None)
+            async with session.post(url, headers=self._auth_headers(access_token), json=body) as resp:
+                await self._raise_for_status(resp, "execute_create_draft")
+                return await resp.json()
 
-    @retry()
-    async def execute_delete_message(self, msg_id: str) -> None:
-        """DELETE users/me/messages/{id} — permanent delete; returns None (204)."""
-        url = f"{self._base_url}/users/me/messages/{msg_id}"
+    async def list_history(
+        self,
+        access_token: str,
+        start_history_id: str,
+        history_types: Optional[List[str]] = None,
+        max_results: int = 500,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /users/me/history — list changes since a history ID."""
+        url = f"{self._base_url}/users/me/history"
+        params: Dict[str, Any] = {
+            "startHistoryId": start_history_id,
+            "maxResults": max_results,
+        }
+        if history_types:
+            params["historyTypes"] = history_types
+        if page_token:
+            params["pageToken"] = page_token
         async with aiohttp.ClientSession() as session:
-            async with session.delete(url, headers=self._headers()) as resp:
-                if resp.status not in (200, 204):
-                    text = await resp.text()
-                    self._raise_for_status(resp.status, text, f"delete_message:{msg_id}")
+            async with session.get(url, headers=self._auth_headers(access_token), params=params) as resp:
+                await self._raise_for_status(resp, "list_history")
+                return await resp.json()
 
-    # ── Threads ──────────────────────────────────────────────────────────────
+    async def post_form_data(
+        self,
+        url: str,
+        payload: Dict[str, str],
+        context: str = "post_form_data",
+    ) -> Dict[str, Any]:
+        """Generic POST of form-encoded data to any URL — returns parsed JSON.
 
-    @retry()
-    async def execute_trash_thread(self, thread_id: str) -> Dict[str, Any]:
-        """POST users/me/threads/{id}/trash — moves thread to Trash; returns trashed thread."""
-        url = f"{self._base_url}/users/me/threads/{thread_id}/trash"
+        Used by connector.py to exchange and renew tokens.  The payload is built
+        in connector.py, keeping all auth-specific field names out of this class.
+        """
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=self._headers()) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    self._raise_for_status(resp.status, text, f"trash_thread:{thread_id}")
-                return await resp.json(content_type=None)
-
-    @retry()
-    async def execute_delete_thread(self, thread_id: str) -> None:
-        """DELETE users/me/threads/{id} — permanent delete; returns None (204)."""
-        url = f"{self._base_url}/users/me/threads/{thread_id}"
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(url, headers=self._headers()) as resp:
-                if resp.status not in (200, 204):
-                    text = await resp.text()
-                    self._raise_for_status(resp.status, text, f"delete_thread:{thread_id}")
+            async with session.post(url, data=payload) as resp:
+                await self._raise_for_status(resp, context)
+                return await resp.json()

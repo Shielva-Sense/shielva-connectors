@@ -1,302 +1,285 @@
-"""GmailConnector — orchestration only; zero raw HTTP, zero JSON parsing."""
-import os
-from datetime import datetime, timezone, timedelta
+"""Gmail connector — orchestration only.
+
+All HTTP calls → client/http_client.py
+All normalization → helpers/normalizer.py
+All utilities → helpers/utils.py
+"""
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp
 import structlog
-
 from shared.base_connector import (
     AuthStatus,
     BaseConnector,
     ConnectorHealth,
     ConnectorStatus,
     NormalizedDocument,
+    RefreshError,
     SyncResult,
     SyncStatus,
     TokenInfo,
 )
 
 from client.http_client import GmailHTTPClient
-from exceptions import ConnectorAuthError, ConnectorError, ConnectorPermissionError
+from exceptions import GmailAPIError, GmailAuthError, GmailConnectorError
 from helpers.normalizer import normalize_message
-from helpers.utils import load_known_ids, save_known_ids, build_mime_raw
-from models import BulkDeleteResult
+from helpers.utils import base64url_encode, build_mime_message, with_retry
 
 logger = structlog.get_logger(__name__)
 
+AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+_GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1"
+
 
 class GmailConnector(BaseConnector):
-    """Shielva connector for Google Gmail — supports list, read, delete, sync."""
+    """Shielva connector for the Google Gmail API."""
 
-    # ── Connector identity ──────────────────────────────────────────────────
-    CONNECTOR_TYPE = "google_gmail"
+    CONNECTOR_TYPE = "google_gmail_connector"
     CONNECTOR_NAME = "Google Gmail"
     AUTH_TYPE = "oauth2_code"
+    AUTH_URI = AUTH_URI
+    TOKEN_URI = TOKEN_URI
 
-    # ── OAuth2 provider endpoints (provider-wide; BaseConnector.get_oauth_url
-    #    reads AUTH_URI to build the consent URL, authorize() uses TOKEN_URI) ──
-    AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
-    TOKEN_URI = "https://oauth2.googleapis.com/token"
-    REQUIRED_SCOPES = [
+    REQUIRED_SCOPES: List[str] = [
+        "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.send",
     ]
 
-    # ── Provider-wide hardcoded constants (same for every tenant) ───────────
-    RATE_LIMIT_PER_MIN = 250
-    PAGINATION_TYPE = "cursor"
-    API_VERSION = "v1"
-    ALLOW_PERMANENT_DELETE = False
+    REQUIRED_CONFIG_KEYS = [
+        "client_id",
+        "client_secret",
+        "scopes",
+        "auth_url",
+        "token_url",
+        "base_url",
+        "rate_limit_per_min",
+        "pagination_type",
+        "api_version",
+    ]
 
-    # ── OCP: status-code → exception mapping (shared with http_client) ──────
-    _STATUS_MAP: Dict[int, str] = {
-        401: "auth",
-        403: "permission",
-        404: "not_found",
-        429: "rate_limit",
+    _STATUS_MAP = {
+        401: (ConnectorHealth.DEGRADED, AuthStatus.TOKEN_EXPIRED),
+        403: (ConnectorHealth.DEGRADED, AuthStatus.AUTHENTICATED),
+        429: (ConnectorHealth.DEGRADED, AuthStatus.AUTHENTICATED),
     }
-
-    # ── Config keys read from user-supplied install fields ──────────────────
-    REQUIRED_CONFIG_KEYS: List[str] = ["allow_permanent_delete", "client_id", "client_secret"]
 
     def __init__(
         self,
         tenant_id: str,
         connector_id: str,
-        config: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        config: Dict[str, Any] = None,
+    ):
         super().__init__(tenant_id, connector_id, config)
-        # Only user-provided (bind:false) fields read from self.config:
-        self.allow_permanent_delete: bool = bool(
-            self.config.get("allow_permanent_delete", False)
+        self.client_id: str = self.config.get("client_id", "")
+        self.client_secret: str = self.config.get("client_secret", "")
+        self.scopes: str = self.config.get("scopes", "")
+        self.auth_url: str = self.config.get("auth_url", "")
+        self.token_url: str = self.config.get("token_url", "")
+        self.base_url: str = self.config.get("base_url", "")
+        self.rate_limit_per_min: Any = self.config.get("rate_limit_per_min", "")
+        self.pagination_type: str = self.config.get("pagination_type", "")
+        self.api_version: str = self.config.get("api_version", "")
+
+        base = self.base_url or _GMAIL_BASE
+        self.http_client = GmailHTTPClient(base_url=base)
+
+    # ── Internal helpers ────────────────────────────────────────────────────
+
+    async def _get_valid_token(self) -> str:
+        """Return a valid access token, refreshing if necessary."""
+        token_info = await self.ensure_token()
+        return token_info.access_token
+
+    async def on_token_refresh(self) -> TokenInfo:
+        """Refresh the OAuth2 access token using the stored refresh token."""
+        if not self._token_info or not self._token_info.refresh_token:
+            raise RefreshError("No refresh token available")
+
+        client_id = self.config.get("client_id", "")
+        client_secret = self.config.get("client_secret", "")
+        token_uri = self.config.get("token_url") or TOKEN_URI
+
+        stored_token = self._token_info.refresh_token
+        data = await self.http_client.post_form_data(
+            url=token_uri,
+            payload={
+                "grant_type": "refresh_token",
+                "refresh_token": stored_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            context="on_token_refresh",
         )
 
-    # ── Private helpers ─────────────────────────────────────────────────────
-
-    async def _build_http_client(self) -> GmailHTTPClient:
-        """Ensure a valid token and return a ready GmailHTTPClient."""
-        token = await self.ensure_token()
-        return GmailHTTPClient(
-            access_token=token.access_token,
-            base_url=self.config.get("base_url", "https://gmail.googleapis.com/gmail/v1"),
+        expires_in = int(data.get("expires_in", 3600))
+        new_scopes = data.get("scope", "").split() if data.get("scope") else list(self._token_info.scopes)
+        return TokenInfo(
+            access_token=data["access_token"],
+            refresh_token=data.get("refresh_token") or stored_token,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            token_type=data.get("token_type", "Bearer"),
+            scopes=new_scopes,
         )
 
-    def _assert_permanent_delete_allowed(self) -> None:
-        """Raise ConnectorPermissionError if permanent delete is disabled."""
-        if not bool(self.config.get("allow_permanent_delete", False)):
-            raise ConnectorPermissionError(
-                "Permanent delete is disabled; set allow_permanent_delete=True "
-                "and include https://mail.google.com/ in scopes."
-            )
-
-    async def _remove_from_kb(self, msg_id: str) -> None:
-        """Call the platform KB document-removal API for a single message."""
-        ingestion_url = os.getenv("INGESTION_URL", "http://localhost:8000")
-        url = f"{ingestion_url}/remove"
-        payload = {
-            "tenant_id": self.tenant_id,
-            "connector_id": self.connector_id,
-            "doc_id": msg_id,
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status not in (200, 204):
-                        text = await resp.text()
-                        logger.warning(
-                            "gmail.remove_from_kb.warn",
-                            msg_id=msg_id,
-                            status=resp.status,
-                            body=text[:200],
-                        )
-        except Exception as exc:
-            logger.warning("gmail.remove_from_kb.error", msg_id=msg_id, error=str(exc))
-
-    # ── BaseConnector abstract methods ──────────────────────────────────────
+    # ── Abstract method implementations ────────────────────────────────────
 
     async def install(self) -> ConnectorStatus:
-        """Validate config and return a PENDING ConnectorStatus (no API call)."""
-        if not self.config.get("client_id") or not self.config.get("client_secret"):
+        """Validate install-time config and return connector status."""
+        client_id = self.config.get("client_id")
+        client_secret = self.config.get("client_secret")
+
+        if not client_id or not client_secret:
+            logger.warning(
+                "gmail.install.missing_credentials",
+                connector_id=self.connector_id,
+            )
             return ConnectorStatus(
                 connector_id=self.connector_id,
-                health=ConnectorHealth.DEGRADED,
-                auth_status=AuthStatus.INVALID_CREDENTIALS,
-                message="client_id and client_secret are required install fields",
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message="client_id and client_secret are required",
             )
+
+        await self.save_config({"client_id": client_id, "client_secret": client_secret})
+        logger.info("gmail.install.ok", connector_id=self.connector_id)
         return ConnectorStatus(
             connector_id=self.connector_id,
             health=ConnectorHealth.HEALTHY,
             auth_status=AuthStatus.PENDING,
-            message="Gmail connector installed. Complete OAuth flow to activate.",
+            message="Connector installed — complete OAuth to connect",
         )
 
-    async def authorize(self, auth_code: str, state: Optional[str] = None) -> TokenInfo:
+    async def authorize(self, auth_code: str, state: str = None) -> TokenInfo:
         """Exchange OAuth authorization code for access + refresh tokens."""
-        redirect_uri = self.config.get("redirect_uri", "")
-        token_endpoint = self.config.get("token_url", "https://oauth2.googleapis.com/token")
-        payload = {
-            "code": auth_code,
-            "client_id": self.config.get("client_id"),
-            "client_secret": self.config.get("client_secret"),
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(token_endpoint, data=payload) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise ConnectorAuthError(f"Token exchange failed: {text}")
-                data: Dict[str, Any] = await resp.json(content_type=None)
+        client_id = self.config.get("client_id", "")
+        client_secret = self.config.get("client_secret", "")
+        token_uri = self.config.get("token_url") or TOKEN_URI
+        redirect_uri = (state or "") if state and state.startswith("http") else ""
 
-        scopes_raw = data.get("scope", "")
-        scopes = scopes_raw.split() if isinstance(scopes_raw, str) else list(scopes_raw)
+        data = await self.http_client.post_form_data(
+            url=token_uri,
+            payload={
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+            },
+            context="authorize",
+        )
+
         expires_in = int(data.get("expires_in", 3600))
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
-
+        scopes = data.get("scope", "").split() if data.get("scope") else list(self.REQUIRED_SCOPES)
         token_info = TokenInfo(
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
-            expires_at=expires_at,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
             token_type=data.get("token_type", "Bearer"),
             scopes=scopes,
         )
         await self.set_token(token_info)
+        logger.info("gmail.authorize.ok", connector_id=self.connector_id)
         return token_info
 
-    async def on_token_refresh(self) -> TokenInfo:
-        """Refresh an expired access token using the stored refresh token."""
-        current = self._token_info
-        if not current or not current.refresh_token:
-            raise ConnectorAuthError("No refresh token available.")
-        token_endpoint = self.config.get("token_url", "https://oauth2.googleapis.com/token")
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": current.refresh_token,
-            "client_id": self.config.get("client_id"),
-            "client_secret": self.config.get("client_secret"),
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(token_endpoint, data=payload) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise ConnectorAuthError(f"Token refresh failed: {text}")
-                data: Dict[str, Any] = await resp.json(content_type=None)
-
-        scopes_raw = data.get("scope", "")
-        scopes = scopes_raw.split() if isinstance(scopes_raw, str) else list(scopes_raw)
-        expires_in = int(data.get("expires_in", 3600))
-        import datetime as dt
-        expires_at = dt.datetime.utcnow() + dt.timedelta(seconds=expires_in)
-        return TokenInfo(
-            access_token=data["access_token"],
-            refresh_token=current.refresh_token,
-            expires_at=expires_at,
-            token_type=data.get("token_type", "Bearer"),
-            scopes=scopes,
-        )
-
     async def health_check(self) -> ConnectorStatus:
-        """Verify token validity by calling users/me/profile."""
+        """Check Gmail API connectivity by fetching the user profile."""
         try:
-            client = await self._build_http_client()
-            profile = await client.execute_get_profile()
+            access_token = await self._get_valid_token()
+            await with_retry(
+                lambda: self.http_client.get_profile(access_token),
+                max_retries=2,
+            )
             return ConnectorStatus(
                 connector_id=self.connector_id,
                 health=ConnectorHealth.HEALTHY,
                 auth_status=AuthStatus.CONNECTED,
-                message=f"Connected as {profile.get('emailAddress', 'unknown')}",
+                message="Gmail API reachable",
             )
-        except ConnectorAuthError:
+        except GmailAuthError:
             return ConnectorStatus(
                 connector_id=self.connector_id,
                 health=ConnectorHealth.DEGRADED,
                 auth_status=AuthStatus.TOKEN_EXPIRED,
-                message="Access token expired — re-authorize.",
+                message="Token expired — re-authorize the connector",
             )
-        except ConnectorPermissionError:
-            return ConnectorStatus(
-                connector_id=self.connector_id,
-                health=ConnectorHealth.DEGRADED,
-                auth_status=AuthStatus.INVALID_CREDENTIALS,
-                message="Insufficient scopes.",
-            )
-        except Exception as exc:
+        except RefreshError as exc:
             return ConnectorStatus(
                 connector_id=self.connector_id,
                 health=ConnectorHealth.OFFLINE,
-                auth_status=AuthStatus.FAILED,
+                auth_status=AuthStatus.EXPIRED,
+                message=str(exc),
+            )
+        except GmailConnectorError as exc:
+            return ConnectorStatus(
+                connector_id=self.connector_id,
+                health=ConnectorHealth.DEGRADED,
+                auth_status=AuthStatus.CONNECTED,
                 message=str(exc),
             )
 
     async def sync(
         self,
-        since: Optional[datetime] = None,
+        since: datetime = None,
         full: bool = False,
-        kb_id: str = "",
-        webhook_url: Optional[str] = None,
+        kb_id: str = None,
+        webhook_url: str = None,
     ) -> SyncResult:
-        """Incremental or full sync with deletion propagation."""
-        client = await self._build_http_client()
-        known_ids = load_known_ids(self.config)
+        """Sync Gmail messages into the Shielva knowledge base.
 
-        query = ""
-        if since and not full:
-            unix_ts = int(since.timestamp())
-            query = f"after:{unix_ts}"
+        Performs incremental sync via the history API when a checkpoint exists,
+        falling back to a full page-token scan when *full* is True or no checkpoint.
+        """
+        access_token = await self._get_valid_token()
+        last_history_id: Optional[str] = await self.get_metadata("last_history_id")
 
-        current_ids: set = set()
         documents_found = 0
         documents_synced = 0
         documents_failed = 0
-        page_token: Optional[str] = None
+        latest_history_id: Optional[str] = None
 
         try:
-            while True:
-                page = await client.execute_list_messages(
-                    query=query, max_results=100, page_token=page_token
-                )
-                stubs = page.get("messages", [])
-                documents_found += len(stubs)
+            if not full and last_history_id:
+                message_ids = await self._collect_history_ids(access_token, last_history_id)
+            else:
+                message_ids, latest_history_id = await self._collect_all_message_ids(access_token)
 
-                for stub in stubs:
-                    msg_id = stub["id"]
-                    current_ids.add(msg_id)
-                    try:
-                        raw = await client.execute_get_message(msg_id)
-                        doc = normalize_message(raw, self.tenant_id, self.connector_id)
-                        await self.ingest_document(doc, kb_id=kb_id, webhook_url=webhook_url)
-                        documents_synced += 1
-                    except Exception as exc:
-                        logger.error("gmail.sync.message_error", msg_id=msg_id, error=str(exc))
-                        documents_failed += 1
+            documents_found = len(message_ids)
 
-                page_token = page.get("nextPageToken")
-                if not page_token:
-                    break
+            for msg_id in message_ids:
+                try:
+                    raw = await with_retry(
+                        lambda mid=msg_id: self.http_client.get_message(access_token, mid),
+                        max_retries=3,
+                    )
+                    doc = normalize_message(raw, self.connector_id, self.tenant_id)
+                    if raw.get("historyId") and (
+                        latest_history_id is None
+                        or int(raw["historyId"]) > int(latest_history_id)
+                    ):
+                        latest_history_id = raw["historyId"]
+                    await self.ingest_document(doc, kb_id=kb_id or "", webhook_url=webhook_url)
+                    documents_synced += 1
+                except Exception as exc:
+                    logger.error(
+                        "gmail.sync.message_failed",
+                        message_id=msg_id,
+                        error=str(exc),
+                    )
+                    documents_failed += 1
 
-            # Propagate deletions
-            removed_ids = known_ids - current_ids
-            for msg_id in removed_ids:
-                await self._remove_from_kb(msg_id)
-            if removed_ids:
-                logger.info(
-                    "gmail.sync.deletions_propagated",
-                    count=len(removed_ids),
-                    connector_id=self.connector_id,
-                )
+            if latest_history_id:
+                await self.set_metadata("last_history_id", latest_history_id)
 
-            # Persist updated known IDs
-            await self.save_config(save_known_ids(self.config, current_ids))
-
-            status = SyncStatus.COMPLETED if documents_failed == 0 else SyncStatus.PARTIAL
             return SyncResult(
-                status=status,
+                status=SyncStatus.COMPLETED if documents_failed == 0 else SyncStatus.PARTIAL,
                 documents_found=documents_found,
                 documents_synced=documents_synced,
                 documents_failed=documents_failed,
-                message=f"Sync complete. Removed {len(removed_ids)} stale IDs.",
+                message=f"Synced {documents_synced}/{documents_found} messages",
             )
+
         except Exception as exc:
             logger.error("gmail.sync.failed", error=str(exc), connector_id=self.connector_id)
             return SyncResult(
@@ -307,173 +290,126 @@ class GmailConnector(BaseConnector):
                 message=str(exc),
             )
 
-    # ── User-requested public methods ────────────────────────────────────────
-
-    async def list_email(
-        self,
-        query: str = "",
-        max_results: int = 100,
-        page_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """List messages matching *query*; returns raw page dict with nextPageToken."""
-        client = await self._build_http_client()
-        return await client.execute_list_messages(
-            query=query, max_results=max_results, page_token=page_token
-        )
-
-    async def read_email(self, msg_id: str) -> NormalizedDocument:
-        """Fetch a single message by ID and return a NormalizedDocument."""
-        client = await self._build_http_client()
-        raw = await client.execute_get_message(msg_id)
-        return normalize_message(raw, self.tenant_id, self.connector_id)
-
-    async def add_email(
-        self,
-        msg_id: str,
-        label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Apply *label_ids* to message *msg_id* via messages.modify."""
-        client = await self._build_http_client()
-        return await client.execute_modify_message(
-            msg_id=msg_id, add_label_ids=label_ids or []
-        )
-
-    async def move_email(
-        self,
-        msg_id: str,
-        destination_label_id: str,
-        remove_label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Move message *msg_id* to *destination_label_id*, removing *remove_label_ids*."""
-        client = await self._build_http_client()
-        result = await client.execute_modify_message(
-            msg_id=msg_id,
-            add_label_ids=[destination_label_id],
-            remove_label_ids=remove_label_ids or ["INBOX"],
-        )
-        logger.info("gmail.move_email.ok", msg_id=msg_id, connector_id=self.connector_id)
-        return result
-
-    async def update_email(
-        self,
-        msg_id: str,
-        add_label_ids: Optional[List[str]] = None,
-        remove_label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Add and/or remove labels on message *msg_id* via messages.modify."""
-        client = await self._build_http_client()
-        result = await client.execute_modify_message(
-            msg_id=msg_id,
-            add_label_ids=add_label_ids or [],
-            remove_label_ids=remove_label_ids or [],
-        )
-        logger.info("gmail.update_email.ok", msg_id=msg_id, connector_id=self.connector_id)
-        return result
-
-    async def get_email(self, msg_id: str) -> NormalizedDocument:
-        """Fetch a single message by ID and return a NormalizedDocument."""
-        client = await self._build_http_client()
-        raw = await client.execute_get_message(msg_id)
-        return normalize_message(raw, self.tenant_id, self.connector_id)
-
-    async def delete_email(self, msg_id: str, permanent: bool = False) -> Any:
-        """Alias for delete_message — kept for API surface consistency."""
-        return await self.delete_message(msg_id, permanent=permanent)
-
-    async def remove_email(self, msg_id: str) -> Any:
-        """Soft-delete (trash) alias — kept for API surface consistency."""
-        return await self.delete_message(msg_id, permanent=False)
-
-    async def delete_message(self, msg_id: str, permanent: bool = False) -> Any:
-        """Trash or permanently delete a single message.
-
-        permanent=False → POST messages/{id}/trash (recoverable)
-        permanent=True  → DELETE messages/{id} (unrecoverable — requires allow_permanent_delete)
-        """
-        client = await self._build_http_client()
-        if permanent:
-            self._assert_permanent_delete_allowed()
-            result = await client.execute_delete_message(msg_id)
-        else:
-            result = await client.execute_trash_message(msg_id)
-        logger.info(
-            "gmail.delete_message.ok",
-            msg_id=msg_id,
-            permanent=permanent,
-            connector_id=self.connector_id,
-        )
-        return result
-
-    async def delete_thread(self, thread_id: str, permanent: bool = False) -> Any:
-        """Trash or permanently delete an entire thread.
-
-        permanent=False → POST threads/{id}/trash
-        permanent=True  → DELETE threads/{id} (requires allow_permanent_delete)
-        """
-        client = await self._build_http_client()
-        if permanent:
-            self._assert_permanent_delete_allowed()
-            result = await client.execute_delete_thread(thread_id)
-        else:
-            result = await client.execute_trash_thread(thread_id)
-        logger.info(
-            "gmail.delete_thread.ok",
-            thread_id=thread_id,
-            permanent=permanent,
-            connector_id=self.connector_id,
-        )
-        return result
-
-    async def bulk_delete(
-        self, query: str, permanent: bool = False
-    ) -> BulkDeleteResult:
-        """Delete all messages matching *query*.
-
-        Collects all message IDs via the pageToken loop first, then deletes
-        each individually so pagination is not corrupted by mid-loop mutations.
-        Per-message errors are caught and counted; the loop never aborts early.
-        """
-        if permanent:
-            self._assert_permanent_delete_allowed()
-
-        client = await self._build_http_client()
-
-        # Collect IDs first
-        all_ids: List[str] = []
+    async def _collect_all_message_ids(
+        self, access_token: str
+    ) -> tuple[List[str], Optional[str]]:
+        """Page through /users/me/messages and return all IDs + last history_id."""
+        ids: List[str] = []
         page_token: Optional[str] = None
+        latest_history_id: Optional[str] = None
+
         while True:
-            page = await client.execute_list_messages(
-                query=query, max_results=100, page_token=page_token
+            resp = await with_retry(
+                lambda pt=page_token: self.http_client.list_messages(
+                    access_token, query="in:inbox", max_results=500, page_token=pt
+                ),
+                max_retries=3,
             )
-            for stub in page.get("messages", []):
-                all_ids.append(stub["id"])
-            page_token = page.get("nextPageToken")
+            for stub in resp.get("messages", []):
+                ids.append(stub["id"])
+            if resp.get("historyId") and (
+                latest_history_id is None
+                or int(resp["historyId"]) > int(latest_history_id)
+            ):
+                latest_history_id = resp.get("historyId")
+            page_token = resp.get("nextPageToken")
             if not page_token:
                 break
 
-        # Delete each message
-        result = BulkDeleteResult()
-        errors: List[str] = []
-        for msg_id in all_ids:
-            try:
-                if permanent:
-                    await client.execute_delete_message(msg_id)
-                else:
-                    await client.execute_trash_message(msg_id)
-                result.deleted += 1
-            except Exception as exc:
-                result.failed += 1
-                errors.append(f"{msg_id}: {exc}")
+        return ids, latest_history_id
 
-        result.errors = errors
-        logger.info(
-            "gmail.bulk_delete.ok",
-            deleted=result.deleted,
-            failed=result.failed,
-            permanent=permanent,
-            connector_id=self.connector_id,
+    async def _collect_history_ids(
+        self, access_token: str, start_history_id: str
+    ) -> List[str]:
+        """Return message IDs added since *start_history_id* via the history API."""
+        ids: List[str] = []
+        page_token: Optional[str] = None
+
+        while True:
+            resp = await with_retry(
+                lambda pt=page_token: self.http_client.list_history(
+                    access_token,
+                    start_history_id=start_history_id,
+                    history_types=["messageAdded"],
+                    max_results=500,
+                    page_token=pt,
+                ),
+                max_retries=3,
+            )
+            for record in resp.get("history", []):
+                for added in record.get("messagesAdded", []):
+                    msg_id = added.get("message", {}).get("id")
+                    if msg_id:
+                        ids.append(msg_id)
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+        return ids
+
+    # ── User-requested standalone methods ───────────────────────────────────
+
+    async def list_emails(
+        self,
+        query: str = "",
+        max_results: int = 500,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List Gmail message stubs matching *query*.
+
+        Returns the raw API response dict: {messages, nextPageToken, resultSizeEstimate}.
+        """
+        access_token = await self._get_valid_token()
+        return await with_retry(
+            lambda: self.http_client.list_messages(
+                access_token,
+                query=query,
+                max_results=max_results,
+                page_token=page_token,
+            ),
+            max_retries=3,
         )
-        return result
+
+    async def get_email(self, message_id: str) -> NormalizedDocument:
+        """Fetch a full Gmail message and return it as a NormalizedDocument."""
+        access_token = await self._get_valid_token()
+        raw = await with_retry(
+            lambda: self.http_client.get_message(access_token, message_id),
+            max_retries=3,
+        )
+        return normalize_message(raw, self.connector_id, self.tenant_id)
+
+    async def modify_message(
+        self,
+        message_id: str,
+        add_labels: Optional[List[str]] = None,
+        remove_labels: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Add or remove labels on a Gmail message.
+
+        Returns the raw API response dict.
+        """
+        access_token = await self._get_valid_token()
+        return await with_retry(
+            lambda: self.http_client.execute_modify_message(
+                access_token,
+                message_id=message_id,
+                add_label_ids=add_labels,
+                remove_label_ids=remove_labels,
+            ),
+            max_retries=3,
+        )
+
+    async def read_email(self, message_id: str) -> Dict[str, Any]:
+        """Return the raw Gmail API message object for *message_id*.
+
+        Delegates directly to GmailHTTPClient.get_message() — no extra HTTP path.
+        """
+        access_token = await self._get_valid_token()
+        return await with_retry(
+            lambda: self.http_client.get_message(access_token, message_id),
+            max_retries=3,
+        )
 
     async def send_email(
         self,
@@ -483,21 +419,39 @@ class GmailConnector(BaseConnector):
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Build an RFC 2822 MIME message and send it via POST /users/me/messages/send.
+        """Send an email via the Gmail API.
 
-        Requires the gmail.send OAuth scope — call returns {id, threadId} on success.
-        Raises ConnectorPermissionError if the scope is absent.
+        Builds a MIMEText message, base64url-encodes it (no padding), and delegates
+        to GmailHTTPClient.execute_send_message().
+
+        Requires the gmail.send scope — raises PermissionError if missing.
+        Returns the raw API response: {id, threadId, labelIds}.
         """
-        raw = build_mime_raw(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
-        client = await self._build_http_client()
-        result = await client.execute_send_message(raw)
-        logger.info(
-            "gmail.send_email.ok",
-            to=to,
-            subject=subject,
-            connector_id=self.connector_id,
+        mime_msg = build_mime_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        raw = base64url_encode(mime_msg.as_bytes())
+        access_token = await self._get_valid_token()
+        return await self.http_client.execute_send_message(access_token, raw)
+
+    async def add_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: Optional[str] = None,
+        bcc: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a Gmail draft (does not send).
+
+        Uses the same MIME-building path as send_email() for consistency.
+        Returns the raw API draft response: {id, message: {id, threadId, labelIds}}.
+        """
+        mime_msg = build_mime_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        raw = base64url_encode(mime_msg.as_bytes())
+        access_token = await self._get_valid_token()
+        return await with_retry(
+            lambda: self.http_client.execute_create_draft(access_token, raw),
+            max_retries=3,
         )
-        return result
 
     async def post_email(
         self,
@@ -507,30 +461,5 @@ class GmailConnector(BaseConnector):
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Public alias for send_email() — same behaviour, different API surface name."""
+        """Public alias for send_email() — provided for API surface completeness."""
         return await self.send_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
-
-    async def modify_message(
-        self,
-        msg_id: str,
-        add_label_ids: Optional[List[str]] = None,
-        remove_label_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Add and/or remove label IDs on message *msg_id* via messages.modify."""
-        client = await self._build_http_client()
-        result = await client.execute_modify_message(
-            msg_id=msg_id,
-            add_label_ids=add_label_ids or [],
-            remove_label_ids=remove_label_ids or [],
-        )
-        logger.info(
-            "gmail.modify_message.ok",
-            msg_id=msg_id,
-            connector_id=self.connector_id,
-        )
-        return result
-
-    async def disconnect(self) -> None:
-        """Clear stored tokens and reset auth status."""
-        await self.clear_token()
-        logger.info("gmail.disconnect", connector_id=self.connector_id)

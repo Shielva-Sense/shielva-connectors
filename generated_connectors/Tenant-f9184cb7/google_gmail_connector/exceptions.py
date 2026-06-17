@@ -1,21 +1,22 @@
-"""Custom exception hierarchy for the Gmail connector."""
+"""Custom exceptions for the Gmail connector."""
 
 
-class ConnectorError(Exception):
+class GmailConnectorError(Exception):
     """Base exception for all Gmail connector errors."""
 
 
-class ConnectorAuthError(ConnectorError):
-    """Raised on HTTP 401 — token invalid or missing."""
+class GmailAuthError(GmailConnectorError):
+    """Raised when authentication fails or token is invalid."""
 
 
-class ConnectorPermissionError(ConnectorError):
-    """Raised on HTTP 403 — insufficient scope or access denied."""
+class GmailRateLimitError(GmailConnectorError):
+    """Raised when the Gmail API rate limit is exceeded."""
 
 
-class ConnectorNotFoundError(ConnectorError):
-    """Raised on HTTP 404 — resource not found."""
+class GmailAPIError(GmailConnectorError):
+    """Raised when the Gmail API returns an unexpected error response."""
 
-
-class ConnectorRateLimitError(ConnectorError):
-    """Raised on HTTP 429 — rate limit exceeded; triggers retry backoff."""
+    def __init__(self, message: str, status_code: int = 0, response_body: dict = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body or {}
