@@ -183,7 +183,8 @@
         { "key": "subject", "type": "string", "required": true },
         { "key": "body", "type": "string", "required": true },
         { "key": "cc", "type": "string", "required": false },
-        { "key": "bcc", "type": "string", "required": false }
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
       ],
       "returns": "Dict"
     },
@@ -197,7 +198,8 @@
         { "key": "subject", "type": "string", "required": true },
         { "key": "body", "type": "string", "required": true },
         { "key": "cc", "type": "string", "required": false },
-        { "key": "bcc", "type": "string", "required": false }
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
       ],
       "returns": "Dict"
     },
@@ -211,7 +213,8 @@
         { "key": "subject", "type": "string", "required": true },
         { "key": "body", "type": "string", "required": true },
         { "key": "cc", "type": "string", "required": false },
-        { "key": "bcc", "type": "string", "required": false }
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
       ],
       "returns": "Dict"
     }
