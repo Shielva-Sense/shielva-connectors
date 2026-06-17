@@ -157,8 +157,7 @@ class GmailConnector(BaseConnector):
         client_secret = self.config.get("client_secret", "")
         token_uri = self.config.get("token_url") or TOKEN_URI
         # redirect_uri MUST come from self.config — the gateway sets it at deploy/check
-        # time. `state` carries the connector_id, not a URL, so reading it from state
-        # produces an empty redirect_uri and Google rejects with 400 invalid_request.
+        # time. `state` carries the connector_id, not a URL.
         redirect_uri = self.config.get("redirect_uri", "")
 
         data = await self.http_client.post_form_data(
@@ -424,9 +423,6 @@ class GmailConnector(BaseConnector):
         html_body: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send an email via the Gmail API.
-
-        Builds a MIME message, base64url-encodes it (no padding), and delegates
-        to GmailHTTPClient.execute_send_message().
 
         `body`      — plain-text part (always sent as the fallback).
         `html_body` — optional HTML part. When supplied, the message is sent as

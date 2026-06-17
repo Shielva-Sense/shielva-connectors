@@ -79,8 +79,7 @@ def build_mime_message(
     - `body`       — plain-text part (always attached as the fallback).
     - `html_body`  — optional HTML part. When provided, the message is sent as
                      `multipart/alternative` so mail clients render HTML when they
-                     can and fall back to plain text otherwise. Backwards-compatible:
-                     callers that don't pass `html_body` get the original behavior.
+                     can and fall back to plain text otherwise. Backwards-compatible.
     """
     subtype = "alternative" if html_body else "mixed"
     msg = MIMEMultipart(subtype)
