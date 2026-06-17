@@ -395,7 +395,7 @@ async def generate_docs(
             return ""
 
     # 4. Agentic docs generation (Gemini + tool calls when TEST_LLM_MODE=gemini)
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         await _log("info", "🤖 Starting Gemini agentic docs generation...")
         from integration.services.agentic_fix import gemini_agentic_generate_docs
         agentic_result = await gemini_agentic_generate_docs(
@@ -408,6 +408,8 @@ async def generate_docs(
             auth_type=session.get("auth_type", ""),
             user_prompt=session.get("user_prompt", ""),
             knowledge_fn=_knowledge_search,
+            # On enhance, docs are UPDATED (missing sections added) — never rewritten.
+            is_enhance=session.get("run_kind") == "enhance",
             log_cb=log_cb,
             rag_context=rag_context,
         )

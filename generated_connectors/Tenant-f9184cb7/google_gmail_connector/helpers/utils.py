@@ -72,9 +72,18 @@ def build_mime_message(
     from_addr: str = "me",
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
+    html_body: Optional[str] = None,
 ) -> MIMEMultipart:
-    """Build an RFC 2822 MIME message ready for Gmail send/draft."""
-    msg = MIMEMultipart()
+    """Build an RFC 2822 MIME message ready for Gmail send/draft.
+
+    - `body`       — plain-text part (always attached as the fallback).
+    - `html_body`  — optional HTML part. When provided, the message is sent as
+                     `multipart/alternative` so mail clients render HTML when they
+                     can and fall back to plain text otherwise. Backwards-compatible:
+                     callers that don't pass `html_body` get the original behavior.
+    """
+    subtype = "alternative" if html_body else "mixed"
+    msg = MIMEMultipart(subtype)
     msg["To"] = to
     msg["From"] = from_addr
     msg["Subject"] = subject
@@ -83,7 +92,11 @@ def build_mime_message(
         msg["Cc"] = cc
     if bcc:
         msg["Bcc"] = bcc
+    # RFC 2046: in multipart/alternative the plain part MUST come first (least-rich),
+    # so clients prefer the HTML part when they support it.
     msg.attach(MIMEText(body, "plain", "utf-8"))
+    if html_body:
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
     return msg
 
 

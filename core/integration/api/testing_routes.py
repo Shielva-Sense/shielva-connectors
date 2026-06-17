@@ -220,7 +220,28 @@ async def generate_unit_tests(
     body: GenerateTestsRequest,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
-    """Use AI to generate pytest unit test cases for the specified connector methods.
+    """⚠ DEPRECATED — backend Gemini codegen has been removed.
+
+    Test generation now lives on the client (SAD) via the local Claude CLI.
+    This endpoint is preserved for legacy callers and returns 410 Gone with a
+    clear message so the caller can route to the new flow.
+    """
+    from fastapi import HTTPException as _HTTPException
+    raise _HTTPException(
+        status_code=410,
+        detail=(
+            "Backend Gemini test generation has been removed. "
+            "Generate tests from SAD (Builder → Write Tests) which runs the local Claude CLI."
+        ),
+    )
+
+
+async def _legacy_generate_unit_tests_DISABLED(
+    session_id: str,
+    body: "GenerateTestsRequest",
+    x_tenant_id: str = "",
+):
+    """Original Gemini implementation — retained as dead reference; not routed.
 
     Returns an SSE stream so the frontend can show real-time progress in the
     Execution Progress terminal. Events:

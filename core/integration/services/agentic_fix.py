@@ -30,6 +30,131 @@ logger = structlog.get_logger(__name__)
 
 LogCallback = Optional[Callable[[str, str], Coroutine[Any, Any, None]]]
 
+
+# ── ENHANCE-MODE DIRECTIVE (single owner, used by every generator) ──────────
+# Build flow regenerates from scratch (correct). Enhance flow MUST edit the seeded
+# parent artifact in place — preserving identity, surface, and structure — and apply
+# ONLY the requested enhancement. Without this, every enhance was a full rewrite that
+# silently changed CONNECTOR_TYPE, exception classes, helper names, config keys, etc.
+def _read_existing_connector_type(connector_dir: Path) -> str:
+    """Return the parent connector's CONNECTOR_TYPE pinned in metadata/connector.json
+    (or parsed from connector.py as fallback). Empty string if neither exists."""
+    import re as _re
+    meta = connector_dir / "metadata" / "connector.json"
+    if meta.exists():
+        try:
+            ct = json.loads(meta.read_text(encoding="utf-8")).get("connector_type", "")
+            if ct:
+                return str(ct).strip()
+        except Exception:
+            pass
+    cp = connector_dir / "connector.py"
+    if cp.exists():
+        m = _re.search(r'CONNECTOR_TYPE\s*=\s*["\']([^"\']+)["\']', cp.read_text(encoding="utf-8"))
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _enhance_directive(
+    connector_dir: Path,
+    *,
+    artifact: str,
+    enhancement_ask: str = "",
+    max_existing_chars: int = 12000,
+) -> str:
+    """Build the EDIT-IN-PLACE directive appended to a generator's initial_message.
+
+    `artifact` ∈ {"connector", "metadata", "tests", "docs", "test_guidelines",
+    "instructions", "plan"} — determines which existing file(s) are quoted and what
+    the preservation contract is.
+
+    Returns "" if there's nothing to preserve (no existing artifact on disk) — callers
+    can therefore unconditionally append the result.
+    """
+    files: Dict[str, Path] = {
+        "connector":        connector_dir / "connector.py",
+        "metadata":         connector_dir / "metadata" / "connector.json",
+        "tests":            connector_dir / "tests" / "test_connector.py",
+        "docs":             connector_dir / "DOCS.md",  # checked alongside docs/index.md below
+        "test_guidelines":  connector_dir / "test_guidelines.md",
+        "instructions":     connector_dir / "instructions" / "setup.md",
+        "plan":             connector_dir / "implementation_plan.md",
+    }
+    contract = {
+        "connector": (
+            "PRESERVE the parent connector identity and surface VERBATIM:\n"
+            "- CONNECTOR_TYPE, CONNECTOR_NAME, class name — UNCHANGED\n"
+            "- every existing public method signature — UNCHANGED\n"
+            "- every existing exception class, helper name, config key — UNCHANGED\n"
+            "- file structure (client/, helpers/, exceptions.py, models.py) — UNCHANGED\n"
+            "Edit the existing connector.py IN PLACE. Apply ONLY the requested enhancement\n"
+            "below — add new methods/fields where required, do NOT rename, reorder, or rewrite\n"
+            "untouched parts. Do NOT regenerate from scratch."
+        ),
+        "metadata": (
+            "PRESERVE: connector_type, name, display_name, auth_type, the install_fields\n"
+            "list (including default values), and all existing apis/methods entries —\n"
+            "VERBATIM. Bump version patch component only. Add new apis/methods entries\n"
+            "ONLY for newly-added connector methods from this enhancement. Do NOT rename\n"
+            "fields or reorder existing entries."
+        ),
+        "tests": (
+            "PRESERVE every existing test function and assertion. Edit tests/test_connector.py\n"
+            "IN PLACE — ADD test functions only for the NEW methods/behavior introduced by\n"
+            "this enhancement. Do NOT rewrite, rename, or restructure existing tests. Keep\n"
+            "existing imports, fixtures, and mocks. Reuse conftest.py if present."
+        ),
+        "docs": (
+            "PRESERVE every existing section, heading, and prose paragraph VERBATIM unless\n"
+            "the enhancement directly contradicts it. Append/edit ONLY the sections\n"
+            "(methods, examples, config) that describe the newly-added behavior. Do NOT\n"
+            "rewrite the whole document or reorder existing sections."
+        ),
+        "test_guidelines": (
+            "PRESERVE existing guidelines verbatim. Add bullets ONLY for the new methods\n"
+            "introduced by this enhancement."
+        ),
+        "instructions": (
+            "PRESERVE existing setup steps verbatim. Append ONLY new steps that the\n"
+            "enhancement requires (e.g. new env var, new scope)."
+        ),
+        "plan": (
+            "PRESERVE every existing Section (1–9) — identity, methods, config keys,\n"
+            "exceptions, file layout, install_fields. EXTEND with the enhancement's new\n"
+            "methods/sections only. Mark unchanged sections as \"(unchanged)\". Do NOT\n"
+            "re-derive design choices."
+        ),
+    }.get(artifact, "")
+    target = files.get(artifact)
+    pinned_type = _read_existing_connector_type(connector_dir)
+    blocks: List[str] = []
+    blocks.append("\n\n## 🩹 ENHANCE MODE — EDIT THE EXISTING ARTIFACT, DO NOT REBUILD")
+    if pinned_type:
+        blocks.append(f"- CONNECTOR_TYPE is PINNED to \"{pinned_type}\" — never change it.")
+    if contract:
+        blocks.append(contract)
+    if enhancement_ask:
+        blocks.append(f"\n### Enhancement requested\n{enhancement_ask.strip()}")
+    # Quote the existing artifact so the LLM has the authoritative starting point.
+    quoted = ""
+    if target and target.exists():
+        try:
+            txt = target.read_text(encoding="utf-8")
+            if len(txt) > max_existing_chars:
+                txt = txt[:max_existing_chars] + "\n# … (truncated for prompt budget — read the full file via read_file)"
+            lang = {"connector": "python", "metadata": "json", "tests": "python",
+                    "docs": "markdown", "test_guidelines": "markdown",
+                    "instructions": "markdown", "plan": "markdown"}.get(artifact, "")
+            quoted = f"\n\n### Existing {target.name} (authoritative starting point)\n```{lang}\n{txt}\n```"
+        except Exception:
+            pass
+    # If no existing artifact was found, the directive alone is still useful (it tells
+    # the model to read the package via tools); return empty only if we have neither.
+    if not pinned_type and not quoted and not contract:
+        return ""
+    return "\n".join(blocks) + quoted
+
 # Optional knowledge query function — injected by the caller (e.g. docs_builder_service)
 # so this module doesn't hard-import knowledge_service.
 # Signature: async (query: str) -> str
@@ -2257,437 +2382,6 @@ def _summarise_tool_result(tool_name: str, result: str) -> str:
 
 # ── Core agentic loop ─────────────────────────────────────────────────────────
 
-async def _gemini_agentic_loop(
-    connector_dir: Path,
-    *,
-    system_prompt: str,
-    initial_message: str,
-    tools: List[Dict],
-    log_cb: LogCallback = None,
-    max_iterations: int = 15,
-    stop_on_done: bool = True,       # stop when model calls done()
-    stop_on_tests_pass: bool = False, # stop when run_tests() output shows all passing
-    require_file: Optional[str] = None,  # if set, re-prompt when Gemini returns text without writing this file
-    require_file_min_size: int = 0,  # if > 0, re-prompt if written file is smaller than this (chars)
-    protected_files: set = None,  # files that cannot be written (e.g. connector.py during fix_tests)
-    validate_connector_on_done: bool = False,  # ONLY True for write_connector — blocks done() if violations remain
-    target_methods: list[str] | None = None,  # when set, run_tests() uses -k filter for only these methods
-) -> Dict[str, Any]:
-    """Core Gemini tool-calling loop shared by all agentic tasks.
-
-    Returns:
-        {"success": bool, "iterations": int, "result": str, "message": str}
-    """
-    if not settings.GEMINI_API_KEY:
-        raise RuntimeError("INTEGRATION_GEMINI_API_KEY not set")
-
-    model = settings.GEMINI_MODEL
-    # Use streamGenerateContent so tokens arrive incrementally — enables real-time logs
-    # during the 15-30 s Gemini thinking phase (batch generateContent would show nothing).
-    def _make_url(m: str) -> str:
-        return (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{m}:streamGenerateContent?alt=sse&key={settings.GEMINI_API_KEY}"
-        )
-    url = _make_url(model)
-
-    async def _log(level: str, msg: str) -> None:
-        if log_cb:
-            try:
-                await log_cb(level, msg)
-            except Exception:
-                pass
-
-    await _log("info", f"🤖 Gemini agentic ({model})...")
-
-    gen_config: Dict[str, Any] = {"maxOutputTokens": 60000}
-    if settings.GEMINI_THINKING_BUDGET != 0:
-        gen_config["thinkingConfig"] = {"thinkingBudget": settings.GEMINI_THINKING_BUDGET}
-
-    # Use default tool set (write_file + done) when caller passes tools=None
-    _effective_tools = tools if tools is not None else _GENERATION_TOOLS
-
-    contents: List[Dict] = [{"role": "user", "parts": [{"text": initial_message}]}]
-    payload: Dict[str, Any] = {
-        "contents": contents,
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "tools": _effective_tools,
-        "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
-        "generationConfig": gen_config,
-    }
-
-    iterations = 0
-    last_result = ""
-    success = False
-    _RETRYABLE = {429, 503}
-    # Separate retry delays for rate-limit (429) vs overload (503).
-    # 429 quota windows are typically 60 s — wait longer between retries.
-    _RETRY_DELAYS_429 = [20, 60, 120]              # 3 retries: 20s, 60s, 120s
-    _RETRY_DELAYS_503 = [5, 10, 20, 40, 60, 120]  # 6 retries — Gemini 503s are transient, just keep retrying
-    # Fallback model with a separate (higher) RPM quota
-    _FALLBACK_MODEL = "gemini-2.0-flash-lite"
-    _active_model = model  # tracks which model is currently in use
-
-    # No-progress early stop: track failing-test counts and collection error counts
-    # from run_tests calls.  If neither improves after _STUCK_LIMIT consecutive
-    # run_tests invocations, bail early.
-    _last_fail_count: Optional[int] = None
-    _last_error_count: Optional[int] = None
-    _stuck_run_tests = 0
-    _STUCK_LIMIT = 3
-    _malformed_consecutive = 0   # consecutive MALFORMED_FUNCTION_CALL count
-
-    # General stuck detection for validate_connector_rules / run_smoke_test:
-    # if the same result appears _STUCK_LIMIT times in a row → Gemini is looping, bail out.
-    _tool_last_result: Dict[str, str] = {}   # tool_name → last result string
-    _tool_repeat_count: Dict[str, int] = {}  # tool_name → consecutive repeat count
-    _STUCK_TOOLS = {"validate_connector_rules"}
-    _STUCK_TOOL_LIMIT = 5
-
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        while iterations < max_iterations:
-            iterations += 1
-
-            # Respect Stop button — check for cancellation at the top of every iteration
-            try:
-                await asyncio.sleep(0)
-            except asyncio.CancelledError:
-                await _log("warn", "  🛑 Gemini loop cancelled by user (Stop).")
-                raise
-
-            # ── Call Gemini ──
-            await _log("info", f"  ⏳ Gemini thinking... (iteration {iterations}/{max_iterations})")
-            # ── Call Gemini with true SSE streaming (tokens arrive in real-time) ──
-            # client.stream() opens the connection and yields lines immediately —
-            # unlike client.post() which waits for the full response before returning.
-            finish_reason = "STOP"
-            parts: List[Dict] = []
-
-            _last_status: Optional[int] = None
-            _iter_success = False
-            _retry_delays = _RETRY_DELAYS_503  # default; updated on first 429
-
-            for attempt in range(1, max(len(_RETRY_DELAYS_429), len(_RETRY_DELAYS_503)) + 2):  # up to max retries + 1
-                delay = 0 if attempt == 1 else _retry_delays[min(attempt - 2, len(_retry_delays) - 1)]
-                if delay:
-                    _status_label = "rate-limited (429)" if _last_status == 429 else "overloaded (503)"
-                    await _log("warn", f"  ⏳ Gemini {_status_label} — retrying in {delay}s (attempt {attempt}, model: {_active_model})...")
-                    await asyncio.sleep(delay)
-                try:
-                    async with client.stream(
-                        "POST", url,
-                        headers={"Content-Type": "application/json"},
-                        json=payload,
-                    ) as resp:
-                        if resp.status_code in _RETRYABLE:
-                            _last_status = resp.status_code
-                            _retry_delays = _RETRY_DELAYS_429 if resp.status_code == 429 else _RETRY_DELAYS_503
-                            _max_retries = len(_retry_delays)
-                            if attempt > _max_retries:
-                                # Exhausted retries on current model — try fallback model
-                                if _active_model != _FALLBACK_MODEL:
-                                    _active_model = _FALLBACK_MODEL
-                                    url = _make_url(_active_model)
-                                    await _log("warn", f"  ⚠ Rate limit exhausted on primary model — switching to {_active_model}...")
-                                    # Reset attempt count for the fallback model
-                                    _last_status = None
-                                    _retry_delays = _RETRY_DELAYS_503
-                                    # Don't raise — the outer while loop will retry with new model
-                                    break
-                                else:
-                                    # Both models exhausted — raise to surface the error
-                                    await resp.aread()
-                                    resp.raise_for_status()
-                            continue
-                        resp.raise_for_status()
-
-                        _stream_buf = ""
-                        async for raw_line in resp.aiter_lines():
-                            raw_line = raw_line.strip()
-                            if not raw_line or raw_line == "data: [DONE]":
-                                continue
-                            if raw_line.startswith("data:"):
-                                raw_line = raw_line[5:].strip()
-                            try:
-                                chunk = json.loads(raw_line)
-                            except json.JSONDecodeError:
-                                _stream_buf += raw_line
-                                try:
-                                    chunk = json.loads(_stream_buf)
-                                    _stream_buf = ""
-                                except json.JSONDecodeError:
-                                    continue
-                            c = (chunk.get("candidates") or [{}])[0]
-                            _chunk_reason = c.get("finishReason", "")
-                            if _chunk_reason:
-                                finish_reason = _chunk_reason
-                            for p in c.get("content", {}).get("parts") or []:
-                                if "text" in p:
-                                    # Do NOT stream raw text/code lines — they flood the terminal
-                                    # with Python code content and obscure the real status.
-                                    # Only structural events (tool calls, results, errors) are logged.
-                                    # Merge consecutive same-type text parts
-                                    if parts and "text" in parts[-1] and parts[-1].get("thought") == p.get("thought"):
-                                        parts[-1]["text"] += p["text"]
-                                    else:
-                                        parts.append(dict(p))
-                                elif "functionCall" in p:
-                                    parts.append(dict(p))
-                    _iter_success = True
-                    break  # stream completed successfully — exit retry loop
-                except httpx.TimeoutException:
-                    if attempt > len(_retry_delays):
-                        raise
-                    continue
-
-            # If fallback model was triggered (broke out of retry loop without success),
-            # retry this same iteration with the new model (url already updated above).
-            if not _iter_success:
-                iterations -= 1  # don't count the failed iteration
-                continue
-
-            contents.append({"role": "model", "parts": parts})
-
-            # Separate thought parts (Gemini internal reasoning) from regular text parts
-            thought_parts = [p["text"] for p in parts if "text" in p and p.get("thought") and p["text"].strip()]
-            text_parts = [p["text"] for p in parts if "text" in p and not p.get("thought") and p["text"].strip()]
-            function_calls = [p["functionCall"] for p in parts if "functionCall" in p]
-
-            if not function_calls:
-                if finish_reason == "MAX_TOKENS":
-                    # Response was cut off — send a continuation prompt instead of stopping.
-                    # This lets Gemini resume (e.g. finish writing a large test file).
-                    await _log("warn", f"  ⚠ Response truncated (MAX_TOKENS) at iteration {iterations} — asking Gemini to continue...")
-                    contents.append({"role": "user", "parts": [{"text": "Your response was cut off due to token limits. Please continue from where you left off. If you were writing a file, call write_file with the complete content. Then call done(summary) when finished."}]})
-                    payload["contents"] = contents
-                    continue
-                if finish_reason == "MALFORMED_FUNCTION_CALL":
-                    # Gemini tried to call a tool but the JSON was malformed (e.g. write_file with
-                    # a very large file that got truncated/corrupted in transit).
-                    _malformed_consecutive += 1
-                    await _log("warn", f"  ⚠ MALFORMED_FUNCTION_CALL at iteration {iterations} (consecutive: {_malformed_consecutive}) — asking Gemini to retry...")
-                    if _malformed_consecutive >= 3:
-                        await _log("warn", "  ⏹ Too many consecutive malformed calls — stopping fix loop to prevent infinite retry")
-                        break
-                    elif _malformed_consecutive == 2:
-                        # Second failure: likely trying to rewrite a huge file. Force targeted edits.
-                        contents.append({"role": "user", "parts": [{"text": (
-                            "Your tool call was malformed again — the file content is too large to send at once. "
-                            "DO NOT rewrite the entire file. Instead:\n"
-                            "1. Read the file first to find the exact lines that need changing.\n"
-                            "2. Write ONLY the corrected version of the specific function(s) that need fixing.\n"
-                            "3. Keep the rest of the file unchanged — write only the minimum diff needed.\n"
-                            "Make your write_file content as short as possible while still fixing the bug."
-                        )}]})
-                    else:
-                        contents.append({"role": "user", "parts": [{"text": (
-                            "Your last tool call was malformed (the JSON was invalid or truncated). "
-                            "Please retry with a shorter write_file content — only write the specific "
-                            "functions or lines that need changing, not the entire file. "
-                            "Then call done(summary) when finished."
-                        )}]})
-                    payload["contents"] = contents
-                    continue
-                # If a required file hasn't been written yet, or was written with
-                # only a short summary sentence instead of real content, re-prompt.
-                if require_file:
-                    _req_path = connector_dir / require_file
-                    _req_exists = _req_path.exists()
-                    _req_size = _req_path.stat().st_size if _req_exists else 0
-                    _min_size = max(300, require_file_min_size)  # caller can raise the bar
-                    if not _req_exists or _req_size < _min_size:
-                        _reason = "did not call write_file" if not _req_exists else f"wrote only {_req_size} chars (too short — summary instead of full content)"
-                        await _log("warn", f"  ⚠ Gemini {_reason} — re-prompting to write {require_file}...")
-                        contents.append({"role": "user", "parts": [{"text": (
-                            f"The file '{require_file}' is {'missing' if not _req_exists else 'too short (' + str(_req_size) + ' chars)'}. "
-                            f"You MUST call write_file('{require_file}', content) with the FULL, COMPLETE content — "
-                            f"not a summary sentence. Write every section in detail, then call done(summary) when finished."
-                        )}]})
-                        payload["contents"] = contents
-                        continue
-                # Model finished without calling done() — treat as success
-                success = True
-                last_result = " ".join(text_parts)
-                break
-
-            # ── Execute tool calls ──
-            if finish_reason == "MAX_TOKENS":
-                await _log("warn", f"  ⚠ MAX_TOKENS hit at iteration {iterations} — executing {len(function_calls)} tool call(s) and continuing...")
-            function_responses = []
-            _done_blocked = False  # set True when done() is rejected due to rule violations
-            _malformed_consecutive = 0  # valid tool call received — reset malformed counter
-            for fc in function_calls:
-                tool_name = fc["name"]
-                tool_args = fc.get("args", {})
-
-                args_preview = ", ".join(
-                    f"{k}={repr(v)[:80]}" for k, v in tool_args.items()
-                    if k != "content"  # skip file content — logged separately by write_file handler
-                )
-                await _log("info", f"  🔧 {tool_name}({args_preview})")
-
-                # search_knowledge is async — handle separately
-                if tool_name == "search_knowledge" and _active_knowledge_fn is not None:
-                    try:
-                        result_str = await _active_knowledge_fn(tool_args.get("query", ""))
-                        result_str = result_str or "No relevant results found."
-                    except Exception as _ke:
-                        result_str = f"Knowledge search error: {_ke}"
-                elif tool_name == "search_knowledge":
-                    result_str = "Knowledge base not available for this task."
-                else:
-                    try:
-                        result_str = await asyncio.get_running_loop().run_in_executor(
-                            None, _execute_tool, tool_name, tool_args, connector_dir, protected_files, target_methods
-                        )
-                    except asyncio.CancelledError:
-                        await _log("warn", "  🛑 Tool execution cancelled by user (Stop).")
-                        raise
-                    except Exception as _tool_exc:
-                        result_str = f"ERROR: tool execution failed — {_tool_exc}"
-
-                # Log a concise summary of the tool result — never dump raw file content.
-                # Full content is available in the files on disk; the terminal is for status.
-                _result_summary = _summarise_tool_result(tool_name, result_str)
-                if _result_summary:
-                    await _log("info", f"     {_result_summary}")
-
-                # Check stop conditions
-                if stop_on_done and tool_name == "done":
-                    # ── Guard: auto-run validate_connector_rules before accepting done() ──
-                    # ONLY active for write_connector (validate_connector_on_done=True).
-                    # Must NOT run for generate_test_guidelines, write_tests, fix loops, etc.
-                    # — those steps can't fix connector.py violations and would get stuck forever.
-                    if validate_connector_on_done and connector_dir is not None:
-                        _conn_path = connector_dir / "connector.py"
-                        if _conn_path.exists():
-                            _rules_result = _execute_tool("validate_connector_rules", {}, connector_dir)
-                            _has_violations = (
-                                "VIOLATION" in _rules_result
-                                or "VIOLATIONS FOUND" in _rules_result
-                            )
-                            if _has_violations:
-                                await _log("warn",
-                                    f"  ⚠️ done() blocked — validate_connector_rules found violations. "
-                                    f"Fix them before calling done().")
-                                # Inject violation result as the done() response so Gemini sees it
-                                _done_reject = (
-                                    f"BLOCKED: done() cannot be called while violations remain.\n\n"
-                                    f"{_rules_result}\n\n"
-                                    f"Fix ALL violations above, then call done()."
-                                )
-                                function_responses.append({
-                                    "functionResponse": {"name": tool_name, "response": {"result": _done_reject}}
-                                })
-                                _done_blocked = True
-                                break  # exit the for loop (for-else won't run; handled below)
-
-                    success = True
-                    last_result = tool_args.get("summary", "Done")
-                    function_responses.append({
-                        "functionResponse": {"name": tool_name, "response": {"result": result_str}}
-                    })
-                    contents.append({"role": "user", "parts": function_responses})
-                    payload["contents"] = contents
-                    break
-
-                if stop_on_tests_pass and tool_name == "run_tests":
-                    last_result = result_str
-                    if _tests_passed(result_str):
-                        success = True
-                        await _log("success", "  ✅ All tests passing!")
-                    else:
-                        # No-progress detection: count failing tests AND collection errors
-                        import re as _re_np
-                        _fail_match = _re_np.search(r"(\d+) failed", result_str)
-                        _err_match = _re_np.search(r"(\d+) error", result_str)
-                        _cur_fail = int(_fail_match.group(1)) if _fail_match else None
-                        _cur_err = int(_err_match.group(1)) if _err_match else 0
-
-                        # Detect timeout — counts toward stuck immediately
-                        if result_str.startswith("TIMEOUT:"):
-                            _stuck_run_tests += 1
-                            if _stuck_run_tests >= _STUCK_LIMIT:
-                                await _log("warn",
-                                    f"  ⏹ Tests keep timing out after {_STUCK_LIMIT} attempts "
-                                    "— stopping fix loop (reduce test count or increase timeout)")
-                                break
-
-                        # Detect stuck on collection errors (IndentationError, ImportError, etc.)
-                        # when pytest reports "0 failed, N errors" the fail count is None/0
-                        # so we track error count separately.
-                        elif _cur_err > 0:
-                            if _last_error_count is not None and _cur_err >= _last_error_count:
-                                _stuck_run_tests += 1
-                                if _stuck_run_tests >= _STUCK_LIMIT:
-                                    await _log("warn", f"  ⏹ No progress on collection errors after {_STUCK_LIMIT} iterations ({_cur_err} still erroring) — stopping")
-                                    break
-                            else:
-                                _stuck_run_tests = 0  # improvement — reset counter
-                            _last_error_count = _cur_err
-                        elif _cur_fail is not None:
-                            if _last_fail_count is not None and _cur_fail >= _last_fail_count:
-                                _stuck_run_tests += 1
-                                if _stuck_run_tests >= _STUCK_LIMIT:
-                                    await _log("warn", f"  ⏹ No improvement after {_STUCK_LIMIT} run_tests calls ({_cur_fail} still failing) — stopping fix loop early")
-                                    break
-                            else:
-                                _stuck_run_tests = 0  # improvement — reset counter
-                            _last_fail_count = _cur_fail
-
-                # ── General stuck detection for validate_connector_rules / run_smoke_test ──
-                # Only count toward stuck when connector.py EXISTS and the result is a real
-                # failure (not a "file not found" error from calling too early).
-                # This prevents false positives when Gemini calls these tools before writing files.
-                if tool_name in _STUCK_TOOLS:
-                    # Normalize: strip timing noise (e.g. "0.23s", "duration: 1.4s") and
-                    # line numbers from tracebacks so slight variation doesn't defeat detection.
-                    import re as _stuck_re
-                    _cur_norm = _stuck_re.sub(r'\d+\.\d+s', 'Xs', result_str.strip())
-                    _cur_norm = _stuck_re.sub(r'line \d+', 'line N', _cur_norm)
-                    # Skip ERROR: and "not found" — prerequisite errors (file not yet written).
-                    _is_prereq_error = (
-                        _cur_norm.startswith("ERROR:")
-                        or "not found" in _cur_norm.lower()
-                    )
-                    if not _is_prereq_error and _cur_norm:
-                        _prev = _tool_last_result.get(tool_name, "")
-                        if _cur_norm == _prev:
-                            _tool_repeat_count[tool_name] = _tool_repeat_count.get(tool_name, 0) + 1
-                            if _tool_repeat_count[tool_name] >= _STUCK_TOOL_LIMIT:
-                                await _log("warn",
-                                    f"  ⏹ {tool_name} returned identical result {_STUCK_TOOL_LIMIT} times in a row — "
-                                    "Gemini is stuck in a loop. Stopping early to avoid wasting iterations.")
-                                success = False
-                                break
-                        else:
-                            _tool_repeat_count[tool_name] = 0  # progress made — reset
-                        _tool_last_result[tool_name] = _cur_norm
-
-                function_responses.append({
-                    "functionResponse": {"name": tool_name, "response": {"result": result_str}}
-                })
-
-            else:
-                # Only continue loop if done() was not called
-                contents.append({"role": "user", "parts": function_responses})
-                payload["contents"] = contents
-                if success:
-                    break
-                continue
-
-            # For loop exited via break — either done() was accepted, done() was blocked, or stuck
-            if _done_blocked:
-                # done() was rejected — send the violation feedback and give Gemini another iteration
-                contents.append({"role": "user", "parts": function_responses})
-                payload["contents"] = contents
-                continue  # outer while loop
-
-            # done() was accepted — exit outer loop
-            break
-
-    logger.info("agentic.done", success=success, iterations=iterations, task=system_prompt[:40])
-    return {"success": success, "iterations": iterations, "result": last_result, "message": last_result}
 
 
 # ── Public smoke test runner — called by the dedicated smoke_test step ────────
@@ -2847,244 +2541,14 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def gemini_agentic_generate_connector(
-    connector_dir: Path,
-    *,
-    context: Dict[str, Any],
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate connector.py using Gemini + tool calls.
-
-    Gemini reads shared/base_connector.py directly, writes connector.py, validates syntax.
-    """
-    provider = context.get("provider", "unknown")
-    service_name = context.get("service_name", "Unknown")
-    auth_type = context.get("auth_type", "unknown")
-    sdk_package = context.get("sdk_package", "")
-    user_prompt = context.get("user_prompt", "Build a standard connector.")
-    plan_constraints = context.get("plan_constraints", "")
-    default_config_md = context.get("default_config_md", "")
-
-    # Derive the canonical CONNECTOR_TYPE value from the service_slug (strip _connector suffix)
-    import re as _re_slug
-    _raw_slug = context.get("service_slug", service_name.lower().replace(" ", "_"))
-    connector_type_value = _re_slug.sub(r'_connector$', '', _raw_slug) if _raw_slug.endswith('_connector') else _raw_slug
-
-    initial_message = (
-        f"Generate a connector.py for: **{service_name}** ({provider})\n\n"
-        f"- Auth type: {auth_type}\n"
-        f"- SDK package: {sdk_package or 'use httpx'}\n"
-        f"- **CONNECTOR_TYPE = \"{connector_type_value}\"** ← use this EXACT value, no suffix, no prefix\n"
-        f"- User requirements: {user_prompt}\n"
-        + (f"- Default configuration binding (MUST follow exactly):\n{default_config_md}\n" if default_config_md else "")
-        + f"- Plan constraints:\n{plan_constraints}\n\n"
-        f"Follow the workflow in your system prompt:\n"
-        f"1. Call `list_files()` to see the pre-created package structure (config.py, helpers/, client/ are already there)\n"
-        f"2. Read `{_CONNECTORS_ROOT}/shared/base_connector.py` for the exact interface\n"
-        f"3. Read `config.py` to see the auth boilerplate\n"
-        f"4. Write `connector.py` (and optionally client/http_client.py, helpers/, exceptions.py)\n"
-        f"5. Validate every file, then call `done()`"
-    )
-
-    return await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=await _r2_service.get_step_prompt(
-            "CONNECTOR_GEN_SYSTEM",
-            _CONNECTOR_GEN_SYSTEM,
-            auth_type=auth_type if auth_type and auth_type != "unknown" else None,
-        ),
-        initial_message=initial_message,
-        tools=_GENERATION_TOOLS,
-        log_cb=log_cb,
-        max_iterations=25,  # budget: write(5) + validate(1) + rules(1) + fix(3) + done(1) = 11 typical; 25 gives headroom for complex connectors with multiple violation fix rounds
-        stop_on_done=True,
-        validate_connector_on_done=True,  # block done() if connector.py still has violations
-        require_file="connector.py",
-        require_file_min_size=1000,  # connector.py must be at least 1000 chars — a stub or empty file is a failure
-    )
 
 
-async def gemini_agentic_generate_metadata(
-    connector_dir: Path,
-    *,
-    version: str = "1.0.0",
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate metadata/connector.json using Gemini + tool calls.
-
-    Gemini reads connector.py directly, writes connector.json, validates JSON.
-    """
-    initial_message = (
-        f"Generate `metadata/connector.json` for the connector in this package (version={version}).\n\n"
-        "Read `connector.py` first to understand the CONNECTOR_TYPE, install() config keys, "
-        "and all public methods. Then write the metadata JSON."
-    )
-
-    return await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=await _r2_service.get_step_prompt("METADATA_GEN_SYSTEM", _METADATA_GEN_SYSTEM),
-        initial_message=initial_message,
-        tools=_GENERATION_TOOLS,
-        log_cb=log_cb,
-        max_iterations=6,
-        stop_on_done=True,
-        require_file="metadata/connector.json",
-    )
 
 
-async def gemini_agentic_generate_instructions(
-    connector_dir: Path,
-    *,
-    context: Dict[str, Any] = None,
-    guidelines: str = "",
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate instructions/setup.md using Gemini + tool calls.
-
-    Gemini reads connector.py and metadata/connector.json, then writes a
-    step-by-step credential setup guide for the deployment form.
-    The `guidelines` parameter is the INSTRUCTION_SETUP_GUIDELINES fetched from R2
-    which defines the required structure and content standards.
-    """
-    from integration.services.step_executor import _SETUP_INSTRUCTIONS_SYSTEM
-    ctx = context or {}
-    provider = ctx.get("provider", "unknown")
-    service_name = ctx.get("service_name", ctx.get("service", "unknown"))
-    auth_type = ctx.get("auth_type", "unknown")
-
-    # Build system prompt: base system + R2 guidelines injected as context
-    base_system = await _r2_service.get_step_prompt("SETUP_INSTRUCTIONS_SYSTEM", _SETUP_INSTRUCTIONS_SYSTEM)
-    if guidelines:
-        system_prompt = (
-            base_system
-            + "\n\n---\n\n## INSTRUCTION_SETUP_GUIDELINES (from R2)\n"
-            + guidelines
-        )
-    else:
-        system_prompt = base_system
-
-    initial_message = (
-        f"Generate `instructions/setup.md` for the **{service_name}** connector "
-        f"(provider: **{provider}**, auth_type: **{auth_type}**).\n\n"
-        "Follow the INSTRUCTION_SETUP_GUIDELINES structure exactly.\n\n"
-        "Steps:\n"
-        "1. Read `connector.py` — identify every `self.config.get(key)` call\n"
-        "2. Read `metadata/connector.json` — use `install_fields` for labels, help, types\n"
-        f"3. Write `instructions/setup.md` — be SPECIFIC about **{provider}**'s actual portal URLs and navigation paths\n"
-        "4. Call `done('Instructions written')` when finished"
-    )
-
-    return await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=system_prompt,
-        initial_message=initial_message,
-        tools=_GENERATION_TOOLS,
-        log_cb=log_cb,
-        max_iterations=6,
-        stop_on_done=True,
-        require_file="instructions/setup.md",
-    )
 
 
-async def gemini_agentic_generate_test_guidelines(
-    connector_dir: Path,
-    *,
-    context: Dict[str, Any] = None,
-    system_prompt: str = "",
-    user_message: str = "",
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate test_guidelines.md using Gemini + tool calls.
-    Gemini reads all package files and writes a connector-specific test guide.
-    """
-    return await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=system_prompt,
-        initial_message=user_message,
-        tools=_GENERATION_TOOLS,
-        log_cb=log_cb,
-        max_iterations=10,  # read(5-6) + write(1) + validate(1) + done(1) = 8 typical
-        stop_on_done=True,
-        require_file="test_guidelines.md",
-        require_file_min_size=800,
-    )
 
 
-async def gemini_agentic_generate_docs(
-    connector_dir: Path,
-    *,
-    guidelines: str = "",
-    extra_prompt: str = "",
-    connector_name: str = "",
-    provider: str = "",
-    service_name: str = "",
-    auth_type: str = "",
-    user_prompt: str = "",
-    knowledge_fn: KnowledgeQueryFn = None,
-    rag_context: str = "",
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate docs/connector_docs.json using Gemini + tool calls.
-
-    Gemini can:
-    - read_file: read connector.py, metadata/connector.json, etc.
-    - search_knowledge: query uploaded SDK docs / API references via vector search
-    - write_file: write docs/connector_docs.json
-    - validate_json / done: verify and finish
-    """
-    global _active_knowledge_fn
-    _active_knowledge_fn = knowledge_fn  # wire for this request
-
-    # Build system prompt — loaded from R2 shielva-integration-plans/STEP_PROMPTS/DOCS_GEN_SYSTEM.txt
-    # Real quality comes from Gemini reading the actual code + querying the knowledge base.
-    system = await _r2_service.get_step_prompt("DOCS_GEN_SYSTEM", _DOCS_GEN_SYSTEM)
-    # Inject pre-fetched RAG context as a starting point so Gemini can deep-dive further
-    if rag_context:
-        system += (
-            f"\n\n## Pre-fetched knowledge context (use as starting point — call search_knowledge for more)\n"
-            f"{rag_context[:4000]}"  # cap to avoid blowing system prompt budget
-        )
-
-    context_block = "\n".join(filter(None, [
-        f"- Connector name: {connector_name}" if connector_name else "",
-        f"- Provider: {provider}" if provider else "",
-        f"- Service: {service_name}" if service_name else "",
-        f"- Auth type: {auth_type}" if auth_type else "",
-        f"- Original user requirements: {user_prompt}" if user_prompt else "",
-        f"- Extra documentation instructions: {extra_prompt}" if extra_prompt else "",
-    ]))
-
-    initial_message = (
-        f"Generate production-quality documentation for the connector in: {connector_dir.name}/\n\n"
-        f"## Session context\n{context_block}\n\n"
-        "## Required steps (do all of these before writing):\n"
-        "1. read_file('connector.py') — extract every method, config field, auth flow, error handling\n"
-        "2. read_file('metadata/connector.json') if it exists — install fields, API endpoints\n"
-        "3. read_file('requirements.txt') if it exists — SDK dependencies\n"
-        "4. search_knowledge with specific queries about this API:\n"
-        f"   - '{service_name} API authentication flow'\n"
-        f"   - '{service_name} API rate limits'\n"
-        f"   - '{service_name} API error codes'\n"
-        f"   - '{service_name} SDK methods examples'\n"
-        "   (call search_knowledge multiple times with different queries)\n"
-        "5. write_file('docs/connector_docs.json') with deeply connector-specific content\n"
-        "   - Use REAL method names, REAL config fields, REAL API details from your research\n"
-        "   - NEVER write placeholder text\n"
-        "6. validate_json('docs/connector_docs.json')\n"
-        "7. done(summary)\n\n"
-        "Quality check before done(): Is every section specific to THIS connector? "
-        "Could a reader set it up and use it from this doc alone?"
-    )
-
-    return await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=system,
-        initial_message=initial_message,
-        tools=_GENERATION_TOOLS,
-        log_cb=log_cb,
-        max_iterations=20,   # more iterations → deeper knowledge search
-        stop_on_done=True,
-    )
 
 
 _TEST_GEN_SYSTEM = """You are a Python testing expert generating pytest unit tests for a Shielva connector.
@@ -3255,360 +2719,7 @@ async def _ingest_connector_files(
         logger.warning("agentic.ingest_connector_files_failed", error=str(exc))
 
 
-async def gemini_agentic_generate_tests(
-    connector_dir: Path,
-    *,
-    methods: List[str],
-    class_name: str,
-    knowledge_fn: KnowledgeQueryFn = None,
-    tenant_id: str = "",
-    provider: str = "",
-    service: str = "",
-    test_guidelines: str = "",
-    existing_tests: str = "",
-    reset: bool = False,
-    log_cb: LogCallback = None,
-) -> Dict[str, Any]:
-    """Generate AND verify pytest tests using the Gemini tool-calling loop.
-
-    Gemini reads connector.py + client/ files (via search_knowledge or read_file),
-    writes tests/test_connector.py, runs pytest, fixes failures, iterates until passing.
-    Each write_file call triggers deterministic autoflake+ruff post-fix automatically.
-    """
-    global _active_knowledge_fn
-    _active_knowledge_fn = knowledge_fn
-
-    # Ingest all connector files into KB so search_knowledge returns real method signatures
-    if knowledge_fn and tenant_id and provider and service:
-        await _ingest_connector_files(connector_dir, tenant_id, provider, service, log_cb)
-
-    # Extract ground truth from connector AST — prevents Gemini from hallucinating class/exception names
-    from integration.services.step_executor import _extract_connector_ground_truth as _egt
-    _agentic_ground_truth = _egt(connector_dir)
-    _agentic_ground_truth_block = ""
-    if _agentic_ground_truth:
-        _agentic_ground_truth_block = (
-            "## ══════════════════════════════════════════════════════════\n"
-            "## GROUND TRUTH — EXACT NAMES FROM CONNECTOR SOURCE (DO NOT DEVIATE)\n"
-            "## ══════════════════════════════════════════════════════════\n"
-            + _agentic_ground_truth
-            + "\n## ══════════════ END OF GROUND TRUTH ══════════════\n\n"
-        )
-
-    # Build system prompt — inject connector-specific guidelines if available
-    _base_test_gen = await _r2_service.get_step_prompt("TEST_GEN_SYSTEM", _TEST_GEN_SYSTEM)
-    system_prompt = _base_test_gen
-    if test_guidelines and len(test_guidelines.strip()) > 300:
-        system_prompt = (
-            "## ══════════════════════════════════════════════════════════\n"
-            "## CONNECTOR-SPECIFIC TEST GUIDELINES — READ THIS FIRST\n"
-            "## These guidelines contain exact fixture blueprints, mock patterns,\n"
-            "## per-method test specs, and required assertions for THIS connector.\n"
-            "## ══════════════════════════════════════════════════════════\n"
-            + test_guidelines.strip()
-            + "\n## ══════════════ END OF CONNECTOR GUIDELINES ══════════════\n\n"
-            + _base_test_gen
-        )
-
-    methods_list = "\n".join(f"- {m}" for m in methods)
-
-    # When merging into existing tests, prepend the existing file content as context
-    existing_tests_block = ""
-    if existing_tests and not reset:
-        existing_tests_block = (
-            "## ══════════════════════════════════════════════════════════\n"
-            "## EXISTING test_connector.py — PRESERVE ALL OTHER TEST CLASSES\n"
-            "## ══════════════════════════════════════════════════════════\n"
-            "CRITICAL: The file below already contains tests for OTHER methods.\n"
-            "You MUST preserve every test class NOT listed in 'Test ONLY these methods' below.\n"
-            "Only ADD or REPLACE test classes for the methods explicitly listed.\n"
-            "Write the COMPLETE merged file (existing tests + new tests).\n\n"
-            + existing_tests
-            + "\n## ══════════════ END OF EXISTING TESTS ══════════════\n\n"
-        )
-
-    initial_message = (
-        _agentic_ground_truth_block
-        + existing_tests_block
-        + f"Generate pytest unit tests for the connector in: {connector_dir.name}/\n\n"
-        f"Test ONLY these methods:\n{methods_list}\n\n"
-        f"Class name hint: {class_name} (verify by reading connector.py)\n\n"
-        f"IMPORTANT — follow the CONNECTOR-SPECIFIC TEST GUIDELINES above EXACTLY:\n"
-        f"  • Use the Fixture Blueprint from Section 5 — copy it precisely\n"
-        f"  • Use the Mock Patterns from Section 6 — exact return value shapes\n"
-        f"  • For each method in Section 9, implement ALL listed test scenarios\n"
-        f"  • Copy the Required Assertions from Section 9 exactly\n\n"
-        f"Steps:\n"
-        f"0. Call check_imports() FIRST — if it reports errors, fix those files before doing anything else.\n"
-        f"   Only proceed when check_imports() returns OK.\n"
-        f"1. Read connector.py to verify exact signatures and logic\n"
-        f"2. Call validate_connector_rules() — if violations exist, fix connector.py FIRST before writing tests\n"
-        f"   ⚠ CONNECTOR FIX RULE: make MINIMAL targeted changes only — fix the specific violation, do NOT rewrite the entire connector.py\n"
-        f"3. Read client/*.py to confirm which methods are async def\n"
-        f"4. Write tests/test_connector.py — {'include ALL existing test classes unchanged + add new classes for listed methods' if existing_tests and not reset else 'use Section 5 fixture, Section 9 specs per method'}\n"
-        f"5. validate_python → fix any syntax errors\n"
-        f"6. run_tests → analyse failures carefully:\n"
-        f"   • If failures come from connector.py (e.g. install() making network calls, wrong logger, wrong field names) → fix ONLY the failing lines in connector.py, do NOT rewrite the file\n"
-        f"   • If failures are test setup issues (wrong mock, missing patch, wrong assertion) → fix the test\n"
-        f"   • NEVER try to patch tests to hide a connector bug — fix the root cause\n"
-        f"7. done(summary) when all tests pass\n\n"
-        f"IMPORTANT: mock set_token, get_token, ingest_batch in every test that calls "
-        f"install/authorize/sync — they connect to a real DB and will hang without mocks.\n\n"
-        f"## Connector bug patterns to recognise and fix in connector.py (MINIMAL fix only):\n"
-        f"- install() calling get_transaction_status/health_check/any API → remove the network call, just validate config keys\n"
-        f"- `import logging; logger = logging.getLogger(...)` → replace with `import structlog; logger = structlog.get_logger(__name__)`\n"
-        f"- ConnectorStatus() missing connector_id= → add connector_id=self.connector_id\n"
-        f"- result.status used as enum (ConnectorStatus.SUCCESS) → use result.health and result.auth_status\n"
-        f"- os.getenv() for credentials → use self.config.get(key)\n"
-        f"- ⛔ AuthStatus.AUTHORIZED / UNAUTHORIZED / UNKNOWN / OK / ACTIVE do NOT exist — use AUTHENTICATED or CONNECTED instead\n"
-        f"  Valid AuthStatus values: PENDING, CONNECTED, EXPIRED, FAILED, MISSING_CREDENTIALS, TOKEN_EXPIRED, AUTHENTICATED, INVALID_CREDENTIALS\n"
-        f"- ⛔ exceptions.py using Optional without `from typing import Optional` → add the import at the top"
-    )
-
-    result = await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=system_prompt,
-        initial_message=initial_message,
-        tools=_FIX_TOOLS,        # includes run_tests + read/write/validate/list/done + search_knowledge
-        log_cb=log_cb,
-        max_iterations=20,       # extra headroom: may need to fix connector.py AND tests
-        stop_on_done=True,
-        stop_on_tests_pass=True,
-        protected_files={"connector.py"},  # never overwrite the connector source during test-gen
-    )
-
-    # Final structured pytest run for pass/fail counts (cancellable)
-    # Trust the loop's success=True — only check final run if loop didn't confirm success.
-    # Re-running can produce false-negatives (e.g. "error" substring in DeprecationWarning paths).
-    if not result.get("success"):
-        final_output = await _run_tests_async(connector_dir)
-        result["pytest_output"] = final_output
-        result["success"] = _tests_passed(final_output)
-    return result
 
 
-async def gemini_agentic_fix(
-    connector_dir: Path,
-    *,
-    initial_pytest_output: str,
-    knowledge_fn: KnowledgeQueryFn = None,
-    tenant_id: str = "",
-    provider: str = "",
-    service: str = "",
-    test_guidelines: str = "",
-    log_cb: LogCallback = None,
-    max_iterations: int = 40,
-    target_methods: list[str] | None = None,
-    compile_errors: str = "",
-) -> Dict[str, Any]:
-    """Fix loop: Gemini reads files, writes fixes, runs pytest, iterates until tests pass.
-
-    `test_guidelines` — the connector-specific test_guidelines.md content (from local disk
-    or R2).  When provided it is prepended to the system prompt so Gemini honours the
-    exact fixture blueprint, mock patterns, and per-method assertions while fixing.
-    """
-    global _active_knowledge_fn
-    _active_knowledge_fn = knowledge_fn
-
-    # Ingest all connector files into KB so search_knowledge returns real method signatures
-    if knowledge_fn and tenant_id and provider and service:
-        await _ingest_connector_files(connector_dir, tenant_id, provider, service, log_cb)
-
-    # Build system prompt: inject connector-specific test guidelines at the top so Gemini
-    # cannot ignore them.  The guidelines describe exact fixture blueprints, mock wiring
-    # expectations, and per-method scenarios — critical context when fixing broken tests.
-    _base_system = await _r2_service.get_step_prompt("FIX_SYSTEM", _FIX_SYSTEM)
-    if test_guidelines and len(test_guidelines.strip()) > 300:
-        _system_prompt = (
-            "## CONNECTOR-SPECIFIC TEST GUIDELINES — READ BEFORE FIXING\n"
-            "These guidelines define the REQUIRED fixture blueprint, mock setup patterns,\n"
-            "and per-method test scenarios for this connector. When fixing test failures,\n"
-            "all fixes MUST comply with these guidelines — do not invent different patterns.\n\n"
-            + test_guidelines.strip()
-            + "\n\n## END OF CONNECTOR TEST GUIDELINES\n\n"
-            + _base_system
-        )
-    else:
-        _system_prompt = _base_system
-
-    # ── Write compile_errors.md so Gemini can read it as a file ────────────
-    _compile_error_block = ""
-    if compile_errors.strip():
-        _compile_errors_file = connector_dir / "compile_errors.md"
-        _compile_errors_file.write_text(
-            f"# Compile Errors — fix these FIRST\n\n{compile_errors.strip()}\n",
-            encoding="utf-8",
-        )
-        _compile_error_block = (
-            "## 🚨 CRITICAL — COMPILE ERRORS DETECTED (fix these BEFORE anything else)\n"
-            f"{compile_errors.strip()}\n\n"
-            "These are compile-time errors in the connector source files. They will cause ALL tests\n"
-            "to fail with collection errors. You MUST fix them first:\n"
-            "- Read the file mentioned in the error.\n"
-            "- Apply ONLY the minimal fix (e.g. add a missing import line).\n"
-            "- Do NOT rewrite the file — make a surgical, targeted change.\n"
-            "- Call check_imports() to confirm the fix, then proceed to test failures.\n\n"
-        )
-
-    initial_message = (
-        _compile_error_block
-        + f"Tests are failing in: {connector_dir.name}/\n\n"
-        "## MANDATORY FIRST STEPS — FOLLOW IN ORDER, DO NOT SKIP\n"
-        "1. Call `check_imports()` FIRST — verifies the full import chain works (exceptions → connector).\n"
-        "   If it reports ANY error (NameError, ImportError, missing typing import, etc.) fix that file first.\n"
-        "   Call `check_imports()` again after fixing — only proceed to step 2 when it returns OK.\n"
-        "2. Read `test_failures.md` — full pytest output with line numbers.\n"
-        "3. Check for PRIORITY 0 issues first: bug-documenting assertions, AsyncMock in side_effect, "
-        "   import path mismatches between connector.py and tests/test_connector.py.\n"
-        "4. Read `connector.py` — class name, method signatures, return types, exceptions, attributes.\n"
-        "5. Read `tests/test_connector.py` — current test structure.\n"
-        "6. Read `exceptions.py` — check custom exception classes have `self.message = message` AND all imports present.\n"
-        "7. Read any helper files (helpers/, client/, etc.) referenced by connector.py.\n"
-        "Only after steps 1-7 should you write any fixes.\n\n"
-        f"Current pytest output (also in test_failures.md):\n```\n{initial_pytest_output}\n```\n\n"
-        "## FIX RULES\n"
-        "- ⛔ NEVER use write_file for connector.py, exceptions.py, or client/ files — use patch_file ONLY.\n"
-        "  patch_file takes `old_code` (exact lines to replace) and `new_code` (replacement). "
-        "  Only those lines change — everything else stays identical.\n"
-        "- write_file is ONLY for tests/test_connector.py when substantial test restructuring is needed.\n"
-        "- Fix tests when they have bug-documenting assertions or wrong mock setup (see PRIORITY 0).\n"
-        "- Fix connector.py when tests assert correct behavior that the connector doesn't implement.\n"
-        "- Use ONLY classes, methods, and attributes that actually exist in connector.py.\n"
-        "- ConnectorStatus fields: `health`, `auth_status`, `connector_id`, `message` — no `.status`.\n"
-        "- ⛔ AuthStatus VALID values ONLY: PENDING, CONNECTED, EXPIRED, FAILED, MISSING_CREDENTIALS, TOKEN_EXPIRED, AUTHENTICATED, INVALID_CREDENTIALS.\n"
-        "  AuthStatus.AUTHORIZED / UNAUTHORIZED / UNKNOWN / OK / ACTIVE do NOT exist — they raise AttributeError at runtime.\n"
-        "- ⛔ exceptions.py: MUST have `from typing import Optional` if Optional is used in any type hint.\n"
-        "- ⛔ Mock patch paths: ALWAYS patch where the name is USED, not where it is defined.\n"
-        "  e.g. connector.py does `from client.gmail_client import GmailClient` → patch as `connector.GmailClient`.\n"
-        "  NEVER patch `client.gmail_client.GmailClient` — that patches the source, connector.py ignores it.\n"
-        + (
-            "- The system prompt contains connector-specific test guidelines. "
-            "Follow the fixture blueprint and mock patterns exactly as described there.\n"
-            if test_guidelines and len(test_guidelines.strip()) > 300
-            else ""
-        )
-        + (
-            f"\n\n⛔ SCOPE: You are ONLY fixing methods: {', '.join(target_methods)}. "
-            "run_tests() is filtered to these methods only — other methods are not your concern. "
-            "Do NOT rewrite or delete test functions for other methods. Surgical fixes only."
-            if target_methods else ""
-        )
-        + "\nRun tests after each fix, iterate until ALL targeted tests pass, then call done(summary)."
-    )
-
-    result = await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=_system_prompt,
-        initial_message=initial_message,
-        tools=_FIX_TOOLS,
-        log_cb=log_cb,
-        max_iterations=max_iterations,
-        stop_on_done=True,
-        stop_on_tests_pass=True,
-        protected_files=None,
-        target_methods=target_methods,
-    )
-
-    # Final structured pytest run for pass/fail counts (cancellable)
-    # Trust the loop's success=True — only check final run if loop didn't confirm success.
-    if not result.get("success"):
-        final_output = await _run_tests_async(connector_dir, methods=target_methods)
-        result["pytest_output"] = final_output
-        result["success"] = _tests_passed(final_output)
-    return result
 
 
-async def gemini_agentic_fix_connector(
-    connector_dir: Path,
-    *,
-    initial_pytest_output: str,
-    knowledge_fn: KnowledgeQueryFn = None,
-    tenant_id: str = "",
-    provider: str = "",
-    service: str = "",
-    test_guidelines: str = "",
-    log_cb: LogCallback = None,
-    max_iterations: int = 40,
-    target_methods: list[str] | None = None,
-) -> Dict[str, Any]:
-    """Fix loop: Gemini fixes connector.py (NOT tests) to make the existing tests pass.
-
-    `tests/test_connector.py` is treated as the frozen source of truth.
-    Gemini reads the failing tests, understands what they expect, and fixes
-    connector.py / client/ files to satisfy those expectations.
-
-    `test_guidelines` — connector-specific guidelines (from test_guidelines.md).
-    Injected into the system prompt so Gemini knows the exact client attribute names,
-    which methods are async, expected return shapes, and mock targets — critical context
-    when fixing the connector implementation to satisfy test expectations.
-    """
-    global _active_knowledge_fn
-    _active_knowledge_fn = knowledge_fn
-
-    if knowledge_fn and tenant_id and provider and service:
-        await _ingest_connector_files(connector_dir, tenant_id, provider, service, log_cb)
-
-    _base_system = await _r2_service.get_step_prompt("CONNECTOR_FIX_SYSTEM", _CONNECTOR_FIX_SYSTEM)
-    if test_guidelines and len(test_guidelines.strip()) > 300:
-        _system_prompt = (
-            "## CONNECTOR-SPECIFIC TEST GUIDELINES — READ BEFORE FIXING\n"
-            "These guidelines describe the exact client attribute names, which methods are async,\n"
-            "expected return shapes, fixture blueprints, and per-method test scenarios.\n"
-            "Use them to understand WHAT the tests expect so you can fix connector.py accordingly.\n\n"
-            + test_guidelines.strip()
-            + "\n\n## END OF CONNECTOR TEST GUIDELINES\n\n"
-            + _base_system
-        )
-    else:
-        _system_prompt = _base_system
-
-    initial_message = (
-        f"Tests are failing in: {connector_dir.name}/\n\n"
-        "## MANDATORY FIRST STEPS — DO THESE BEFORE WRITING ANY FIX\n"
-        "1. Read `tests/test_connector.py` — check for PRIORITY 0 issues first: bug-documenting "
-        "assertions, wrong mock setups (AsyncMock in side_effect), import path mismatches.\n"
-        "2. Read `connector.py` — compare the current implementation against test expectations.\n"
-        "3. Read every file in `client/` — understand the real API client signatures.\n"
-        "4. Read `exceptions.py` — check custom exception classes have `self.message = message`.\n"
-        "5. Read `helpers/` files if connector.py imports from them.\n"
-        "Only after reading these files should you write any fixes.\n\n"
-        f"Current pytest output:\n```\n{initial_pytest_output}\n```\n\n"
-        "## RULES\n"
-        "- You MAY edit ANY file: `connector.py`, `client/` files, `exceptions.py`, "
-        "AND `tests/test_connector.py` if the tests themselves are wrong (bug-documenting assertions, "
-        "wrong mock setup, import path mismatch — see PRIORITY 0 in system prompt).\n"
-        "- Do not delete connector methods; fix their implementations.\n"
-        "- Match return types, attribute names, and exception types exactly as correct behavior requires.\n"
-        + (
-            "- The system prompt contains connector-specific test guidelines. "
-            "Use the client layer description, mock targets, and per-method specs to understand "
-            "exactly what the tests expect from the connector implementation.\n"
-            if test_guidelines and len(test_guidelines.strip()) > 300
-            else ""
-        )
-        + (
-            f"\n\n⛔ SCOPE: Fixing methods: {', '.join(target_methods)}. "
-            "run_tests() is filtered to these methods. Do not touch connector methods outside this scope."
-            if target_methods else ""
-        )
-        + "\nRun tests after each fix, iterate until ALL targeted tests pass, then call done(summary)."
-    )
-
-    result = await _gemini_agentic_loop(
-        connector_dir,
-        system_prompt=_system_prompt,
-        initial_message=initial_message,
-        tools=_FIX_TOOLS,
-        log_cb=log_cb,
-        max_iterations=max_iterations,
-        stop_on_done=True,
-        stop_on_tests_pass=True,
-        protected_files=None,
-        target_methods=target_methods,
-    )
-
-    if not result.get("success"):
-        final_output = await _run_tests_async(connector_dir, methods=target_methods)
-        result["pytest_output"] = final_output
-        result["success"] = _tests_passed(final_output)
-    return result

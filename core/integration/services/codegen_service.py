@@ -333,6 +333,12 @@ async def execute_plan(
         "default_scopes": catalog.get("default_scopes", []),
         "user_prompt": session.get("user_prompt", ""),
         "llm_model": session.get("llm_model", "") or "",   # preferred Claude model for this session
+        # Enhance-mode signal — every generator handler consults this. When True, the
+        # handler must EDIT the seeded parent artifact (connector.py, tests, docs,
+        # metadata, plan) in place rather than regenerate from scratch.
+        "run_kind": session.get("run_kind", "build"),
+        "parent_session_id": session.get("parent_session_id", ""),
+        "is_enhance": session.get("run_kind") == "enhance",
         "package_structure": _build_package_structure(plan),
         # Running memory — updated after each step so every handler knows what happened before
         "step_memory": {
@@ -1502,6 +1508,9 @@ async def execute_single_step(
         "docs_url": catalog.get("docs_url", ""),
         "default_scopes": catalog.get("default_scopes", []),
         "user_prompt": session.get("user_prompt", ""),
+        "run_kind": session.get("run_kind", "build"),
+        "parent_session_id": session.get("parent_session_id", ""),
+        "is_enhance": session.get("run_kind") == "enhance",
         "package_structure": _build_package_structure(plan),
         "error_details": error_details,
         "failure_id": prior_failure.get("failure_id") if prior_failure else None,
@@ -2058,6 +2067,9 @@ async def attempt_fix_step(
         "docs_url": catalog.get("docs_url", ""),
         "default_scopes": catalog.get("default_scopes", []),
         "user_prompt": session.get("user_prompt", ""),
+        "run_kind": session.get("run_kind", "build"),
+        "parent_session_id": session.get("parent_session_id", ""),
+        "is_enhance": session.get("run_kind") == "enhance",
         "error_details": error_details,
         "test_passed": test_passed,
         "test_failed": test_failed,
@@ -2428,6 +2440,9 @@ async def auto_run_session(
         "docs_url": catalog.get("docs_url", ""),
         "default_scopes": catalog.get("default_scopes", []),
         "user_prompt": session.get("user_prompt", ""),
+        "run_kind": session.get("run_kind", "build"),
+        "parent_session_id": session.get("parent_session_id", ""),
+        "is_enhance": session.get("run_kind") == "enhance",
         "package_structure": _build_package_structure(plan),
     }
 

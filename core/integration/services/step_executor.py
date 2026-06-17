@@ -1802,7 +1802,7 @@ async def handle_write_connector(
             await _emit(log_cb, "success", f"  ✓ {_subdir}/__init__.py scaffolded")
 
     # ── Connector generation: Gemini agentic OR Claude CLI ───────────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         # Gemini agentic path (reads base_connector.py, writes + validates in a tool-call loop)
         try:
             from integration.services.agentic_fix import gemini_agentic_generate_connector
@@ -2063,27 +2063,31 @@ async def handle_write_tests(
         await _emit(log_cb, "info", "📋 Prior failure history injected into test generation prompt")
 
     # ── Gemini agentic path — tool-calling loop (read files → write tests → run → fix) ──
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
-            from integration.services.agentic_fix import _gemini_agentic_loop, _FIX_TOOLS
+            from integration.services.agentic_fix import _gemini_agentic_loop, _FIX_TOOLS, _enhance_directive
             await _emit(log_cb, "info", "🤖 Gemini agentic write_tests (tool-call loop: read → write → run → fix)...")
+            _tests_initial = (
+                f"Generate pytest unit tests for the connector in: {out_dir.name}/\n\n"
+                f"Connector class: {class_name}\n\n"
+                "Steps:\n"
+                "1. read_file('connector.py') — exact class name, method signatures, client attribute name, every awaited call\n"
+                "2. Read client/*.py files — identify which methods are async def (MUST mock those as AsyncMock)\n"
+                "3. Read helpers/*.py if connector imports from helpers\n"
+                "4. Write tests/test_connector.py — follow ALL guidelines in the system prompt exactly\n"
+                "5. validate_python('tests/test_connector.py') — fix any syntax errors\n"
+                "6. run_tests — analyse failures and fix root causes; iterate until ALL pass\n"
+                "7. done(summary) when all tests pass\n\n"
+                "CRITICAL: mock set_token, get_token, ingest_batch in every test calling install/authorize/sync.\n"
+                "CRITICAL: write to tests/test_connector.py — not to the package root."
+            )
+            if context.get("is_enhance"):
+                _tests_initial += _enhance_directive(out_dir, artifact="tests",
+                                                    enhancement_ask=context.get("user_prompt", ""))
             agentic_result = await _gemini_agentic_loop(
                 out_dir,
                 system_prompt=system,   # pre-built rich system with ground truth + guidelines
-                initial_message=(
-                    f"Generate pytest unit tests for the connector in: {out_dir.name}/\n\n"
-                    f"Connector class: {class_name}\n\n"
-                    "Steps:\n"
-                    "1. read_file('connector.py') — exact class name, method signatures, client attribute name, every awaited call\n"
-                    "2. Read client/*.py files — identify which methods are async def (MUST mock those as AsyncMock)\n"
-                    "3. Read helpers/*.py if connector imports from helpers\n"
-                    "4. Write tests/test_connector.py — follow ALL guidelines in the system prompt exactly\n"
-                    "5. validate_python('tests/test_connector.py') — fix any syntax errors\n"
-                    "6. run_tests — analyse failures and fix root causes; iterate until ALL pass\n"
-                    "7. done(summary) when all tests pass\n\n"
-                    "CRITICAL: mock set_token, get_token, ingest_batch in every test calling install/authorize/sync.\n"
-                    "CRITICAL: write to tests/test_connector.py — not to the package root."
-                ),
+                initial_message=_tests_initial,
                 tools=_FIX_TOOLS,
                 log_cb=log_cb,
                 max_iterations=20,
@@ -2740,7 +2744,7 @@ async def handle_fix_connector_for_tests(
         return {"status": "fail", "output": "connector.py missing"}
 
     # ── Agentic fix: Gemini + tool calls ────────────────────────────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         from integration.services.agentic_fix import gemini_agentic_fix, gemini_agentic_fix_connector
         from integration.services import knowledge_service as _ks
         tests_dir = out_dir / "tests"
@@ -3172,7 +3176,7 @@ async def handle_fix_tests(
         await _emit(log_cb, "info", "Fast pre-fix applied but errors remain — handing off to Gemini agentic")
 
     # ── Agentic fix: Gemini + tool calls (read/write/run loop) ──────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         from integration.services.agentic_fix import gemini_agentic_fix
         from integration.services import knowledge_service as _ks
         await _emit(log_cb, "info", f"🤖 Using {_llm_label()} agentic fix (tool-call loop)...")
@@ -4884,11 +4888,18 @@ async def handle_generate_implementation_plan(
 ❌ DO NOT call done() before write_file('implementation_plan.md', ...)
 """
 
+    # Enhance overlay — when the parent connector is seeded, extend its existing
+    # implementation plan / surface; do NOT re-derive design choices from scratch.
+    if context.get("is_enhance"):
+        from integration.services.agentic_fix import _enhance_directive
+        user_message += _enhance_directive(out_dir, artifact="plan",
+                                           enhancement_ask=context.get("user_prompt", ""))
+
     plan_content: Optional[str] = None
     _min_chars = 5000
 
     # ── Gemini agentic path ───────────────────────────────────────────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
             from integration.services.agentic_fix import _gemini_agentic_loop, _PLAN_TOOLS, _r2_service as _agentic_r2
             result = await _gemini_agentic_loop(
@@ -5803,7 +5814,7 @@ Provider: **{provider}**, Service slug: **{service_slug}**
     _GUIDELINES_TIMEOUT = 180  # seconds — fail fast rather than hang forever
     guidelines_content = None
 
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
             from integration.services.agentic_fix import gemini_agentic_generate_test_guidelines
             result = await asyncio.wait_for(
@@ -5913,7 +5924,7 @@ async def handle_setup_instructions(
     await _emit(log_cb, "info", "Generating connector setup instructions…")
 
     # ── Gemini agentic path ────────────────────────────────────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         from integration.services.agentic_fix import gemini_agentic_generate_instructions
         from integration.services.instructions_guidelines_service import get_instruction_guidelines
         guidelines = await get_instruction_guidelines()
@@ -6051,9 +6062,15 @@ async def handle_generate_metadata(
     await _emit(log_cb, "info", f"Generating metadata/connector.json (version {version})…")
 
     # ── Gemini agentic metadata generation ──────────────────────────────────
-    if settings.TEST_LLM_MODE.lower() == "gemini":
+    if False:  # gemini path disabled — Claude is the only backend codegen runtime
         from integration.services.agentic_fix import gemini_agentic_generate_metadata
-        result = await gemini_agentic_generate_metadata(out_dir, version=version, log_cb=log_cb)
+        result = await gemini_agentic_generate_metadata(
+            out_dir,
+            version=version,
+            is_enhance=bool(context.get("is_enhance")),
+            enhancement_ask=context.get("user_prompt", ""),
+            log_cb=log_cb,
+        )
         if result["success"] and metadata_path.exists():
             try:
                 meta = json.loads(metadata_path.read_text(encoding="utf-8"))

@@ -156,7 +156,10 @@ class GmailConnector(BaseConnector):
         client_id = self.config.get("client_id", "")
         client_secret = self.config.get("client_secret", "")
         token_uri = self.config.get("token_url") or TOKEN_URI
-        redirect_uri = (state or "") if state and state.startswith("http") else ""
+        # redirect_uri MUST come from self.config — the gateway sets it at deploy/check
+        # time. `state` carries the connector_id, not a URL, so reading it from state
+        # produces an empty redirect_uri and Google rejects with 400 invalid_request.
+        redirect_uri = self.config.get("redirect_uri", "")
 
         data = await self.http_client.post_form_data(
             url=token_uri,
@@ -418,16 +421,25 @@ class GmailConnector(BaseConnector):
         body: str,
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
+        html_body: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send an email via the Gmail API.
 
-        Builds a MIMEText message, base64url-encodes it (no padding), and delegates
+        Builds a MIME message, base64url-encodes it (no padding), and delegates
         to GmailHTTPClient.execute_send_message().
+
+        `body`      — plain-text part (always sent as the fallback).
+        `html_body` — optional HTML part. When supplied, the message is sent as
+                      `multipart/alternative` so clients that render HTML do so and
+                      others fall back to plain text. Existing callers that omit
+                      `html_body` get the original plain-only behavior.
 
         Requires the gmail.send scope — raises PermissionError if missing.
         Returns the raw API response: {id, threadId, labelIds}.
         """
-        mime_msg = build_mime_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        mime_msg = build_mime_message(
+            to=to, subject=subject, body=body, cc=cc, bcc=bcc, html_body=html_body,
+        )
         raw = base64url_encode(mime_msg.as_bytes())
         access_token = await self._get_valid_token()
         return await self.http_client.execute_send_message(access_token, raw)
@@ -439,13 +451,17 @@ class GmailConnector(BaseConnector):
         body: str,
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
+        html_body: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a Gmail draft (does not send).
 
-        Uses the same MIME-building path as send_email() for consistency.
+        Uses the same MIME-building path as send_email() for consistency, including
+        optional HTML support via `html_body` (multipart/alternative).
         Returns the raw API draft response: {id, message: {id, threadId, labelIds}}.
         """
-        mime_msg = build_mime_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        mime_msg = build_mime_message(
+            to=to, subject=subject, body=body, cc=cc, bcc=bcc, html_body=html_body,
+        )
         raw = base64url_encode(mime_msg.as_bytes())
         access_token = await self._get_valid_token()
         return await with_retry(
@@ -460,6 +476,9 @@ class GmailConnector(BaseConnector):
         body: str,
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
+        html_body: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Public alias for send_email() — provided for API surface completeness."""
-        return await self.send_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+        return await self.send_email(
+            to=to, subject=subject, body=body, cc=cc, bcc=bcc, html_body=html_body,
+        )

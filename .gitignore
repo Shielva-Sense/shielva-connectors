@@ -53,3 +53,5 @@ Thumbs.db
 */shared/discovery_client.py
 */shared/__init__.py
 */shared/__pycache__/
+core/legacy_integration_service/
+legacy_integration_service/
