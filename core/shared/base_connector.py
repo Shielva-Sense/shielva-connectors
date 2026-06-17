@@ -5,7 +5,7 @@ All connectors inherit from this base class.
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -1227,7 +1227,7 @@ class BaseConnector(ABC):
             return False
 
         if self._token_info.expires_at:
-            return datetime.utcnow() < self._token_info.expires_at
+            return datetime.now(timezone.utc) < self._token_info.expires_at
 
         return True
 

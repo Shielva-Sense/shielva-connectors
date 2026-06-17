@@ -389,8 +389,8 @@ The developer can uncheck any field in the UI to turn it into a user-supplied in
 Do NOT use bind:false for any field — all fields (including credentials) must be bind:true.
 
 Auth-type mapping:
-- **oauth2 / oauth2_code**: fields → client_id (bind:true), client_secret (bind:true), scopes (bind:true), auth_url (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), pagination_type (bind:true), api_version (bind:true)
-- **oauth2_pkce**: fields → client_id (bind:true), scopes (bind:true), auth_url (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), pagination_type (bind:true), api_version (bind:true)
+- **oauth2 / oauth2_code**: fields → client_id (bind:true), client_secret (bind:true), scopes (bind:true), authorization_url (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), pagination_type (bind:true), api_version (bind:true)
+- **oauth2_pkce**: fields → client_id (bind:true), scopes (bind:true), authorization_url (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), pagination_type (bind:true), api_version (bind:true)
 - **oauth2_client_credentials**: fields → client_id (bind:true), client_secret (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), pagination_type (bind:true), api_version (bind:true)
 - **oauth2_password**: fields → client_id (bind:true), client_secret (bind:true), username (bind:true), password (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), api_version (bind:true)
 - **oauth2_device**: fields → client_id (bind:true), client_secret (bind:true), token_url (bind:true), base_url (bind:true), rate_limit_per_min (bind:true), api_version (bind:true)
@@ -404,6 +404,16 @@ Auth-type mapping:
 
 Use the provider's actual values as placeholder/help text. For example, for a payments api_key connector, base_url placeholder should be the provider's actual API base URL, not another provider's URL.
 Only include fields that are genuinely applicable — omit api_version if the API has no versioning, omit rate_limit_per_min if undocumented.
+
+🔑 CANONICAL CONFIG KEYS — use these EXACT key names, never aliases. The SAME key
+must appear in the plan's `default_config_fields`, in connector.py `self.config.get("key")`,
+and in connector.json `install_fields`. A drift (e.g. `auth_url` vs `authorization_url`,
+`tokenUrl` vs `token_url`) breaks credential pre-fill across the SAD test form and ACP.
+- `client_id`, `client_secret`, `scopes`, `authorization_url`, `token_url`, `base_url`,
+  `rate_limit_per_min`, `pagination_type`, `api_version`, `api_key`, `api_secret`, `token`,
+  `username`, `password`, `service_account_json`, `private_key`, `client_email`, `token_uri`.
+- NEVER emit `auth_url`, `auth_uri` (as a config key), `authUrl`, `tokenUrl`, or any camelCase /
+  shortened variant. Lowercase snake_case canonical names only.
 
 ### Steps
 For `install_deps` step, config should include: `{{ "packages": ["pkg1", "pkg2"] }}` — list ONLY connector-specific packages (provider SDK, etc.). Do NOT include pydantic, httpx, structlog, pytest, pytest-asyncio, pytest-mock, google-auth, google-auth-oauthlib, or google-auth-httplib2 — these are pre-installed in the shared Python 3.13 venv. Use `>=` minimum version floors (e.g. `google-api-python-client>=2.100`), never `==` exact pins. At runtime the handler will prefer packages extracted from implementation_plan.md Section 7 if available.

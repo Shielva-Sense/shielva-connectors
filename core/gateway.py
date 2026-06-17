@@ -1782,12 +1782,20 @@ async def deploy_connector(
     elif test_result and not test_result["healthy"] and test_result["auth_status"] not in ("pending", "missing_credentials"):
         effective_status = test_result["auth_status"]
 
-    if effective_status in ("pending", "missing_credentials") or (test_result is None and status.auth_status.value == "pending"):
-        _gw = os.getenv("GATEWAY_URL", "https://localhost:8000")
-        _default_redirect = f"{_gw}/connectors/oauth/callback"
-        redirect_uri = final_config.get("redirect_uri") or _default_redirect
-        # Persist redirect_uri in connector config so authorize() can use it later
-        connector.config["redirect_uri"] = redirect_uri
+    # redirect_uri is a deterministic constant ({GATEWAY_URL}/connectors/oauth/callback)
+    # and is needed by authorize() at token-exchange time for ANY OAuth flow. Set it on
+    # the deployed instance UNCONDITIONALLY — not gated on status — so a connector that
+    # needs to (re)authorize (pending, missing_credentials, token_expired, failed, …)
+    # always has it. The old status gate skipped token_expired/failed, which broke
+    # re-authorization. Non-OAuth connectors simply ignore the value.
+    _gw = os.getenv("GATEWAY_URL", "https://localhost:8000")
+    _default_redirect = f"{_gw}/connectors/oauth/callback"
+    redirect_uri = final_config.get("redirect_uri") or _default_redirect
+    connector.config["redirect_uri"] = redirect_uri
+
+    # Generate the consent URL whenever the connector is not already connected, so any
+    # non-connected state can start/restart the OAuth flow.
+    if effective_status != "connected":
         try:
             oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
         except Exception:
@@ -1857,7 +1865,9 @@ async def list_connector_apis(
         # Normalize params: connector.json uses "name" but the frontend ApiParam interface
         # expects "key". Map name→key and synthesize a "label" if absent so that React
         # list rendering never receives undefined keys.
-        raw_apis = metadata.get("apis", [])
+        # The catalogue is stored under "apis" (rich, with params) OR "methods" (name +
+        # description only). Prefer "apis"; fall back to "methods".
+        raw_apis = metadata.get("apis") or metadata.get("methods") or []
         normalized_apis = []
         for api in raw_apis:
             if _is_system_api(api):
@@ -1870,7 +1880,26 @@ async def list_connector_apis(
                     "key": param_key,
                     "label": p.get("label") or param_key.replace("_", " ").title(),
                 })
-            normalized_apis.append({**api, "params": normalized_params})
+            # "methods" entries carry no params — enrich from the connector class
+            # signature so the Test APIs form still shows input fields.
+            fn_name = (api.get("id") or api.get("name") or "").replace(" ", "_")
+            if not normalized_params and fn_name:
+                import inspect as _insp
+                _fn = getattr(connector.__class__, fn_name, None)
+                if callable(_fn):
+                    try:
+                        for pn, pv in _insp.signature(_fn).parameters.items():
+                            if pn in ("self", "cls"):
+                                continue
+                            normalized_params.append({
+                                "key": pn,
+                                "label": pn.replace("_", " ").title(),
+                                "type": "text",
+                                "required": pv.default is _insp.Parameter.empty,
+                            })
+                    except Exception:
+                        pass
+            normalized_apis.append({**api, "id": api.get("id") or fn_name, "params": normalized_params})
         return {
             "connector_id": connector_id,
             "connector_type": connector_type,
@@ -2088,7 +2117,7 @@ async def oauth_callback(
     
     if connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     try:
         token_info = await connector.authorize(
             auth_code=request.code,
