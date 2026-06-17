@@ -1,18 +1,35 @@
-"""Typed models for Gmail connector request/response shapes."""
-from dataclasses import dataclass, field
+"""Pydantic request/response models for the Gmail connector."""
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
 
-@dataclass
-class MessageStub:
-    """Lightweight reference returned by messages.list."""
+
+class SendEmailRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
+
+
+class ModifyMessageRequest(BaseModel):
+    message_id: str
+    add_label_ids: List[str] = []
+    remove_label_ids: List[str] = []
+
+
+class ListEmailsRequest(BaseModel):
+    query: str = ""
+    max_results: int = 500
+    page_token: Optional[str] = None
+
+
+class GmailMessageStub(BaseModel):
     id: str
-    thread_id: str = ""
+    threadId: Optional[str] = None
 
 
-@dataclass
-class BulkDeleteResult:
-    """Return value of GmailConnector.bulk_delete()."""
-    deleted: int = 0
-    failed: int = 0
-    errors: List[str] = field(default_factory=list)
+class ListEmailsResponse(BaseModel):
+    messages: List[GmailMessageStub] = []
+    nextPageToken: Optional[str] = None
+    resultSizeEstimate: Optional[int] = None

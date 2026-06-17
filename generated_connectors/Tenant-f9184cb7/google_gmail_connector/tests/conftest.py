@@ -1,175 +1,122 @@
-"""Unit-test conftest for Gmail connector — clean mocks, zero real I/O."""
+"""Unit-test fixtures for GmailConnector — zero real I/O."""
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Add the connector package root to sys.path (root conftest.py adds the SDK)
+# Add connector root to path (relative — no machine-specific paths)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from connector import GmailConnector
 from shared.base_connector import AuthStatus, ConnectorHealth, TokenInfo
 
-TENANT_ID = "test-tenant"
-CONNECTOR_ID = "test-connector"
-BASE_CONFIG = {
+TENANT_ID = "test-tenant-001"
+CONNECTOR_ID = "test-connector-001"
+
+TEST_CONFIG = {
     "client_id": "test-client-id",
     "client_secret": "test-client-secret",
-    "allow_permanent_delete": False,
-    "redirect_uri": "https://example.com/callback",
-    "known_message_ids": [],
+    "scopes": (
+        "https://www.googleapis.com/auth/gmail.readonly "
+        "https://www.googleapis.com/auth/gmail.modify "
+        "https://www.googleapis.com/auth/gmail.send"
+    ),
+    "auth_url": "https://accounts.google.com/o/oauth2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "base_url": "https://gmail.googleapis.com/gmail/v1",
+    "rate_limit_per_min": 250,
+    "pagination_type": "page_token",
+    "api_version": "v1",
 }
 
-
-# ── Autouse fixtures (apply to EVERY test) ───────────────────────────────────
+SAMPLE_MESSAGE = {
+    "id": "msg123",
+    "threadId": "thread456",
+    "labelIds": ["INBOX"],
+    "snippet": "Hello world",
+    "historyId": "99000",
+    "internalDate": "1700000000000",
+    "payload": {
+        "mimeType": "text/plain",
+        "headers": [
+            {"name": "Subject", "value": "Test Subject"},
+            {"name": "From", "value": "sender@example.com"},
+            {"name": "To", "value": "recipient@example.com"},
+            {"name": "Date", "value": "Mon, 01 Jan 2024 12:00:00 +0000"},
+        ],
+        "body": {
+            # base64url for "Hello world"
+            "data": "SGVsbG8gd29ybGQ",
+        },
+        "parts": [],
+    },
+}
 
 
 @pytest.fixture(autouse=True)
 def mock_storage(mocker):
-    """Prevent all BaseConnector storage calls from hitting Redis/DB."""
-    mocker.patch.object(GmailConnector, "get_token", new_callable=AsyncMock, return_value=None)
+    """Prevent all BaseConnector Redis/DB calls."""
     mocker.patch.object(GmailConnector, "set_token", new_callable=AsyncMock)
     mocker.patch.object(GmailConnector, "clear_token", new_callable=AsyncMock)
     mocker.patch.object(GmailConnector, "save_config", new_callable=AsyncMock)
     mocker.patch.object(GmailConnector, "ingest_batch", new_callable=AsyncMock)
     mocker.patch.object(GmailConnector, "ingest_document", new_callable=AsyncMock)
+    mocker.patch.object(GmailConnector, "get_metadata", new_callable=AsyncMock, return_value=None)
+    mocker.patch.object(GmailConnector, "set_metadata", new_callable=AsyncMock)
 
 
 @pytest.fixture(autouse=True)
 def mock_logger(mocker):
+    """Silence structlog calls that may fail with unexpected keyword args."""
     mocker.patch("connector.logger")
 
 
-# ── Token / connector fixtures ───────────────────────────────────────────────
+@pytest.fixture
+def connector():
+    """GmailConnector with full config, no token loaded."""
+    return GmailConnector(
+        tenant_id=TENANT_ID,
+        connector_id=CONNECTOR_ID,
+        config=TEST_CONFIG,
+    )
 
 
 @pytest.fixture
-def valid_token() -> TokenInfo:
+def mock_http():
+    """Fully-mocked GmailHTTPClient — all methods are AsyncMock."""
+    return MagicMock(
+        get_profile=AsyncMock(),
+        list_messages=AsyncMock(),
+        get_message=AsyncMock(),
+        execute_modify_message=AsyncMock(),
+        execute_send_message=AsyncMock(),
+        execute_create_draft=AsyncMock(),
+        list_history=AsyncMock(),
+        post_form_data=AsyncMock(),
+    )
+
+
+@pytest.fixture
+def valid_token():
     return TokenInfo(
         access_token="test-access-token",
         refresh_token="test-refresh-token",
-        expires_at=datetime.utcnow() + timedelta(hours=1),
-        scopes=["https://www.googleapis.com/auth/gmail.modify"],
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        token_type="Bearer",
+        scopes=[
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+        ],
     )
 
 
 @pytest.fixture
-def connector() -> GmailConnector:
-    return GmailConnector(
-        tenant_id=TENANT_ID,
-        connector_id=CONNECTOR_ID,
-        config=BASE_CONFIG.copy(),
-    )
-
-
-@pytest.fixture
-def connector_no_creds() -> GmailConnector:
-    """Connector with empty client_id and client_secret — for install() validation tests."""
-    cfg = {**BASE_CONFIG, "client_id": "", "client_secret": ""}
-    return GmailConnector(
-        tenant_id=TENANT_ID,
-        connector_id=CONNECTOR_ID,
-        config=cfg,
-    )
-
-
-@pytest.fixture
-def connector_with_perm_delete() -> GmailConnector:
-    cfg = {**BASE_CONFIG, "allow_permanent_delete": True}
-    return GmailConnector(
-        tenant_id=TENANT_ID,
-        connector_id=CONNECTOR_ID,
-        config=cfg,
-    )
-
-
-@pytest.fixture
-def authed_connector(connector: GmailConnector, valid_token: TokenInfo) -> GmailConnector:
-    """Connector with a pre-set valid token so ensure_token() succeeds inline."""
+def authed(connector, mock_http, valid_token):
+    """Connector with valid token and mocked http_client."""
     connector._token_info = valid_token
+    connector._status.auth_status = AuthStatus.CONNECTED
+    connector.http_client = mock_http
     return connector
-
-
-@pytest.fixture
-def authed_perm_delete(
-    connector_with_perm_delete: GmailConnector, valid_token: TokenInfo
-) -> GmailConnector:
-    connector_with_perm_delete._token_info = valid_token
-    return connector_with_perm_delete
-
-
-# ── HTTP client mock ─────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def mock_http_client() -> MagicMock:
-    """Pre-configured mock of GmailHTTPClient with sensible happy-path defaults."""
-    client = MagicMock()
-    client.execute_get_profile = AsyncMock(
-        return_value={"emailAddress": "user@example.com", "messagesTotal": 42}
-    )
-    client.execute_list_messages = AsyncMock(
-        return_value={"messages": [{"id": "msg1", "threadId": "t1"}], "resultSizeEstimate": 1}
-    )
-    client.execute_get_message = AsyncMock(
-        return_value={
-            "id": "msg1",
-            "threadId": "t1",
-            "labelIds": ["INBOX"],
-            "snippet": "Hello world",
-            "payload": {
-                "mimeType": "text/plain",
-                "headers": [
-                    {"name": "Subject", "value": "Test Subject"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "To", "value": "recv@example.com"},
-                    {"name": "Date", "value": "Mon, 1 Jan 2024 00:00:00 +0000"},
-                ],
-                "body": {"data": "SGVsbG8gd29ybGQ="},  # "Hello world"
-            },
-        }
-    )
-    client.execute_trash_message = AsyncMock(
-        return_value={"id": "msg1", "labelIds": ["TRASH"]}
-    )
-    client.execute_delete_message = AsyncMock(return_value=None)
-    client.execute_modify_message = AsyncMock(
-        return_value={"id": "msg1", "labelIds": ["INBOX", "STARRED"]}
-    )
-    client.execute_send_message = AsyncMock(
-        return_value={"id": "sent1", "threadId": "t1", "labelIds": ["SENT"]}
-    )
-    client.execute_trash_thread = AsyncMock(
-        return_value={"id": "t1", "messages": []}
-    )
-    client.execute_delete_thread = AsyncMock(return_value=None)
-    return client
-
-
-# ── aiohttp session mock helpers ─────────────────────────────────────────────
-
-
-def make_aiohttp_post_mock(response_data: dict, status: int = 200) -> MagicMock:
-    """Build a MagicMock aiohttp.ClientSession whose .post() returns *response_data*.
-
-    session.post MUST be MagicMock (NOT AsyncMock) because it is used as an
-    async context manager, not awaited directly.
-    """
-    mock_response = AsyncMock()
-    mock_response.status = status
-    mock_response.json = AsyncMock(return_value=response_data)
-    mock_response.text = AsyncMock(return_value=str(response_data))
-
-    mock_post_cm = MagicMock()
-    mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_post_cm.__aexit__ = AsyncMock(return_value=None)
-
-    mock_session = MagicMock()
-    mock_session.post = MagicMock(return_value=mock_post_cm)
-
-    mock_session_cm = MagicMock()
-    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-    return mock_session_cm

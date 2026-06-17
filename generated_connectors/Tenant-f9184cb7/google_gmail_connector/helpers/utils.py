@@ -1,95 +1,92 @@
-"""Shared utilities: retry decorator, known-ID checkpoint helpers, header extractor."""
+"""Shared utilities: retry logic, MIME construction, base64url encoding."""
 import asyncio
 import base64
-import functools
 import random
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from email.utils import formatdate
+from typing import Any, Callable, Coroutine, Optional
 
-from exceptions import (
-    ConnectorAuthError,
-    ConnectorError,
-    ConnectorNotFoundError,
-    ConnectorPermissionError,
-    ConnectorRateLimitError,
-)
+import structlog
 
-_NON_RETRYABLE = (ConnectorAuthError, ConnectorPermissionError, ConnectorNotFoundError)
+from exceptions import GmailRateLimitError
+
+logger = structlog.get_logger(__name__)
+
+# OCP: retry constants — change here, nowhere else
+RETRY_DELAY_S: float = 1.0
+BACKOFF_FACTOR: float = 2.0
+MAX_RETRY_DELAY_S: float = 32.0
 
 
-def retry(
-    max_attempts: int = 3,
-    initial_delay: float = 1.0,
-    multiplier: float = 2.0,
-    jitter_factor: float = 0.1,
-):
-    """Async retry decorator with exponential backoff and jitter.
+async def with_retry(
+    coro_fn: Callable[[], Coroutine[Any, Any, Any]],
+    max_retries: int = 3,
+    base_delay: float = RETRY_DELAY_S,
+    max_delay: float = MAX_RETRY_DELAY_S,
+    retry_after: Optional[float] = None,
+) -> Any:
+    """Execute *coro_fn()* with exponential-backoff retry.
 
-    Retries on ConnectorRateLimitError and generic ConnectorError.
-    Does NOT retry on auth / permission / not-found errors.
+    Retries on GmailRateLimitError and aiohttp.ClientError subclasses.
+    Raises the last exception after exhausting all retries.
     """
-    def decorator(func):  # type: ignore[no-untyped-def]
-        @functools.wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            delay = initial_delay
-            for attempt in range(max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except _NON_RETRYABLE:
-                    raise
-                except (ConnectorRateLimitError, ConnectorError) as exc:
-                    if attempt == max_attempts - 1:
-                        raise
-                    jitter = random.uniform(0, jitter_factor * delay)
-                    await asyncio.sleep(delay + jitter)
-                    delay *= multiplier
-        return wrapper
-    return decorator
+    import aiohttp
+
+    last_exc: Exception = RuntimeError("with_retry called with max_retries=0")
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_fn()
+        except GmailRateLimitError as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = retry_after if (retry_after and attempt == 0) else min(
+                base_delay * (BACKOFF_FACTOR ** attempt) + random.uniform(0, 0.5), max_delay
+            )
+            logger.warning(
+                "gmail.rate_limit — retrying",
+                attempt=attempt + 1,
+                delay=delay,
+            )
+            await asyncio.sleep(delay)
+        except aiohttp.ClientError as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = min(base_delay * (BACKOFF_FACTOR ** attempt) + random.uniform(0, 0.5), max_delay)
+            logger.warning(
+                "gmail.client_error — retrying",
+                attempt=attempt + 1,
+                delay=delay,
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+    raise last_exc
 
 
-def load_known_ids(config: Dict[str, Any]) -> Set[str]:
-    """Return the set of message IDs previously ingested, stored in config."""
-    return set(config.get("known_message_ids", []))
-
-
-def save_known_ids(config: Dict[str, Any], ids: Set[str]) -> Dict[str, Any]:
-    """Return an updated config dict with *ids* persisted as known_message_ids."""
-    return {**config, "known_message_ids": list(ids)}
-
-
-def build_mime_raw(
+def build_mime_message(
     to: str,
     subject: str,
     body: str,
+    from_addr: str = "me",
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
-) -> str:
-    """Build an RFC 2822 MIME message and return a base64url-encoded string (no padding).
-
-    Gmail API requires the padding chars to be stripped — padded base64 causes 400.
-    Uses MIMEMultipart when cc or bcc is provided so all headers are set correctly.
-    """
-    msg: Union[MIMEText, MIMEMultipart]
-    if cc or bcc:
-        msg = MIMEMultipart()
-        msg.attach(MIMEText(body, "plain"))
-    else:
-        msg = MIMEText(body, "plain")
-
+) -> MIMEMultipart:
+    """Build an RFC 2822 MIME message ready for Gmail send/draft."""
+    msg = MIMEMultipart()
     msg["To"] = to
+    msg["From"] = from_addr
     msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=False)
     if cc:
         msg["Cc"] = cc
     if bcc:
         msg["Bcc"] = bcc
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    return msg
 
-    return base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
 
-
-def extract_header(headers: List[Dict[str, str]], name: str) -> str:
-    """Case-insensitive lookup of a Gmail message header value."""
-    for header in headers or []:
-        if header.get("name", "").lower() == name.lower():
-            return header.get("value", "")
-    return ""
+def base64url_encode(raw_bytes: bytes) -> str:
+    """Base64url-encode bytes and strip padding — required by Gmail API."""
+    return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode("ascii")

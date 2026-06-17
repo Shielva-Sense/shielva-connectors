@@ -1,75 +1,75 @@
-# Gmail Connector — Test Guidelines
+# Test Guidelines — Gmail Connector
 
 ## 1. Package Structure
 
 ```
-tests/
-├── __init__.py
-├── conftest.py          # shared fixtures, BASE_CONFIG, mock factories
-└── test_connector.py    # all unit tests (fully mocked, zero real I/O)
+google_gmail_c996c4_connector/
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py          # fixtures, mocks, shared setup
+│   └── test_connector.py   # unit tests for GmailConnector
 ```
 
 ---
 
 ## 2. Connector Class Details
 
-**Class**: `GmailConnector` (in `connector.py`)
+**Class:** `GmailConnector` (in `connector.py`)
 
-**Constructor**:
+**Constructor:**
 ```python
-GmailConnector(
-    tenant_id: str,
-    connector_id: str,
-    config: Optional[Dict[str, Any]] = None,
-)
+GmailConnector(tenant_id: str, connector_id: str, config: Dict[str, Any] = None)
 ```
 
-**Public methods**:
+**Public methods (all async):**
 ```python
-async def install() -> ConnectorStatus
-async def authorize(auth_code: str, state: Optional[str] = None) -> TokenInfo
-async def on_token_refresh() -> TokenInfo
-async def health_check() -> ConnectorStatus
-async def sync(since=None, full=False, kb_id="", webhook_url=None) -> SyncResult
-async def list_email(query="", max_results=100, page_token=None) -> Dict[str, Any]
-async def read_email(msg_id: str) -> NormalizedDocument
-async def add_email(msg_id: str, label_ids=None) -> Dict[str, Any]
-async def move_email(msg_id: str, destination_label_id: str, remove_label_ids=None) -> Dict[str, Any]
-async def update_email(msg_id: str, add_label_ids=None, remove_label_ids=None) -> Dict[str, Any]
-async def get_email(msg_id: str) -> NormalizedDocument
-async def send_email(to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
-async def post_email(to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
-async def modify_message(msg_id: str, add_label_ids=None, remove_label_ids=None) -> Dict[str, Any]
-async def delete_email(msg_id: str, permanent=False) -> Any
-async def remove_email(msg_id: str) -> Any
-async def delete_message(msg_id: str, permanent=False) -> Any
-async def delete_thread(thread_id: str, permanent=False) -> Any
-async def bulk_delete(query: str, permanent=False) -> BulkDeleteResult
-async def disconnect() -> None
+async def install(self) -> ConnectorStatus
+async def authorize(self, auth_code: str, state: str = None) -> TokenInfo
+async def health_check(self) -> ConnectorStatus
+async def sync(self, since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult
+async def list_emails(self, query="", max_results=500, page_token=None) -> Dict[str, Any]
+async def get_email(self, message_id: str) -> NormalizedDocument
+async def modify_message(self, message_id: str, add_labels=None, remove_labels=None) -> Dict[str, Any]
+async def read_email(self, message_id: str) -> Dict[str, Any]
+async def send_email(self, to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
+async def add_email(self, to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
+async def post_email(self, to: str, subject: str, body: str, cc=None, bcc=None) -> Dict[str, Any]
+```
+
+**Internal helpers (do not test directly):**
+```python
+async def _get_valid_token(self) -> str
+async def on_token_refresh(self) -> TokenInfo
+async def _collect_all_message_ids(self, access_token: str) -> tuple[List[str], Optional[str]]
+async def _collect_history_ids(self, access_token: str, start_history_id: str) -> List[str]
 ```
 
 ---
 
 ## 3. Client/SDK Layer
 
-**HTTP client**: `client.http_client.GmailHTTPClient`
+**HTTP client:** `GmailHTTPClient` in `client/http_client.py`
 
-Instantiated by `connector._build_http_client()` using:
-- `access_token` from `ensure_token()`
-- `base_url` from `self.config.get('base_url', 'https://gmail.googleapis.com/gmail/v1')`
+**Key methods to mock:**
+- `get_profile(access_token) -> Dict`
+- `list_messages(access_token, query, max_results, page_token) -> Dict`
+- `get_message(access_token, message_id, fmt) -> Dict`
+- `execute_modify_message(access_token, message_id, add_label_ids, remove_label_ids) -> Dict`
+- `execute_send_message(access_token, raw_message) -> Dict`
+- `execute_create_draft(access_token, raw_message) -> Dict`
+- `list_history(access_token, start_history_id, history_types, max_results, page_token) -> Dict`
+- `post_form_data(url, payload, context) -> Dict`
 
-**Mock path**: `connector.GmailHTTPClient` (patch the class; constructor returns your mock)
+**Mock path:** `connector.GmailHTTPClient` or patch `connector_instance.http_client`
 
-**Methods to mock on GmailHTTPClient**:
-- `execute_get_profile() -> Dict`
-- `execute_list_messages(query, max_results, page_token) -> Dict`
-- `execute_get_message(msg_id) -> Dict`
-- `execute_modify_message(msg_id, add_label_ids, remove_label_ids) -> Dict`
-- `execute_trash_message(msg_id) -> Dict`
-- `execute_delete_message(msg_id) -> None`
-- `execute_send_message(raw_message: str) -> Dict`
-- `execute_trash_thread(thread_id) -> Dict`
-- `execute_delete_thread(thread_id) -> None`
+**aiohttp async context manager mock pattern:**
+```python
+# session.post must be MagicMock (NOT AsyncMock) — AsyncMock returns a coroutine, not a CM
+mock_post_cm = MagicMock()
+mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+mock_post_cm.__aexit__ = AsyncMock(return_value=None)
+mock_session_instance.post = MagicMock(return_value=mock_post_cm)
+```
 
 ---
 
@@ -89,150 +89,110 @@ pytest-timeout==2.4.0
 
 ```python
 # tests/conftest.py
-"""Unit-test conftest for Gmail connector — clean mocks, zero real I/O."""
-import os
 import sys
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
-
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from connector import GmailConnector
-from shared.base_connector import AuthStatus, ConnectorHealth, TokenInfo
 
-TENANT_ID = "test-tenant"
-CONNECTOR_ID = "test-connector"
 
-BASE_CONFIG = {
+TENANT_ID = "test-tenant-001"
+CONNECTOR_ID = "test-connector-001"
+TEST_CONFIG = {
     "client_id": "test-client-id",
     "client_secret": "test-client-secret",
-    "allow_permanent_delete": False,
-    "redirect_uri": "https://example.com/callback",
-    "known_message_ids": [],
+    "scopes": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+    "auth_url": "https://accounts.google.com/o/oauth2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "base_url": "https://gmail.googleapis.com/gmail/v1",
+    "rate_limit_per_min": 250,
+    "pagination_type": "page_token",
+    "api_version": "v1",
 }
 
 
-@pytest.fixture(autouse=True)
-def mock_storage(mocker):
-    mocker.patch.object(GmailConnector, "get_token", new_callable=AsyncMock, return_value=None)
-    mocker.patch.object(GmailConnector, "set_token", new_callable=AsyncMock)
-    mocker.patch.object(GmailConnector, "clear_token", new_callable=AsyncMock)
-    mocker.patch.object(GmailConnector, "save_config", new_callable=AsyncMock)
-    mocker.patch.object(GmailConnector, "ingest_batch", new_callable=AsyncMock)
-    mocker.patch.object(GmailConnector, "ingest_document", new_callable=AsyncMock)
-
-
-@pytest.fixture(autouse=True)
-def mock_logger(mocker):
-    mocker.patch("connector.logger")
-
-
 @pytest.fixture
-def valid_token() -> TokenInfo:
-    return TokenInfo(
-        access_token="test-access-token",
-        refresh_token="test-refresh-token",
-        expires_at=datetime.utcnow() + timedelta(hours=1),
-        scopes=["https://www.googleapis.com/auth/gmail.modify"],
-    )
-
-
-@pytest.fixture
-def connector() -> GmailConnector:
+def connector():
+    """Instantiate GmailConnector with full config."""
     return GmailConnector(
         tenant_id=TENANT_ID,
         connector_id=CONNECTOR_ID,
-        config=BASE_CONFIG.copy(),
+        config=TEST_CONFIG,
     )
 
 
 @pytest.fixture
-def connector_no_creds() -> GmailConnector:
-    cfg = {**BASE_CONFIG, "client_id": "", "client_secret": ""}
-    return GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
+def mock_http_client():
+    """Return an AsyncMock replacing GmailHTTPClient on the connector."""
+    return MagicMock(
+        get_profile=AsyncMock(),
+        list_messages=AsyncMock(),
+        get_message=AsyncMock(),
+        execute_modify_message=AsyncMock(),
+        execute_send_message=AsyncMock(),
+        execute_create_draft=AsyncMock(),
+        list_history=AsyncMock(),
+        post_form_data=AsyncMock(),
+    )
 
 
 @pytest.fixture
-def connector_with_perm_delete() -> GmailConnector:
-    cfg = {**BASE_CONFIG, "allow_permanent_delete": True}
-    return GmailConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID, config=cfg)
-
-
-@pytest.fixture
-def authed_connector(connector: GmailConnector, valid_token: TokenInfo) -> GmailConnector:
-    connector._token_info = valid_token
+def connector_with_mock_client(connector, mock_http_client):
+    """Connector with its http_client replaced by a mock."""
+    connector.http_client = mock_http_client
     return connector
 
 
 @pytest.fixture
-def authed_perm_delete(connector_with_perm_delete: GmailConnector, valid_token: TokenInfo) -> GmailConnector:
-    connector_with_perm_delete._token_info = valid_token
-    return connector_with_perm_delete
+def valid_token():
+    """Inject a valid, non-expired token into the connector."""
+    from datetime import datetime, timedelta, timezone
+    from shared.base_connector import TokenInfo
+
+    return TokenInfo(
+        access_token="test-access-token",
+        refresh_token="test-refresh-token",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        token_type="Bearer",
+        scopes=[
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+        ],
+    )
 
 
 @pytest.fixture
-def mock_http_client() -> MagicMock:
-    client = MagicMock()
-    client.execute_get_profile = AsyncMock(
-        return_value={"emailAddress": "user@example.com", "messagesTotal": 42}
-    )
-    client.execute_list_messages = AsyncMock(
-        return_value={"messages": [{"id": "msg1", "threadId": "t1"}], "resultSizeEstimate": 1}
-    )
-    client.execute_get_message = AsyncMock(
-        return_value={
-            "id": "msg1",
-            "threadId": "t1",
-            "labelIds": ["INBOX"],
-            "snippet": "Hello world",
-            "payload": {
-                "mimeType": "text/plain",
-                "headers": [
-                    {"name": "Subject", "value": "Test Subject"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "To", "value": "recv@example.com"},
-                    {"name": "Date", "value": "Mon, 1 Jan 2024 00:00:00 +0000"},
-                ],
-                "body": {"data": "SGVsbG8gd29ybGQ="},
-            },
-        }
-    )
-    client.execute_trash_message = AsyncMock(return_value={"id": "msg1", "labelIds": ["TRASH"]})
-    client.execute_delete_message = AsyncMock(return_value=None)
-    client.execute_modify_message = AsyncMock(
-        return_value={"id": "msg1", "labelIds": ["INBOX", "STARRED"]}
-    )
-    client.execute_send_message = AsyncMock(
-        return_value={"id": "sent1", "threadId": "t1", "labelIds": ["SENT"]}
-    )
-    client.execute_trash_thread = AsyncMock(return_value={"id": "t1", "messages": []})
-    client.execute_delete_thread = AsyncMock(return_value=None)
-    return client
+def authed_connector(connector_with_mock_client, valid_token):
+    """Connector pre-loaded with a valid token."""
+    connector_with_mock_client._token_info = valid_token
+    return connector_with_mock_client
 
 
-def make_aiohttp_post_mock(response_data: dict, status: int = 200) -> MagicMock:
-    """Build a MagicMock aiohttp.ClientSession whose .post() returns response_data.
-
-    session.post MUST be MagicMock (NOT AsyncMock) — it is used as an async context manager.
-    """
-    mock_response = AsyncMock()
-    mock_response.status = status
-    mock_response.json = AsyncMock(return_value=response_data)
-    mock_response.text = AsyncMock(return_value=str(response_data))
-
-    mock_post_cm = MagicMock()
-    mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_post_cm.__aexit__ = AsyncMock(return_value=None)
-
-    mock_session = MagicMock()
-    mock_session.post = MagicMock(return_value=mock_post_cm)
-
-    mock_session_cm = MagicMock()
-    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-    return mock_session_cm
+SAMPLE_MESSAGE = {
+    "id": "msg123",
+    "threadId": "thread456",
+    "labelIds": ["INBOX"],
+    "snippet": "Hello world",
+    "historyId": "99000",
+    "internalDate": "1700000000000",
+    "payload": {
+        "mimeType": "text/plain",
+        "headers": [
+            {"name": "Subject", "value": "Test Subject"},
+            {"name": "From", "value": "sender@example.com"},
+            {"name": "To", "value": "recipient@example.com"},
+            {"name": "Date", "value": "Mon, 01 Jan 2024 12:00:00 +0000"},
+        ],
+        "body": {
+            "data": "SGVsbG8gd29ybGQ=",  # "Hello world" base64
+        },
+        "parts": [],
+    },
+}
 ```
 
 ---
@@ -240,160 +200,344 @@ def make_aiohttp_post_mock(response_data: dict, status: int = 200) -> MagicMock:
 ## 6. Mock Patterns
 
 ```python
-# Patch the HTTP client class so _build_http_client() returns your mock:
-def patch_http_client(mocker, mock_http_client):
-    mock_cls = mocker.patch("connector.GmailHTTPClient")
-    mock_cls.return_value = mock_http_client
-    return mock_cls
+# install()
+connector._token_info = None  # no token needed
 
-# Patch aiohttp for authorize() / on_token_refresh():
-mock_session = make_aiohttp_post_mock({"access_token": "tok", ...}, status=200)
-mocker.patch("connector.aiohttp.ClientSession", return_value=mock_session)
+# authorize()
+mock_http_client.post_form_data.return_value = {
+    "access_token": "new-token",
+    "refresh_token": "new-refresh",
+    "expires_in": 3600,
+    "token_type": "Bearer",
+    "scope": "https://www.googleapis.com/auth/gmail.readonly",
+}
 
-# Patch _remove_from_kb (internal helper):
-mocker.patch.object(connector, "_remove_from_kb", new_callable=AsyncMock)
+# health_check()
+mock_http_client.get_profile.return_value = {"emailAddress": "user@example.com"}
+
+# sync()
+mock_http_client.list_messages.return_value = {
+    "messages": [{"id": "msg1"}, {"id": "msg2"}],
+    "nextPageToken": None,
+    "historyId": "12345",
+}
+mock_http_client.get_message.return_value = SAMPLE_MESSAGE  # from conftest
+
+# list_emails()
+mock_http_client.list_messages.return_value = {"messages": [{"id": "msg1"}]}
+
+# get_email() / read_email()
+mock_http_client.get_message.return_value = SAMPLE_MESSAGE
+
+# modify_message()
+mock_http_client.execute_modify_message.return_value = {"id": "msg1", "labelIds": ["INBOX", "STARRED"]}
+
+# send_email() / post_email()
+mock_http_client.execute_send_message.return_value = {"id": "sent123", "threadId": "thread1", "labelIds": ["SENT"]}
+
+# add_email()
+mock_http_client.execute_create_draft.return_value = {"id": "draft1", "message": {"id": "msg456"}}
+
+# send_email() — 403 PermissionError
+mock_http_client.execute_send_message.side_effect = PermissionError(
+    "gmail.send scope missing — re-authorize the connector"
+)
+
+# send_email() — 400 ValueError
+mock_http_client.execute_send_message.side_effect = ValueError("Invalid recipient address")
 ```
 
 ---
 
 ## 7. Auth-Type Specific Rules (oauth2_code)
 
-**Mock these**:
-- `client_id` and `client_secret` in `BASE_CONFIG`
-- `aiohttp.ClientSession.post()` for token exchange and refresh via `make_aiohttp_post_mock`
-- `connector._token_info` for pre-seeding a valid token in `authed_connector` fixture
+**DO mock:**
+- `connector._token_info` — inject a valid `TokenInfo` with `access_token` set
+- `connector.http_client.post_form_data` — for authorize() and on_token_refresh() tests
 
-**Do NOT test**:
-- Real Google OAuth authorization redirects
-- Actual token exchange with Google's servers
-- BaseConnector `ensure_token()` or `set_token()` internals — mock via `mock_storage`
+**DO NOT mock:**
+- `BaseConnector.ensure_token()` — use `connector._token_info` to bypass it naturally
+- `BaseConnector.set_token()` — tested indirectly via authorize()
+- `BaseConnector.get_oauth_url()` — not part of connector-specific logic
+
+**Token injection pattern:**
+```python
+from datetime import datetime, timedelta, timezone
+from shared.base_connector import TokenInfo, AuthStatus
+
+connector._token_info = TokenInfo(
+    access_token="fake-token",
+    refresh_token="fake-refresh",
+    expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    scopes=["https://www.googleapis.com/auth/gmail.send"],
+)
+connector._status.auth_status = AuthStatus.CONNECTED
+```
 
 ---
 
 ## 8. Do NOT Test
 
-- `BaseConnector` internals (`ensure_token`, `set_token`, `clear_token`, `save_config`, `ingest_document`)
-- `GmailHTTPClient` internals — test those in a separate `test_http_client.py`
-- `helpers/normalizer.py` directly — test indirectly via `read_email()` / `get_email()` assertions
-- Real aiohttp/network I/O
-- Google token validation logic
+- `BaseConnector` internals: `ensure_token()`, `set_token()`, `get_token()`, `ingest_batch()`, `publish_event()`
+- `aiohttp` internals: session creation, SSL, connection pooling
+- `GmailHTTPClient._raise_for_status()` internal error mapping (tested indirectly)
+- Private helpers: `_collect_all_message_ids()`, `_collect_history_ids()` — tested indirectly via `sync()`
+- Redis persistence: `connector_store` — not available in unit tests
+- Actual Google OAuth endpoints — all network calls must be mocked
 
 ---
 
 ## 9. Per-Method Test Specifications
 
 ### `install()`
-- **Happy path**: `connector` with `client_id` + `client_secret` → `health=HEALTHY`, `auth_status=PENDING`, `connector_id=CONNECTOR_ID`
-- **Missing client_id**: `connector_no_creds` → `health=DEGRADED`, `auth_status=INVALID_CREDENTIALS`
-- **Missing client_secret only**: config `{"client_id": "x", "client_secret": ""}` → `health=DEGRADED`
-- **Missing both**: `connector_no_creds` → `health=DEGRADED`
+**Signature:** `async def install(self) -> ConnectorStatus`
+
+**Happy path — credentials present:**
+```python
+result = await connector.install()
+assert result.health == ConnectorHealth.HEALTHY
+assert result.auth_status == AuthStatus.PENDING
+```
+
+**Error path — missing client_id:**
+```python
+connector.config.pop("client_id", None)
+result = await connector.install()
+assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+assert result.health == ConnectorHealth.OFFLINE
+```
+
+**Error path — missing client_secret:**
+```python
+connector.config.pop("client_secret", None)
+result = await connector.install()
+assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+```
+
+---
 
 ### `authorize(auth_code, state)`
-- **Happy path**: mock 200 → returns `TokenInfo` with `access_token`, `refresh_token`; `scopes` from response `scope`
-- **Uses config client_id/secret**: assert `session.post` payload contains `client_id="test-client-id"`, `client_secret="test-client-secret"`
-- **Uses config token_url**: custom `token_url` in config → `session.post` called at that URL
-- **Error non-200**: mock 400 → raises `ConnectorAuthError` matching "Token exchange failed"
+**Signature:** `async def authorize(self, auth_code: str, state: str = None) -> TokenInfo`
 
-### `on_token_refresh()`
-- **Happy path**: `authed_connector` → mock 200 → `access_token` updated, existing `refresh_token` preserved
-- **Uses config client_id/secret**: payload contains config credentials
-- **Uses config token_url**: custom `token_url` → correct URL used
-- **No token raises**: bare `connector` → raises `ConnectorAuthError`
-- **Non-200 raises**: mock 400 → raises `ConnectorAuthError` matching "Token refresh failed"
+**Happy path:**
+```python
+mock_http_client.post_form_data.return_value = {
+    "access_token": "acc123", "refresh_token": "ref456",
+    "expires_in": 3600, "token_type": "Bearer",
+    "scope": "https://www.googleapis.com/auth/gmail.readonly"
+}
+result = await authed_connector.authorize("code123")
+assert result.access_token == "acc123"
+assert result.refresh_token == "ref456"
+assert isinstance(result.scopes, list)
+```
+
+**Error path — http_client raises GmailAuthError:**
+```python
+from exceptions import GmailAuthError
+mock_http_client.post_form_data.side_effect = GmailAuthError("invalid_client")
+with pytest.raises(GmailAuthError):
+    await authed_connector.authorize("bad-code")
+```
+
+---
 
 ### `health_check()`
-- **Happy path**: `execute_get_profile` returns profile → `HEALTHY/CONNECTED`, message contains email
-- **ConnectorAuthError**: → `DEGRADED/TOKEN_EXPIRED`
-- **ConnectorPermissionError**: → `DEGRADED/INVALID_CREDENTIALS`
-- **Generic exception**: → `OFFLINE/FAILED`
+**Signature:** `async def health_check(self) -> ConnectorStatus`
+
+**Happy path:**
+```python
+mock_http_client.get_profile.return_value = {"emailAddress": "u@example.com"}
+result = await authed_connector.health_check()
+assert result.health == ConnectorHealth.HEALTHY
+assert result.auth_status == AuthStatus.CONNECTED
+```
+
+**Error path — GmailAuthError (token expired):**
+```python
+from exceptions import GmailAuthError
+mock_http_client.get_profile.side_effect = GmailAuthError("401")
+result = await authed_connector.health_check()
+assert result.auth_status == AuthStatus.TOKEN_EXPIRED
+assert result.health == ConnectorHealth.DEGRADED
+```
+
+---
 
 ### `sync()`
-- **Happy path**: one page, one message → `COMPLETED`, `documents_synced=1`, `documents_found=1`
-- **Deletion propagation**: `known_message_ids=["old-id","msg1"]` + API returns only `msg1` → `_remove_from_kb("old-id")` called
-- **Saves current IDs**: `save_config` called with `known_message_ids` containing `"msg1"`
-- **Partial failure**: `execute_get_message` raises → `PARTIAL`, `documents_failed=1`
-- **List failure**: `execute_list_messages` raises → `FAILED`
-- **Incremental**: `since` set + `full=False` → query starts with `"after:"`
-- **Full sync**: `full=True` → `query=""`
-- **Multi-page**: two pages → `execute_list_messages` called twice
+**Signature:** `async def sync(self, since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`
 
-### `list_email()`
-- **Happy path**: returns page dict; `execute_list_messages` called with correct kwargs
-- **Page token forwarded**: `page_token="tok123"` → forwarded to client
-- **Rate limit propagated**: raises `ConnectorRateLimitError` → caller sees it
+**Happy path — full sync:**
+```python
+mock_http_client.list_messages.return_value = {
+    "messages": [{"id": "msg1"}, {"id": "msg2"}],
+    "nextPageToken": None,
+    "historyId": "5000",
+}
+mock_http_client.get_message.return_value = SAMPLE_MESSAGE
+with patch.object(authed_connector, "ingest_document", new=AsyncMock()):
+    result = await authed_connector.sync(full=True)
+assert result.status == SyncStatus.COMPLETED
+assert result.documents_synced == 2
+assert result.documents_found == 2
+```
 
-### `read_email()`
-- **Happy path**: `NormalizedDocument` with `id="msg1"`, `title="Test Subject"`, content "Hello world", `tenant_id=TENANT_ID`
-- **Not found propagated**: raises `ConnectorNotFoundError`
+**Error path — get_message raises:**
+```python
+mock_http_client.list_messages.return_value = {"messages": [{"id": "m1"}], "nextPageToken": None}
+mock_http_client.get_message.side_effect = Exception("network error")
+with patch.object(authed_connector, "ingest_document", new=AsyncMock()):
+    result = await authed_connector.sync(full=True)
+assert result.status == SyncStatus.PARTIAL
+assert result.documents_failed == 1
+```
 
-### `add_email()`
-- **Happy path**: `execute_modify_message` called with `add_label_ids=["STARRED"]`; returns result
-- **Permission error propagated**: raises `ConnectorPermissionError`
+---
 
-### `move_email()`
-- **Happy path**: `execute_modify_message` called with `add_label_ids=["LABEL_X"]`, `remove_label_ids=["INBOX"]`
-- **Custom remove labels**: `remove_label_ids=["LABEL_A"]` → forwarded
-- **Permission error propagated**: raises `ConnectorPermissionError`
+### `list_emails()`
+**Signature:** `async def list_emails(self, query="", max_results=500, page_token=None) -> Dict`
 
-### `update_email()`
-- **Happy path**: `execute_modify_message` called with both `add_label_ids` and `remove_label_ids`
-- **Empty args default to empty lists**: no labels → called with `[]`, `[]`
-- **Permission error propagated**: raises `ConnectorPermissionError`
+**Happy path:**
+```python
+mock_http_client.list_messages.return_value = {
+    "messages": [{"id": "m1", "threadId": "t1"}],
+    "nextPageToken": None,
+}
+result = await authed_connector.list_emails(query="in:inbox")
+assert "messages" in result
+assert result["messages"][0]["id"] == "m1"
+mock_http_client.list_messages.assert_awaited_once()
+```
+
+---
 
 ### `get_email()`
-- **Happy path**: `NormalizedDocument` — identical assertions to `read_email()`
-- **Not found propagated**: raises `ConnectorNotFoundError`
+**Signature:** `async def get_email(self, message_id: str) -> NormalizedDocument`
 
-### `send_email()`
-- **Happy path**: mock `build_mime_raw` returns `"base64str"`, `execute_send_message` returns `{"id": "sent1", "threadId": "t1"}` → assert dict returned with correct `id`
-- **With cc/bcc**: assert `build_mime_raw` called with `cc` and `bcc` keyword args
-- **403 scope missing**: `execute_send_message` raises `ConnectorPermissionError("gmail.send scope missing...")` → assert `ConnectorPermissionError` propagated
+**Happy path:**
+```python
+mock_http_client.get_message.return_value = SAMPLE_MESSAGE
+result = await authed_connector.get_email("msg123")
+assert result.source_id == "msg123"
+assert result.title == "Test Subject"
+assert "Hello world" in result.content
+```
 
-### `post_email()`
-- **Delegates to send_email**: patch `connector.send_email` as `AsyncMock`; call `post_email(to, subject, body)` → assert `send_email` called once with same args
+---
 
 ### `modify_message()`
-- **Happy path**: `execute_modify_message` returns modified message → assert dict returned
-- **add_label_ids forwarded**: assert passed to `execute_modify_message`
-- **remove_label_ids forwarded**: assert passed to `execute_modify_message`
-- **Both None default to empty lists**: assert `execute_modify_message` called with `add_label_ids=[]`, `remove_label_ids=[]`
+**Signature:** `async def modify_message(self, message_id, add_labels=None, remove_labels=None) -> Dict`
 
-### `delete_email()`
-- **Delegates to delete_message**: mock `delete_message` → called with `(msg_id, permanent=False)`
+**Happy path:**
+```python
+mock_http_client.execute_modify_message.return_value = {"id": "msg1", "labelIds": ["STARRED"]}
+result = await authed_connector.modify_message("msg1", add_labels=["STARRED"])
+assert result["id"] == "msg1"
+mock_http_client.execute_modify_message.assert_awaited_once_with(
+    "test-access-token", message_id="msg1", add_label_ids=["STARRED"], remove_label_ids=None
+)
+```
 
-### `remove_email()`
-- **Delegates to soft delete**: mock `delete_message` → called with `(msg_id, permanent=False)`
+---
 
-### `delete_message()`
-- **Soft delete**: `execute_trash_message` called; `execute_delete_message` not called
-- **Hard delete with flag**: `authed_perm_delete` + `permanent=True` → `execute_delete_message` called
-- **Hard delete blocked**: no flag + `permanent=True` → raises `ConnectorPermissionError` matching "allow_permanent_delete"
-- **Not found propagated**: `execute_trash_message` raises `ConnectorNotFoundError`
+### `read_email()`
+**Signature:** `async def read_email(self, message_id: str) -> Dict`
 
-### `delete_thread()`
-- **Soft delete**: `execute_trash_thread` called
-- **Hard delete with flag**: `execute_delete_thread` called
-- **Hard delete blocked**: no flag → raises `ConnectorPermissionError`
+**Happy path:**
+```python
+mock_http_client.get_message.return_value = SAMPLE_MESSAGE
+result = await authed_connector.read_email("msg123")
+assert result["id"] == "msg123"
+assert result["payload"]["headers"] is not None
+```
 
-### `bulk_delete()`
-- **Soft all succeed**: two messages → `execute_trash_message` ×2; `deleted=2`, `failed=0`
-- **Partial failure continues**: one trash raises → loop continues; `failed=1`, error contains msg_id
-- **Multi-page**: two pages → `execute_list_messages` ×2; both IDs processed
-- **Hard blocked without flag**: raises `ConnectorPermissionError`; list not called
-- **Hard uses delete endpoint**: `authed_perm_delete` → `execute_delete_message` called
+**Note:** `read_email()` returns the raw API dict; `get_email()` returns a NormalizedDocument.
 
-### `disconnect()`
-- **Clears token**: `clear_token` called once
+---
+
+### `send_email()`
+**Signature:** `async def send_email(self, to, subject, body, cc=None, bcc=None) -> Dict`
+
+**Happy path:**
+```python
+mock_http_client.execute_send_message.return_value = {
+    "id": "sent1", "threadId": "thread1", "labelIds": ["SENT"]
+}
+result = await authed_connector.send_email(
+    to="recipient@example.com", subject="Hello", body="World"
+)
+assert result["id"] == "sent1"
+assert result["labelIds"] == ["SENT"]
+mock_http_client.execute_send_message.assert_awaited_once()
+# Verify raw message is base64url-encoded (no padding)
+call_args = mock_http_client.execute_send_message.call_args
+raw = call_args[0][1]  # second positional arg
+assert "=" not in raw
+```
+
+**Error path — 403 (missing scope):**
+```python
+mock_http_client.execute_send_message.side_effect = PermissionError(
+    "gmail.send scope missing — re-authorize the connector"
+)
+with pytest.raises(PermissionError, match="gmail.send scope missing"):
+    await authed_connector.send_email("to@ex.com", "sub", "body")
+```
+
+**Error path — 400 (bad request):**
+```python
+mock_http_client.execute_send_message.side_effect = ValueError("Invalid recipient")
+with pytest.raises(ValueError, match="Invalid recipient"):
+    await authed_connector.send_email("bad@", "sub", "body")
+```
+
+**Test with cc/bcc:**
+```python
+mock_http_client.execute_send_message.return_value = {"id": "s2"}
+result = await authed_connector.send_email(
+    "to@ex.com", "sub", "body", cc="cc@ex.com", bcc="bcc@ex.com"
+)
+assert result["id"] == "s2"
+```
+
+---
+
+### `add_email()`
+**Signature:** `async def add_email(self, to, subject, body, cc=None, bcc=None) -> Dict`
+
+**Happy path:**
+```python
+mock_http_client.execute_create_draft.return_value = {
+    "id": "draft1", "message": {"id": "msg456", "threadId": "t1"}
+}
+result = await authed_connector.add_email("to@ex.com", "Draft", "body text")
+assert result["id"] == "draft1"
+assert result["message"]["id"] == "msg456"
+```
+
+---
+
+### `post_email()`
+**Signature:** `async def post_email(self, to, subject, body, cc=None, bcc=None) -> Dict`
+
+**Happy path (alias test):**
+```python
+mock_http_client.execute_send_message.return_value = {"id": "sent2"}
+result = await authed_connector.post_email("to@ex.com", "Hi", "body")
+# Must call execute_send_message — same as send_email
+mock_http_client.execute_send_message.assert_awaited_once()
+assert result["id"] == "sent2"
+```
 
 ---
 
 ## 10. Test Dependencies
 
-Already present in `requirements.txt`:
+These packages must be in `requirements.txt` under `# ── Test dependencies ──`:
+
 ```
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.11.1
 pytest-cov>=4.1.0
-pytest-timeout==2.4.0
 ```
