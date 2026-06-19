@@ -1,0 +1,139 @@
+{
+  "connector_type": "salesforce",
+  "connector_id": "salesforce",
+  "name": "Salesforce CRM",
+  "provider": "salesforce",
+  "service": "salesforce",
+  "version": "1.0.0",
+  "description": "Sync Salesforce leads, contacts, opportunities and accounts into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Connected App Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "3MVG9...",
+      "help": "From Salesforce Setup → App Manager → Connected App → Consumer Key"
+    },
+    {
+      "key": "client_secret",
+      "label": "Connected App Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Consumer Secret from Connected App",
+      "help": "Consumer Secret from your Salesforce Connected App"
+    },
+    {
+      "key": "instance_url",
+      "label": "Instance URL",
+      "type": "text",
+      "required": false,
+      "placeholder": "https://yourorg.salesforce.com",
+      "help": "Your Salesforce org URL. Auto-detected from OAuth if left blank."
+    }
+  ],
+  "oauth_scopes": ["api", "refresh_token", "offline_access"],
+  "oauth_auth_url": "https://login.salesforce.com/services/oauth2/authorize",
+  "oauth_token_url": "https://login.salesforce.com/services/oauth2/token",
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the OAuth access token by pinging the Salesforce REST API root.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping the Salesforce REST API root and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync CRM Records",
+      "description": "Full or incremental sync of Leads, Contacts, and Opportunities into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "query",
+      "name": "SOQL Query",
+      "description": "Execute an arbitrary SOQL query against the org.",
+      "category": "query",
+      "endpoint": "GET /services/data/v57.0/query?q={soql}"
+    },
+    {
+      "id": "list_objects",
+      "name": "List SObjects",
+      "description": "List all available SObject types in this org.",
+      "category": "objects",
+      "endpoint": "GET /services/data/v57.0/sobjects/"
+    },
+    {
+      "id": "get_object",
+      "name": "Get SObject Record",
+      "description": "Retrieve a single SObject record by type and ID.",
+      "category": "objects",
+      "endpoint": "GET /services/data/v57.0/sobjects/{type}/{id}"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List Leads ordered by creation date descending via SOQL.",
+      "category": "leads",
+      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Lead"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List Contacts ordered by creation date descending via SOQL.",
+      "category": "contacts",
+      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Contact"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List Opportunities ordered by creation date descending via SOQL.",
+      "category": "opportunities",
+      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Opportunity"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "List Accounts ordered by creation date descending via SOQL.",
+      "category": "accounts",
+      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Account"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "query",
+    "objects",
+    "leads",
+    "contacts",
+    "opportunities",
+    "accounts"
+  ],
+  "apis": [
+    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync CRM Records", "id": "sync", "category": "sync" },
+    { "name": "SOQL Query", "id": "query", "category": "query" },
+    { "name": "List SObjects", "id": "list_objects", "category": "objects" },
+    { "name": "Get SObject Record", "id": "get_object", "category": "objects" },
+    { "name": "List Leads", "id": "list_leads", "category": "leads" },
+    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
+    { "name": "List Opportunities", "id": "list_opportunities", "category": "opportunities" },
+    { "name": "List Accounts", "id": "list_accounts", "category": "accounts" }
+  ]
+}
