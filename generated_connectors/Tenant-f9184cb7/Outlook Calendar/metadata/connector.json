@@ -1,0 +1,49 @@
+{
+  "connector_type": "outlook_calendar",
+  "name": "Outlook Calendar",
+  "display_name": "Outlook Calendar",
+  "description": "Connect to Microsoft Outlook Calendar via the Microsoft Graph API to sync events, meetings, and calendar data into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "oauth2",
+  "auth_uri": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+  "token_uri": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+  "scopes": [
+    "https://graph.microsoft.com/Calendars.Read",
+    "offline_access"
+  ],
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Application (client) ID",
+      "type": "string",
+      "required": true,
+      "description": "Azure AD application client ID from the Azure Portal app registration."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "Azure AD client secret value (not the secret ID)."
+    },
+    {
+      "key": "tenant_hint",
+      "label": "Azure AD Tenant (optional)",
+      "type": "string",
+      "required": false,
+      "description": "Your Azure AD tenant ID or domain. Leave blank to allow any Microsoft account."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "description": "OAuth redirect URI registered in Azure Portal. Must match exactly."
+    }
+  ],
+  "capabilities": ["list_calendars", "list_events", "get_event", "sync"],
+  "provider": "microsoft",
+  "category": "calendar",
+  "logo_url": "https://cdn.shielva.ai/connectors/outlook-calendar.svg",
+  "docs_url": "https://docs.shielva.ai/connectors/outlook-calendar"
+}
