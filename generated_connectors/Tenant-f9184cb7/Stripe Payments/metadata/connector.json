@@ -1,4 +1,5 @@
 {
+  "connector_type": "stripe_payments",
   "connector_id": "stripe_payments",
   "name": "Stripe Payments",
   "provider": "stripe",

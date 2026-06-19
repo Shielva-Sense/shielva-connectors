@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 from client import StripeHTTPClient
 from exceptions import StripeAuthError, StripeError, StripeInvalidKeyError, StripeNetworkError
@@ -17,12 +17,18 @@ from models import (
     SyncStatus,
 )
 
+try:
+    from shared.base_connector import BaseConnector
+    _BASE = BaseConnector
+except ImportError:
+    _BASE = object  # standalone / test mode
+
 STRIPE_BASE_URL = "https://api.stripe.com/v1"
 SYNC_PAGE_SIZE = 100
 CIRCUIT_BREAKER_THRESHOLD = 5
 
 
-class StripeConnector:
+class StripeConnector(_BASE):  # type: ignore[misc]
     """
     Shielva connector for Stripe Payments.
 
@@ -30,17 +36,26 @@ class StripeConnector:
     direct access to all major Stripe API resources.
     """
 
-    connector_id: str = ""
+    CONNECTOR_TYPE: str = "stripe_payments"
+    AUTH_TYPE: str = "api_key"
 
     def __init__(
         self,
-        api_key: str = "",
-        connector_id: str = "",
         tenant_id: str = "",
+        connector_id: str = "",
+        config: Dict[str, Any] = None,
+        # Legacy positional-arg compat for standalone tests that pass api_key directly
+        api_key: str = "",
     ) -> None:
-        self._api_key = api_key
-        self.connector_id = connector_id
-        self._tenant_id = tenant_id
+        _config = config or {}
+        if _BASE is not object:
+            super().__init__(tenant_id=tenant_id, connector_id=connector_id, config=_config)
+        else:
+            self.config = _config
+            self.connector_id = connector_id
+            self._tenant_id = tenant_id
+        # Stripe-specific attrs
+        self._api_key = _config.get("api_key", "") or api_key
         self.http_client: StripeHTTPClient | None = None
         self._circuit_breaker = CircuitBreaker(failure_threshold=CIRCUIT_BREAKER_THRESHOLD)
 
