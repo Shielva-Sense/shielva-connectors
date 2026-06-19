@@ -418,6 +418,7 @@ class ImportConnectorSpec(BaseModel):
     connector_name: str = ""
     version: str = ""            # metadata_version to display
     run_kind: str = "build"      # "build" | "enhance"
+    output_dir: str = ""         # local path to the connector directory (optional)
 
 
 class ImportExistingBody(BaseModel):
@@ -545,6 +546,99 @@ async def import_existing_sessions(
     if not app_id and not tenant_id:
         raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
 
+    import json as _json
+    from integration.schemas.models import StepType, StepStatus
+
+    _valid_types = {e.value for e in StepType}
+    _type_map = {"write_integration_tests": "run_integration_tests"}
+
+    def _load_plan_steps(output_dir: str) -> list:
+        """Read plan_steps.json from output_dir and return plan step dicts with step configs."""
+        if not output_dir:
+            return []
+        ps_path = Path(output_dir) / "plan_steps.json"
+        if not ps_path.exists():
+            return []
+        try:
+            raw = _json.loads(ps_path.read_text())
+        except Exception:
+            return []
+        # Load connector metadata for per-step config enrichment
+        meta: dict = {}
+        for meta_rel in ("metadata/connector.json", "connector.json"):
+            mp = Path(output_dir) / meta_rel
+            if mp.exists():
+                try:
+                    meta = _json.loads(mp.read_text())
+                except Exception:
+                    pass
+                break
+        install_fields = meta.get("install_fields", [])
+        api_methods = [a.get("name", "") for a in meta.get("apis", [])]
+        steps = []
+        for i, s in enumerate(raw):
+            t = (s.get("type") or "").lower()
+            t = _type_map.get(t, t)
+            if t not in _valid_types:
+                t = "write_connector"
+            st = (s.get("status") or "").lower()
+            if st not in {e.value for e in StepStatus}:
+                st = "completed"
+            # Enrich step config from connector metadata
+            cfg: dict = {}
+            if t == "write_connector":
+                cfg = {
+                    "methods": api_methods,
+                    "install_fields": install_fields,
+                    "features": ["retry", "pagination", "circuit_breaker", "normalizer", "rate_limiting"],
+                }
+            elif t == "generate_metadata":
+                cfg = {"install_fields": install_fields, "api_count": len(api_methods)}
+            elif t in ("write_tests", "run_integration_tests"):
+                cfg = {"methods": api_methods, "test_type": "both"}
+            steps.append({
+                "index": i,
+                "type": t,
+                "title": s.get("title", ""),
+                "description": s.get("description", s.get("title", "")),
+                "estimated_duration_s": s.get("estimated_duration_s", 30),
+                "config": s.get("config", cfg) or cfg,
+                "status": st,
+            })
+
+        # Always append terminal steps if missing
+        _step_types = {s["type"] for s in steps}
+        _next = len(steps)
+        if "setup_instructions" not in _step_types:
+            steps.append({
+                "index": _next, "type": "setup_instructions",
+                "title": "Generate Setup Instructions",
+                "description": "Research and generate connector-specific configuration guide — shows users exactly where to find credentials in the provider portal.",
+                "estimated_duration_s": 45, "config": {}, "status": "completed",
+            })
+            _next += 1
+        if "version_upgrade" not in _step_types:
+            steps.append({
+                "index": _next, "type": "version_upgrade",
+                "title": "Version Upgrade",
+                "description": "Review changes and set the release version for this connector. Select patch, minor, or major version bump.",
+                "estimated_duration_s": 30, "config": {"auto_suggest": True}, "status": "completed",
+            })
+        return steps
+
+    def _load_connector_meta(output_dir: str) -> dict:
+        """Read metadata/connector.json (or connector.json) from output_dir."""
+        if not output_dir:
+            return {}
+        for rel in ("metadata/connector.json", "connector.json"):
+            p = Path(output_dir) / rel
+            if p.exists():
+                try:
+                    return _json.loads(p.read_text())
+                except Exception:
+                    pass
+        return {}
+
     col = sessions_collection()
     created: List[str] = []
     skipped: List[str] = []
@@ -553,6 +647,45 @@ async def import_existing_sessions(
         if await col.find_one({**owner, "service_slug": spec.service_slug}):
             skipped.append(spec.service_slug)
             continue
+
+        meta = _load_connector_meta(spec.output_dir)
+        install_fields: list = meta.get("install_fields", [])
+        auth_type: str = meta.get("auth_type", "")
+
+        # Detect test_type: "both" when integration test file is present
+        has_integration_tests = spec.output_dir and (Path(spec.output_dir) / "tests" / "test_integration.py").exists()
+        test_type = "both" if has_integration_tests else "unit"
+
+        # selected_config_keys: all install field keys → user-provided at connect time
+        selected_config_keys = [f["key"] for f in install_fields if f.get("key")]
+
+        # Derive package_structure, recommended_features, default_config_fields from metadata
+        feature_ids: list = meta.get("features", [])
+        recommended_features = [
+            {
+                "id": fid,
+                "label": fid.replace("_", " ").title(),
+                "recommended": True,
+                "category": "connector",
+                "description": "",
+            }
+            for fid in feature_ids
+        ]
+        default_config_fields = install_fields  # already {key, label, type, required, ...}
+        pkg_root = meta.get("connector_id", spec.service_slug)
+        if not pkg_root.endswith("_connector"):
+            pkg_root = pkg_root + "_connector"
+        pkg_files: list = []
+        if spec.output_dir:
+            import os as _os
+            for walk_root, dirs, filenames in _os.walk(spec.output_dir):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".shielva")]
+                for fname in filenames:
+                    if fname.endswith((".py", ".json", ".txt", ".ini", ".cfg", ".md", ".toml")):
+                        rel = _os.path.relpath(_os.path.join(walk_root, fname), spec.output_dir)
+                        pkg_files.append({"path": rel})
+        package_structure = {"root": pkg_root, "files": pkg_files[:60]}
+
         session = IntegrationSession(
             app_id=app_id,
             tenant_id=tenant_id,
@@ -562,15 +695,29 @@ async def import_existing_sessions(
             connector_name=spec.connector_name or "",
             run_kind=spec.run_kind if spec.run_kind in ("build", "enhance") else "build",
             status=SessionStatus.COMPLETED,
+            auth_type=auth_type,
+            test_type=test_type,
+            selected_config_keys=selected_config_keys,
+            default_config=install_fields,
         )
         doc = session.model_dump()
         doc["service_slug"] = spec.service_slug
         doc["stepper_max_step"] = 7                 # completed → all steps reachable
         doc["metadata_version"] = spec.version or None
-        doc["imported_from_disk"] = True            # provenance marker (history is not reconstructed)
+        doc["imported_from_disk"] = True            # provenance marker
+        doc["selected_features"] = feature_ids or ["retry", "pagination", "circuit_breaker", "normalizer", "rate_limiting"]
+        doc["package_structure"] = package_structure
+        doc["recommended_features"] = recommended_features
+        doc["default_config_fields"] = default_config_fields
+        if spec.output_dir:
+            doc["output_dir"] = spec.output_dir
+        steps = _load_plan_steps(spec.output_dir)
+        if steps:
+            doc["plan"] = {"steps": steps, "version": 1}
         res = await col.insert_one(doc)
         created.append(str(res.inserted_id))
-        logger.info("session.imported_from_disk", service_slug=spec.service_slug, session_id=str(res.inserted_id))
+        logger.info("session.imported_from_disk", service_slug=spec.service_slug, session_id=str(res.inserted_id),
+                    steps=len(steps), auth_type=auth_type, test_type=test_type, config_keys=selected_config_keys)
 
     return {"created": created, "skipped": skipped, "imported": len(created)}
 
@@ -650,7 +797,7 @@ async def patch_session(
     from bson import ObjectId
     app_id    = x_app_id or None
     tenant_id = x_tenant_id or None
-    allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt"}
+    allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt", "output_dir", "auth_type", "package_structure", "recommended_features", "default_config_fields"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         return {"ok": True}
@@ -1780,6 +1927,50 @@ async def get_test_guidelines(session_id: str, x_tenant_id: Optional[str] = Head
     return {"content": "", "source": "not_found", "chars": 0, "path": str(local_path)}
 
 
+async def _cascade_delete_acp_connector(gateway_connector_id: str, tenant_id: str) -> None:
+    """Best-effort: ask ACP core to delete the connector linked to this session (joined by
+    gateway_connector_id == acp connector_id). Token-gated /internal endpoint, called DIRECTLY
+    (not via the JWT-gated public gateway). Never raises — a sync failure must not break the
+    primary session delete; it's logged for follow-up."""
+    import httpx as _httpx
+    base = (settings.ACP_INTERNAL_URL or "https://localhost:8020").rstrip("/")
+    try:
+        try:
+            from shielva_common.tls import internal_ca_verify
+            verify = internal_ca_verify()
+        except Exception:  # noqa: BLE001 — shielva_common not present in this service; trust internal CA bundle
+            verify = True
+        async with _httpx.AsyncClient(verify=verify, timeout=8.0) as client:
+            r = await client.delete(
+                f"{base}/internal/connectors/by-connector-id/{gateway_connector_id}",
+                headers={"X-Internal-Token": settings.ACP_INTERNAL_TOKEN, "X-Tenant-ID": tenant_id},
+            )
+        logger.info("session.cascade_acp_connector_delete", connector_id=gateway_connector_id,
+                    status=r.status_code, tenant_id=tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("session.cascade_acp_connector_delete_failed",
+                       connector_id=gateway_connector_id, error=str(exc))
+
+
+@session_router.delete("/by-connector/{gateway_connector_id}")
+async def delete_sessions_by_connector(
+    gateway_connector_id: str,
+    x_tenant_id: Optional[str] = Header(None),
+):
+    """Cascade target: delete the builder session(s) linked to an ACP connector (joined by
+    gateway_connector_id), so the integration grid stops counting it. Called by ACP core when
+    a connector is deleted. Performs NO back-cascade (ACP already deleted the connector), so
+    there's no loop. Tenant-scoped; idempotent."""
+    tenant_id = _get_tenant(x_tenant_id)
+    q: Dict[str, Any] = {"gateway_connector_id": gateway_connector_id}
+    if tenant_id:
+        q["tenant_id"] = tenant_id
+    res = await sessions_collection().delete_many(q)
+    logger.info("session.cascade_delete_by_connector", connector_id=gateway_connector_id,
+                tenant_id=tenant_id, deleted=res.deleted_count)
+    return {"deleted": res.deleted_count}
+
+
 @session_router.delete("/{session_id}")
 async def delete_session(
     session_id: str,
@@ -1893,6 +2084,12 @@ async def delete_session(
 
     # Clear execution event buffer
     execution_manager.cleanup(session_id)
+
+    # Cascade: delete the linked ACP connector so the two stores stay in sync (joined by
+    # gateway_connector_id == acp connector_id). Best-effort — never fail the session delete.
+    # ACP's internal endpoint does NOT cascade back, so there's no loop.
+    if gateway_connector_id and tenant_id:
+        await _cascade_delete_acp_connector(gateway_connector_id, tenant_id)
 
     logger.info("session.deleted", session_id=session_id, tenant_id=tenant_id,
                 provider=provider, service=service)

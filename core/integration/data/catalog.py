@@ -4082,6 +4082,679 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/shopify.png",
         },
     },
+
+    # ══════════════════════════════════════════════════════════════════
+    # CRM PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "pipedrive": {
+        "crm": {
+            "display_name": "Pipedrive CRM",
+            "description": "Deals, contacts, organizations, activities, and pipeline management",
+            "auth_type": "api_key",
+            "sdk_package": "pypipedrive requests",
+            "docs_url": "https://developers.pipedrive.com/docs/api/v1",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/pipedrive.png",
+        },
+        "leads": {
+            "display_name": "Pipedrive Leads",
+            "description": "Lead inbox management, lead-to-deal conversion, and lead scoring",
+            "auth_type": "api_key",
+            "sdk_package": "pypipedrive requests",
+            "docs_url": "https://developers.pipedrive.com/docs/api/v1/Leads",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/pipedrive.png",
+        },
+    },
+
+    "zoho": {
+        "crm": {
+            "display_name": "Zoho CRM",
+            "description": "Leads, contacts, accounts, deals, and workflow automation",
+            "auth_type": "oauth2",
+            "sdk_package": "zohocrmsdk requests",
+            "docs_url": "https://www.zoho.com/crm/developer/docs/api/v6/",
+            "default_scopes": ["ZohoCRM.modules.ALL", "ZohoCRM.settings.ALL"],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zoho.png",
+        },
+        "desk": {
+            "display_name": "Zoho Desk",
+            "description": "Support tickets, agents, departments, and customer portal",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://desk.zoho.com/DeskAPIDocument",
+            "default_scopes": ["Desk.tickets.ALL", "Desk.contacts.READ"],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zoho.png",
+        },
+        "mail": {
+            "display_name": "Zoho Mail",
+            "description": "Email accounts, folders, messages, and calendar events",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://www.zoho.com/mail/help/api/",
+            "default_scopes": ["ZohoMail.messages.READ", "ZohoMail.accounts.READ"],
+            "category": "communication",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zoho.png",
+        },
+    },
+
+    "monday": {
+        "boards": {
+            "display_name": "Monday.com Boards",
+            "description": "Boards, items, columns, subitems, and automation triggers via GraphQL API",
+            "auth_type": "api_key",
+            "sdk_package": "monday requests",
+            "docs_url": "https://developer.monday.com/api-reference/reference/about-the-api-reference",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/monday.png",
+        },
+    },
+
+    "freshsales": {
+        "crm": {
+            "display_name": "Freshsales CRM",
+            "description": "Contacts, leads, deals, accounts, notes, and sales sequences",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.freshsales.io/api/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshsales.png",
+        },
+    },
+
+    "copper": {
+        "crm": {
+            "display_name": "Copper CRM",
+            "description": "People, companies, opportunities, projects, and activities for Google Workspace",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.copper.com/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/copper.png",
+        },
+    },
+
+    "keap": {
+        "crm": {
+            "display_name": "Keap (Infusionsoft) CRM",
+            "description": "Contacts, tags, opportunities, orders, and email campaigns",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.infusionsoft.com/docs/rest/",
+            "default_scopes": ["full"],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/keap.png",
+        },
+    },
+
+    "insightly": {
+        "crm": {
+            "display_name": "Insightly CRM",
+            "description": "Contacts, organisations, leads, opportunities, and project management",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://api.insightly.com/v3.1/Help",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/insightly.png",
+        },
+    },
+
+    "nocrm": {
+        "crm": {
+            "display_name": "noCRM.io",
+            "description": "Leads, steps, pipelines, and sales team activity tracking",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://nocrm.io/api/docs",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nocrm.png",
+        },
+    },
+
+    "kommo": {
+        "crm": {
+            "display_name": "Kommo (amoCRM)",
+            "description": "Leads, contacts, companies, tasks, and pipeline automation",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://www.kommo.com/developers/content/api/",
+            "default_scopes": ["crm"],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/kommo.png",
+        },
+    },
+
+    "activecampaign": {
+        "crm": {
+            "display_name": "ActiveCampaign CRM",
+            "description": "Contacts, deals, pipelines, and CRM automation",
+            "auth_type": "api_key",
+            "sdk_package": "activecampaign requests",
+            "docs_url": "https://developers.activecampaign.com/reference/overview",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/activecampaign.png",
+        },
+        "marketing": {
+            "display_name": "ActiveCampaign Marketing",
+            "description": "Email campaigns, automations, lists, and segmentation",
+            "auth_type": "api_key",
+            "sdk_package": "activecampaign requests",
+            "docs_url": "https://developers.activecampaign.com/reference/overview",
+            "default_scopes": [],
+            "category": "marketing",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/activecampaign.png",
+        },
+    },
+
+    "nutshell": {
+        "crm": {
+            "display_name": "Nutshell CRM",
+            "description": "Contacts, leads, accounts, and email sequences",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.nutshell.com/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nutshell.png",
+        },
+    },
+
+    "sugarcrm": {
+        "crm": {
+            "display_name": "SugarCRM",
+            "description": "Accounts, contacts, leads, opportunities, and cases",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://support.sugarcrm.com/Documentation/Sugar_Developer/Sugar_Developer_Guide/Integration/Web_Services/REST_API/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/sugarcrm.png",
+        },
+    },
+
+    "bitrix24": {
+        "crm": {
+            "display_name": "Bitrix24 CRM",
+            "description": "Leads, deals, contacts, companies, and sales funnel automation",
+            "auth_type": "oauth2",
+            "sdk_package": "fast-bitrix24 requests",
+            "docs_url": "https://apidocs.bitrix24.com/",
+            "default_scopes": ["crm"],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/bitrix24.png",
+        },
+    },
+
+    "attio": {
+        "crm": {
+            "display_name": "Attio CRM",
+            "description": "People, companies, records, attributes, lists, and notes",
+            "auth_type": "bearer_token",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.attio.com/reference/getting-started",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/attio.png",
+        },
+    },
+
+    "outreach": {
+        "crm": {
+            "display_name": "Outreach Sales Engagement",
+            "description": "Prospects, sequences, calls, meetings, and sales intelligence",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.outreach.io/api/",
+            "default_scopes": ["profiles.all", "prospects.all", "sequences.all"],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/outreach.png",
+        },
+    },
+
+    "nimble": {
+        "crm": {
+            "display_name": "Nimble CRM",
+            "description": "Contacts, deals, activities, and social relationship management",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://nimble.readthedocs.io/en/latest/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nimble.png",
+        },
+    },
+
+    "close": {
+        "crm": {
+            "display_name": "Close CRM",
+            "description": "Leads, contacts, opportunities, activities, and email/call sequences",
+            "auth_type": "api_key",
+            "sdk_package": "closeio requests",
+            "docs_url": "https://developer.close.com/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/close.png",
+        },
+    },
+
+    "kustomer": {
+        "crm": {
+            "display_name": "Kustomer CRM",
+            "description": "Customers, conversations, messages, and omnichannel support workflows",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.kustomer.com/kustomer-api-docs/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/kustomer.png",
+        },
+    },
+
+    "agile_crm": {
+        "crm": {
+            "display_name": "Agile CRM",
+            "description": "Contacts, deals, tasks, notes, campaigns, and deal milestones",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://github.com/agilecrm/rest-api",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/agile_crm.png",
+        },
+    },
+
+    "vtiger": {
+        "crm": {
+            "display_name": "Vtiger CRM",
+            "description": "Contacts, leads, organisations, potentials, and cases",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://www.vtiger.com/docs/vtiger-rest-api-documentation/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/vtiger.png",
+        },
+    },
+
+    "capsule": {
+        "crm": {
+            "display_name": "Capsule CRM",
+            "description": "People, organisations, opportunities, cases, and activity tracking",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.capsulecrm.com/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/capsule.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # HELPDESK PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "freshdesk": {
+        "tickets": {
+            "display_name": "Freshdesk Tickets",
+            "description": "Support tickets, contacts, agents, canned responses, and SLA management",
+            "auth_type": "api_key",
+            "sdk_package": "freshdesk requests",
+            "docs_url": "https://developers.freshdesk.com/api/",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshdesk.png",
+        },
+        "contacts": {
+            "display_name": "Freshdesk Contacts",
+            "description": "Customer contacts, companies, and merge operations",
+            "auth_type": "api_key",
+            "sdk_package": "freshdesk requests",
+            "docs_url": "https://developers.freshdesk.com/api/#contacts",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshdesk.png",
+        },
+    },
+
+    "helpscout": {
+        "mailbox": {
+            "display_name": "Help Scout Mailbox",
+            "description": "Conversations, threads, customers, tags, and shared inboxes",
+            "auth_type": "oauth2",
+            "sdk_package": "python-helpscout requests",
+            "docs_url": "https://developer.helpscout.com/mailbox-api/",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/helpscout.png",
+        },
+    },
+
+    "front": {
+        "inbox": {
+            "display_name": "Front Inbox",
+            "description": "Conversations, messages, contacts, inboxes, and team assignments",
+            "auth_type": "api_key",
+            "sdk_package": "frontapp requests",
+            "docs_url": "https://dev.frontapp.com/reference/introduction",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/front.png",
+        },
+    },
+
+    "intercom": {
+        "messenger": {
+            "display_name": "Intercom Messenger",
+            "description": "Contacts, conversations, messages, tags, and data attributes",
+            "auth_type": "bearer_token",
+            "sdk_package": "python-intercom requests",
+            "docs_url": "https://developers.intercom.com/docs/build-an-integration/learn-more/rest-apis/",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/intercom.png",
+        },
+    },
+
+    "gorgias": {
+        "helpdesk": {
+            "display_name": "Gorgias Helpdesk",
+            "description": "Tickets, customers, macros, views, and integrations for e-commerce support",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.gorgias.com/reference/introduction",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/gorgias.png",
+        },
+    },
+
+    "reamaze": {
+        "helpdesk": {
+            "display_name": "Re:amaze Support",
+            "description": "Conversations, customers, channels, notes, and automated workflows",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://www.reamaze.com/api",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/reamaze.png",
+        },
+    },
+
+    "groove": {
+        "helpdesk": {
+            "display_name": "Groove Helpdesk",
+            "description": "Tickets, customers, agents, mailboxes, and knowledge base articles",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://www.groovehq.com/docs",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/groove.png",
+        },
+    },
+
+    "freshservice": {
+        "itsm": {
+            "display_name": "Freshservice ITSM",
+            "description": "Tickets, assets, changes, problems, releases, and CMDB",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://api.freshservice.com/",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshservice.png",
+        },
+    },
+
+    "happyfox": {
+        "helpdesk": {
+            "display_name": "HappyFox Helpdesk",
+            "description": "Tickets, contacts, staff, categories, and SLA policies",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.happyfox.com/",
+            "default_scopes": [],
+            "category": "helpdesk",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/happyfox.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # PRODUCTIVITY PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "airtable": {
+        "bases": {
+            "display_name": "Airtable Bases",
+            "description": "Bases, tables, records, fields, views, and automations",
+            "auth_type": "api_key",
+            "sdk_package": "pyairtable requests",
+            "docs_url": "https://airtable.com/developers/web/api/introduction",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/airtable.png",
+        },
+    },
+
+    "asana": {
+        "projects": {
+            "display_name": "Asana Projects",
+            "description": "Projects, tasks, subtasks, sections, portfolios, and goals",
+            "auth_type": "oauth2",
+            "sdk_package": "asana requests",
+            "docs_url": "https://developers.asana.com/reference/rest-api-reference",
+            "default_scopes": ["default"],
+            "category": "productivity",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/asana.png",
+        },
+    },
+
+    "calendly": {
+        "scheduling": {
+            "display_name": "Calendly Scheduling",
+            "description": "Event types, scheduled events, invitees, and availability rules",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.calendly.com/api-docs/",
+            "default_scopes": ["default"],
+            "category": "productivity",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/calendly.png",
+        },
+    },
+
+    "trello": {
+        "boards": {
+            "display_name": "Trello Boards",
+            "description": "Boards, lists, cards, checklists, labels, and members",
+            "auth_type": "api_key",
+            "sdk_package": "py-trello requests",
+            "docs_url": "https://developer.atlassian.com/cloud/trello/rest/api-group-actions/",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/trello.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # E-COMMERCE PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "bigcommerce": {
+        "store": {
+            "display_name": "BigCommerce Store",
+            "description": "Products, orders, customers, coupons, and cart management",
+            "auth_type": "api_key",
+            "sdk_package": "bigcommerce requests",
+            "docs_url": "https://developer.bigcommerce.com/docs/rest-management",
+            "default_scopes": [],
+            "category": "ecommerce",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/bigcommerce.png",
+        },
+    },
+
+    "magento": {
+        "store": {
+            "display_name": "Magento 2 Store",
+            "description": "Products, categories, orders, customers, and inventory via REST API",
+            "auth_type": "bearer_token",
+            "sdk_package": "python-magento requests",
+            "docs_url": "https://developer.adobe.com/commerce/webapi/rest/",
+            "default_scopes": [],
+            "category": "ecommerce",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/magento.png",
+        },
+    },
+
+    "woocommerce": {
+        "store": {
+            "display_name": "WooCommerce Store",
+            "description": "Products, orders, customers, coupons, and shipping zones",
+            "auth_type": "basic_auth",
+            "sdk_package": "woocommerce requests",
+            "docs_url": "https://woocommerce.github.io/woocommerce-rest-api-docs/",
+            "default_scopes": [],
+            "category": "ecommerce",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/woocommerce.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # MARKETING PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "mailchimp": {
+        "campaigns": {
+            "display_name": "Mailchimp Campaigns",
+            "description": "Email campaigns, lists, members, templates, and automation workflows",
+            "auth_type": "api_key",
+            "sdk_package": "mailchimp-marketing requests",
+            "docs_url": "https://mailchimp.com/developer/marketing/api/",
+            "default_scopes": [],
+            "category": "marketing",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/mailchimp.png",
+        },
+    },
+
+    "klaviyo": {
+        "marketing": {
+            "display_name": "Klaviyo Marketing",
+            "description": "Profiles, lists, segments, flows, events, and campaign analytics",
+            "auth_type": "api_key",
+            "sdk_package": "klaviyo-api requests",
+            "docs_url": "https://developers.klaviyo.com/en/reference/api_overview",
+            "default_scopes": [],
+            "category": "marketing",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/klaviyo.png",
+        },
+    },
+
+    "constant_contact": {
+        "email": {
+            "display_name": "Constant Contact Email",
+            "description": "Email campaigns, contact lists, segments, and reporting",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://v3.developer.constantcontact.com/api_reference/index.html",
+            "default_scopes": ["contact_data", "campaign_data"],
+            "category": "marketing",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/constant_contact.png",
+        },
+    },
+
+    "marketo": {
+        "automation": {
+            "display_name": "Marketo Marketing Automation",
+            "description": "Leads, lists, programs, campaigns, assets, and activity logs",
+            "auth_type": "oauth2",
+            "sdk_package": "marketorestpython requests",
+            "docs_url": "https://developers.marketo.com/rest-api/",
+            "default_scopes": [],
+            "category": "marketing",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/marketo.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # ANALYTICS PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "gong": {
+        "calls": {
+            "display_name": "Gong Call Analytics",
+            "description": "Call recordings, transcripts, deal intelligence, and coaching insights",
+            "auth_type": "basic_auth",
+            "sdk_package": "requests",
+            "docs_url": "https://gong.io/product/integrations/api/",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/gong.png",
+        },
+    },
+
+    "chorus": {
+        "calls": {
+            "display_name": "Chorus.ai Conversation Intelligence",
+            "description": "Call recordings, moments, scorecards, and deal signals",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.chorus.ai/docs",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/chorus.png",
+        },
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # INTEGRATION PLATFORM PROVIDERS
+    # ══════════════════════════════════════════════════════════════════
+
+    "zapier": {
+        "webhooks": {
+            "display_name": "Zapier Webhooks",
+            "description": "Trigger Zaps via catch hooks and send data to connected apps",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://zapier.com/developer/documentation/v2/",
+            "default_scopes": [],
+            "category": "cloud_dev",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zapier.png",
+        },
+        "nla": {
+            "display_name": "Zapier NLA Actions",
+            "description": "Trigger any Zapier action via natural language API (NLA)",
+            "auth_type": "bearer_token",
+            "sdk_package": "requests",
+            "docs_url": "https://nla.zapier.com/docs/",
+            "default_scopes": [],
+            "category": "cloud_dev",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zapier.png",
+        },
+    },
+
+    "make": {
+        "scenarios": {
+            "display_name": "Make (Integromat) Scenarios",
+            "description": "Trigger scenarios, manage connections, retrieve execution logs",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://www.make.com/en/api-documentation",
+            "default_scopes": [],
+            "category": "cloud_dev",
+            "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/make.png",
+        },
+    },
 }
 
 

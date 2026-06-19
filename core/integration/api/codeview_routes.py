@@ -40,12 +40,12 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
 
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": tenant_id},
-        {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1},
+        {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1, "output_dir": 1},
     )
     if not session:
         session = await sessions_collection().find_one(
             {"_id": oid},
-            {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1},
+            {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1, "output_dir": 1},
         )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -64,6 +64,7 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
         "stored_tenant_id": session.get("tenant_id", ""),
         "stored_tenant_name": (session.get("tenant_name") or "").strip().lower(),
         "session_id": session_id,
+        "output_dir": session.get("output_dir") or "",
     }
 
 
@@ -96,6 +97,14 @@ async def _resolve_output_dir(session_id: str, tenant_id: str) -> Path:
     Tries local disk first; raises 404 if not found (use _resolve_output_dir_or_r2 for R2 fallback).
     """
     meta = await _resolve_session_meta(session_id, tenant_id)
+
+    # Prefer the session's stored output_dir (set by import-existing and Electron SAD sessions).
+    # This is the canonical path for imported connectors that live outside GENERATED_CODE_DIR.
+    if meta.get("output_dir"):
+        _stored = Path(meta["output_dir"])
+        if _stored.exists():
+            return _stored
+
     _base = Path(settings.GENERATED_CODE_DIR)
     for _tid in [meta["stored_tenant_id"], tenant_id, meta["stored_tenant_name"]]:
         if not _tid:

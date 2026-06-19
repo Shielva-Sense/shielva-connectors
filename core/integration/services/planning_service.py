@@ -506,6 +506,44 @@ def _extract_plan_parts(llm_result: Any) -> Dict[str, Any]:
         raise ValueError(f"Expected JSON object or array from LLM, got {type(llm_result).__name__}")
 
 
+def _fill_missing_plan_extras(
+    parts: Dict[str, Any],
+    parsed_steps: "List[PlanStep]",
+    auth_type: str = "",
+) -> None:
+    """Backfill recommended_features and default_config_fields from step configs when LLM omitted them.
+
+    Mutates `parts` in-place. Called after _parse_steps so we have typed PlanStep objects.
+    """
+    if not parts.get("recommended_features"):
+        for s in parsed_steps:
+            feat_list = (s.config or {}).get("features") if s.config else None
+            if feat_list and isinstance(feat_list, list):
+                parts["recommended_features"] = [
+                    {"id": fid, "label": fid.replace("_", " ").title(),
+                     "recommended": True, "category": "connector", "description": ""}
+                    for fid in feat_list if isinstance(fid, str)
+                ]
+                break
+
+    if not parts.get("default_config_fields"):
+        for s in parsed_steps:
+            inst = (s.config or {}).get("install_fields") if s.config else None
+            if inst and isinstance(inst, list):
+                parts["default_config_fields"] = inst
+                break
+        if not parts.get("default_config_fields") and auth_type:
+            if auth_type == "oauth2":
+                parts["default_config_fields"] = [
+                    {"key": "client_id",     "label": "Client ID",     "type": "text",     "required": True},
+                    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": True},
+                ]
+            elif auth_type in ("api_key", "bearer"):
+                parts["default_config_fields"] = [
+                    {"key": "api_key", "label": "API Key", "type": "password", "required": True}
+                ]
+
+
 # ── Plan generation ───────────────────────────────────────────────────
 
 async def generate_plan(
@@ -652,6 +690,8 @@ async def generate_plan(
     _ensure_terminal_steps(steps)
     # Guard: ensure user-requested operations are in write_connector.config.methods
     _ensure_user_methods_in_write_connector(steps, session.get("user_prompt", ""), service_slug)
+    # Backfill extras when LLM used old format (bare array)
+    _fill_missing_plan_extras(parts, steps, auth_type=session.get("auth_type", ""))
 
     plan = PlanDocument(steps=steps, version=1)
 
@@ -1234,6 +1274,11 @@ async def generate_plan_stream(
         _ensure_terminal_steps(steps)
         # Guard: inject any user-requested methods the LLM missed
         _ensure_user_methods_in_write_connector(steps, session.get("user_prompt", ""), service_slug)
+        # Backfill extras when LLM used old format (bare array)
+        _stream_parts = {"recommended_features": recommended_features, "default_config_fields": default_config_fields}
+        _fill_missing_plan_extras(_stream_parts, steps, auth_type=session.get("auth_type", ""))
+        recommended_features = _stream_parts["recommended_features"]
+        default_config_fields = _stream_parts["default_config_fields"]
 
         plan = PlanDocument(steps=steps, version=1)
 
@@ -1841,6 +1886,36 @@ async def import_cached_plan(
     package_structure["root"] = f"{service_slug}_connector"
     recommended_features = plan_data.get("recommended_features") or []
     default_config_fields = plan_data.get("default_config_fields") or []
+
+    # When Claude used old format (bare array), derive extras from the plan steps and session
+    if not recommended_features:
+        for s in steps:
+            feat_list = (s.config or {}).get("features") if s.config else None
+            if feat_list and isinstance(feat_list, list):
+                recommended_features = [
+                    {"id": fid, "label": fid.replace("_", " ").title(),
+                     "recommended": True, "category": "connector", "description": ""}
+                    for fid in feat_list if isinstance(fid, str)
+                ]
+                break
+
+    if not default_config_fields:
+        for s in steps:
+            inst_fields = (s.config or {}).get("install_fields") if s.config else None
+            if inst_fields and isinstance(inst_fields, list):
+                default_config_fields = inst_fields
+                break
+        if not default_config_fields:
+            auth_type = session.get("auth_type", "")
+            if auth_type == "oauth2":
+                default_config_fields = [
+                    {"key": "client_id",     "label": "Client ID",     "type": "text",     "required": True},
+                    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": True},
+                ]
+            elif auth_type in ("api_key", "bearer"):
+                default_config_fields = [
+                    {"key": "api_key", "label": "API Key", "type": "password", "required": True}
+                ]
 
     plan = PlanDocument(steps=steps, version=plan_data.get("version", 1))
 

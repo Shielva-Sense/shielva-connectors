@@ -32,6 +32,11 @@ class IntegrationSettings(BaseSettings):
     # API Gateway (for service registration)
     API_GATEWAY_URL: str = "https://localhost:8000"
 
+    # ACP core (cms) — DIRECT internal URL (bypasses the JWT-gated public gateway) for the
+    # connector↔session delete cascade. Token-gated /internal/* endpoint; never gateway-exposed.
+    ACP_INTERNAL_URL: str = "https://localhost:8020"
+    ACP_INTERNAL_TOKEN: str = "acp-internal-dev-token"
+
     # LLM — Claude as primary
     # Mode: "cli"    = use Claude CLI directly (local dev, Max plan, $0)
     #        "worker" = push jobs to Redis, worker machine calls Claude CLI ($0)
