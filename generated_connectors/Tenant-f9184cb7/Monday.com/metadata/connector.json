@@ -1,0 +1,14 @@
+{
+  "connector_type": "monday_com",
+  "display_name": "Monday.com",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Token",
+      "type": "password",
+      "required": true
+    }
+  ]
+}
