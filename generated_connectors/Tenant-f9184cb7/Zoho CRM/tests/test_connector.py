@@ -1,1149 +1,950 @@
-"""
-Comprehensive unit test suite for the Zoho CRM connector.
-60+ tests — no live network calls.
-"""
+"""Unit tests for FreshworksCRMConnector — all HTTP calls are mocked."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Make root importable without installing
-sys.path.insert(0, str(Path(__file__).parent.parent))
+ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from connector import FreshworksCRMConnector
 from exceptions import (
-    ZohoCRMAuthError,
-    ZohoCRMError,
-    ZohoCRMNetworkError,
-    ZohoCRMNotFoundError,
-    ZohoCRMRateLimitError,
-    ZohoCRMServerError,
+    FreshworksCRMAuthError,
+    FreshworksCRMNetworkError,
+    FreshworksCRMNotFoundError,
+    FreshworksCRMRateLimitError,
 )
-from models import (
-    AuthStatus,
-    ConnectorDocument,
-    ConnectorHealth,
-    HealthCheckResult,
-    InstallResult,
-    SyncResult,
-    SyncStatus,
+from helpers.utils import (
+    normalize_account,
+    normalize_contact,
+    normalize_deal,
+    with_retry,
 )
-from helpers.utils import CircuitBreaker, normalize_record, with_retry, _stable_id
-from connector import ZohoCRMConnector
-from client.http_client import _build_base_url, _build_auth_url
+from models import AuthStatus, ConnectorHealth, SyncStatus
+
+TENANT_ID = "Tenant-f9184cb7"
+CONNECTOR_ID = "conn_freshworks_crm_test_001"
+DOMAIN = "acme"
+API_KEY = "test_api_key_freshworks_xyz"
+
+# ── Sample data ──────────────────────────────────────────────────────────────
+
+SAMPLE_OWNERS_RESPONSE: dict = {
+    "users": [
+        {"id": 1, "display_name": "Alice Sales", "email": "alice@acme.com"},
+        {"id": 2, "display_name": "Bob Manager", "email": "bob@acme.com"},
+    ]
+}
+
+SAMPLE_CONTACT: dict = {
+    "id": 101,
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "display_name": "Jane Doe",
+    "email": "jane.doe@example.com",
+    "work_number": "+1-555-1000",
+    "mobile_number": "+1-555-2000",
+    "job_title": "VP of Engineering",
+    "company": {"name": "Example Corp"},
+    "owner_id": 1,
+    "lead_source_id": 3,
+    "linkedin": "https://linkedin.com/in/janedoe",
+    "created_at": "2026-01-15T09:00:00Z",
+    "updated_at": "2026-06-01T14:00:00Z",
+}
+
+SAMPLE_CONTACT_2: dict = {
+    "id": 102,
+    "first_name": "John",
+    "last_name": "Smith",
+    "display_name": "John Smith",
+    "email": "john.smith@example.com",
+    "work_number": "",
+    "mobile_number": "+44-7700-900456",
+    "job_title": "",
+    "company": {"name": ""},
+    "owner_id": 2,
+    "lead_source_id": None,
+    "linkedin": "",
+    "created_at": "2026-02-20T11:30:00Z",
+    "updated_at": "2026-05-30T10:00:00Z",
+}
+
+SAMPLE_CONTACTS_RESPONSE: dict = {
+    "contacts": [SAMPLE_CONTACT, SAMPLE_CONTACT_2],
+    "meta": {"total_pages": 1, "current_page": 1, "total_count": 2},
+}
+
+SAMPLE_DEAL: dict = {
+    "id": 201,
+    "name": "Acme Enterprise License",
+    "amount": 50000.0,
+    "deal_stage_id": 5,
+    "probability": 75,
+    "expected_close": "2026-09-30",
+    "owner_id": 1,
+    "lead_source_id": 2,
+    "sales_account_id": 301,
+    "contact_id": 101,
+    "created_at": "2026-03-01T10:00:00Z",
+    "updated_at": "2026-06-15T12:00:00Z",
+}
+
+SAMPLE_DEAL_2: dict = {
+    "id": 202,
+    "name": "Startup Pilot",
+    "amount": 5000.0,
+    "deal_stage_id": 2,
+    "probability": 30,
+    "expected_close": "2026-08-15",
+    "owner_id": 2,
+    "lead_source_id": None,
+    "sales_account_id": None,
+    "contact_id": None,
+    "created_at": "2026-04-10T08:00:00Z",
+    "updated_at": "2026-06-10T09:00:00Z",
+}
+
+SAMPLE_DEALS_RESPONSE: dict = {
+    "deals": [SAMPLE_DEAL, SAMPLE_DEAL_2],
+    "meta": {"total_pages": 1, "current_page": 1, "total_count": 2},
+}
+
+SAMPLE_ACCOUNT: dict = {
+    "id": 301,
+    "name": "Example Corp",
+    "website": "https://example.com",
+    "phone": "+1-800-555-0000",
+    "industry_type_id": 7,
+    "business_type_id": 2,
+    "number_of_employees": 500,
+    "annual_revenue": 10000000.0,
+    "owner_id": 1,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-06-01T00:00:00Z",
+}
+
+SAMPLE_ACCOUNT_2: dict = {
+    "id": 302,
+    "name": "Startup Inc",
+    "website": "",
+    "phone": "",
+    "industry_type_id": None,
+    "business_type_id": None,
+    "number_of_employees": 12,
+    "annual_revenue": None,
+    "owner_id": 2,
+    "created_at": "2026-02-01T00:00:00Z",
+    "updated_at": "2026-05-15T00:00:00Z",
+}
+
+SAMPLE_ACCOUNTS_RESPONSE: dict = {
+    "sales_accounts": [SAMPLE_ACCOUNT, SAMPLE_ACCOUNT_2],
+    "meta": {"total_pages": 1, "current_page": 1, "total_count": 2},
+}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Fixtures ─────────────────────────────────────────────────────────────────
 
-def _make_connector(**config_overrides: object) -> ZohoCRMConnector:
-    config: dict = {
-        "client_id": "1000.TESTCLIENTID",
-        "client_secret": "test_secret",
-        "access_token": "1000.token_abc123",
-        "refresh_token": "1000.refresh_xyz789",
-        "dc": "com",
-        "redirect_uri": "https://app.shielva.ai/oauth/callback/zoho_crm",
-    }
-    config.update(config_overrides)
-    return ZohoCRMConnector(
-        tenant_id="tenant-test",
-        connector_id="connector-test",
-        config=config,
+
+def make_connector(domain: str = DOMAIN, api_key: str = API_KEY) -> FreshworksCRMConnector:
+    return FreshworksCRMConnector(
+        tenant_id=TENANT_ID,
+        connector_id=CONNECTOR_ID,
+        config={"domain": domain, "api_key": api_key},
     )
 
 
-def _zoho_page(records: list, more_records: bool = False, page: int = 1) -> dict:
-    return {
-        "data": records,
-        "info": {
-            "page": page,
-            "count": len(records),
-            "more_records": more_records,
-            "per_page": 200,
-        },
-    }
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1. INSTALL
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-def _lead_record(record_id: str = "3692340000001234567") -> dict:
-    return {
-        "id": record_id,
-        "First_Name": "Jane",
-        "Last_Name": "Smith",
-        "Company": "Acme Corp",
-        "Email": "jane@acme.com",
-        "Phone": "+1-555-0100",
-        "Lead_Status": "Not Contacted",
-        "Lead_Source": "Web",
-        "Created_Time": "2024-01-15T10:00:00+00:00",
-    }
-
-
-def _contact_record(record_id: str = "3692340000002345678") -> dict:
-    return {
-        "id": record_id,
-        "First_Name": "Bob",
-        "Last_Name": "Jones",
-        "Account_Name": {"id": "99999", "name": "BigCorp"},
-        "Email": "bob@bigcorp.com",
-        "Phone": "+1-555-0200",
-        "Title": "VP Sales",
-        "Created_Time": "2024-02-01T09:00:00+00:00",
-    }
-
-
-def _deal_record(record_id: str = "3692340000003456789") -> dict:
-    return {
-        "id": record_id,
-        "Deal_Name": "Big Deal Q1",
-        "Stage": "Negotiation/Review",
-        "Amount": 75000.0,
-        "Closing_Date": "2024-03-31",
-        "Account_Name": {"id": "99999", "name": "MegaCorp"},
-        "Probability": 80,
-        "Created_Time": "2024-01-10T08:00:00+00:00",
-    }
-
-
-def _account_record(record_id: str = "3692340000004567890") -> dict:
-    return {
-        "id": record_id,
-        "Account_Name": "TechCorp Inc",
-        "Phone": "+1-555-0300",
-        "Website": "https://techcorp.example.com",
-        "Industry": "Technology",
-        "Created_Time": "2024-01-01T00:00:00+00:00",
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. Class attributes
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestClassAttributes:
-    def test_connector_type(self) -> None:
-        assert ZohoCRMConnector.CONNECTOR_TYPE == "zoho_crm"
-
-    def test_auth_type(self) -> None:
-        assert ZohoCRMConnector.AUTH_TYPE == "oauth2"
-
-    def test_instance_has_connector_type(self) -> None:
-        c = _make_connector()
-        assert c.CONNECTOR_TYPE == "zoho_crm"
-
-    def test_instance_has_auth_type(self) -> None:
-        c = _make_connector()
-        assert c.AUTH_TYPE == "oauth2"
-
-    def test_data_center_default_com(self) -> None:
-        c = ZohoCRMConnector(config={
-            "client_id": "cid", "client_secret": "cs", "access_token": "tok"
-        })
-        assert c._data_center == "com"
-
-    def test_data_center_eu_via_dc_key(self) -> None:
-        c = _make_connector(dc="eu")
-        assert c._data_center == "eu"
-
-    def test_data_center_in_via_dc_key(self) -> None:
-        c = _make_connector(dc="in")
-        assert c._data_center == "in"
-
-    def test_data_center_legacy_key(self) -> None:
-        # legacy "data_center" key still accepted for backwards compat
-        c = ZohoCRMConnector(config={
-            "client_id": "cid", "client_secret": "cs",
-            "access_token": "tok", "data_center": "eu",
-        })
-        assert c._data_center == "eu"
-
-    def test_tenant_and_connector_id_stored(self) -> None:
-        c = ZohoCRMConnector(
-            tenant_id="t1", connector_id="c1",
-            config={"client_id": "cid", "client_secret": "cs", "access_token": "tok"},
-        )
-        assert c.tenant_id == "t1"
-        assert c.connector_id == "c1"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. DC helper methods
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestDCHelpers:
-    def test_get_dc_com(self) -> None:
-        c = _make_connector(dc="com")
-        assert c._get_dc() == "com"
-
-    def test_get_dc_eu(self) -> None:
-        c = _make_connector(dc="eu")
-        assert c._get_dc() == "eu"
-
-    def test_accounts_url_com(self) -> None:
-        c = _make_connector(dc="com")
-        assert c._accounts_url() == "https://accounts.zoho.com"
-
-    def test_accounts_url_eu(self) -> None:
-        c = _make_connector(dc="eu")
-        assert c._accounts_url() == "https://accounts.zoho.eu"
-
-    def test_accounts_url_in(self) -> None:
-        c = _make_connector(dc="in")
-        assert c._accounts_url() == "https://accounts.zoho.in"
-
-    def test_api_url_com(self) -> None:
-        c = _make_connector(dc="com")
-        assert c._api_url() == "https://www.zohoapis.com/crm/v2"
-
-    def test_api_url_eu(self) -> None:
-        c = _make_connector(dc="eu")
-        assert c._api_url() == "https://www.zohoapis.eu/crm/v2"
-
-    def test_api_url_in(self) -> None:
-        c = _make_connector(dc="in")
-        assert c._api_url() == "https://www.zohoapis.in/crm/v2"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Exception hierarchy
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestExceptions:
-    def test_zoho_error_attrs(self) -> None:
-        exc = ZohoCRMError("oops", status_code=400, code="BAD")
-        assert exc.message == "oops"
-        assert exc.status_code == 400
-        assert exc.code == "BAD"
-        assert str(exc) == "oops"
-
-    def test_zoho_error_defaults(self) -> None:
-        exc = ZohoCRMError("msg")
-        assert exc.status_code == 0
-        assert exc.code == ""
-
-    def test_auth_error_inherits(self) -> None:
-        exc = ZohoCRMAuthError("auth fail", 401, "INVALID_TOKEN")
-        assert isinstance(exc, ZohoCRMError)
-        assert exc.status_code == 401
-
-    def test_rate_limit_error_attrs(self) -> None:
-        exc = ZohoCRMRateLimitError("too many", retry_after=5.5)
-        assert isinstance(exc, ZohoCRMError)
-        assert exc.retry_after == 5.5
-        assert exc.status_code == 429
-        assert exc.code == "rate_limit"
-
-    def test_rate_limit_default_retry_after(self) -> None:
-        exc = ZohoCRMRateLimitError("too many")
-        assert exc.retry_after == 0.0
-
-    def test_not_found_message(self) -> None:
-        exc = ZohoCRMNotFoundError("Lead", "123")
-        assert isinstance(exc, ZohoCRMError)
-        assert "Lead" in str(exc)
-        assert "123" in str(exc)
-        assert exc.status_code == 404
-        assert exc.code == "NOT_FOUND"
-
-    def test_network_error_inherits(self) -> None:
-        exc = ZohoCRMNetworkError("timeout")
-        assert isinstance(exc, ZohoCRMError)
-
-    def test_server_error_inherits(self) -> None:
-        exc = ZohoCRMServerError("500 oops", 500)
-        assert isinstance(exc, ZohoCRMError)
-        assert exc.status_code == 500
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Models
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestModels:
-    def test_connector_health_values(self) -> None:
-        assert ConnectorHealth.HEALTHY == "healthy"
-        assert ConnectorHealth.DEGRADED == "degraded"
-        assert ConnectorHealth.OFFLINE == "offline"
-
-    def test_auth_status_values(self) -> None:
-        assert AuthStatus.CONNECTED == "connected"
-        assert AuthStatus.FAILED == "failed"
-        assert AuthStatus.MISSING_CREDENTIALS == "missing_credentials"
-        assert AuthStatus.INVALID_CREDENTIALS == "invalid_credentials"
-
-    def test_sync_status_values(self) -> None:
-        assert SyncStatus.COMPLETED == "completed"
-        assert SyncStatus.PARTIAL == "partial"
-        assert SyncStatus.FAILED == "failed"
-        assert SyncStatus.RUNNING == "running"
-
-    def test_install_result_fields(self) -> None:
-        r = InstallResult(
-            health=ConnectorHealth.HEALTHY,
-            auth_status=AuthStatus.CONNECTED,
-            connector_id="cid",
-            message="ok",
-        )
-        assert r.health == ConnectorHealth.HEALTHY
-        assert r.auth_status == AuthStatus.CONNECTED
-        assert r.connector_id == "cid"
-        assert r.message == "ok"
-
-    def test_install_result_defaults(self) -> None:
-        r = InstallResult(health=ConnectorHealth.OFFLINE, auth_status=AuthStatus.FAILED)
-        assert r.connector_id == ""
-        assert r.message == ""
-
-    def test_health_check_result_fields(self) -> None:
-        r = HealthCheckResult(
-            health=ConnectorHealth.DEGRADED,
-            auth_status=AuthStatus.FAILED,
-            message="net error",
-        )
-        assert r.health == ConnectorHealth.DEGRADED
-        assert r.message == "net error"
-
-    def test_sync_result_fields(self) -> None:
-        r = SyncResult(
-            status=SyncStatus.PARTIAL,
-            documents_found=10,
-            documents_synced=8,
-            documents_failed=2,
-        )
-        assert r.documents_found == 10
-        assert r.documents_synced == 8
-        assert r.documents_failed == 2
-
-    def test_connector_document_fields(self) -> None:
-        doc = ConnectorDocument(
-            source_id="abc123",
-            title="Zoho Lead: Jane Smith",
-            content="content here",
-            connector_id="conn1",
-            tenant_id="tenant1",
-            source_url="https://crm.zoho.com/crm/org/tab/Leads/123",
-            metadata={"module": "Leads"},
-        )
-        assert doc.source_id == "abc123"
-        assert doc.source_url == "https://crm.zoho.com/crm/org/tab/Leads/123"
-        assert doc.metadata["module"] == "Leads"
-
-    def test_connector_document_defaults(self) -> None:
-        doc = ConnectorDocument(
-            source_id="x",
-            title="T",
-            content="C",
-            connector_id="c",
-            tenant_id="t",
-        )
-        assert doc.source_url == ""
-        assert doc.metadata == {}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. URL builders
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestURLBuilders:
-    def test_base_url_com(self) -> None:
-        url = _build_base_url("com")
-        assert url == "https://www.zohoapis.com/crm/v2"
-
-    def test_base_url_eu(self) -> None:
-        url = _build_base_url("eu")
-        assert url == "https://www.zohoapis.eu/crm/v2"
-
-    def test_base_url_in(self) -> None:
-        url = _build_base_url("in")
-        assert url == "https://www.zohoapis.in/crm/v2"
-
-    def test_base_url_com_au(self) -> None:
-        url = _build_base_url("com.au")
-        assert url == "https://www.zohoapis.com.au/crm/v2"
-
-    def test_base_url_empty_defaults_com(self) -> None:
-        url = _build_base_url("")
-        assert "zohoapis.com" in url
-
-    def test_auth_url_com(self) -> None:
-        url = _build_auth_url("com")
-        assert url == "https://accounts.zoho.com/oauth/v2/"
-
-    def test_auth_url_eu(self) -> None:
-        url = _build_auth_url("eu")
-        assert url == "https://accounts.zoho.eu/oauth/v2/"
-
-    def test_auth_url_in(self) -> None:
-        url = _build_auth_url("in")
-        assert url == "https://accounts.zoho.in/oauth/v2/"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. normalize_record
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestNormalizeRecord:
-    def test_stable_id_deterministic(self) -> None:
-        doc1 = normalize_record("Leads", _lead_record(), "c", "t")
-        doc2 = normalize_record("Leads", _lead_record(), "c", "t")
-        assert doc1.source_id == doc2.source_id
-
-    def test_stable_id_length_16(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t")
-        assert len(doc.source_id) == 16
-
-    def test_stable_id_helper(self) -> None:
-        result = _stable_id("Leads", "123")
-        assert len(result) == 16
-        assert result == _stable_id("Leads", "123")
-
-    def test_stable_id_differs_by_module(self) -> None:
-        id1 = _stable_id("Leads", "123")
-        id2 = _stable_id("Contacts", "123")
-        assert id1 != id2
-
-    def test_lead_title(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t")
-        assert "Jane Smith" in doc.title
-        assert "Acme Corp" in doc.title
-
-    def test_contact_title(self) -> None:
-        doc = normalize_record("Contacts", _contact_record(), "c", "t")
-        assert "Bob Jones" in doc.title
-        assert "BigCorp" in doc.title
-
-    def test_deal_title(self) -> None:
-        doc = normalize_record("Deals", _deal_record(), "c", "t")
-        assert "Big Deal Q1" in doc.title
-        assert "Negotiation" in doc.title
-
-    def test_account_title(self) -> None:
-        record = {"id": "A001", "Account_Name": "TechCorp"}
-        doc = normalize_record("Accounts", record, "c", "t")
-        assert "TechCorp" in doc.title
-
-    def test_generic_module_title(self) -> None:
-        record = {"id": "X001", "Name": "Test Record"}
-        doc = normalize_record("Tasks", record, "c", "t")
-        assert "Test Record" in doc.title
-        assert "Tasks" in doc.title
-
-    def test_content_contains_record_id(self) -> None:
-        doc = normalize_record("Leads", _lead_record("LEAD001"), "c", "t")
-        assert "LEAD001" in doc.content
-
-    def test_content_contains_module(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t")
-        assert "Leads" in doc.content
-
-    def test_content_includes_scalar_fields(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t")
-        assert "jane@acme.com" in doc.content
-
-    def test_content_includes_dict_name_fields(self) -> None:
-        doc = normalize_record("Contacts", _contact_record(), "c", "t")
-        assert "BigCorp" in doc.content
-
-    def test_metadata_module(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t")
-        assert doc.metadata["module"] == "Leads"
-
-    def test_metadata_zoho_record_id(self) -> None:
-        doc = normalize_record("Leads", _lead_record("ZCRM001"), "c", "t")
-        assert doc.metadata["zoho_record_id"] == "ZCRM001"
-
-    def test_metadata_data_center(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t", data_center="eu")
-        assert doc.metadata["data_center"] == "eu"
-
-    def test_source_url_contains_module(self) -> None:
-        doc = normalize_record("Leads", _lead_record("REC123"), "c", "t")
-        assert "Leads" in doc.source_url
-        assert "REC123" in doc.source_url
-
-    def test_source_url_uses_data_center(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "c", "t", data_center="eu")
-        assert "zoho.eu" in doc.source_url
-
-    def test_connector_and_tenant_ids(self) -> None:
-        doc = normalize_record("Leads", _lead_record(), "my-conn", "my-tenant")
-        assert doc.connector_id == "my-conn"
-        assert doc.tenant_id == "my-tenant"
-
-    def test_empty_record_id_gives_empty_source_id(self) -> None:
-        doc = normalize_record("Leads", {}, "c", "t")
-        assert doc.source_id == ""
-
-    def test_empty_record_id_gives_empty_source_url(self) -> None:
-        doc = normalize_record("Leads", {}, "c", "t")
-        assert doc.source_url == ""
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. CircuitBreaker
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestCircuitBreaker:
-    def test_starts_closed(self) -> None:
-        cb = CircuitBreaker(failure_threshold=3)
-        assert cb.state == "closed"
-        assert not cb.is_open
-
-    def test_opens_after_threshold_failures(self) -> None:
-        cb = CircuitBreaker(failure_threshold=3)
-        cb.on_failure()
-        cb.on_failure()
-        assert not cb.is_open
-        cb.on_failure()
-        assert cb.is_open
-        assert cb.state == "open"
-
-    def test_on_success_closes(self) -> None:
-        cb = CircuitBreaker(failure_threshold=2)
-        cb.on_failure()
-        cb.on_failure()
-        assert cb.is_open
-        cb.on_success()
-        assert not cb.is_open
-        assert cb.state == "closed"
-
-    def test_is_open_property(self) -> None:
-        cb = CircuitBreaker(failure_threshold=1)
-        assert cb.is_open is False
-        cb.on_failure()
-        assert cb.is_open is True
-
-    def test_half_open_after_recovery_timeout(self) -> None:
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout_s=0.0)
-        cb.on_failure()
-        assert cb.state in ("open", "half-open")
-
-    def test_multiple_successes_stay_closed(self) -> None:
-        cb = CircuitBreaker(failure_threshold=5)
-        cb.on_success()
-        cb.on_success()
-        assert cb.state == "closed"
-
-    def test_reset_on_success(self) -> None:
-        cb = CircuitBreaker(failure_threshold=3)
-        cb.on_failure()
-        cb.on_failure()
-        cb.on_success()
-        cb.on_failure()
-        cb.on_failure()
-        assert not cb.is_open
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 8. with_retry
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestWithRetry:
-    async def test_success_on_first_try(self) -> None:
-        fn = AsyncMock(return_value={"ok": True})
-        result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == {"ok": True}
-        assert fn.call_count == 1
-
-    async def test_retries_on_zoho_error(self) -> None:
-        fn = AsyncMock(side_effect=[
-            ZohoCRMError("temp", 503),
-            ZohoCRMError("temp", 503),
-            {"ok": True},
-        ])
-        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
-            result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == {"ok": True}
-        assert fn.call_count == 3
-
-    async def test_raises_immediately_on_auth_error(self) -> None:
-        fn = AsyncMock(side_effect=ZohoCRMAuthError("invalid token", 401))
-        with pytest.raises(ZohoCRMAuthError):
-            await with_retry(fn, max_attempts=3, base_delay=0)
-        assert fn.call_count == 1
-
-    async def test_respects_max_attempts(self) -> None:
-        fn = AsyncMock(side_effect=ZohoCRMError("fail", 503))
-        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(ZohoCRMError):
-                await with_retry(fn, max_attempts=3, base_delay=0)
-        assert fn.call_count == 3
-
-    async def test_rate_limit_uses_retry_after(self) -> None:
-        fn = AsyncMock(side_effect=[
-            ZohoCRMRateLimitError("rate", retry_after=2.5),
-            {"ok": True},
-        ])
-        sleep_mock = AsyncMock()
-        with patch("helpers.utils.asyncio.sleep", sleep_mock):
-            result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == {"ok": True}
-        sleep_mock.assert_called_once_with(2.5)
-
-    async def test_success_after_one_failure(self) -> None:
-        fn = AsyncMock(side_effect=[ZohoCRMNetworkError("net"), {"data": 1}])
-        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
-            result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == {"data": 1}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 9. authorize()
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestAuthorize:
-    async def test_returns_string(self) -> None:
-        c = _make_connector()
-        url = await c.authorize()
-        assert isinstance(url, str)
-        assert url.startswith("https://")
-
-    async def test_contains_client_id(self) -> None:
-        c = _make_connector()
-        url = await c.authorize()
-        assert "1000.TESTCLIENTID" in url
-
-    async def test_contains_scope(self) -> None:
-        c = _make_connector()
-        url = await c.authorize()
-        # scope contains contacts.READ
-        assert "ZohoCRM.modules.contacts.READ" in url
-
-    async def test_uses_correct_data_center_eu(self) -> None:
-        c = _make_connector(dc="eu")
-        url = await c.authorize()
-        assert "accounts.zoho.eu" in url
-
-    async def test_uses_correct_data_center_com(self) -> None:
-        c = _make_connector(dc="com")
-        url = await c.authorize()
-        assert "accounts.zoho.com" in url
-
-    async def test_contains_redirect_uri_when_set(self) -> None:
-        c = _make_connector(redirect_uri="https://app.shielva.ai/oauth/callback/zoho_crm")
-        url = await c.authorize()
-        assert "redirect_uri" in url
-
-    async def test_contains_response_type_code(self) -> None:
-        c = _make_connector()
-        url = await c.authorize()
-        assert "response_type=code" in url
-
-    async def test_no_redirect_uri_when_empty(self) -> None:
-        c = _make_connector(redirect_uri="")
-        url = await c.authorize()
-        assert "redirect_uri" not in url
-
-    async def test_uses_accounts_url_path(self) -> None:
-        c = _make_connector(dc="in")
-        url = await c.authorize()
-        assert "accounts.zoho.in/oauth/v2/auth" in url
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 10. install()
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestInstall:
-    async def test_missing_client_id(self) -> None:
-        c = _make_connector(client_id="")
-        result = await c.install()
-        assert result.health == ConnectorHealth.OFFLINE
-        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-    async def test_missing_client_secret(self) -> None:
-        c = _make_connector(client_secret="")
-        result = await c.install()
-        assert result.health == ConnectorHealth.OFFLINE
-        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-    async def test_missing_access_token(self) -> None:
-        c = _make_connector(access_token="")
-        result = await c.install()
-        assert result.health == ConnectorHealth.OFFLINE
-        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-    async def test_success(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(
-                return_value={"data": [{"id": "org1", "company_name": "Test Org"}]}
-            )
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.install()
+    @pytest.mark.asyncio
+    async def test_install_success(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(return_value=SAMPLE_OWNERS_RESPONSE)
+            instance.aclose = AsyncMock()
+            result = await connector.install()
         assert result.health == ConnectorHealth.HEALTHY
         assert result.auth_status == AuthStatus.CONNECTED
+        assert "2 owner" in result.message
 
-    async def test_auth_error_returns_invalid_credentials(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(
-                side_effect=ZohoCRMAuthError("bad token", 401)
+    @pytest.mark.asyncio
+    async def test_install_missing_domain(self) -> None:
+        connector = make_connector(domain="")
+        result = await connector.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+        assert "domain" in result.message
+
+    @pytest.mark.asyncio
+    async def test_install_missing_api_key(self) -> None:
+        connector = make_connector(api_key="")
+        result = await connector.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+        assert "api_key" in result.message
+
+    @pytest.mark.asyncio
+    async def test_install_missing_both(self) -> None:
+        connector = make_connector(domain="", api_key="")
+        result = await connector.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+        assert "domain" in result.message
+        assert "api_key" in result.message
+
+    @pytest.mark.asyncio
+    async def test_install_auth_error(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(
+                side_effect=FreshworksCRMAuthError("Authentication failed", 401)
             )
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.install()
+            instance.aclose = AsyncMock()
+            result = await connector.install()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
 
-    async def test_generic_exception_returns_failed(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(side_effect=Exception("unexpected"))
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.install()
+    @pytest.mark.asyncio
+    async def test_install_network_error(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(
+                side_effect=FreshworksCRMNetworkError("Connection refused")
+            )
+            instance.aclose = AsyncMock()
+            result = await connector.install()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.FAILED
 
+    @pytest.mark.asyncio
+    async def test_install_empty_owners(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(return_value={"users": []})
+            instance.aclose = AsyncMock()
+            result = await connector.install()
+        assert result.health == ConnectorHealth.HEALTHY
+        assert "0 owner" in result.message
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 11. health_check()
-# ─────────────────────────────────────────────────────────────────────────────
+    @pytest.mark.asyncio
+    async def test_install_stores_connector_id(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(return_value=SAMPLE_OWNERS_RESPONSE)
+            instance.aclose = AsyncMock()
+            result = await connector.install()
+        assert result.connector_id == CONNECTOR_ID
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2. HEALTH CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestHealthCheck:
-    async def test_missing_access_token(self) -> None:
-        c = _make_connector(access_token="")
-        result = await c.health_check()
+    @pytest.mark.asyncio
+    async def test_health_check_healthy(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(return_value=SAMPLE_OWNERS_RESPONSE)
+            instance.aclose = AsyncMock()
+            result = await connector.health_check()
+        assert result.health == ConnectorHealth.HEALTHY
+        assert result.auth_status == AuthStatus.CONNECTED
+
+    @pytest.mark.asyncio
+    async def test_health_check_missing_creds(self) -> None:
+        connector = make_connector(domain="", api_key="")
+        result = await connector.health_check()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
 
-    async def test_success_healthy(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(return_value={"data": [{}]})
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.health_check()
-        assert result.health == ConnectorHealth.HEALTHY
-        assert result.auth_status == AuthStatus.CONNECTED
-        assert "reachable" in result.message
-
-    async def test_auth_error_returns_offline_invalid(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(
-                side_effect=ZohoCRMAuthError("bad", 401)
+    @pytest.mark.asyncio
+    async def test_health_check_auth_error(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(
+                side_effect=FreshworksCRMAuthError("Invalid token", 401)
             )
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.health_check()
+            instance.aclose = AsyncMock()
+            result = await connector.health_check()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
 
-    async def test_network_error_circuit_not_open_degraded(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(
-                side_effect=ZohoCRMNetworkError("timeout")
+    @pytest.mark.asyncio
+    async def test_health_check_network_error(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(
+                side_effect=FreshworksCRMNetworkError("Timeout")
             )
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.health_check()
-        # 1 failure < 5 threshold → DEGRADED
+            instance.aclose = AsyncMock()
+            result = await connector.health_check()
+        assert result.health == ConnectorHealth.DEGRADED
+        assert result.auth_status == AuthStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_health_check_generic_error(self) -> None:
+        connector = make_connector()
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_owners = AsyncMock(side_effect=RuntimeError("unexpected"))
+            instance.aclose = AsyncMock()
+            result = await connector.health_check()
         assert result.health == ConnectorHealth.DEGRADED
 
-    async def test_network_error_circuit_open_offline(self) -> None:
-        c = _make_connector()
-        for _ in range(5):
-            c._circuit_breaker.on_failure()
-        assert c._circuit_breaker.is_open
 
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_org = AsyncMock(
-                side_effect=ZohoCRMNetworkError("timeout")
-            )
-            mock_instance.aclose = AsyncMock()
-            MockClient.return_value = mock_instance
-            result = await c.health_check()
-        assert result.health == ConnectorHealth.OFFLINE
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. LIST / GET CONTACTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 12. sync()
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestSync:
-    async def test_empty_all_modules(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        result = await c.sync()
-        assert result.status == SyncStatus.COMPLETED
-        assert result.documents_found == 0
-        assert result.documents_synced == 0
-        assert result.documents_failed == 0
-
-    async def test_leads_only(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            _zoho_page([_lead_record()]),   # Leads
-            _zoho_page([]),                 # Contacts
-            _zoho_page([]),                 # Accounts
-            _zoho_page([]),                 # Deals
-        ])
-        c.http_client = mock_http
-        result = await c.sync()
-        assert result.documents_found == 1
-        assert result.documents_synced == 1
-        assert result.status == SyncStatus.COMPLETED
-
-    async def test_all_four_modules(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            _zoho_page([_lead_record()]),
-            _zoho_page([_contact_record()]),
-            _zoho_page([_account_record()]),
-            _zoho_page([_deal_record()]),
-        ])
-        c.http_client = mock_http
-        result = await c.sync()
-        assert result.documents_found == 4
-        assert result.documents_synced == 4
-        assert result.status == SyncStatus.COMPLETED
-
-    async def test_pagination_follows_more_records(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            _zoho_page([_lead_record("L001")], more_records=True, page=1),
-            _zoho_page([_lead_record("L002")], more_records=False, page=2),
-            _zoho_page([]),  # Contacts
-            _zoho_page([]),  # Accounts
-            _zoho_page([]),  # Deals
-        ])
-        c.http_client = mock_http
-        result = await c.sync()
-        assert result.documents_found == 2
-        assert result.documents_synced == 2
-
-    async def test_kb_id_calls_ingest_document(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            _zoho_page([_lead_record()]),
-            _zoho_page([]),
-            _zoho_page([]),
-            _zoho_page([]),
-        ])
-        c.http_client = mock_http
-        ingest_mock = AsyncMock()
-        c._ingest_document = ingest_mock  # type: ignore[method-assign]
-        await c.sync(kb_id="kb-123")
-        ingest_mock.assert_called_once()
-        assert ingest_mock.call_args[0][1] == "kb-123"
-
-    async def test_error_on_one_module_partial_status(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            ZohoCRMError("server error", 503),
-            ZohoCRMError("server error", 503),
-            ZohoCRMError("server error", 503),
-            _zoho_page([]),   # Contacts
-            _zoho_page([]),   # Accounts
-            _zoho_page([]),   # Deals
-        ])
-        c.http_client = mock_http
-        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
-            result = await c.sync()
-        assert result.status == SyncStatus.PARTIAL
-        assert result.documents_failed >= 1
-
-    async def test_normalize_error_increments_failed(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(side_effect=[
-            _zoho_page([_lead_record()]),
-            _zoho_page([]),
-            _zoho_page([]),
-            _zoho_page([]),
-        ])
-        c.http_client = mock_http
-        with patch("connector.normalize_record", side_effect=Exception("normalize failed")):
-            result = await c.sync()
-        assert result.documents_failed >= 1
-
-    async def test_sync_calls_list_records_for_each_module(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.sync()
-        # 4 modules × 1 page each = 4 calls
-        assert mock_http.list_records.call_count == 4
-
-    async def test_sync_creates_client_if_none(self) -> None:
-        c = _make_connector()
-        assert c.http_client is None
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.list_records = AsyncMock(return_value=_zoho_page([]))
-            MockClient.return_value = mock_instance
-            await c.sync()
-        assert c.http_client is not None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 13. list_contacts / list_leads / list_accounts / list_deals
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestTypedListMethods:
+class TestContacts:
+    @pytest.mark.asyncio
     async def test_list_contacts_returns_list(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_contacts = AsyncMock(return_value=_zoho_page([_contact_record()]))
-        c.http_client = mock_http
-        result = await c.list_contacts()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["id"] == "3692340000002345678"
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_contacts = AsyncMock(
+            return_value=SAMPLE_CONTACTS_RESPONSE
+        )
+        result = await connector.list_contacts(page=1, per_page=100)
+        assert len(result) == 2
+        assert result[0]["id"] == 101
+        assert result[1]["id"] == 102
 
-    async def test_list_contacts_default_pagination(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_contacts = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_contacts()
-        mock_http.get_contacts.assert_called_once_with(1, 200)
-
-    async def test_list_contacts_custom_pagination(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_contacts = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_contacts(page=3, per_page=50)
-        mock_http.get_contacts.assert_called_once_with(3, 50)
-
-    async def test_list_leads_returns_list(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_leads = AsyncMock(return_value=_zoho_page([_lead_record()]))
-        c.http_client = mock_http
-        result = await c.list_leads()
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-    async def test_list_leads_default_pagination(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_leads = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_leads()
-        mock_http.get_leads.assert_called_once_with(1, 200)
-
-    async def test_list_accounts_returns_list(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_accounts = AsyncMock(return_value=_zoho_page([_account_record()]))
-        c.http_client = mock_http
-        result = await c.list_accounts()
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-    async def test_list_accounts_default_pagination(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_accounts = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_accounts()
-        mock_http.get_accounts.assert_called_once_with(1, 200)
-
-    async def test_list_deals_returns_list(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_deals = AsyncMock(return_value=_zoho_page([_deal_record()]))
-        c.http_client = mock_http
-        result = await c.list_deals()
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-    async def test_list_deals_default_pagination(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_deals = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_deals()
-        mock_http.get_deals.assert_called_once_with(1, 200)
-
-    async def test_list_contacts_empty_page(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_contacts = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        result = await c.list_contacts()
+    @pytest.mark.asyncio
+    async def test_list_contacts_page_2(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_contacts = AsyncMock(
+            return_value={"contacts": [], "meta": {"total_pages": 1, "current_page": 2}}
+        )
+        result = await connector.list_contacts(page=2)
         assert result == []
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 14. get_contact()
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestGetContact:
-    async def test_delegates_to_http_client(self) -> None:
-        c = _make_connector()
-        expected = {"data": [_contact_record("C001")]}
-        mock_http = AsyncMock()
-        mock_http.get_contact = AsyncMock(return_value=expected)
-        c.http_client = mock_http
-        result = await c.get_contact("C001")
-        assert result == expected
-        mock_http.get_contact.assert_called_once_with("C001")
-
-    async def test_creates_client_if_none(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_contact = AsyncMock(return_value={"data": [{}]})
-            MockClient.return_value = mock_instance
-            await c.get_contact("C001")
-        assert c.http_client is not None
-
-    async def test_not_found_raises(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.get_contact = AsyncMock(
-            side_effect=ZohoCRMNotFoundError("Contact", "MISSING")
+    @pytest.mark.asyncio
+    async def test_get_contact_unwraps_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_contact = AsyncMock(
+            return_value={"contact": SAMPLE_CONTACT}
         )
-        c.http_client = mock_http
-        with pytest.raises(ZohoCRMNotFoundError):
-            await with_retry(mock_http.get_contact, "MISSING", max_attempts=1, base_delay=0)
+        result = await connector.get_contact(101)
+        assert result["id"] == 101
+        assert result["email"] == "jane.doe@example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_contact_no_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_contact = AsyncMock(return_value=SAMPLE_CONTACT)
+        result = await connector.get_contact(101)
+        assert result["id"] == 101
+
+    @pytest.mark.asyncio
+    async def test_get_contact_not_found(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_contact = AsyncMock(
+            side_effect=FreshworksCRMNotFoundError("contact", "999")
+        )
+        with pytest.raises(FreshworksCRMNotFoundError):
+            await connector.get_contact(999)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 15. list_records() / get_record() / search_records()
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestGenericRecordMethods:
-    async def test_list_records_returns_result(self) -> None:
-        c = _make_connector()
-        expected = _zoho_page([_lead_record()])
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(return_value=expected)
-        c.http_client = mock_http
-        result = await c.list_records("Leads")
-        assert result == expected
-
-    async def test_list_records_passes_page_and_per_page(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        await c.list_records("Contacts", page=2, per_page=50)
-        mock_http.list_records.assert_called_once_with("Contacts", 2, 50)
-
-    async def test_list_records_creates_client_if_none(self) -> None:
-        c = _make_connector()
-        assert c.http_client is None
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.list_records = AsyncMock(return_value=_zoho_page([]))
-            MockClient.return_value = mock_instance
-            await c.list_records("Accounts")
-        assert c.http_client is not None
-
-    async def test_list_records_any_module_works(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.list_records = AsyncMock(return_value=_zoho_page([]))
-        c.http_client = mock_http
-        result = await c.list_records("Tasks")
-        assert "data" in result
-
-    async def test_get_record_delegates_to_http_client(self) -> None:
-        c = _make_connector()
-        expected = {"data": [_lead_record("LEAD001")]}
-        mock_http = AsyncMock()
-        mock_http.get_record = AsyncMock(return_value=expected)
-        c.http_client = mock_http
-        result = await c.get_record("Leads", "LEAD001")
-        assert result == expected
-        mock_http.get_record.assert_called_once_with("Leads", "LEAD001")
-
-    async def test_get_record_creates_client_if_none(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.get_record = AsyncMock(return_value={"data": [{}]})
-            MockClient.return_value = mock_instance
-            await c.get_record("Contacts", "C001")
-        assert c.http_client is not None
-
-    async def test_search_records_delegates_to_http_client(self) -> None:
-        c = _make_connector()
-        expected = {"data": [_contact_record()]}
-        mock_http = AsyncMock()
-        mock_http.search_records = AsyncMock(return_value=expected)
-        c.http_client = mock_http
-        result = await c.search_records("Contacts", "(Last_Name:equals:Jones)")
-        assert result == expected
-        mock_http.search_records.assert_called_once_with("Contacts", "(Last_Name:equals:Jones)")
-
-    async def test_search_records_creates_client_if_none(self) -> None:
-        c = _make_connector()
-        with patch("connector.ZohoCRMHTTPClient") as MockClient:
-            mock_instance = AsyncMock()
-            mock_instance.search_records = AsyncMock(return_value={"data": []})
-            MockClient.return_value = mock_instance
-            await c.search_records("Leads", "(Email:equals:test@example.com)")
-        assert c.http_client is not None
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. LIST / GET DEALS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 16. aclose()
-# ─────────────────────────────────────────────────────────────────────────────
+class TestDeals:
+    @pytest.mark.asyncio
+    async def test_list_deals_returns_list(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_deals = AsyncMock(
+            return_value=SAMPLE_DEALS_RESPONSE
+        )
+        result = await connector.list_deals(page=1)
+        assert len(result) == 2
+        assert result[0]["id"] == 201
+        assert result[1]["name"] == "Startup Pilot"
 
-class TestAclose:
-    async def test_aclose_calls_http_client_aclose(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        mock_http.aclose = AsyncMock()
-        c.http_client = mock_http
-        await c.aclose()
-        mock_http.aclose.assert_called_once()
-        assert c.http_client is None
+    @pytest.mark.asyncio
+    async def test_list_deals_empty(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_deals = AsyncMock(
+            return_value={"deals": [], "meta": {}}
+        )
+        result = await connector.list_deals()
+        assert result == []
 
-    async def test_aclose_safe_when_no_client(self) -> None:
-        c = _make_connector()
-        assert c.http_client is None
-        await c.aclose()  # must not raise
+    @pytest.mark.asyncio
+    async def test_get_deal_unwraps_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_deal = AsyncMock(
+            return_value={"deal": SAMPLE_DEAL}
+        )
+        result = await connector.get_deal(201)
+        assert result["id"] == 201
+        assert result["amount"] == 50000.0
 
-    async def test_aclose_sets_http_client_none(self) -> None:
-        c = _make_connector()
-        c.http_client = AsyncMock()
-        await c.aclose()
-        assert c.http_client is None
+    @pytest.mark.asyncio
+    async def test_get_deal_no_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_deal = AsyncMock(return_value=SAMPLE_DEAL)
+        result = await connector.get_deal(201)
+        assert result["name"] == "Acme Enterprise License"
 
-    async def test_double_aclose_safe(self) -> None:
-        c = _make_connector()
-        c.http_client = AsyncMock()
-        await c.aclose()
-        await c.aclose()  # second call must not raise
+    @pytest.mark.asyncio
+    async def test_get_deal_not_found(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_deal = AsyncMock(
+            side_effect=FreshworksCRMNotFoundError("deal", "999")
+        )
+        with pytest.raises(FreshworksCRMNotFoundError):
+            await connector.get_deal(999)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 17. Context manager
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. LIST / GET ACCOUNTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestContextManager:
+
+class TestAccounts:
+    @pytest.mark.asyncio
+    async def test_list_accounts_returns_list(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_accounts = AsyncMock(
+            return_value=SAMPLE_ACCOUNTS_RESPONSE
+        )
+        result = await connector.list_accounts(page=1)
+        assert len(result) == 2
+        assert result[0]["id"] == 301
+        assert result[1]["name"] == "Startup Inc"
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_empty(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.list_accounts = AsyncMock(
+            return_value={"sales_accounts": [], "meta": {}}
+        )
+        result = await connector.list_accounts()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_account_unwraps_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_account = AsyncMock(
+            return_value={"sales_account": SAMPLE_ACCOUNT}
+        )
+        result = await connector.get_account(301)
+        assert result["id"] == 301
+        assert result["name"] == "Example Corp"
+
+    @pytest.mark.asyncio
+    async def test_get_account_no_wrapper(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_account = AsyncMock(return_value=SAMPLE_ACCOUNT)
+        result = await connector.get_account(301)
+        assert result["website"] == "https://example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_account_not_found(self) -> None:
+        connector = make_connector()
+        connector._http_client = MagicMock()
+        connector._http_client.get_account = AsyncMock(
+            side_effect=FreshworksCRMNotFoundError("account", "999")
+        )
+        with pytest.raises(FreshworksCRMNotFoundError):
+            await connector.get_account(999)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. SYNC
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSync:
+    def _mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.list_contacts = AsyncMock(return_value=SAMPLE_CONTACTS_RESPONSE)
+        client.list_deals = AsyncMock(return_value=SAMPLE_DEALS_RESPONSE)
+        client.list_accounts = AsyncMock(return_value=SAMPLE_ACCOUNTS_RESPONSE)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_sync_full_completed(self) -> None:
+        connector = make_connector()
+        connector._http_client = self._mock_client()
+        result = await connector.sync(full=True)
+        assert result.status == SyncStatus.COMPLETED
+        assert result.documents_found == 6  # 2 contacts + 2 deals + 2 accounts
+        assert result.documents_synced == 6
+        assert result.documents_failed == 0
+
+    @pytest.mark.asyncio
+    async def test_sync_no_kb_id_no_ingest(self) -> None:
+        connector = make_connector()
+        connector._http_client = self._mock_client()
+        connector._ingest_document = AsyncMock()
+        result = await connector.sync()
+        connector._ingest_document.assert_not_called()
+        assert result.documents_synced == 6
+
+    @pytest.mark.asyncio
+    async def test_sync_with_kb_id_calls_ingest(self) -> None:
+        connector = make_connector()
+        connector._http_client = self._mock_client()
+        connector._ingest_document = AsyncMock()
+        result = await connector.sync(kb_id="kb_crm_001")
+        assert connector._ingest_document.call_count == 6
+
+    @pytest.mark.asyncio
+    async def test_sync_empty_contacts(self) -> None:
+        connector = make_connector()
+        client = MagicMock()
+        client.list_contacts = AsyncMock(return_value={"contacts": [], "meta": {}})
+        client.list_deals = AsyncMock(return_value=SAMPLE_DEALS_RESPONSE)
+        client.list_accounts = AsyncMock(return_value=SAMPLE_ACCOUNTS_RESPONSE)
+        connector._http_client = client
+        result = await connector.sync()
+        assert result.documents_found == 4  # 0 contacts + 2 deals + 2 accounts
+        assert result.status == SyncStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_sync_contacts_api_error_returns_failed(self) -> None:
+        connector = make_connector()
+        client = MagicMock()
+        client.list_contacts = AsyncMock(
+            side_effect=FreshworksCRMNetworkError("5xx error")
+        )
+        connector._http_client = client
+        result = await connector.sync()
+        assert result.status == SyncStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_sync_deals_api_error_returns_partial(self) -> None:
+        connector = make_connector()
+        client = MagicMock()
+        client.list_contacts = AsyncMock(return_value=SAMPLE_CONTACTS_RESPONSE)
+        client.list_deals = AsyncMock(
+            side_effect=FreshworksCRMNetworkError("deals API error")
+        )
+        connector._http_client = client
+        result = await connector.sync()
+        assert result.status == SyncStatus.PARTIAL
+        assert result.documents_found == 2  # contacts only
+
+    @pytest.mark.asyncio
+    async def test_sync_accounts_api_error_returns_partial(self) -> None:
+        connector = make_connector()
+        client = MagicMock()
+        client.list_contacts = AsyncMock(return_value=SAMPLE_CONTACTS_RESPONSE)
+        client.list_deals = AsyncMock(return_value=SAMPLE_DEALS_RESPONSE)
+        client.list_accounts = AsyncMock(
+            side_effect=FreshworksCRMNetworkError("accounts API error")
+        )
+        connector._http_client = client
+        result = await connector.sync()
+        assert result.status == SyncStatus.PARTIAL
+        assert result.documents_found == 4  # contacts + deals
+
+    @pytest.mark.asyncio
+    async def test_sync_partial_on_normalizer_failure(self) -> None:
+        connector = make_connector()
+        bad_contact: dict = {"id": None, "first_name": None, "last_name": None}
+        client = MagicMock()
+        client.list_contacts = AsyncMock(
+            return_value={"contacts": [bad_contact], "meta": {"total_pages": 1}}
+        )
+        client.list_deals = AsyncMock(return_value={"deals": [], "meta": {}})
+        client.list_accounts = AsyncMock(return_value={"sales_accounts": [], "meta": {}})
+        connector._http_client = client
+
+        # Patch normalize_contact to raise
+        with patch("connector.normalize_contact", side_effect=ValueError("bad data")):
+            result = await connector.sync()
+        assert result.documents_failed == 1
+        assert result.status == SyncStatus.PARTIAL
+
+    @pytest.mark.asyncio
+    async def test_sync_multi_page_contacts(self) -> None:
+        connector = make_connector()
+        page1 = {
+            "contacts": [SAMPLE_CONTACT],
+            "meta": {"total_pages": 2, "current_page": 1},
+        }
+        page2 = {
+            "contacts": [SAMPLE_CONTACT_2],
+            "meta": {"total_pages": 2, "current_page": 2},
+        }
+        client = MagicMock()
+        client.list_contacts = AsyncMock(side_effect=[page1, page2])
+        client.list_deals = AsyncMock(return_value={"deals": [], "meta": {}})
+        client.list_accounts = AsyncMock(return_value={"sales_accounts": [], "meta": {}})
+        connector._http_client = client
+        result = await connector.sync()
+        assert result.documents_found == 2
+        assert client.list_contacts.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_sync_initialises_http_client_if_none(self) -> None:
+        connector = make_connector()
+        assert connector._http_client is None
+        with patch("connector.FreshworksCRMHTTPClient") as MockClient:
+            instance = MockClient.return_value
+            instance.list_contacts = AsyncMock(return_value={"contacts": [], "meta": {}})
+            instance.list_deals = AsyncMock(return_value={"deals": [], "meta": {}})
+            instance.list_accounts = AsyncMock(return_value={"sales_accounts": [], "meta": {}})
+            await connector.sync()
+        assert MockClient.called
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. NORMALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestNormalizeContact:
+    def test_basic_fields(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.title == "Contact: Jane Doe"
+        assert "Jane Doe" in doc.content
+        assert "jane.doe@example.com" in doc.content
+        assert "+1-555-1000" in doc.content
+        assert "VP of Engineering" in doc.content
+        assert "Example Corp" in doc.content
+
+    def test_source_id_is_sha256_prefix(self) -> None:
+        import hashlib
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        expected = hashlib.sha256(f"contact:{SAMPLE_CONTACT['id']}".encode()).hexdigest()[:16]
+        assert doc.source_id == expected
+
+    def test_source_url_contains_contact_id(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "101" in doc.source_url
+        assert "myfreshworks.com" in doc.source_url
+
+    def test_connector_id_and_tenant_id(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.connector_id == CONNECTOR_ID
+        assert doc.tenant_id == TENANT_ID
+
+    def test_metadata_fields(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.metadata["contact_id"] == 101
+        assert doc.metadata["email"] == "jane.doe@example.com"
+
+    def test_fallback_name_when_display_name_missing(self) -> None:
+        contact = dict(SAMPLE_CONTACT)
+        contact["display_name"] = ""
+        contact["first_name"] = "Alice"
+        contact["last_name"] = "Wonder"
+        doc = normalize_contact(contact, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "Alice Wonder" in doc.title
+
+    def test_fallback_name_when_all_name_fields_empty(self) -> None:
+        contact = dict(SAMPLE_CONTACT)
+        contact["display_name"] = ""
+        contact["first_name"] = ""
+        contact["last_name"] = ""
+        doc = normalize_contact(contact, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert f"Contact #{contact['id']}" in doc.title
+
+    def test_mobile_used_when_work_number_empty(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT_2, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "+44-7700-900456" in doc.content
+
+    def test_linkedin_included_when_present(self) -> None:
+        doc = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "linkedin.com/in/janedoe" in doc.content
+
+    def test_stable_id_different_contacts(self) -> None:
+        doc1 = normalize_contact(SAMPLE_CONTACT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        doc2 = normalize_contact(SAMPLE_CONTACT_2, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc1.source_id != doc2.source_id
+
+
+class TestNormalizeDeal:
+    def test_basic_fields(self) -> None:
+        doc = normalize_deal(SAMPLE_DEAL, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.title == "Deal: Acme Enterprise License"
+        assert "50000" in doc.content
+        assert "75" in doc.content  # probability
+        assert "2026-09-30" in doc.content
+
+    def test_source_id_is_sha256_prefix(self) -> None:
+        import hashlib
+        doc = normalize_deal(SAMPLE_DEAL, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        expected = hashlib.sha256(f"deal:{SAMPLE_DEAL['id']}".encode()).hexdigest()[:16]
+        assert doc.source_id == expected
+
+    def test_source_url_contains_deal_id(self) -> None:
+        doc = normalize_deal(SAMPLE_DEAL, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "201" in doc.source_url
+        assert "myfreshworks.com" in doc.source_url
+
+    def test_metadata_amount_and_stage(self) -> None:
+        doc = normalize_deal(SAMPLE_DEAL, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.metadata["amount"] == 50000.0
+        assert doc.metadata["stage_id"] == 5
+
+    def test_fallback_title_when_name_empty(self) -> None:
+        deal = dict(SAMPLE_DEAL)
+        deal["name"] = ""
+        doc = normalize_deal(deal, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert f"Deal #{deal['id']}" in doc.title
+
+    def test_none_amount_not_in_content(self) -> None:
+        deal = dict(SAMPLE_DEAL_2)
+        deal["amount"] = None
+        doc = normalize_deal(deal, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "Amount:" not in doc.content
+
+    def test_stable_id_different_deals(self) -> None:
+        doc1 = normalize_deal(SAMPLE_DEAL, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        doc2 = normalize_deal(SAMPLE_DEAL_2, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc1.source_id != doc2.source_id
+
+
+class TestNormalizeAccount:
+    def test_basic_fields(self) -> None:
+        doc = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.title == "Account: Example Corp"
+        assert "https://example.com" in doc.content
+        assert "+1-800-555-0000" in doc.content
+        assert "500" in doc.content  # employees
+
+    def test_source_id_is_sha256_prefix(self) -> None:
+        import hashlib
+        doc = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        expected = hashlib.sha256(f"account:{SAMPLE_ACCOUNT['id']}".encode()).hexdigest()[:16]
+        assert doc.source_id == expected
+
+    def test_source_url_contains_account_id(self) -> None:
+        doc = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "301" in doc.source_url
+        assert "myfreshworks.com" in doc.source_url
+
+    def test_annual_revenue_in_content(self) -> None:
+        doc = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "10000000" in doc.content
+
+    def test_none_revenue_not_in_content(self) -> None:
+        doc = normalize_account(SAMPLE_ACCOUNT_2, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert "Annual Revenue:" not in doc.content
+
+    def test_fallback_name_when_empty(self) -> None:
+        account = dict(SAMPLE_ACCOUNT)
+        account["name"] = ""
+        doc = normalize_account(account, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert f"Account #{account['id']}" in doc.title
+
+    def test_stable_id_different_accounts(self) -> None:
+        doc1 = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        doc2 = normalize_account(SAMPLE_ACCOUNT_2, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc1.source_id != doc2.source_id
+
+    def test_metadata_includes_key_fields(self) -> None:
+        doc = normalize_account(SAMPLE_ACCOUNT, CONNECTOR_ID, TENANT_ID, DOMAIN)
+        assert doc.metadata["account_id"] == 301
+        assert doc.metadata["website"] == "https://example.com"
+        assert doc.metadata["number_of_employees"] == 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. RETRY HELPER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestWithRetry:
+    @pytest.mark.asyncio
+    async def test_success_on_first_attempt(self) -> None:
+        fn = AsyncMock(return_value="ok")
+        result = await with_retry(fn)
+        assert result == "ok"
+        assert fn.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retries_on_network_error(self) -> None:
+        fn = AsyncMock(
+            side_effect=[
+                FreshworksCRMNetworkError("timeout"),
+                FreshworksCRMNetworkError("timeout"),
+                "success",
+            ]
+        )
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
+            result = await with_retry(fn, max_attempts=3, base_delay=0)
+        assert result == "success"
+        assert fn.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_auth_error_not_retried(self) -> None:
+        fn = AsyncMock(side_effect=FreshworksCRMAuthError("bad key", 401))
+        with pytest.raises(FreshworksCRMAuthError):
+            await with_retry(fn, max_attempts=3)
+        assert fn.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_exhausts_attempts_and_raises(self) -> None:
+        fn = AsyncMock(side_effect=FreshworksCRMNetworkError("5xx"))
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(FreshworksCRMNetworkError):
+                await with_retry(fn, max_attempts=3, base_delay=0)
+        assert fn.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_uses_retry_after(self) -> None:
+        exc = FreshworksCRMRateLimitError("429 rate limit", retry_after=5.0)
+        fn = AsyncMock(side_effect=[exc, "done"])
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await with_retry(fn, max_attempts=3, base_delay=1.0)
+        assert result == "done"
+        mock_sleep.assert_called_once_with(5.0)
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_backoff_when_no_retry_after(self) -> None:
+        exc = FreshworksCRMRateLimitError("429", retry_after=0)
+        fn = AsyncMock(side_effect=[exc, "done"])
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await with_retry(fn, max_attempts=3, base_delay=1.0)
+        assert result == "done"
+        assert mock_sleep.call_count == 1
+        delay = mock_sleep.call_args[0][0]
+        assert delay >= 1.0  # at least base_delay
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. EXCEPTION HIERARCHY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestExceptions:
+    def test_base_error_attributes(self) -> None:
+        from exceptions import FreshworksCRMError
+        exc = FreshworksCRMError("something failed", status_code=500, code="server_error")
+        assert exc.message == "something failed"
+        assert exc.status_code == 500
+        assert exc.code == "server_error"
+
+    def test_auth_error_is_base(self) -> None:
+        from exceptions import FreshworksCRMError
+        exc = FreshworksCRMAuthError("bad key", 401)
+        assert isinstance(exc, FreshworksCRMError)
+        assert exc.status_code == 401
+
+    def test_rate_limit_has_retry_after(self) -> None:
+        exc = FreshworksCRMRateLimitError("too fast", retry_after=30.0)
+        assert exc.retry_after == 30.0
+        assert exc.status_code == 429
+
+    def test_not_found_formats_message(self) -> None:
+        exc = FreshworksCRMNotFoundError("deal", "201")
+        assert "deal" in str(exc)
+        assert "201" in str(exc)
+        assert exc.status_code == 404
+
+    def test_network_error_is_base(self) -> None:
+        from exceptions import FreshworksCRMError
+        exc = FreshworksCRMNetworkError("connection refused")
+        assert isinstance(exc, FreshworksCRMError)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. HTTP CLIENT — BASE URL BUILDER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBaseURL:
+    def test_bare_subdomain_expands(self) -> None:
+        from client.http_client import _base_url
+        url = _base_url("acme")
+        assert url == "https://acme.myfreshworks.com/crm/sales/api/v2"
+
+    def test_full_host_preserved(self) -> None:
+        from client.http_client import _base_url
+        url = _base_url("acme.myfreshworks.com")
+        assert url == "https://acme.myfreshworks.com/crm/sales/api/v2"
+
+    def test_https_prefix_preserved(self) -> None:
+        from client.http_client import _base_url
+        url = _base_url("https://acme.myfreshworks.com")
+        assert url == "https://acme.myfreshworks.com/crm/sales/api/v2"
+
+    def test_trailing_slash_stripped(self) -> None:
+        from client.http_client import _base_url
+        url = _base_url("acme/")
+        assert not url.endswith("//")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11. LIFECYCLE / ASYNC CONTEXT MANAGER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestLifecycle:
+    @pytest.mark.asyncio
+    async def test_aclose_clears_http_client(self) -> None:
+        connector = make_connector()
+        mock_client = MagicMock()
+        mock_client.aclose = AsyncMock()
+        connector._http_client = mock_client
+        await connector.aclose()
+        mock_client.aclose.assert_awaited_once()
+        assert connector._http_client is None
+
+    @pytest.mark.asyncio
+    async def test_aclose_no_op_when_client_is_none(self) -> None:
+        connector = make_connector()
+        assert connector._http_client is None
+        await connector.aclose()  # should not raise
+
+    @pytest.mark.asyncio
     async def test_async_context_manager(self) -> None:
-        c = _make_connector()
-        mock_http = AsyncMock()
-        c.http_client = mock_http
-        async with c as ctx:
-            assert ctx is c
-        mock_http.aclose.assert_called_once()
+        connector = make_connector()
+        mock_client = MagicMock()
+        mock_client.aclose = AsyncMock()
+        connector._http_client = mock_client
+        async with connector as ctx:
+            assert ctx is connector
+        mock_client.aclose.assert_awaited_once()
+
+    def test_connector_type_constant(self) -> None:
+        assert FreshworksCRMConnector.CONNECTOR_TYPE == "freshworks_crm"
+
+    def test_auth_type_constant(self) -> None:
+        assert FreshworksCRMConnector.AUTH_TYPE == "api_key"
+
+    def test_default_constructor(self) -> None:
+        connector = FreshworksCRMConnector()
+        assert connector._domain == ""
+        assert connector._api_key == ""
+        assert connector._tenant_id == ""

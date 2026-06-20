@@ -1,138 +1,41 @@
 {
-  "connector_type": "zoho_crm",
-  "name": "Zoho CRM",
-  "provider": "Zoho",
-  "service": "CRM",
-  "auth_type": "oauth2",
+  "connector_type": "freshworks_crm",
+  "name": "Freshworks CRM",
+  "display_name": "Freshworks CRM",
+  "description": "Connect to Freshworks CRM (Freshsales) to sync contacts, deals, and accounts.",
   "version": "1.0.0",
-  "description": "Zoho CRM connector for contacts, leads, accounts, and deals",
+  "auth_type": "api_key",
+  "provider": "freshworks",
+  "service": "freshworks_crm",
+  "category": "crm",
   "install_fields": [
     {
-      "key": "client_id",
-      "label": "Client ID",
+      "key": "domain",
+      "label": "Domain",
       "type": "string",
       "required": true,
-      "placeholder": "1000.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-      "help": "From Zoho API Console → Your Client → Client ID"
+      "placeholder": "acme",
+      "description": "Your Freshworks CRM subdomain (e.g. 'acme' from acme.myfreshworks.com)."
     },
     {
-      "key": "client_secret",
-      "label": "Client Secret",
+      "key": "api_key",
+      "label": "API Key",
       "type": "password",
       "required": true,
-      "placeholder": "Your Zoho OAuth client secret",
-      "help": "From Zoho API Console → Your Client → Client Secret"
-    },
-    {
-      "key": "redirect_uri",
-      "label": "Redirect URI",
-      "type": "string",
-      "required": false,
-      "placeholder": "https://app.shielva.ai/oauth/callback/zoho_crm",
-      "help": "Must match one of the Authorized Redirect URIs in your Zoho client app."
-    },
-    {
-      "key": "dc",
-      "label": "Data Center (com/eu/in/com.au)",
-      "type": "string",
-      "required": false,
-      "placeholder": "com",
-      "help": "Zoho data center suffix: com (US, default), eu (Europe), in (India), com.au (Australia)."
+      "description": "Your Freshworks CRM API key from Profile Settings → API Settings."
     }
   ],
-  "capabilities": ["contacts", "leads", "accounts", "deals", "sync"],
-  "oauth": {
-    "auth_url": "https://accounts.zoho.com/oauth/v2/auth",
-    "token_url": "https://accounts.zoho.com/oauth/v2/token",
-    "scopes": [
-      "ZohoCRM.modules.contacts.READ",
-      "ZohoCRM.modules.leads.READ",
-      "ZohoCRM.modules.accounts.READ",
-      "ZohoCRM.modules.deals.READ",
-      "ZohoCRM.settings.fields.READ"
-    ]
-  },
-  "methods": [
-    {
-      "id": "install",
-      "name": "Install / Authenticate",
-      "description": "Validate client credentials and access token by calling GET /org.",
-      "category": "auth"
-    },
-    {
-      "id": "authorize",
-      "name": "Get Authorization URL",
-      "description": "Return the Zoho OAuth2 authorization URL for the configured data center.",
-      "category": "auth"
-    },
-    {
-      "id": "health_check",
-      "name": "Health Check",
-      "description": "Ping Zoho CRM via GET /org and return HEALTHY, DEGRADED, or OFFLINE.",
-      "category": "health"
-    },
-    {
-      "id": "sync",
-      "name": "Sync CRM Records",
-      "description": "Full paginated sync of Leads, Contacts, Accounts, and Deals.",
-      "category": "sync"
-    },
-    {
-      "id": "list_contacts",
-      "name": "List Contacts",
-      "description": "GET /Contacts?page={page}&per_page={per_page}",
-      "category": "records",
-      "endpoint": "GET /Contacts"
-    },
-    {
-      "id": "list_leads",
-      "name": "List Leads",
-      "description": "GET /Leads?page={page}&per_page={per_page}",
-      "category": "records",
-      "endpoint": "GET /Leads"
-    },
-    {
-      "id": "list_accounts",
-      "name": "List Accounts",
-      "description": "GET /Accounts?page={page}&per_page={per_page}",
-      "category": "records",
-      "endpoint": "GET /Accounts"
-    },
-    {
-      "id": "list_deals",
-      "name": "List Deals",
-      "description": "GET /Deals?page={page}&per_page={per_page}",
-      "category": "records",
-      "endpoint": "GET /Deals"
-    },
-    {
-      "id": "get_contact",
-      "name": "Get Contact",
-      "description": "GET /Contacts/{contact_id}",
-      "category": "records",
-      "endpoint": "GET /Contacts/{id}"
-    },
-    {
-      "id": "list_records",
-      "name": "List Records (Generic)",
-      "description": "List records from any Zoho CRM module with pagination.",
-      "category": "records",
-      "endpoint": "GET /{module}?page={page}&per_page={per_page}"
-    },
-    {
-      "id": "get_record",
-      "name": "Get Record (Generic)",
-      "description": "Fetch a single Zoho CRM record by module and record ID.",
-      "category": "records",
-      "endpoint": "GET /{module}/{record_id}"
-    },
-    {
-      "id": "search_records",
-      "name": "Search Records",
-      "description": "Search records in a module using Zoho CRM criteria syntax.",
-      "category": "records",
-      "endpoint": "GET /{module}/search?criteria={criteria}"
-    }
+  "capabilities": [
+    "install",
+    "health_check",
+    "sync",
+    "list_contacts",
+    "get_contact",
+    "list_deals",
+    "get_deal",
+    "list_accounts",
+    "get_account"
   ],
-  "categories": ["auth", "health", "sync", "records"]
+  "api_base_url": "https://{domain}.myfreshworks.com/crm/sales/api/v2",
+  "auth_header": "Authorization: Token token={api_key}"
 }

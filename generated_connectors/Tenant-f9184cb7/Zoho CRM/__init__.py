@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from connector import ZohoCRMConnector
+from .connector import FreshworksCRMConnector
 
-__all__ = ["ZohoCRMConnector"]
+__all__ = ["FreshworksCRMConnector"]

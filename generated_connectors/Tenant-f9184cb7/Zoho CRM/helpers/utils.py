@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import random
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-from exceptions import ZohoCRMAuthError, ZohoCRMError, ZohoCRMRateLimitError
+from exceptions import (
+    FreshworksCRMAuthError,
+    FreshworksCRMError,
+    FreshworksCRMRateLimitError,
+)
 from models import ConnectorDocument
 
 RETRY_MAX_ATTEMPTS: int = 3
@@ -16,9 +19,211 @@ RETRY_JITTER_S: float = 0.5
 RETRY_BASE_DELAY_S: float = 1.0
 RETRY_MAX_DELAY_S: float = 30.0
 
-ZOHO_APP_BASE = "https://crm.zoho.com"  # fallback source_url base
-
 T = TypeVar("T")
+
+
+def _short_id(prefix: str, value: str) -> str:
+    """Return a 16-character hex digest (sha256 prefix) for a prefixed key."""
+    return hashlib.sha256(f"{prefix}:{value}".encode()).hexdigest()[:16]
+
+
+# ── Normalizers ───────────────────────────────────────────────────────────────
+
+
+def normalize_contact(
+    contact: dict[str, Any],
+    connector_id: str,
+    tenant_id: str,
+    domain: str,
+) -> ConnectorDocument:
+    """Convert a raw Freshworks CRM contact into a ConnectorDocument."""
+    contact_id: int = contact.get("id", 0)
+    first_name: str = contact.get("first_name", "") or ""
+    last_name: str = contact.get("last_name", "") or ""
+    name: str = (
+        contact.get("display_name", "")
+        or f"{first_name} {last_name}".strip()
+        or f"Contact #{contact_id}"
+    )
+    email: str = contact.get("email", "") or ""
+    phone: str = contact.get("work_number", "") or contact.get("mobile_number", "") or ""
+    job_title: str = contact.get("job_title", "") or ""
+    company_name: str = contact.get("company", {}).get("name", "") if isinstance(contact.get("company"), dict) else ""
+    lead_source: str = contact.get("lead_source_id", "") or ""
+    linkedin: str = contact.get("linkedin", "") or ""
+    created_at: str = contact.get("created_at", "") or ""
+    updated_at: str = contact.get("updated_at", "") or ""
+    owner_id: Any = contact.get("owner_id", None)
+
+    content_parts: list[str] = [f"Name: {name}"]
+    if email:
+        content_parts.append(f"Email: {email}")
+    if phone:
+        content_parts.append(f"Phone: {phone}")
+    if job_title:
+        content_parts.append(f"Job Title: {job_title}")
+    if company_name:
+        content_parts.append(f"Company: {company_name}")
+    if lead_source:
+        content_parts.append(f"Lead Source: {lead_source}")
+    if linkedin:
+        content_parts.append(f"LinkedIn: {linkedin}")
+    if created_at:
+        content_parts.append(f"Created At: {created_at}")
+    if updated_at:
+        content_parts.append(f"Updated At: {updated_at}")
+
+    source_id = _short_id("contact", str(contact_id))
+
+    return ConnectorDocument(
+        source_id=source_id,
+        title=f"Contact: {name}",
+        content="\n".join(content_parts),
+        connector_id=connector_id,
+        tenant_id=tenant_id,
+        source_url=f"https://{domain}.myfreshworks.com/crm/sales/contacts/{contact_id}",
+        metadata={
+            "contact_id": contact_id,
+            "email": email,
+            "phone": phone,
+            "job_title": job_title,
+            "company_name": company_name,
+            "owner_id": owner_id,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        },
+    )
+
+
+def normalize_deal(
+    deal: dict[str, Any],
+    connector_id: str,
+    tenant_id: str,
+    domain: str,
+) -> ConnectorDocument:
+    """Convert a raw Freshworks CRM deal into a ConnectorDocument."""
+    deal_id: int = deal.get("id", 0)
+    name: str = deal.get("name", "") or f"Deal #{deal_id}"
+    amount: Any = deal.get("amount", None)
+    stage_id: Any = deal.get("deal_stage_id", None)
+    expected_close: str = deal.get("expected_close", "") or ""
+    owner_id: Any = deal.get("owner_id", None)
+    lead_source: Any = deal.get("lead_source_id", None)
+    probability: Any = deal.get("probability", None)
+    created_at: str = deal.get("created_at", "") or ""
+    updated_at: str = deal.get("updated_at", "") or ""
+    # Associated contact and account
+    contact_id: Any = deal.get("fc_widget_collaboration_id", None) or deal.get("contact_id", None)
+    sales_account_id: Any = deal.get("sales_account_id", None)
+
+    content_parts: list[str] = [f"Deal: {name}"]
+    if amount is not None:
+        content_parts.append(f"Amount: {amount}")
+    if stage_id is not None:
+        content_parts.append(f"Stage ID: {stage_id}")
+    if probability is not None:
+        content_parts.append(f"Probability: {probability}%")
+    if expected_close:
+        content_parts.append(f"Expected Close: {expected_close}")
+    if lead_source:
+        content_parts.append(f"Lead Source ID: {lead_source}")
+    if contact_id:
+        content_parts.append(f"Contact ID: {contact_id}")
+    if sales_account_id:
+        content_parts.append(f"Account ID: {sales_account_id}")
+    if owner_id:
+        content_parts.append(f"Owner ID: {owner_id}")
+    if created_at:
+        content_parts.append(f"Created At: {created_at}")
+    if updated_at:
+        content_parts.append(f"Updated At: {updated_at}")
+
+    source_id = _short_id("deal", str(deal_id))
+
+    return ConnectorDocument(
+        source_id=source_id,
+        title=f"Deal: {name}",
+        content="\n".join(content_parts),
+        connector_id=connector_id,
+        tenant_id=tenant_id,
+        source_url=f"https://{domain}.myfreshworks.com/crm/sales/deals/{deal_id}",
+        metadata={
+            "deal_id": deal_id,
+            "amount": amount,
+            "stage_id": stage_id,
+            "probability": probability,
+            "expected_close": expected_close,
+            "owner_id": owner_id,
+            "sales_account_id": sales_account_id,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        },
+    )
+
+
+def normalize_account(
+    account: dict[str, Any],
+    connector_id: str,
+    tenant_id: str,
+    domain: str,
+) -> ConnectorDocument:
+    """Convert a raw Freshworks CRM sales account into a ConnectorDocument."""
+    account_id: int = account.get("id", 0)
+    name: str = account.get("name", "") or f"Account #{account_id}"
+    website: str = account.get("website", "") or ""
+    phone: str = account.get("phone", "") or ""
+    industry_type: Any = account.get("industry_type_id", None)
+    business_type: Any = account.get("business_type_id", None)
+    number_of_employees: Any = account.get("number_of_employees", None)
+    owner_id: Any = account.get("owner_id", None)
+    annual_revenue: Any = account.get("annual_revenue", None)
+    created_at: str = account.get("created_at", "") or ""
+    updated_at: str = account.get("updated_at", "") or ""
+
+    content_parts: list[str] = [f"Account: {name}"]
+    if website:
+        content_parts.append(f"Website: {website}")
+    if phone:
+        content_parts.append(f"Phone: {phone}")
+    if industry_type is not None:
+        content_parts.append(f"Industry Type ID: {industry_type}")
+    if business_type is not None:
+        content_parts.append(f"Business Type ID: {business_type}")
+    if number_of_employees is not None:
+        content_parts.append(f"Employees: {number_of_employees}")
+    if annual_revenue is not None:
+        content_parts.append(f"Annual Revenue: {annual_revenue}")
+    if owner_id:
+        content_parts.append(f"Owner ID: {owner_id}")
+    if created_at:
+        content_parts.append(f"Created At: {created_at}")
+    if updated_at:
+        content_parts.append(f"Updated At: {updated_at}")
+
+    source_id = _short_id("account", str(account_id))
+
+    return ConnectorDocument(
+        source_id=source_id,
+        title=f"Account: {name}",
+        content="\n".join(content_parts),
+        connector_id=connector_id,
+        tenant_id=tenant_id,
+        source_url=f"https://{domain}.myfreshworks.com/crm/sales/sales-accounts/{account_id}",
+        metadata={
+            "account_id": account_id,
+            "website": website,
+            "phone": phone,
+            "industry_type_id": industry_type,
+            "number_of_employees": number_of_employees,
+            "annual_revenue": annual_revenue,
+            "owner_id": owner_id,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        },
+    )
+
+
+# ── Retry helper ──────────────────────────────────────────────────────────────
 
 
 async def with_retry(
@@ -31,149 +236,33 @@ async def with_retry(
 ) -> T:
     """Retry an async callable with exponential backoff + jitter.
 
-    Auth errors are not retried — they require human intervention.
-    Rate-limit errors honour the Retry-After header when present.
+    Auth errors are never retried — they require human intervention.
+    Rate-limit errors honour the Retry-After value when present.
     """
-    last_exc: ZohoCRMError | None = None
+    last_exc: FreshworksCRMError | None = None
     for attempt in range(max_attempts):
         try:
             return await fn(*args, **kwargs)
-        except ZohoCRMAuthError:
-            raise
-        except ZohoCRMRateLimitError as exc:
+        except FreshworksCRMAuthError:
+            raise  # no retry on auth failures
+        except FreshworksCRMRateLimitError as exc:
             last_exc = exc
             if attempt + 1 == max_attempts:
                 break
             delay = exc.retry_after if exc.retry_after > 0 else min(
-                base_delay * (RETRY_BACKOFF_FACTOR ** attempt) + random.uniform(0, RETRY_JITTER_S),
+                base_delay * (RETRY_BACKOFF_FACTOR ** attempt)
+                + random.uniform(0, RETRY_JITTER_S),
                 max_delay,
             )
             await asyncio.sleep(delay)
-        except ZohoCRMError as exc:
+        except FreshworksCRMError as exc:
             last_exc = exc
             if attempt + 1 == max_attempts:
                 break
             delay = min(
-                base_delay * (RETRY_BACKOFF_FACTOR ** attempt) + random.uniform(0, RETRY_JITTER_S),
+                base_delay * (RETRY_BACKOFF_FACTOR ** attempt)
+                + random.uniform(0, RETRY_JITTER_S),
                 max_delay,
             )
             await asyncio.sleep(delay)
     raise last_exc  # type: ignore[misc]
-
-
-def _stable_id(module: str, record_id: str) -> str:
-    """Compute a stable 16-char hex ID from module + record_id."""
-    raw = f"{module}:{record_id}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-def normalize_record(
-    module: str,
-    record: dict[str, Any],
-    connector_id: str,
-    tenant_id: str,
-    data_center: str = "com",
-) -> ConnectorDocument:
-    """Convert a raw Zoho CRM record into a ConnectorDocument.
-
-    Works for any module (Leads, Contacts, Deals, Accounts, etc.).
-    The stable source_id is SHA-256(module + ":" + record_id)[:16].
-    """
-    record_id: str = str(record.get("id", record.get("Id", "")))
-    source_id = _stable_id(module, record_id) if record_id else ""
-
-    # ── Title heuristics by module ─────────────────────────────────────────
-    module_lower = module.lower()
-    if module_lower == "leads":
-        first = record.get("First_Name", "") or ""
-        last = record.get("Last_Name", "") or ""
-        company = record.get("Company", "") or ""
-        full_name = f"{first} {last}".strip() or "Unknown Lead"
-        title = f"Zoho Lead: {full_name}" + (f" — {company}" if company else "")
-    elif module_lower == "contacts":
-        first = record.get("First_Name", "") or ""
-        last = record.get("Last_Name", "") or ""
-        account = record.get("Account_Name", {})
-        account_name = account.get("name", "") if isinstance(account, dict) else str(account or "")
-        full_name = f"{first} {last}".strip() or "Unknown Contact"
-        title = f"Zoho Contact: {full_name}" + (f" — {account_name}" if account_name else "")
-    elif module_lower == "deals":
-        deal_name = record.get("Deal_Name", "") or "Unnamed Deal"
-        stage = record.get("Stage", "") or ""
-        title = f"Zoho Deal: {deal_name}" + (f" — {stage}" if stage else "")
-    elif module_lower == "accounts":
-        account_name = record.get("Account_Name", "") or "Unnamed Account"
-        title = f"Zoho Account: {account_name}"
-    else:
-        # Generic: use Name field or record_id
-        name = record.get("Name", "") or record_id or "Unknown Record"
-        title = f"Zoho {module}: {name}"
-
-    # ── Build content from all scalar fields ──────────────────────────────
-    content_parts: list[str] = [f"Record ID: {record_id}", f"Module: {module}"]
-    for key, value in record.items():
-        if key in ("id", "Id"):
-            continue
-        if value is None:
-            continue
-        if isinstance(value, (str, int, float, bool)):
-            content_parts.append(f"{key}: {value}")
-        elif isinstance(value, dict) and "name" in value:
-            content_parts.append(f"{key}: {value['name']}")
-
-    dc = (data_center or "com").strip().lower()
-    source_url = (
-        f"https://crm.zoho.{dc}/crm/org/tab/{module}/{record_id}"
-        if record_id
-        else ""
-    )
-
-    return ConnectorDocument(
-        source_id=source_id,
-        title=title,
-        content="\n".join(content_parts),
-        connector_id=connector_id,
-        tenant_id=tenant_id,
-        source_url=source_url,
-        metadata={
-            "module": module,
-            "zoho_record_id": record_id,
-            "data_center": dc,
-        },
-    )
-
-
-class CircuitBreaker:
-    """Simple three-state circuit breaker (closed → open → half-open → closed)."""
-
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout_s: float = 60.0,
-    ) -> None:
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout_s = recovery_timeout_s
-        self._failures: int = 0
-        self._state: str = "closed"
-        self._opened_at: float = 0.0
-
-    @property
-    def state(self) -> str:
-        if self._state == "open":
-            if time.monotonic() - self._opened_at >= self.recovery_timeout_s:
-                self._state = "half-open"
-        return self._state
-
-    def on_failure(self) -> None:
-        self._failures += 1
-        if self._failures >= self.failure_threshold:
-            self._state = "open"
-            self._opened_at = time.monotonic()
-
-    def on_success(self) -> None:
-        self._failures = 0
-        self._state = "closed"
-
-    @property
-    def is_open(self) -> bool:
-        return self.state == "open"

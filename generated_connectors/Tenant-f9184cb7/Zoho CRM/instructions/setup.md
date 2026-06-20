@@ -1,136 +1,135 @@
-# Zoho CRM Connector — Setup Guide
+# Freshworks CRM Connector — Setup Guide
 
-## Overview
+## Prerequisites
 
-The Zoho CRM connector authenticates via OAuth 2.0 using a Zoho API Console client app and syncs Leads, Contacts, and Deals into your Shielva knowledge base using the Zoho CRM REST API v6.
-
----
-
-## Step 1: Create a Client App in Zoho API Console
-
-1. Go to [https://api-console.zoho.com/](https://api-console.zoho.com/) and log in with your Zoho account.
-2. Click **Add Client** (or **GET STARTED**).
-3. Select **Server-based Applications** as the client type.
-4. Fill in the required fields:
-   - **Client Name**: `Shielva Connector` (or any label you prefer)
-   - **Homepage URL**: your Shielva instance URL (e.g. `https://app.shielva.ai`)
-   - **Authorized Redirect URIs**: Add the callback URL (see Step 2)
-5. Click **Create**.
+You need a Freshworks CRM (Freshsales) account with Agent or Admin access.
 
 ---
 
-## Step 2: Set the Redirect URI
+## Step 1 — Find your Freshworks CRM domain
 
-In your Zoho client app, add the following **Authorized Redirect URI**:
+Your domain is the subdomain of your Freshworks CRM account URL.
+
+- If you access Freshworks CRM at `https://acme.myfreshworks.com`, your domain is **acme**.
+- Enter only the subdomain — not the full URL. The connector automatically constructs `https://{domain}.myfreshworks.com/crm/sales/api/v2`.
+
+---
+
+## Step 2 — Get your API Key
+
+1. Log in to your Freshworks CRM account.
+2. Click your **avatar / profile icon** in the top-right corner.
+3. Select **Profile Settings**.
+4. Navigate to the **API Settings** tab.
+5. Copy the **API Key** shown there.
+
+The API key is a long alphanumeric string. Keep it secure — it grants full API access to your CRM account.
+
+---
+
+## Step 3 — Install the connector
+
+In the Shielva integration builder:
+
+1. Navigate to **Integrations → Freshworks CRM**.
+2. Click **Connect** or **Install**.
+3. Enter your **Domain** (e.g. `acme` — without `.myfreshworks.com`).
+4. Paste your **API Key**.
+5. Click **Save / Install**.
+
+The connector validates credentials by calling `GET /crm/sales/api/v2/selector/owners`. On success, status is set to **Connected** and the number of CRM owners is reported.
+
+---
+
+## Authentication method
+
+Freshworks CRM uses Token-based authentication via the `Authorization` header:
 
 ```
-https://app.shielva.ai/oauth/callback/zoho_crm
+Authorization: Token token={api_key}
 ```
 
-If self-hosting Shielva, replace the domain with your own.
+This is different from HTTP Basic Auth — do **not** use `Bearer` or `Basic` prefixes.
 
 ---
 
-## Step 3: Note Your Credentials
+## Required permissions
 
-After creating the app, you will see:
+Your Freshworks CRM account must have at least **Agent** level access. Agent access allows:
 
-| Field | Description |
-|---|---|
-| **Client ID** | Starts with `1000.` — this is your `client_id` |
-| **Client Secret** | Hidden by default — click to reveal; this is your `client_secret` |
+- Reading all contacts in your account
+- Reading all deals
+- Reading all sales accounts (companies)
+- Listing CRM owners (used for auth validation)
 
-Keep these safe — you will enter them in Shielva.
-
----
-
-## Step 4: Choose Your Data Center
-
-Zoho operates regional data centers. Select the one matching your Zoho account:
-
-| Data Center | Suffix | Accounts URL |
-|---|---|---|
-| US (default) | `com` | https://accounts.zoho.com |
-| Europe | `eu` | https://accounts.zoho.eu |
-| India | `in` | https://accounts.zoho.in |
-| Australia | `com.au` | https://accounts.zoho.com.au |
-| Japan | `jp` | https://accounts.zoho.jp |
-| China | `com.cn` | https://accounts.zoho.com.cn |
-
-Enter the suffix (e.g. `eu`) in the **Data Center** field when installing the connector. Leave blank for US.
+Admin access is not required for read-only sync.
 
 ---
 
-## Step 5: Authorize the Connector in Shielva
+## What gets synced
 
-When installing the connector in Shielva:
+| Resource | API endpoint | Key fields |
+|----------|-------------|------------|
+| Contacts | `POST /contacts/filters` | Name, email, phone, job title, company, LinkedIn |
+| Deals | `POST /deals/filters` | Name, amount, stage, probability, expected close, account |
+| Accounts | `POST /sales_accounts/filters` | Name, website, phone, industry, employees, revenue |
 
-1. Enter your **Client ID** and **Client Secret** from Step 3.
-2. Optionally enter your **Redirect URI** from Step 2.
-3. Optionally enter your **Data Center** suffix from Step 4.
-4. Click **Connect** — Shielva will open the Zoho OAuth authorization page.
-5. Log in with a CRM admin account and click **Accept**.
-6. Shielva will receive the authorization code and exchange it for tokens automatically.
+Freshworks CRM uses a `POST /resource/filters` pattern for listing records. The connector handles this transparently and exposes standard `list_*()` / `get_*()` methods.
 
----
-
-## Step 6: Verify the Connection
-
-After authorization, Shielva runs `health_check()` automatically. A green status badge indicates the connector is **healthy** and the Zoho CRM API is reachable.
+Pagination is controlled by `meta.total_pages` in the API response. The connector stops fetching when all pages are consumed or the returned list is empty.
 
 ---
 
-## OAuth Scopes
+## Pagination response format
 
-The connector requests the following scope:
+Freshworks CRM wraps all list responses:
 
-| Scope | Permission |
-|---|---|
-| `ZohoCRM.modules.ALL` | Full read/write access to all CRM modules (Leads, Contacts, Deals, Accounts, etc.) |
+```json
+{
+  "contacts": [...],
+  "meta": {
+    "total_pages": 5,
+    "current_page": 1,
+    "total_count": 487
+  }
+}
+```
 
----
-
-## Data Synced
-
-| Module | Key Fields |
-|---|---|
-| Leads | id, First_Name, Last_Name, Company, Email, Phone, Lead_Status, Lead_Source, Created_Time |
-| Contacts | id, First_Name, Last_Name, Account_Name, Email, Phone, Title, Created_Time |
-| Deals | id, Deal_Name, Stage, Amount, Closing_Date, Account_Name, Probability, Created_Time |
-
-All records are normalized to a `ConnectorDocument` with a `source_url` pointing to the record in your Zoho CRM portal. A stable `source_id` is derived from `SHA-256(module + ":" + record_id)[:16]`.
+The connector reads `meta.total_pages` to stop pagination correctly.
 
 ---
 
 ## Troubleshooting
 
-| Error | Cause | Fix |
-|---|---|---|
-| `INVALID_OAUTHTOKEN` (401) | `access_token` expired or revoked | Re-authorize the connector via the Shielva dashboard |
-| `ACCESS_DENIED` (403) | Missing CRM module permissions | Ensure the Zoho user has CRM access and the scope `ZohoCRM.modules.ALL` was granted |
-| Data center mismatch (network error) | Wrong `data_center` suffix | Verify your Zoho account data center and update the connector config |
-| Rate limits (429) | Too many API calls | The connector has built-in exponential backoff; reduce sync frequency if persistent |
-| Empty sync results | Zoho CRM module has no records or API user lacks visibility | Confirm records exist in CRM and the API user has appropriate profile permissions |
-| `redirect_uri_mismatch` | Redirect URI not in Authorized list | Add the exact URI to your Zoho client app's Authorized Redirect URIs |
+### 401 Unauthorized
+- The API key is wrong or has been regenerated.
+- Go to **Profile Settings → API Settings** and copy the current key.
+- Re-enter it in the connector settings.
 
----
+### 403 Forbidden
+- Your account does not have permission to read the requested resource.
+- Confirm your role in Freshworks CRM is at least **Agent**.
+- Ask a Freshworks CRM Admin to check your permissions.
 
-## Required Zoho CRM Permissions for the API User
+### 429 Too Many Requests — rate limit
+- Freshworks CRM enforces API rate limits depending on your plan.
+- The connector retries automatically with exponential backoff (up to 3 attempts).
+- If the limit is consistently hit, consider reducing sync frequency.
 
-The Zoho user account used to authorize the connector must have:
+### Domain not found / connection error
+- Verify the domain is entered as just the subdomain (e.g. `acme`, not `acme.myfreshworks.com`).
+- Confirm your Freshworks CRM account is active.
+- Check that your network allows outbound HTTPS to `*.myfreshworks.com`.
 
-- **CRM profile** with read access to: Leads, Contacts, Deals, Accounts modules
-- No IP restriction blocking Zoho API access from Shielva's servers
+### Sync returns 0 documents
+- Your CRM account may be empty or newly created.
+- Run with `full=True` to bypass any incremental filters.
+- Check that your account contains contacts, deals, or accounts.
 
----
-
-## API Base URLs (by data center)
-
-| Data Center | API Base URL |
-|---|---|
-| US | `https://www.zohoapis.com/crm/v6/` |
-| Europe | `https://www.zohoapis.eu/crm/v6/` |
-| India | `https://www.zohoapis.in/crm/v6/` |
-| Australia | `https://www.zohoapis.com.au/crm/v6/` |
-| Japan | `https://www.zohoapis.jp/crm/v6/` |
-| China | `https://www.zohoapis.com.cn/crm/v6/` |
+### Unit tests fail with `ModuleNotFoundError: aiohttp`
+```bash
+source "/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate"
+pip install aiohttp pytest pytest-asyncio
+cd /Users/vivekvarshavaishvik/Documents/client_dir/freshworks_crm_connector
+python -m pytest tests/ -v
+```

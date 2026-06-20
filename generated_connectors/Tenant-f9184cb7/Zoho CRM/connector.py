@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import hashlib
-from typing import Any
-from urllib.parse import urlencode
+from typing import Any, Dict
 
-from client import ZohoCRMHTTPClient
-from exceptions import ZohoCRMAuthError, ZohoCRMError, ZohoCRMNetworkError
-from helpers import CircuitBreaker, normalize_record, with_retry
+from client import FreshworksCRMHTTPClient
+from exceptions import (
+    FreshworksCRMAuthError,
+    FreshworksCRMError,
+    FreshworksCRMNetworkError,
+)
+from helpers import normalize_account, normalize_contact, normalize_deal, with_retry
 from models import (
     AuthStatus,
     ConnectorDocument,
@@ -17,140 +19,94 @@ from models import (
     SyncStatus,
 )
 
-from shared.base_connector import BaseConnector
+try:
+    from shared.base_connector import BaseConnector
+    _BASE = BaseConnector
+except ImportError:
+    _BASE = object  # standalone / test mode
+
+CONNECTOR_TYPE: str = "freshworks_crm"
+AUTH_TYPE: str = "api_key"
+SYNC_PAGE_SIZE: int = 100
 
 
-CONNECTOR_TYPE: str = "zoho_crm"
-SYNC_PAGE_SIZE: int = 200
-CIRCUIT_BREAKER_THRESHOLD: int = 5
-OAUTH_SCOPE: str = (
-    "ZohoCRM.modules.contacts.READ,"
-    "ZohoCRM.modules.leads.READ,"
-    "ZohoCRM.modules.accounts.READ,"
-    "ZohoCRM.modules.deals.READ,"
-    "ZohoCRM.settings.fields.READ"
-)
-
-# Modules fetched during full sync
-SYNC_MODULES: list[str] = ["Leads", "Contacts", "Accounts", "Deals"]
-
-
-class ZohoCRMConnector(BaseConnector):
+class FreshworksCRMConnector(_BASE):  # type: ignore[misc]
     """
-    Shielva connector for Zoho CRM REST API v2.
+    Shielva connector for Freshworks CRM (Freshsales).
 
-    Provides OAuth2 authorization URL generation, credential validation,
-    health checks, full/incremental sync of Leads, Contacts, Accounts, and Deals,
-    and direct access to any Zoho CRM module.
+    Syncs contacts, deals, and accounts from a Freshworks CRM account using
+    Token-based API key authentication.
     """
 
-    CONNECTOR_TYPE: str = "zoho_crm"
-    AUTH_TYPE: str = "oauth2"
+    CONNECTOR_TYPE: str = "freshworks_crm"
+    AUTH_TYPE: str = "api_key"
 
     def __init__(
         self,
         tenant_id: str = "",
         connector_id: str = "",
-        config: dict[str, Any] | None = None,
+        config: Dict[str, Any] | None = None,
     ) -> None:
         _config = config or {}
-        super().__init__(tenant_id=tenant_id, connector_id=connector_id, config=_config)
+        if _BASE is not object:
+            super().__init__(
+                tenant_id=tenant_id, connector_id=connector_id, config=_config
+            )
+        else:
+            self.config = _config
+            self.connector_id = connector_id
+            self._tenant_id = tenant_id
 
-        # Zoho-specific attrs; accept both "dc" and legacy "data_center" key
-        self._client_id: str = _config.get("client_id", "")
-        self._client_secret: str = _config.get("client_secret", "")
-        self._redirect_uri: str = _config.get("redirect_uri", "")
-        # "dc" is the canonical key; fall back to "data_center" for backwards compat
-        dc_raw: str = _config.get("dc", _config.get("data_center", "com")) or "com"
-        self._data_center: str = dc_raw.strip().lower()
-        self._access_token: str = _config.get("access_token", "")
-        self._refresh_token: str = _config.get("refresh_token", "")
+        self._domain: str = _config.get("domain", "").strip().rstrip("/")
+        self._api_key: str = _config.get("api_key", "").strip()
+        self._http_client: FreshworksCRMHTTPClient | None = None
 
-        self.http_client: ZohoCRMHTTPClient | None = None
-        self._circuit_breaker = CircuitBreaker(failure_threshold=CIRCUIT_BREAKER_THRESHOLD)
+    # ── Internal helpers ──────────────────────────────────────────────────────
 
-    # ── DC helpers ────────────────────────────────────────────────────────────
+    def _make_client(self) -> FreshworksCRMHTTPClient:
+        return FreshworksCRMHTTPClient()
 
-    def _get_dc(self) -> str:
-        """Return the configured data-center suffix (e.g. 'com', 'eu', 'in')."""
-        return self._data_center
+    def _ensure_client(self) -> FreshworksCRMHTTPClient:
+        if self._http_client is None:
+            self._http_client = self._make_client()
+        return self._http_client
 
-    def _accounts_url(self) -> str:
-        """Return the OAuth/accounts base URL for the current data center."""
-        return f"https://accounts.zoho.{self._get_dc()}"
-
-    def _api_url(self) -> str:
-        """Return the REST API base URL for the current data center."""
-        return f"https://www.zohoapis.{self._get_dc()}/crm/v2"
-
-    # ── Client factory ────────────────────────────────────────────────────────
-
-    def _make_client(self) -> ZohoCRMHTTPClient:
-        return ZohoCRMHTTPClient(
-            access_token=self._access_token,
-            data_center=self._data_center,
-            client_id=self._client_id,
-            client_secret=self._client_secret,
-            redirect_uri=self._redirect_uri,
-        )
-
-    def _ensure_client(self) -> ZohoCRMHTTPClient:
-        if self.http_client is None:
-            self.http_client = self._make_client()
-        return self.http_client
-
-    # ── Auth ──────────────────────────────────────────────────────────────────
-
-    async def authorize(self) -> str:
-        """Return the Zoho OAuth2 authorization URL for the configured data center.
-
-        Redirects the user to Zoho's consent screen. After approval Zoho
-        redirects to redirect_uri with a ``code`` param that must be exchanged
-        for tokens via the Zoho token endpoint.
-        """
-        params: dict[str, str] = {
-            "response_type": "code",
-            "client_id": self._client_id,
-            "scope": OAUTH_SCOPE,
-            "access_type": "offline",
-        }
-        if self._redirect_uri:
-            params["redirect_uri"] = self._redirect_uri
-        auth_url = f"{self._accounts_url()}/oauth/v2/auth"
-        return f"{auth_url}?{urlencode(params)}"
+    def _missing_creds(self) -> bool:
+        return not self._domain or not self._api_key
 
     # ── Install ───────────────────────────────────────────────────────────────
 
     async def install(self) -> InstallResult:
-        """Validate OAuth credentials by fetching org info.
+        """Validate domain + api_key by calling GET /selector/owners."""
+        if self._missing_creds():
+            missing = []
+            if not self._domain:
+                missing.append("domain")
+            if not self._api_key:
+                missing.append("api_key")
+            return InstallResult(
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message=f"Missing required fields: {', '.join(missing)}",
+            )
 
-        Requires ``client_id`` and ``client_secret`` (used for token refresh by
-        the platform) and a valid ``access_token`` to call the API.
-        """
-        if not self._client_id or not self._client_secret:
-            return InstallResult(
-                health=ConnectorHealth.OFFLINE,
-                auth_status=AuthStatus.MISSING_CREDENTIALS,
-                message="client_id and client_secret are required",
-            )
-        if not self._access_token:
-            return InstallResult(
-                health=ConnectorHealth.OFFLINE,
-                auth_status=AuthStatus.MISSING_CREDENTIALS,
-                message="access_token is required — complete OAuth authorization first",
-            )
         client = self._make_client()
         try:
-            await with_retry(client.get_org)
+            result = await with_retry(
+                client.list_owners, self._domain, self._api_key
+            )
             await client.aclose()
-            self.http_client = self._make_client()
+            # Freshworks CRM owners endpoint returns {"users": [...]}
+            users: list[dict[str, Any]] = result.get("users", []) if isinstance(result, dict) else []
+            owner_count = len(users)
+            self._http_client = self._make_client()
             return InstallResult(
                 health=ConnectorHealth.HEALTHY,
                 auth_status=AuthStatus.CONNECTED,
                 connector_id=self.connector_id,
-                message="Connected to Zoho CRM successfully",
+                message=f"Connected to Freshworks CRM ({owner_count} owner(s) found)",
             )
-        except ZohoCRMAuthError as exc:
+        except FreshworksCRMAuthError as exc:
             await client.aclose()
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
@@ -168,47 +124,39 @@ class ZohoCRMConnector(BaseConnector):
     # ── Health check ──────────────────────────────────────────────────────────
 
     async def health_check(self) -> HealthCheckResult:
-        """Ping Zoho CRM via GET /org; return HEALTHY/DEGRADED/OFFLINE."""
-        if not self._access_token:
+        """Ping GET /selector/owners and return current connector health."""
+        if self._missing_creds():
             return HealthCheckResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.MISSING_CREDENTIALS,
-                message="access_token is required",
+                message="domain and api_key are required",
             )
+
         client = self._make_client()
         try:
-            await with_retry(client.get_org)
+            await with_retry(client.list_owners, self._domain, self._api_key)
             await client.aclose()
-            self._circuit_breaker.on_success()
             return HealthCheckResult(
                 health=ConnectorHealth.HEALTHY,
                 auth_status=AuthStatus.CONNECTED,
-                message="Zoho CRM API is reachable",
+                message="Freshworks CRM API is reachable",
             )
-        except ZohoCRMAuthError as exc:
+        except FreshworksCRMAuthError as exc:
             await client.aclose()
-            self._circuit_breaker.on_failure()
             return HealthCheckResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.INVALID_CREDENTIALS,
                 message=str(exc),
             )
-        except ZohoCRMNetworkError as exc:
+        except FreshworksCRMNetworkError as exc:
             await client.aclose()
-            self._circuit_breaker.on_failure()
-            health = (
-                ConnectorHealth.DEGRADED
-                if not self._circuit_breaker.is_open
-                else ConnectorHealth.OFFLINE
-            )
             return HealthCheckResult(
-                health=health,
+                health=ConnectorHealth.DEGRADED,
                 auth_status=AuthStatus.FAILED,
                 message=str(exc),
             )
         except Exception as exc:
             await client.aclose()
-            self._circuit_breaker.on_failure()
             return HealthCheckResult(
                 health=ConnectorHealth.DEGRADED,
                 auth_status=AuthStatus.FAILED,
@@ -217,45 +165,47 @@ class ZohoCRMConnector(BaseConnector):
 
     # ── Sync ──────────────────────────────────────────────────────────────────
 
-    async def sync(self, kb_id: str = "", **kwargs: Any) -> SyncResult:
-        """Sync Zoho CRM Leads, Contacts, Accounts, and Deals into the knowledge base.
-
-        Fetches all pages for each module using Zoho REST API v2
-        pagination (page / per_page / more_records).
+    async def sync(
+        self,
+        full: bool = False,  # noqa: ARG002  — future: pass to API if filter added
+        kb_id: str = "",
+    ) -> SyncResult:
         """
-        if self.http_client is None:
-            self.http_client = self._make_client()
+        Sync contacts, deals, and accounts from Freshworks CRM.
+
+        Freshworks CRM list endpoints use POST /resource/filters for paginated listing.
+        Pagination stops when the returned list is empty or total_pages is reached.
+        """
+        if self._http_client is None:
+            self._http_client = self._make_client()
 
         found = 0
         synced = 0
         failed = 0
 
-        for module in SYNC_MODULES:
-            page = 1
+        # Sync contacts
+        try:
+            contact_page = 1
             while True:
-                try:
-                    response = await with_retry(
-                        self.http_client.list_records,
-                        module,
-                        page,
-                        SYNC_PAGE_SIZE,
-                    )
-                except ZohoCRMError:
-                    failed += 1
+                response = await with_retry(
+                    self._http_client.list_contacts,
+                    self._domain,
+                    self._api_key,
+                    page=contact_page,
+                    per_page=SYNC_PAGE_SIZE,
+                )
+                contacts: list[dict[str, Any]] = response.get("contacts", [])
+                if not contacts:
                     break
+                found += len(contacts)
 
-                records: list[dict[str, Any]] = response.get("data", [])
-                info: dict[str, Any] = response.get("info", {})
-                found += len(records)
-
-                for record in records:
+                for contact in contacts:
                     try:
-                        doc: ConnectorDocument = normalize_record(
-                            module,
-                            record,
+                        doc = normalize_contact(
+                            contact,
                             self.connector_id,
-                            self.tenant_id,
-                            self._data_center,
+                            self._tenant_id,
+                            self._domain,
                         )
                         if kb_id:
                             await self._ingest_document(doc, kb_id)
@@ -263,10 +213,107 @@ class ZohoCRMConnector(BaseConnector):
                     except Exception:
                         failed += 1
 
-                more_records: bool = info.get("more_records", False)
-                if not more_records:
+                meta: dict[str, Any] = response.get("meta", {})
+                total_pages: int = int(meta.get("total_pages", 1))
+                if contact_page >= total_pages:
                     break
-                page += 1
+                contact_page += 1
+        except FreshworksCRMError as exc:
+            return SyncResult(
+                status=SyncStatus.FAILED,
+                documents_found=found,
+                documents_synced=synced,
+                documents_failed=failed,
+                message=str(exc),
+            )
+
+        # Sync deals
+        try:
+            deal_page = 1
+            while True:
+                response = await with_retry(
+                    self._http_client.list_deals,
+                    self._domain,
+                    self._api_key,
+                    page=deal_page,
+                    per_page=SYNC_PAGE_SIZE,
+                )
+                deals: list[dict[str, Any]] = response.get("deals", [])
+                if not deals:
+                    break
+                found += len(deals)
+
+                for deal in deals:
+                    try:
+                        doc = normalize_deal(
+                            deal,
+                            self.connector_id,
+                            self._tenant_id,
+                            self._domain,
+                        )
+                        if kb_id:
+                            await self._ingest_document(doc, kb_id)
+                        synced += 1
+                    except Exception:
+                        failed += 1
+
+                meta = response.get("meta", {})
+                total_pages = int(meta.get("total_pages", 1))
+                if deal_page >= total_pages:
+                    break
+                deal_page += 1
+        except FreshworksCRMError as exc:
+            return SyncResult(
+                status=SyncStatus.PARTIAL,
+                documents_found=found,
+                documents_synced=synced,
+                documents_failed=failed,
+                message=f"Deals sync failed: {exc}",
+            )
+
+        # Sync accounts
+        try:
+            account_page = 1
+            while True:
+                response = await with_retry(
+                    self._http_client.list_accounts,
+                    self._domain,
+                    self._api_key,
+                    page=account_page,
+                    per_page=SYNC_PAGE_SIZE,
+                )
+                accounts: list[dict[str, Any]] = response.get("sales_accounts", [])
+                if not accounts:
+                    break
+                found += len(accounts)
+
+                for account in accounts:
+                    try:
+                        doc = normalize_account(
+                            account,
+                            self.connector_id,
+                            self._tenant_id,
+                            self._domain,
+                        )
+                        if kb_id:
+                            await self._ingest_document(doc, kb_id)
+                        synced += 1
+                    except Exception:
+                        failed += 1
+
+                meta = response.get("meta", {})
+                total_pages = int(meta.get("total_pages", 1))
+                if account_page >= total_pages:
+                    break
+                account_page += 1
+        except FreshworksCRMError as exc:
+            return SyncResult(
+                status=SyncStatus.PARTIAL,
+                documents_found=found,
+                documents_synced=synced,
+                documents_failed=failed,
+                message=f"Accounts sync failed: {exc}",
+            )
 
         status = SyncStatus.COMPLETED if failed == 0 else SyncStatus.PARTIAL
         return SyncResult(
@@ -277,70 +324,102 @@ class ZohoCRMConnector(BaseConnector):
         )
 
     async def _ingest_document(self, doc: ConnectorDocument, kb_id: str) -> None:
-        """Push a normalized document to the knowledge base (stub — wired by Shielva runtime)."""
+        """Push a normalized document to the knowledge base (wired by Shielva runtime)."""
         _ = doc, kb_id
 
-    # ── Typed list helpers (spec-required) ────────────────────────────────────
+    # ── Contact methods ───────────────────────────────────────────────────────
 
-    async def list_contacts(self, page: int = 1, per_page: int = 200) -> list[dict[str, Any]]:
-        """GET /Contacts?page={page}&per_page={per_page} → list of contact records."""
-        client = self._ensure_client()
-        response = await with_retry(client.get_contacts, page, per_page)
-        return response.get("data", [])
-
-    async def list_leads(self, page: int = 1, per_page: int = 200) -> list[dict[str, Any]]:
-        """GET /Leads?page={page}&per_page={per_page} → list of lead records."""
-        client = self._ensure_client()
-        response = await with_retry(client.get_leads, page, per_page)
-        return response.get("data", [])
-
-    async def list_accounts(self, page: int = 1, per_page: int = 200) -> list[dict[str, Any]]:
-        """GET /Accounts?page={page}&per_page={per_page} → list of account records."""
-        client = self._ensure_client()
-        response = await with_retry(client.get_accounts, page, per_page)
-        return response.get("data", [])
-
-    async def list_deals(self, page: int = 1, per_page: int = 200) -> list[dict[str, Any]]:
-        """GET /Deals?page={page}&per_page={per_page} → list of deal records."""
-        client = self._ensure_client()
-        response = await with_retry(client.get_deals, page, per_page)
-        return response.get("data", [])
-
-    async def get_contact(self, contact_id: str) -> dict[str, Any]:
-        """GET /Contacts/{contact_id} — fetch a single contact record."""
-        client = self._ensure_client()
-        return await with_retry(client.get_contact, contact_id)
-
-    # ── Generic module records ────────────────────────────────────────────────
-
-    async def list_records(
+    async def list_contacts(
         self,
-        module: str,
         page: int = 1,
-        per_page: int = 200,
-    ) -> dict[str, Any]:
-        """GET /{module}?page={page}&per_page={per_page} — any module."""
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return one page of contacts from POST /contacts/filters."""
         client = self._ensure_client()
-        return await with_retry(client.list_records, module, page, per_page)
+        response = await with_retry(
+            client.list_contacts,
+            self._domain,
+            self._api_key,
+            page=page,
+            per_page=per_page,
+        )
+        return response.get("contacts", [])
 
-    async def get_record(self, module: str, record_id: str) -> dict[str, Any]:
-        """GET /{module}/{record_id} — fetch a single record."""
+    async def get_contact(self, contact_id: int) -> dict[str, Any]:
+        """Return a single contact by ID via GET /contacts/{id}."""
         client = self._ensure_client()
-        return await with_retry(client.get_record, module, record_id)
+        result = await with_retry(
+            client.get_contact, self._domain, self._api_key, contact_id
+        )
+        # Freshworks CRM wraps single-record responses in {"contact": {...}}
+        if "contact" in result:
+            return result["contact"]
+        return result
 
-    async def search_records(self, module: str, criteria: str) -> dict[str, Any]:
-        """GET /{module}/search?criteria={criteria} — search records by criteria string."""
+    # ── Deal methods ──────────────────────────────────────────────────────────
+
+    async def list_deals(
+        self,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return one page of deals from POST /deals/filters."""
         client = self._ensure_client()
-        return await with_retry(client.search_records, module, criteria)
+        response = await with_retry(
+            client.list_deals,
+            self._domain,
+            self._api_key,
+            page=page,
+            per_page=per_page,
+        )
+        return response.get("deals", [])
+
+    async def get_deal(self, deal_id: int) -> dict[str, Any]:
+        """Return a single deal by ID via GET /deals/{id}."""
+        client = self._ensure_client()
+        result = await with_retry(
+            client.get_deal, self._domain, self._api_key, deal_id
+        )
+        if "deal" in result:
+            return result["deal"]
+        return result
+
+    # ── Account methods ───────────────────────────────────────────────────────
+
+    async def list_accounts(
+        self,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return one page of accounts from POST /sales_accounts/filters."""
+        client = self._ensure_client()
+        response = await with_retry(
+            client.list_accounts,
+            self._domain,
+            self._api_key,
+            page=page,
+            per_page=per_page,
+        )
+        return response.get("sales_accounts", [])
+
+    async def get_account(self, account_id: int) -> dict[str, Any]:
+        """Return a single account by ID via GET /sales_accounts/{id}."""
+        client = self._ensure_client()
+        result = await with_retry(
+            client.get_account, self._domain, self._api_key, account_id
+        )
+        if "sales_account" in result:
+            return result["sales_account"]
+        return result
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def aclose(self) -> None:
-        if self.http_client is not None:
-            await self.http_client.aclose()
-            self.http_client = None
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
-    async def __aenter__(self) -> ZohoCRMConnector:
+    async def __aenter__(self) -> FreshworksCRMConnector:
         return self
 
     async def __aexit__(self, *args: object) -> None:
