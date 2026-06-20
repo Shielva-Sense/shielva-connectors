@@ -1,0 +1,36 @@
+{
+  "connector_type": "workable",
+  "name": "Workable",
+  "display_name": "Workable",
+  "description": "Connect to Workable ATS to sync jobs, candidates, and pipeline stages into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Workable API token. Found in Workable → Settings → Integrations → API Access Tokens."
+    },
+    {
+      "key": "subdomain",
+      "label": "Workable Subdomain (e.g. mycompany)",
+      "type": "string",
+      "required": true,
+      "description": "Your Workable account subdomain. If your Workable URL is mycompany.workable.com, enter 'mycompany'."
+    }
+  ],
+  "capabilities": [
+    "list_jobs",
+    "get_job",
+    "list_candidates",
+    "get_candidate",
+    "list_stages",
+    "list_members",
+    "sync"
+  ],
+  "provider": "Workable",
+  "service": "Workable",
+  "category": "ats"
+}
