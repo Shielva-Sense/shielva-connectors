@@ -1,0 +1,34 @@
+{
+  "connector_type": "reamaze",
+  "display_name": "Re:amaze",
+  "provider": "reamaze",
+  "service": "reamaze",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Re:amaze to sync customer support conversations, contacts, knowledge base articles, and reports for eCommerce businesses.",
+  "install_fields": [
+    {
+      "key": "brand_subdomain",
+      "label": "Brand Subdomain",
+      "type": "string",
+      "required": true,
+      "description": "Your Re:amaze brand subdomain (e.g. 'mystore' for mystore.reamaze.com)."
+    },
+    {
+      "key": "email",
+      "label": "Email",
+      "type": "string",
+      "required": true,
+      "description": "The email address associated with your Re:amaze account."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Re:amaze API token from Settings > Account > API."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["conversations", "contacts", "articles", "reports"]
+}
