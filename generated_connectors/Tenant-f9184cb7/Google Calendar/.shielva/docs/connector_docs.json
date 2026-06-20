@@ -1,0 +1,167 @@
+{
+  "title": "Google Calendar Connector Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "1. Overview",
+      "content": "The Google Calendar connector syncs calendar events from the authenticated user's primary Google Calendar into the Shielva knowledge base. It uses the Google Calendar API v3 with OAuth 2.0 for authentication. Events are normalized into ConnectorDocument objects and ingested with stable, content-addressable IDs. The connector supports listing calendars, listing events, fetching individual events, and running a paginated 30-day sync window.",
+      "children": [
+        {
+          "id": "what-this-connector-does",
+          "title": "1.1 What This Connector Does",
+          "content": "The `GoogleCalendarConnector` class connects to the Google Calendar API v3 via OAuth 2.0 to read calendar events from the user's primary calendar. It fetches events within a 30-day window starting from the current time, normalizes each event into a `ConnectorDocument`, and ingests the batch into the Shielva knowledge base.\n\nIt supports full sync over the next 30 days with nextPageToken pagination, per-event error isolation (individual failed normalizations are logged and counted without aborting the batch), exponential-backoff retry on 429 and network errors via `with_retry()`, and multi-tenant ID namespacing so the same raw `event_id` produces different `ConnectorDocument.id` values across connector instances (`{connector_id}_{event_id}`).",
+          "children": []
+        },
+        {
+          "id": "connector-identity",
+          "title": "1.2 Connector Identity",
+          "content": "| Field | Value |\n|-------|-------|\n| Provider | Google |\n| Service | Google Calendar |\n| Connector Class | `GoogleCalendarConnector` |\n| Auth Type | OAuth 2.0 (`oauth2`) |\n| Sync Type | Paginated 30-day window |\n| Current Version | 1.0.0 |\n| `CONNECTOR_TYPE` | `\"google_calendar\"` |\n| `CONNECTOR_NAME` | `\"Google Calendar\"` |\n| `AUTH_URI` | `\"https://accounts.google.com/o/oauth2/v2/auth\"` |\n| `TOKEN_URI` | `\"https://oauth2.googleapis.com/token\"` |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "2. Authentication",
+      "content": "Authentication uses OAuth 2.0 Authorization Code flow. The connector requires a `client_id` and `client_secret` from a Google Cloud project with the Calendar API enabled.",
+      "children": [
+        {
+          "id": "oauth-flow",
+          "title": "2.1 OAuth Flow",
+          "content": "The OAuth flow issues an access token and refresh token scoped to `calendar.readonly`. The access token is automatically refreshed using the stored refresh token when it expires via `on_token_refresh()`.\n\n- Required scope: `https://www.googleapis.com/auth/calendar.readonly`\n- Auth URI: `https://accounts.google.com/o/oauth2/v2/auth`\n- Token URI: `https://oauth2.googleapis.com/token`",
+          "children": []
+        },
+        {
+          "id": "install-fields",
+          "title": "2.2 Install Fields",
+          "content": "| Field | Required | Type | Description |\n|-------|----------|------|-------------|\n| `client_id` | Yes | text | OAuth 2.0 Client ID from Google Cloud Console (ends in `.apps.googleusercontent.com`) |\n| `client_secret` | Yes | secret | OAuth 2.0 Client Secret (starts with `GOCSPX-`) |\n| `redirect_uri` | No | text | Must match the authorized redirect URI registered in Google Cloud Console |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "sync-engine",
+      "title": "3. Sync Engine",
+      "content": "The sync engine fetches events from the primary calendar using a 30-day window (now to now+30 days) with nextPageToken pagination.",
+      "children": [
+        {
+          "id": "sync-algorithm",
+          "title": "3.1 Sync Algorithm",
+          "content": "1. Compute `time_min` = now (UTC) and `time_max` = now + 30 days.\n2. Call `GET /calendars/primary/events` with `maxResults=100`, `singleEvents=true`, `orderBy=startTime`.\n3. For each event in `items`, call `normalize_event()` to produce a `ConnectorDocument`.\n4. Failed normalizations increment `documents_failed` without aborting the batch.\n5. If `nextPageToken` is present, fetch the next page.\n6. Return `SyncResult` with status `COMPLETED` (0 failures), `PARTIAL` (some failures), or `FAILED` (outer exception).",
+          "children": []
+        },
+        {
+          "id": "retry-policy",
+          "title": "3.2 Retry Policy",
+          "content": "All API calls pass through `with_retry()` with the following parameters:\n- `max_retries=3` for sync page fetches\n- `max_retries=2` for health checks\n- `max_retries=3` for list_calendars, list_events, get_event\n- Base delay: 1.0 s, backoff factor: 2.0x, max delay: 32 s\n- `GoogleCalendarRateLimitError` and `GoogleCalendarNetworkError` are retried\n- `GoogleCalendarAuthError` is NOT retried (re-authorize required)",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "4. API Methods",
+      "content": "The connector exposes the following methods:",
+      "children": [
+        {
+          "id": "install",
+          "title": "4.1 install()",
+          "content": "Validates `client_id` and `client_secret` are present in config.\n\n- Returns `HEALTHY/PENDING` on success (credentials present, OAuth not yet completed)\n- Returns `OFFLINE/MISSING_CREDENTIALS` if either credential is absent\n- When SDK is present, saves config via `save_config()`",
+          "children": []
+        },
+        {
+          "id": "health-check",
+          "title": "4.2 health_check()",
+          "content": "Fetches `GET /calendars/primary` to verify token validity and API connectivity.\n\n- Returns `HEALTHY/CONNECTED` on success\n- Returns `DEGRADED/TOKEN_EXPIRED` on `GoogleCalendarAuthError`\n- Returns `DEGRADED/FAILED` on other `GoogleCalendarError`",
+          "children": []
+        },
+        {
+          "id": "sync",
+          "title": "4.3 sync(full, since, kb_id)",
+          "content": "Paginated event sync over the next 30 days from the primary calendar.\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | False | Reserved for future full-history sync |\n| `since` | datetime | None | Reserved for incremental sync |\n| `kb_id` | str | '' | Knowledge base ID to ingest into |\n| `webhook_url` | str | None | Webhook to notify on ingestion |",
+          "children": []
+        },
+        {
+          "id": "list-calendars",
+          "title": "4.4 list_calendars()",
+          "content": "Returns the raw `calendarList` API response: `{kind, etag, items: [{id, summary, primary, ...}]}`.",
+          "children": []
+        },
+        {
+          "id": "list-events",
+          "title": "4.5 list_events(calendar_id, time_min, time_max, max_results)",
+          "content": "Returns the raw events list API response for the specified calendar. Defaults to `calendar_id='primary'` and `max_results=100`.",
+          "children": []
+        },
+        {
+          "id": "get-event",
+          "title": "4.6 get_event(calendar_id, event_id)",
+          "content": "Returns a single raw Google Calendar API event object by calendar ID and event ID.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "5. Data Model (ConnectorDocument)",
+      "content": "Each synced event is normalized into a `ConnectorDocument` with the following shape:",
+      "children": [
+        {
+          "id": "document-fields",
+          "title": "5.1 Document Fields",
+          "content": "| Field | Type | Description |\n|-------|------|-------------|\n| `id` | string | `{connector_id}_{event_id}` — namespaced, stable |\n| `source` | string | Always `'google_calendar'` |\n| `title` | string | Event summary; defaults to `'(no title)'` |\n| `content` | string | Human-readable: description, attendees, location, start, end |\n| `connector_id` | string | The connector instance ID |\n| `tenant_id` | string | The tenant this document belongs to |\n| `metadata` | dict | See below |",
+          "children": []
+        },
+        {
+          "id": "metadata-fields",
+          "title": "5.2 Metadata Fields",
+          "content": "| Key | Description |\n|-----|-------------|\n| `start` | RFC 3339 datetime or date string |\n| `end` | RFC 3339 datetime or date string |\n| `location` | Event location string |\n| `organizer` | Organizer display name or email |\n| `organizer_email` | Organizer email address |\n| `status` | `confirmed`, `tentative`, or `cancelled` |\n| `attendees` | Formatted attendee list: `Name (status), ...` |\n| `html_link` | Google Calendar event URL |\n| `recurring_event_id` | Present for recurring event instances |\n| `calendar_id` | Organizer email (used as calendar identifier) |\n| `etag` | Google Calendar etag for cache validation |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "6. Exceptions",
+      "content": "| Exception | HTTP Status | Retried | Description |\n|-----------|-------------|---------|-------------|\n| `GoogleCalendarError` | — | No | Base exception for all connector errors |\n| `GoogleCalendarAuthError` | 401 | No | Authentication failure — invalid or expired token |\n| `GoogleCalendarRateLimitError` | 429 | Yes | Too Many Requests — quota exceeded |\n| `GoogleCalendarNetworkError` | 4xx/5xx/network | Yes | Network or unexpected HTTP error |\n| `GoogleCalendarNotFoundError` | 404 | No | Requested calendar or event does not exist |",
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "7. Troubleshooting",
+      "content": "Common issues and resolutions:",
+      "children": [
+        {
+          "id": "401-token-expired",
+          "title": "7.1 401 Token Expired",
+          "content": "The access token has expired and the refresh token could not renew it. Re-authorize the connector by clicking **Reconnect**. `health_check()` returns `DEGRADED/TOKEN_EXPIRED`.",
+          "children": []
+        },
+        {
+          "id": "403-insufficient-scope",
+          "title": "7.2 403 Insufficient Scope",
+          "content": "The Google account granted fewer permissions than required. Re-authorize and accept all requested scopes (`calendar.readonly`). For Workspace accounts, confirm the admin has not restricted Calendar API access.",
+          "children": []
+        },
+        {
+          "id": "redirect-uri-mismatch",
+          "title": "7.3 redirect_uri_mismatch",
+          "content": "The redirect URI in Shielva config does not match what is registered in Google Cloud Console. They must be byte-for-byte identical. Check for trailing slashes or `http` vs `https` differences.",
+          "children": []
+        },
+        {
+          "id": "429-rate-limit",
+          "title": "7.4 429 Rate Limit",
+          "content": "The connector retries automatically up to 3 times with exponential backoff (1 s base, 2x factor, 32 s max). Persistent 429s require a quota increase in Google Cloud Console → APIs & Services → Google Calendar API → Quotas.",
+          "children": []
+        },
+        {
+          "id": "events-not-syncing",
+          "title": "7.5 Events Not Syncing",
+          "content": "Verify that: (1) the connector health is `HEALTHY/CONNECTED`, (2) the primary calendar has events in the next 30 days, and (3) the correct knowledge base is selected in the sync settings.",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
