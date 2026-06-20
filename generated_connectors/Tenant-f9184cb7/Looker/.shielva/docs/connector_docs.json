@@ -1,0 +1,65 @@
+{
+  "title": "Looker Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Looker connector syncs Looks and Dashboards from your Google Looker instance into the Shielva knowledge base using the Looker REST API 4.0. It supports OAuth2 client credentials authentication, full sync of Looks and Dashboards, health checks via /user, and exposes direct list/get methods for all major Looker content types."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication (OAuth2 Client Credentials)",
+      "content": "The connector authenticates using Looker API3 Keys. You must provide a client_id and client_secret obtained from Looker Admin → Users → API3 Keys, along with the base_url of your Looker instance (e.g. https://mycompany.looker.com:19999). On login(), the connector POSTs form-encoded credentials to /api/4.0/login and receives a Bearer access_token used for all subsequent requests. Auth errors (401/403) are raised as LookerAuthError and are not retried — they require re-authorization.",
+      "auth_type": "api_key"
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "content": "The following fields are required when installing the connector.",
+      "fields": [
+        {
+          "key": "base_url",
+          "label": "Looker Instance URL",
+          "type": "string",
+          "required": true,
+          "description": "Full Looker instance URL including port (e.g. https://mycompany.looker.com:19999)."
+        },
+        {
+          "key": "client_id",
+          "label": "API Client ID",
+          "type": "string",
+          "required": true,
+          "description": "API3 Client ID from Looker Admin → Users → Edit User → API3 Keys."
+        },
+        {
+          "key": "client_secret",
+          "label": "API Client Secret",
+          "type": "password",
+          "required": true,
+          "description": "API3 Client Secret. Only shown once at key creation time."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync Behaviour",
+      "content": "sync() logs in, fetches all Looks (GET /api/4.0/looks, limit=500) and all Dashboards (GET /api/4.0/dashboards), normalizes each to a ConnectorDocument with a stable SHA-256 source_id (prefix:id), and returns a SyncResult with documents_found, documents_synced, and documents_failed counts. Status is 'completed' when all items succeed, 'partial' when some fail, and 'failed' when login itself fails."
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Three normalizers transform Looker API responses into ConnectorDocuments: normalize_look (prefix='look', id=str(l['id'])), normalize_dashboard (prefix='dashboard', id=str(d['id'])), normalize_model (prefix='model', id=m['name']). All produce 16-character SHA-256 hex source_ids. Metadata includes type, looker_id, description, folder_name, model_name (for looks), and timestamps."
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "content": "LookerAuthError (401/403) — not retried, requires credential fix. LookerNotFoundError (404) — not retried. LookerRateLimitError (429) — retried with Retry-After delay. LookerNetworkError (timeouts/connection errors) — retried 3x with exponential backoff. LookerError (5xx) — retried 3x with exponential backoff."
+    },
+    {
+      "id": "methods",
+      "title": "Available Methods",
+      "content": "install() — validate fields present. health_check() — login + GET /user, return health status. sync() — login + fetch looks + dashboards. list_looks() — GET /api/4.0/looks. list_dashboards() — GET /api/4.0/dashboards. list_models() — GET /api/4.0/lookml_models. get_look(id) — GET /api/4.0/looks/{id}. get_dashboard(id) — GET /api/4.0/dashboards/{id}. run_look(id, format, limit) — GET /api/4.0/looks/{id}/run/{format}."
+    }
+  ]
+}
