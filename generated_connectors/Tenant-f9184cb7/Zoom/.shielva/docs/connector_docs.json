@@ -1,0 +1,284 @@
+{
+  "connector": "zoom",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Zoom connector syncs users, meetings, cloud recordings, and webinars from Zoom into the Shielva knowledge base using the Zoom REST API v2. It uses Server-to-Server OAuth (account_credentials grant) — no user redirect needed. Credentials are exchanged for a Bearer token automatically, and refreshed every hour. The connector implements cursor-based pagination with next_page_token, exponential backoff retry (3 attempts), rate-limit back-off, and a circuit breaker. Each document receives a stable SHA-256-based ID for idempotent syncs."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "server_to_server_oauth",
+          "title": "Server-to-Server OAuth",
+          "content": "The connector uses Zoom Server-to-Server OAuth (account_credentials grant). Create a Server-to-Server OAuth App in the Zoom Marketplace, add the required admin scopes, and provide the Account ID, Client ID, and Client Secret in Shielva. No user redirect or browser consent is required.",
+          "token_url": "https://zoom.us/oauth/token",
+          "grant_type": "account_credentials",
+          "steps": [
+            "Go to marketplace.zoom.us → Develop → Build App → Server-to-Server OAuth.",
+            "Note the Account ID, Client ID, and Client Secret from App Credentials.",
+            "Add scopes: user:read:admin, meeting:read:admin, recording:read:admin.",
+            "Activate the app.",
+            "Enter the Account ID, Client ID, and Client Secret in Shielva.",
+            "Shielva exchanges credentials for a token and probes GET /accounts/me."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "account_id",
+          "label": "Account ID",
+          "type": "string",
+          "required": true,
+          "description": "Your Zoom Account ID, found on the App Credentials page in Zoom Marketplace or under Account Profile in the Zoom Admin portal."
+        },
+        {
+          "key": "client_id",
+          "label": "Client ID",
+          "type": "string",
+          "required": true,
+          "description": "OAuth Client ID from Zoom Marketplace → Your Server-to-Server OAuth App → App Credentials."
+        },
+        {
+          "key": "client_secret",
+          "label": "Client Secret",
+          "type": "password",
+          "required": true,
+          "description": "OAuth Client Secret from Zoom Marketplace → Your Server-to-Server OAuth App → App Credentials."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of Zoom meetings and cloud recordings. For each resource type, it fetches all pages using the next_page_token cursor. Each raw record is passed through a normalizer that converts it into a ConnectorDocument with a stable SHA-256-based source_id, then optionally ingested into the Shielva knowledge base.",
+      "pagination": {
+        "mechanism": "cursor-based (next_page_token parameter)",
+        "page_size": 300,
+        "endpoint_pattern": "GET /users/{user_id}/meetings?page_size=300&next_page_token={token}"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      },
+      "stable_id": {
+        "algorithm": "SHA-256",
+        "format": "SHA-256('meeting:' + meeting_id)[:16]",
+        "purpose": "Ensures idempotent syncs — same meeting always produces the same document ID"
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials. For Server-to-Server OAuth (account_id present): exchanges credentials for a token via POST /oauth/token, then probes GET /accounts/me. Returns HEALTHY + CONNECTED on success.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /accounts/me. Returns HEALTHY, DEGRADED (transient error, circuit not open), or OFFLINE (auth failure or circuit open). Updates circuit breaker state.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Paginated full sync of meetings and recordings. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_users",
+          "signature": "async def list_users(status: str = 'active', page_size: int = 300) -> dict",
+          "description": "Returns a page of Zoom users in the account.",
+          "endpoint": "GET /users",
+          "category": "users"
+        },
+        {
+          "id": "list_meetings",
+          "signature": "async def list_meetings(user_id: str = 'me', meeting_type: str = 'scheduled', page_size: int = 300) -> dict",
+          "description": "Returns a page of Zoom meetings for the given user.",
+          "endpoint": "GET /users/{user_id}/meetings",
+          "category": "meetings"
+        },
+        {
+          "id": "list_recordings",
+          "signature": "async def list_recordings(user_id: str = 'me', from_date: str | None = None, to_date: str | None = None) -> dict",
+          "description": "Returns a page of cloud recordings for the given user.",
+          "endpoint": "GET /users/{user_id}/recordings",
+          "category": "recordings"
+        },
+        {
+          "id": "list_webinars",
+          "signature": "async def list_webinars(user_id: str = 'me') -> dict",
+          "description": "Returns webinars for the given user.",
+          "endpoint": "GET /users/{user_id}/webinars",
+          "category": "webinars"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "http_client_methods",
+      "title": "HTTP Client Methods",
+      "description": "ZoomHTTPClient provides low-level access to the Zoom REST API.",
+      "methods": [
+        {
+          "id": "get_token",
+          "signature": "async def get_token() -> str",
+          "description": "POST /oauth/token with account_credentials grant using BasicAuth (client_id:client_secret). Returns and caches the access_token. Propagates it into the config dict."
+        },
+        {
+          "id": "get_account_info",
+          "signature": "async def get_account_info() -> dict",
+          "description": "GET /accounts/me. Used for health check."
+        },
+        {
+          "id": "get_users",
+          "signature": "async def get_users(status: str = 'active', page_size: int = 300, next_page_token: str = '') -> dict",
+          "description": "GET /users with optional pagination token."
+        },
+        {
+          "id": "get_meetings",
+          "signature": "async def get_meetings(user_id: str = 'me', type: str = 'scheduled', page_size: int = 300, next_page_token: str = '') -> dict",
+          "description": "GET /users/{user_id}/meetings with type and pagination."
+        },
+        {
+          "id": "get_recordings",
+          "signature": "async def get_recordings(user_id: str = 'me', from_date: str = '', to_date: str = '', page_size: int = 300, next_page_token: str = '') -> dict",
+          "description": "GET /users/{user_id}/recordings with date range and pagination."
+        },
+        {
+          "id": "get_webinars",
+          "signature": "async def get_webinars(user_id: str = 'me', page_size: int = 300, next_page_token: str = '') -> dict",
+          "description": "GET /users/{user_id}/webinars with pagination."
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Zoom resource is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "SHA-256('meeting:' + meeting_id)[:16] — stable 16-char hex ID." },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format: 'Zoom meeting: {topic}' or 'Zoom recording: {topic}'." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the resource's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "For meetings: join_url. For recordings: share_url." },
+          { "name": "metadata", "type": "dict", "description": "Resource-type-specific properties map. Always includes object_type key." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_meeting(record, connector_id, tenant_id)",
+          "object_type": "meeting",
+          "title_format": "Zoom meeting: {topic}",
+          "metadata_keys": ["object_type", "meeting_id", "topic", "status", "start_time", "duration", "timezone", "host_id", "host_email", "join_url"]
+        },
+        {
+          "function": "normalize_recording(record, connector_id, tenant_id)",
+          "object_type": "recording",
+          "title_format": "Zoom recording: {topic}",
+          "metadata_keys": ["object_type", "meeting_id", "topic", "start_time", "duration", "host_id", "host_email", "share_url", "recording_count", "total_size"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "ZoomError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "ZoomAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "ZoomRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "ZoomNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource path.",
+          "http_status": 404
+        },
+        {
+          "name": "ZoomNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "ZoomServerError",
+          "description": "Raised on 5xx responses from Zoom. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized on token exchange",
+          "cause": "Client ID, Client Secret, or Account ID is incorrect, or the app has been deactivated.",
+          "solution": "Verify credentials in Zoom Marketplace → App Credentials. Re-activate the app if it was deactivated."
+        },
+        {
+          "problem": "403 Forbidden — scope missing",
+          "cause": "The Server-to-Server OAuth app is missing one or more required admin scopes.",
+          "solution": "Edit the Zoom App in the Marketplace, add user:read:admin, meeting:read:admin, recording:read:admin, then reactivate."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Zoom API rate limits exceeded.",
+          "solution": "The connector retries automatically with exponential backoff. For large accounts, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have tripped the circuit breaker (5 consecutive failures).",
+          "solution": "Resolve the underlying network or credential issue, then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "Cloud recordings not syncing",
+          "cause": "Free Zoom plan does not support cloud recordings, or recording:read:admin scope is missing.",
+          "solution": "Upgrade to Pro, Business, or Enterprise plan and ensure the recording:read:admin scope is granted."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more Zoom resources returned unexpected data that caused normalization to fail.",
+          "solution": "Check connector logs for which record IDs failed. Inspect those resources in Zoom for corrupted or null property values."
+        }
+      ]
+    }
+  ]
+}
