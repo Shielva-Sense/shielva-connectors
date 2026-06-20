@@ -1,0 +1,117 @@
+{
+  "connector_type": "pendo",
+  "connector_id": "pendo",
+  "name": "Pendo",
+  "provider": "Pendo",
+  "service": "Pendo",
+  "version": "1.0.0",
+  "description": "Connects to the Pendo Aggregation API to sync guides, features, pages, accounts, and visitors into the Shielva knowledge base. Authenticates via the x-pendo-integration-key header.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "integration_key",
+      "label": "Integration Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Pendo Integration Key",
+      "help": "Your Pendo Integration Key. Found in Pendo → Settings → Integrations → Integration Keys."
+    }
+  ],
+  "features": [
+    "retry",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "guides",
+    "features",
+    "pages",
+    "accounts",
+    "visitors",
+    "aggregation_api"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate integration_key via GET /api/v1/app. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Call GET /api/v1/app and return HEALTHY with app count, or DEGRADED/OFFLINE on failure.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches guides and features for all apps; normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_apps",
+      "name": "List Apps",
+      "description": "List all Pendo applications in the subscription.",
+      "category": "apps",
+      "endpoint": "GET /api/v1/app"
+    },
+    {
+      "id": "list_guides",
+      "name": "List Guides",
+      "description": "List in-app guides for a given app ID.",
+      "category": "guides",
+      "endpoint": "GET /api/v1/guide"
+    },
+    {
+      "id": "list_features",
+      "name": "List Features",
+      "description": "List tagged features for a given app ID.",
+      "category": "features",
+      "endpoint": "GET /api/v1/feature"
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "List pages for a given app ID.",
+      "category": "pages",
+      "endpoint": "GET /api/v1/page"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Fetch accounts via the Pendo Aggregation API pipeline.",
+      "category": "accounts",
+      "endpoint": "POST /api/v1/aggregation"
+    },
+    {
+      "id": "list_visitors",
+      "name": "List Visitors",
+      "description": "Fetch visitors via the Pendo Aggregation API pipeline.",
+      "category": "visitors",
+      "endpoint": "POST /api/v1/aggregation"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "apps",
+    "guides",
+    "features",
+    "pages",
+    "accounts",
+    "visitors"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync", "id": "sync", "category": "sync"},
+    {"name": "List Apps", "id": "list_apps", "category": "apps"},
+    {"name": "List Guides", "id": "list_guides", "category": "guides"},
+    {"name": "List Features", "id": "list_features", "category": "features"},
+    {"name": "List Pages", "id": "list_pages", "category": "pages"},
+    {"name": "List Accounts", "id": "list_accounts", "category": "accounts"},
+    {"name": "List Visitors", "id": "list_visitors", "category": "visitors"}
+  ]
+}
