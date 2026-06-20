@@ -1,0 +1,83 @@
+{
+  "title": "Jotform Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Jotform** connector integrates Shielva with the [Jotform REST API v1](https://api.jotform.com/docs/) to sync form definitions and submissions into Shielva's knowledge base.\n\nJotform is a leading online form builder platform. This connector exposes **7 API methods** and implements a full paginated sync engine that ingests forms and submissions as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /user` (returns username + email)\n- List all forms with offset-based pagination\n- Fetch complete form definitions\n- Fetch form questions\n- Offset-based pagination for submissions per form and across all forms\n- Full sync engine: all forms → all submissions → normalized documents\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All entities normalized to canonical `ConnectorDocument` with stable 16-char SHA-256 source IDs\n- API key passed as query parameter (`apiKey`) on all requests\n- Jotform envelope (`responseCode` / `content`) always unwrapped"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Jotform connector running in under 5 minutes.\n\n### 1. Get your API Key\n\n1. Log in at [https://www.jotform.com](https://www.jotform.com)\n2. Click your profile icon → **My Account** → **API**\n3. Click **Create New Key** and copy the result\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Jotform**\n2. Paste your **API Key**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with JotformConnector(api_key=\"your_key\") as conn:\n    result = await conn.sync()\n    print(f\"Synced {result.documents_synced} documents from {result.documents_found} found\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Jotform connector uses **API Key** authentication — the key is passed as a query parameter on every request.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Jotform API key from My Account → API |\n\n### How it works\n\nEvery request appends the key as a query parameter:\n```\nhttps://api.jotform.com/user?apiKey={api_key}\n```\n\nThe connector builds this automatically via `_make_params()`. No manual parameter management is needed.\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /user`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\nOn success, the response `username` and `email` fields are included in the result message.\n\n### Security\n\n- The API key is stored encrypted in the Shielva vault and never logged\n- The key is never written to disk or included in any log output"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Jotform connector requires one install field and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"YOUR_JOTFORM_API_KEY\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `JOTFORM_BASE_URL` | `https://api.jotform.com` | Jotform API base URL |\n| `SYNC_SUBMISSIONS_PAGE_SIZE` | `100` | Submissions per page during sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the API key by calling `GET /user`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Jotform as myuser')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing key → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /user` to verify the connector is still reachable. Returns `username` and `email`.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#                   message='Jotform API reachable. Account: myuser',\n#                   username='myuser', email='me@company.com')\n```"
+        },
+        {
+          "id": "sync",
+          "title": "sync(**kwargs)",
+          "content": "Syncs all Jotform forms and submissions into the knowledge base.\n\n```python\nresult = await connector.sync(kb_id=\"kb_forms\")\nprint(result.documents_found)   # total entities found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations or API errors\n```\n\n**How it works:**\n1. Paginates through `GET /user/forms` (100 per page) to collect all forms\n2. Normalizes each form to `ConnectorDocument` via `normalize_form()`\n3. For each form, paginates through `GET /form/{id}/submissions` (100 per page)\n4. Normalizes each submission via `normalize_submission()`\n5. Calls `_ingest_document(doc, kb_id)` for each document (wired by Shielva runtime)"
+        },
+        {
+          "id": "list-forms",
+          "title": "list_forms(offset, limit, order_by)",
+          "content": "Returns a paginated list of Jotform forms.\n\n```python\npage = await connector.list_forms(offset=0, limit=100)\n# {\"items\": [...]}\n```\n\n**Jotform endpoint:** `GET /user/forms`"
+        },
+        {
+          "id": "get-form",
+          "title": "get_form(form_id)",
+          "content": "Returns a single form definition.\n\n```python\nform = await connector.get_form(\"123456789\")\n```\n\n**Jotform endpoint:** `GET /form/{form_id}`"
+        },
+        {
+          "id": "list-submissions",
+          "title": "list_submissions(form_id, offset, limit)",
+          "content": "Returns paginated submissions for a specific form.\n\n```python\nresult = await connector.list_submissions(\"123456789\", offset=0, limit=100)\n```\n\n**Jotform endpoint:** `GET /form/{form_id}/submissions`"
+        },
+        {
+          "id": "list-all-submissions",
+          "title": "list_all_submissions(offset, limit)",
+          "content": "Returns paginated submissions across all forms.\n\n```python\nresult = await connector.list_all_submissions(offset=0, limit=100)\n```\n\n**Jotform endpoint:** `GET /user/submissions`"
+        },
+        {
+          "id": "list-form-questions",
+          "title": "list_form_questions(form_id)",
+          "content": "Returns all questions for a form.\n\n```python\nquestions = await connector.list_form_questions(\"123456789\")\n```\n\n**Jotform endpoint:** `GET /form/{form_id}/questions`"
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "The connector normalizes three entity types to `ConnectorDocument`:\n\n### normalize_form(f)\nConverts a Jotform form object. `source_id = SHA-256(\"form:\" + id)[:16]`\n\n### normalize_submission(s)\nConverts a Jotform submission. `source_id = SHA-256(\"submission:\" + id)[:16]`. Answers are extracted from the nested `answers` dict and rendered as readable key-value pairs.\n\n### normalize_question(q, form_id)\nConverts a Jotform question. `source_id = SHA-256(\"question:\" + form_id + \":\" + qid)[:16]`\n\nAll source IDs are 16-char hex strings derived from SHA-256 — deterministic and collision-resistant."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nJotformError (base)\n├── JotformAuthError       # 401/403 — credentials rejected\n├── JotformRateLimitError  # 429 — too many requests (has retry_after)\n├── JotformNotFoundError   # 404 — resource does not exist\n└── JotformNetworkError    # 5xx / timeouts / connection errors\n```\n\n### Retry Policy\n\n- Auth errors: **never retried** (require human intervention)\n- Rate-limit errors: retried up to 3 times; honours `retry_after` if set\n- Network errors: retried up to 3 times with exponential backoff (1s → 2s → 4s + jitter)\n- Auth errors propagate immediately"
+    }
+  ]
+}
