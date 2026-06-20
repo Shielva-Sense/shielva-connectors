@@ -1,0 +1,140 @@
+{
+  "connector_type": "paypal",
+  "connector_id": "paypal",
+  "name": "PayPal",
+  "provider": "paypal",
+  "service": "paypal",
+  "version": "1.0.0",
+  "description": "Connects to PayPal REST API v2 to sync transactions, orders, and payments into the Shielva knowledge base using OAuth2 client credentials authentication.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "AeQm9rnBtqoTl0ElKjtE0z6Z2l...",
+      "help": "Your PayPal REST app Client ID. Found in the PayPal Developer Dashboard under My Apps & Credentials."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "EKxYGT...",
+      "help": "Your PayPal REST app Client Secret. Found in the PayPal Developer Dashboard next to the Client ID."
+    },
+    {
+      "key": "sandbox",
+      "label": "Sandbox Mode",
+      "type": "string",
+      "required": false,
+      "placeholder": "true",
+      "help": "Set to 'true' to use the PayPal sandbox environment for testing. Leave empty or set to 'false' for live/production."
+    }
+  ],
+  "features": [
+    "oauth2",
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "sandbox_support"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate client_id and client_secret by acquiring an OAuth2 client_credentials token from POST /v1/oauth2/token.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Re-acquire an OAuth2 token to verify credentials are still valid and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Transactions & Orders",
+      "description": "Full or incremental sync of PayPal transactions into the knowledge base using GET /v1/reporting/transactions.",
+      "category": "sync"
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Transactions",
+      "description": "Retrieve a paginated list of transactions within a date range.",
+      "category": "transactions",
+      "endpoint": "GET /v1/reporting/transactions"
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "Retrieve a single PayPal order by order ID.",
+      "category": "orders",
+      "endpoint": "GET /v2/checkout/orders/{order_id}"
+    },
+    {
+      "id": "list_payments",
+      "name": "List Payments",
+      "description": "Retrieve a paginated list of PayPal payment records.",
+      "category": "payments",
+      "endpoint": "GET /v1/payments/payment"
+    },
+    {
+      "id": "get_balance",
+      "name": "Get Balance",
+      "description": "Retrieve the current PayPal account balances.",
+      "category": "balance",
+      "endpoint": "GET /v1/reporting/balances"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "transactions",
+    "orders",
+    "payments",
+    "balance"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health"
+    },
+    {
+      "name": "Sync Transactions & Orders",
+      "id": "sync",
+      "category": "sync"
+    },
+    {
+      "name": "List Transactions",
+      "id": "list_transactions",
+      "category": "transactions"
+    },
+    {
+      "name": "Get Order",
+      "id": "get_order",
+      "category": "orders"
+    },
+    {
+      "name": "List Payments",
+      "id": "list_payments",
+      "category": "payments"
+    },
+    {
+      "name": "Get Balance",
+      "id": "get_balance",
+      "category": "balance"
+    }
+  ]
+}
