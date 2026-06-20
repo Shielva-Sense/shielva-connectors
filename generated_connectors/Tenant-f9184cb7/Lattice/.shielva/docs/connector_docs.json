@@ -1,0 +1,93 @@
+{
+  "title": "Lattice Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Lattice** connector integrates Shielva with the [Lattice REST API v1](https://developers.latticehq.com/) to sync employees, goals/OKRs, and performance reviews into Shielva's knowledge base.\n\nLattice is a leading people management and performance platform. This connector exposes **7 API methods** across 5 resource domains — Users, Departments, Goals, Reviews, and Feedback — and implements a full sync engine that ingests all data as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /v1/users?per_page=1`\n- Full employee sync with normalized documents\n- Goals/OKRs sync with progress and owner metadata\n- Performance reviews sync with score and period metadata\n- Feedback/praise listing\n- Department listing\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- Full pagination via `meta.total_pages` or `meta.total`\n- Bearer token auth: `Authorization: Bearer {api_token}`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Lattice connector running in under 5 minutes.\n\n### 1. Generate an API Token\n\n1. Log in to Lattice\n2. Navigate to **Settings → Integrations → API**\n3. Click **Create API Token**, enter a label, copy the token\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Lattice**\n2. Enter your **API Token**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nfrom connector import LatticeConnector\n\nasync with LatticeConnector(api_token=\"your_token\") as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Lattice connector uses **API Token authentication** via HTTP Bearer.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | Lattice API token from Settings → Integrations → API |\n\n### How it works\n\nEvery request carries:\n```\nAuthorization: Bearer {api_token}\n```\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /v1/users?per_page=1`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged\n- The API token is never written to disk or included in any log output\n- Rotate tokens at Lattice → Settings → Integrations → API"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /v1/users?per_page=1`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, ...)\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing api_token → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /v1/users?per_page=1` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Lattice API reachable.')\n```"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Lattice users, goals, and performance reviews into the knowledge base.\n\n```python\nresult = await connector.sync(full=True, kb_id=\"kb_hr\")\nprint(result.documents_found)   # users + goals + reviews found\nprint(result.documents_synced)  # successfully normalized + ingested\n```\n\n**Sync order:**\n1. Users (fatal if fails)\n2. Goals (non-fatal)\n3. Reviews (non-fatal)\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED)"
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "Returns all Lattice users/employees across all pages.\n\n```python\nusers = await connector.list_users()\n# [{'id': '1', 'firstName': 'Jane', ...}, ...]\n```"
+        },
+        {
+          "id": "get-user",
+          "title": "get_user(user_id)",
+          "content": "Returns a single user as a ConnectorDocument.\n\n```python\ndoc = await connector.get_user(\"123\")\n# ConnectorDocument(title='Employee: Jane Smith', ...)\n```\n\nRaises `LatticeNotFoundError` when the user does not exist."
+        },
+        {
+          "id": "list-goals",
+          "title": "list_goals()",
+          "content": "Returns all Lattice goals/OKRs across all pages.\n\n```python\ngoals = await connector.list_goals()\n```"
+        },
+        {
+          "id": "list-reviews",
+          "title": "list_reviews()",
+          "content": "Returns all Lattice performance reviews across all pages.\n\n```python\nreviews = await connector.list_reviews()\n```"
+        },
+        {
+          "id": "list-feedback",
+          "title": "list_feedback()",
+          "content": "Returns all Lattice public praise / feedback across all pages.\n\n```python\nfeedback = await connector.list_feedback()\n```"
+        },
+        {
+          "id": "list-departments",
+          "title": "list_departments()",
+          "content": "Returns all Lattice departments across all pages.\n\n```python\ndepartments = await connector.list_departments()\n```"
+        }
+      ]
+    },
+    {
+      "id": "sync-details",
+      "title": "Sync & Data Normalization",
+      "content": "### Employee Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('user:{id}')[:16]` |\n| `title` | `Employee: {full_name}` |\n| `content` | Name, email, job title, department, status, manager ID, start date |\n| `metadata.user_id` | Lattice user ID |\n| `metadata.email` | Email address |\n| `metadata.job_title` | Job title |\n| `metadata.department` | Department name |\n| `metadata.status` | Employment status |\n\n### Goal Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('goal:{id}')[:16]` |\n| `title` | `Goal: {name}` |\n| `content` | Name, description, status, progress, owner, type, due date |\n| `metadata.goal_id` | Lattice goal ID |\n| `metadata.status` | Goal status |\n| `metadata.progress` | Completion percentage |\n\n### Review Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('review:{id}')[:16]` |\n| `title` | `Performance Review: {title}` |\n| `content` | Title, reviewee, reviewer, status, score, period, due date |\n| `metadata.review_id` | Lattice review ID |\n| `metadata.score` | Review score/rating |\n| `metadata.status` | Review status |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nLatticeError (base)\n├── LatticeAuthError      — 401/403: invalid credentials or insufficient permissions\n├── LatticeRateLimitError — 429: too many requests (stores retry_after seconds)\n├── LatticeNotFoundError  — 404: resource does not exist\n└── LatticeNetworkError   — 5xx / connection error / timeout\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `LatticeNetworkError` | Yes | Exponential backoff: 1s, 2s, 4s + jitter |\n| `LatticeRateLimitError` | Yes | Respects `Retry-After` header |\n| `LatticeAuthError` | **No** | Immediate failure — fix credentials |\n| `LatticeNotFoundError` | **No** | Immediate failure — resource is gone |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\n**Cause:** API token is invalid or expired.\n**Fix:** Regenerate the API token at Lattice → Settings → Integrations → API.\n\n---\n\n### 403 Forbidden\n\n**Cause:** The token user lacks access to the requested resource.\n**Fix:** Use an admin account's API token or adjust permissions.\n\n---\n\n### 404 Not Found\n\n**Cause:** The resource (user, goal, review) doesn't exist.\n**Fix:** Verify the ID is correct.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Lattice API rate limit reached.\n**Fix:** The connector retries automatically. If persistent, reduce sync frequency."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 60+ unit tests — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/lattice_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 60+ passed\n```\n\n### Coverage\n\n- Exception hierarchy (all 5 classes, inheritance, attributes)\n- Models (all enums, dataclasses)\n- normalize_user, normalize_goal, normalize_review (stable IDs, metadata)\n- with_retry (success, retry on network, no retry on auth, exhausted)\n- LatticeHTTPClient (Bearer header, all 7 endpoints, pagination, _raise_for_status)\n- install() (success, missing api_token)\n- health_check() (healthy, auth error, network error)\n- sync() (returns SyncResult, counts, partial graceful)\n- list_users/list_goals/list_reviews/list_feedback/list_departments (pagination, return types)\n- get_user (returns doc, 404 raises)"
+    }
+  ]
+}
