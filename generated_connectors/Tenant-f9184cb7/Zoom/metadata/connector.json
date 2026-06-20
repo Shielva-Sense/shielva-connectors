@@ -1,0 +1,85 @@
+{
+  "connector_type": "zoom",
+  "name": "Zoom",
+  "provider": "Zoom",
+  "service": "zoom",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "account_id", "label": "Account ID", "type": "string", "required": true},
+    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "capabilities": ["sync", "health_check", "list_users", "list_meetings", "list_recordings"],
+  "description": "Sync meetings, recordings, users, and webinar data from Zoom using Server-to-Server OAuth.",
+  "oauth_token_url": "https://zoom.us/oauth/token",
+  "oauth_grant_type": "account_credentials",
+  "api_base_url": "https://api.zoom.us/v2/",
+  "features": [
+    "server_to_server_oauth",
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "token_refresh"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Exchange account credentials for a Bearer token and probe GET /accounts/me.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probe GET /accounts/me and return HEALTHY, DEGRADED, or OFFLINE. Updates the circuit breaker.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full paginated sync of Zoom meetings and recordings into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "List active users in the Zoom account.",
+      "category": "users",
+      "endpoint": "GET /users"
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Paginated list of Zoom meetings for a user.",
+      "category": "meetings",
+      "endpoint": "GET /users/{user_id}/meetings"
+    },
+    {
+      "id": "list_recordings",
+      "name": "List Recordings",
+      "description": "Paginated list of cloud recordings for a user.",
+      "category": "recordings",
+      "endpoint": "GET /users/{user_id}/recordings"
+    },
+    {
+      "id": "list_webinars",
+      "name": "List Webinars",
+      "description": "List webinars for a user.",
+      "category": "webinars",
+      "endpoint": "GET /users/{user_id}/webinars"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "users",
+    "meetings",
+    "recordings",
+    "webinars"
+  ]
+}
