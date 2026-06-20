@@ -1,0 +1,121 @@
+{
+  "connector_type": "confluence",
+  "display_name": "Confluence",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "provider": "Atlassian",
+  "service": "Confluence",
+  "description": "Sync Confluence spaces, pages, and blog posts into the Shielva knowledge base using the Confluence REST API v2.",
+  "install_fields": [
+    {
+      "key": "email",
+      "label": "Atlassian Account Email",
+      "type": "string",
+      "required": true,
+      "placeholder": "you@yourcompany.com",
+      "help": "The email address associated with your Atlassian account."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "ATATT3xFfGF0...",
+      "help": "Atlassian API token from id.atlassian.com/manage-profile/security/api-tokens."
+    },
+    {
+      "key": "domain",
+      "label": "Confluence Domain (e.g. company.atlassian.net)",
+      "type": "string",
+      "required": true,
+      "placeholder": "yourcompany.atlassian.net",
+      "help": "Your Confluence Cloud domain. Enter only the subdomain (e.g. 'yourcompany' from 'yourcompany.atlassian.net')."
+    }
+  ],
+  "features": [
+    "retry",
+    "cursor_pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "html_stripping"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate email + api_token + domain by calling GET /wiki/rest/api/user/current.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /wiki/rest/api/user/current and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Content",
+      "description": "Full sync of all Confluence spaces, pages, and blog posts into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_spaces",
+      "name": "List Spaces",
+      "description": "Return the first page of Confluence spaces, optionally filtered by type.",
+      "category": "spaces",
+      "endpoint": "GET /wiki/api/v2/spaces"
+    },
+    {
+      "id": "get_space",
+      "name": "Get Space",
+      "description": "Retrieve a single Confluence space by ID.",
+      "category": "spaces",
+      "endpoint": "GET /wiki/api/v2/spaces/{space_id}"
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "Return pages, optionally filtered by space ID and status.",
+      "category": "pages",
+      "endpoint": "GET /wiki/api/v2/pages"
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "Retrieve a single page with full body content in storage format.",
+      "category": "pages",
+      "endpoint": "GET /wiki/api/v2/pages/{page_id}?body-format=storage"
+    },
+    {
+      "id": "get_page_children",
+      "name": "Get Page Children",
+      "description": "Retrieve child pages of a given page.",
+      "category": "pages",
+      "endpoint": "GET /wiki/api/v2/pages/{page_id}/children"
+    },
+    {
+      "id": "list_blogposts",
+      "name": "List Blog Posts",
+      "description": "Return blog posts, optionally filtered by space ID.",
+      "category": "blog_posts",
+      "endpoint": "GET /wiki/api/v2/blogposts"
+    },
+    {
+      "id": "search_content",
+      "name": "Search Content",
+      "description": "CQL full-text search over all Confluence content.",
+      "category": "search",
+      "endpoint": "GET /wiki/rest/api/search?cql=text~\"{query}\""
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "spaces",
+    "pages",
+    "blog_posts",
+    "search"
+  ]
+}
