@@ -1,0 +1,132 @@
+{
+  "connector_type": "linkedin",
+  "connector_id": "linkedin",
+  "name": "LinkedIn",
+  "provider": "linkedin",
+  "service": "linkedin",
+  "version": "1.0.0",
+  "description": "Sync LinkedIn profile, posts, and company pages into the Shielva knowledge base via the LinkedIn REST API v2 using OAuth 2.0.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "Your LinkedIn App Client ID",
+      "help": "From LinkedIn Developers → Your App → Auth → Application credentials → Client ID"
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your LinkedIn App Client Secret",
+      "help": "From LinkedIn Developers → Your App → Auth → Application credentials → Client Secret"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "text",
+      "required": false,
+      "placeholder": "https://your-domain.com/oauth/callback",
+      "help": "Optional. The OAuth redirect URI registered in your LinkedIn App. Leave blank to use the Shielva default."
+    }
+  ],
+  "oauth_scopes": [
+    "r_liteprofile",
+    "r_emailaddress",
+    "w_member_social",
+    "r_organization_social"
+  ],
+  "oauth_auth_url": "https://www.linkedin.com/oauth/v2/authorization",
+  "oauth_token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+  "features": [
+    "retry",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "oauth2"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate client_id and client_secret. If an access_token is already configured, probe GET /me.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return the LinkedIn OAuth2 authorization URL with required scopes.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /me and return HEALTHY, DEGRADED, or OFFLINE. Includes authenticated member name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of LinkedIn profile, member posts, and organization pages.",
+      "category": "sync"
+    },
+    {
+      "id": "get_profile",
+      "name": "Get Profile",
+      "description": "GET /me with projection for id, name, picture, and headline.",
+      "category": "profile",
+      "endpoint": "GET /me?projection=(id,firstName,lastName,profilePicture,headline)"
+    },
+    {
+      "id": "get_email",
+      "name": "Get Email Address",
+      "description": "GET /emailAddress to retrieve the member's primary email.",
+      "category": "profile",
+      "endpoint": "GET /emailAddress?q=members&projection=(elements*(handle~))"
+    },
+    {
+      "id": "list_posts",
+      "name": "List Posts",
+      "description": "Retrieve recent shares/posts for a given author URN.",
+      "category": "posts",
+      "endpoint": "GET /shares?q=owners&owners={author_urn}&count={count}"
+    },
+    {
+      "id": "get_organization",
+      "name": "Get Organization",
+      "description": "Retrieve an organization (company page) by numeric ID.",
+      "category": "organizations",
+      "endpoint": "GET /organizations/{org_id}"
+    },
+    {
+      "id": "list_organization_posts",
+      "name": "List Organization Posts",
+      "description": "Retrieve recent shares posted by an organization URN.",
+      "category": "organizations",
+      "endpoint": "GET /shares?q=owners&owners={org_urn}&count={count}"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "profile",
+    "posts",
+    "organizations"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Authorize", "id": "authorize", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync Records", "id": "sync", "category": "sync"},
+    {"name": "Get Profile", "id": "get_profile", "category": "profile"},
+    {"name": "Get Email Address", "id": "get_email", "category": "profile"},
+    {"name": "List Posts", "id": "list_posts", "category": "posts"},
+    {"name": "Get Organization", "id": "get_organization", "category": "organizations"},
+    {"name": "List Organization Posts", "id": "list_organization_posts", "category": "organizations"}
+  ]
+}
