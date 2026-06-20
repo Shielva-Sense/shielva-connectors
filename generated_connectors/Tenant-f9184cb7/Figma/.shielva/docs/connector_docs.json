@@ -1,0 +1,141 @@
+{
+  "connector_type": "figma",
+  "display_name": "Figma",
+  "version": "1.0.0",
+  "summary": "Sync Figma design files, projects, team components, published styles, comments, and version history into Shielva via the Figma REST API using a Personal Access Token.",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Figma connector provides read-only access to your Figma team's design assets. It traverses the team project hierarchy (team → projects → files → comments) and also fetches the team's published component and style libraries. Each resource is normalized into a ConnectorDocument with a stable SHA-256 derived ID so re-syncing the same file always produces the same document ID."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Authentication uses a Figma Personal Access Token (PAT) transmitted via the X-Figma-Token header on every request. The config field is named 'api_key'. 'personal_access_token' is accepted as a legacy alias for backward compatibility. Generate a PAT in Figma → Account Settings → Security → Personal access tokens."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "Personal Access Token",
+          "type": "password",
+          "required": true,
+          "description": "Figma PAT — transmitted as X-Figma-Token header"
+        },
+        {
+          "key": "team_id",
+          "label": "Team ID",
+          "type": "string",
+          "required": false,
+          "description": "Numeric team ID from the Figma URL: figma.com/files/team/{team_id}/. Required to access team projects, components, and styles."
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "HTTP Client API Methods",
+      "methods": [
+        {"name": "get_me", "endpoint": "GET /me", "description": "Fetch authenticated user info — used for health check"},
+        {"name": "list_projects(team_id)", "endpoint": "GET /teams/{team_id}/projects", "description": "List all projects for a team"},
+        {"name": "list_files(project_id)", "endpoint": "GET /projects/{project_id}/files", "description": "List all files in a project"},
+        {"name": "get_file(file_key)", "endpoint": "GET /files/{file_key}", "description": "Fetch the full document tree for a file"},
+        {"name": "get_file_nodes(file_key, node_ids)", "endpoint": "GET /files/{file_key}/nodes?ids=…", "description": "Fetch specific nodes within a file by node ID list"},
+        {"name": "get_file_comments(file_key)", "endpoint": "GET /files/{file_key}/comments", "description": "List all comments on a file"},
+        {"name": "get_file_versions(file_key)", "endpoint": "GET /files/{file_key}/versions", "description": "List version history of a file"},
+        {"name": "get_team_components(team_id)", "endpoint": "GET /teams/{team_id}/components", "description": "List published components for a team (cursor-paginated)"},
+        {"name": "get_team_styles(team_id)", "endpoint": "GET /teams/{team_id}/styles", "description": "List published styles for a team (cursor-paginated)"}
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "document_types": [
+        {"type": "design_file", "stable_id": "sha256('file:{file_key}')[:16]", "source": "list_files"},
+        {"type": "figma_project", "stable_id": "sha256('project:{project_id}')[:16]", "source": "list_projects"},
+        {"type": "component", "stable_id": "sha256('component:{component_key}')[:16]", "source": "list_components"},
+        {"type": "figma_style", "stable_id": "sha256('style:{style_key}')[:16]", "source": "list_styles"},
+        {"type": "figma_comment", "stable_id": "sha256('comment:{comment_id}')[:16]", "source": "get_file_comments"},
+        {"type": "figma_version", "stable_id": "sha256('version:{version_id}')[:16]", "source": "get_file_versions"}
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {"name": "FigmaError", "role": "Base exception for all Figma connector errors"},
+        {"name": "FigmaAuthError", "role": "Raised on 401/403 or 200+{status:403} — invalid or expired PAT. Not retried."},
+        {"name": "FigmaNetworkError", "role": "Raised on connection/timeout failures and 5xx responses"},
+        {"name": "FigmaNotFoundError", "role": "Raised on 404 — resource deleted or not accessible. Not retried."},
+        {"name": "FigmaRateLimitError", "role": "Raised on 429 — rate limit reached"}
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "issue": "Health check returns FigmaAuthError",
+          "solution": "Regenerate the PAT in Figma Settings → Security. Ensure the PAT belongs to an account with access to the target team."
+        },
+        {
+          "issue": "No projects or files returned",
+          "solution": "Verify the Team ID is the numeric ID from the Figma URL (not the team name). The PAT account must be a team member."
+        },
+        {
+          "issue": "Components or styles list is empty",
+          "solution": "Components and styles must be explicitly published to the team library (right-click → Publish in Figma) before they appear in the API."
+        },
+        {
+          "issue": "200 response raises FigmaAuthError",
+          "solution": "Figma sometimes returns {status: 403, err: '...'} inside a 200 response. The connector correctly detects this and raises FigmaAuthError."
+        },
+        {
+          "issue": "Rate limit (429) errors during sync",
+          "solution": "Reduce sync frequency or use a dedicated Figma service account. The connector retries transient errors with exponential backoff but does not auto-retry 429."
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "api_key",
+    "header": "X-Figma-Token",
+    "config_key": "api_key",
+    "legacy_alias": "personal_access_token",
+    "token_source": "Figma → Account Settings → Security → Personal access tokens"
+  },
+  "api": {
+    "base_url": "https://api.figma.com/v1",
+    "rate_limit": "~100 requests/minute per token",
+    "pagination": "cursor-based for /teams/{id}/components and /teams/{id}/styles",
+    "docs": "https://www.figma.com/developers/api"
+  },
+  "retry_policy": {
+    "max_attempts": 3,
+    "backoff": "exponential",
+    "base_delay_s": 1.0,
+    "skip_on": ["FigmaAuthError", "FigmaNotFoundError"]
+  },
+  "capabilities": ["sync", "health_check"],
+  "test_coverage": {
+    "total_tests": 122,
+    "categories": {
+      "exceptions": 6,
+      "models": 9,
+      "normalize_functions": 22,
+      "with_retry": 7,
+      "http_client_mocked": 30,
+      "install": 7,
+      "health_check": 6,
+      "sync_with_team_id": 7,
+      "sync_without_team_id": 4,
+      "list_methods": 8,
+      "list_styles": 4,
+      "get_file_versions": 4,
+      "get_file": 4,
+      "connector_constants": 5
+    }
+  }
+}
