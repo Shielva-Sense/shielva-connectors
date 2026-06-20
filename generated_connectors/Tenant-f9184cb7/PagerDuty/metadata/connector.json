@@ -1,0 +1,31 @@
+{
+  "connector_type": "pagerduty",
+  "display_name": "PagerDuty",
+  "provider": "PagerDuty",
+  "service": "PagerDuty",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "REST API Key",
+      "type": "password",
+      "required": true,
+      "help": "Your PagerDuty REST API Key. Create one at My Profile → User Settings → API Access Keys."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["incidents", "services", "users", "schedules", "escalation_policies"],
+  "api_base": "https://api.pagerduty.com/",
+  "auth_header": "Authorization: Token token={api_key}",
+  "api_version_header": "Accept: application/vnd.pagerduty+json;version=2",
+  "pagination": {
+    "type": "offset",
+    "fields": ["offset", "limit", "more"],
+    "note": "PagerDuty uses offset+limit pagination. Continue while more==true."
+  },
+  "rate_limit": {
+    "requests_per_minute": 60,
+    "note": "PagerDuty enforces per-user rate limits. The connector retries on 429 with exponential backoff."
+  }
+}
