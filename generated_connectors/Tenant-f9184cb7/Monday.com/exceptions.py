@@ -2,21 +2,21 @@
 from __future__ import annotations
 
 
-class MondayComError(Exception):
+class MondayError(Exception):
     """Base exception for all Monday.com connector errors."""
 
 
-class MondayComAuthError(MondayComError):
+class MondayAuthError(MondayError):
     """Raised on authentication failures — invalid or expired API token."""
 
 
-class MondayComNetworkError(MondayComError):
-    """Raised on connection / timeout / server errors."""
+class MondayNetworkError(MondayError):
+    """Raised on connection / timeout failures."""
 
 
-class MondayComNotFoundError(MondayComError):
-    """Raised when a requested resource does not exist."""
+class MondayRateLimitError(MondayError):
+    """Raised when Monday.com API returns a rate-limit error."""
 
 
-class MondayComRateLimitError(MondayComError):
-    """Raised when Monday.com API returns a rate-limit (HTTP 429) error."""
+class MondayNotFoundError(MondayError):
+    """Raised when a requested resource does not exist (board not found, item not found)."""

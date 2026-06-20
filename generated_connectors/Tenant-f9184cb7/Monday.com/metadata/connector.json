@@ -1,14 +1,20 @@
 {
-  "connector_type": "monday_com",
+  "connector_type": "monday",
+  "name": "Monday.com",
   "display_name": "Monday.com",
-  "auth_type": "api_key",
+  "description": "Connect to Monday.com to sync boards, items, and workspaces via the Monday.com GraphQL API v2.",
   "version": "1.0.0",
+  "auth_type": "api_key",
   "install_fields": [
     {
-      "key": "api_key",
+      "key": "api_token",
       "label": "API Token",
       "type": "password",
-      "required": true
+      "required": true,
+      "description": "Monday.com personal API token. Go to Profile → Developers → My Access Tokens → Show to copy it."
     }
-  ]
+  ],
+  "capabilities": ["list_boards", "get_board", "list_items", "get_item", "list_workspaces", "sync"],
+  "provider": "monday",
+  "category": "project_management"
 }
