@@ -1,0 +1,29 @@
+{
+  "connector_type": "slack",
+  "name": "Slack",
+  "display_name": "Slack",
+  "provider": "Slack",
+  "service": "slack",
+  "description": "Sync channels, messages, users, and files from Slack.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "bot_token",
+      "label": "Bot Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "xoxb-...",
+      "description": "Slack Bot User OAuth Token (xoxb-...). From Slack App → OAuth & Permissions."
+    },
+    {
+      "key": "channel_types",
+      "label": "Channel Types",
+      "type": "string",
+      "required": false,
+      "description": "Comma-separated channel types to sync: public_channel, private_channel, mpim, im. Default: public_channel"
+    }
+  ],
+  "capabilities": ["sync", "health_check", "list_channels", "list_users", "get_channel_messages"],
+  "category": "messaging"
+}
