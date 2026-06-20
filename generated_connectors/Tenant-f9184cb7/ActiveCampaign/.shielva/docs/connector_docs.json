@@ -1,0 +1,268 @@
+{
+  "connector": "activecampaign",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The ActiveCampaign connector syncs contacts, deals, and campaigns from ActiveCampaign into the Shielva knowledge base using the ActiveCampaign REST API v3. Authentication uses an API key passed in the Api-Token request header. The connector implements offset-based pagination (using meta.total), exponential backoff retry, and a circuit breaker to ensure reliable, throttle-safe data ingestion. Each synced record receives a stable 16-character source_id derived from SHA-256(type:id)[:16]."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_key",
+          "title": "API Key",
+          "content": "ActiveCampaign uses a static API key passed as the Api-Token header on every request. The key is found in Settings → Developer in your ActiveCampaign account. API keys do not expire unless regenerated manually.",
+          "steps": [
+            "Log into your ActiveCampaign account.",
+            "Click Settings (gear icon, bottom-left sidebar).",
+            "Navigate to Developer in the left menu.",
+            "Copy the API URL (e.g. https://youraccountname.api-us1.com).",
+            "Copy the API Key shown below the URL.",
+            "Paste both into the connector install form in Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "api_url",
+          "label": "API URL",
+          "type": "text",
+          "required": true,
+          "placeholder": "https://youraccountname.api-us1.com",
+          "description": "Your ActiveCampaign account API URL. Found in Settings → Developer → API URL. Do not append /api/3/ — the connector adds it automatically."
+        },
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your ActiveCampaign API key",
+          "description": "Your ActiveCampaign API key. Found in Settings → Developer → Key. Passed as Api-Token header on every request."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of ActiveCampaign objects. For each object type (contacts, deals, campaigns), it fetches all pages using offset-based pagination. The total record count is read from the meta.total field in each API response. Each raw API record is passed through a normalizer that converts it into a ConnectorDocument with a stable source_id.",
+      "pagination": {
+        "mechanism": "offset-based (limit + offset parameters)",
+        "page_size": 100,
+        "total_field": "meta.total",
+        "endpoint_pattern": "GET /api/3/{resource}?limit=100&offset={offset}"
+      },
+      "stable_id": {
+        "algorithm": "SHA-256",
+        "format": "SHA-256(\"{type}:{id}\")[:16]",
+        "example": "stable_id(\"contact\", \"12345\") → 16-char hex string"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials by probing GET /api/3/users/me. Returns HEALTHY + CONNECTED on success, or OFFLINE + appropriate AuthStatus on failure. Sets http_client on success.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /api/3/users/me. Returns HEALTHY (with user_name and user_email), DEGRADED (transient network error, circuit not open), or OFFLINE (auth failure or circuit open). Updates the circuit breaker state.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Paginated full sync of contacts, deals, and campaigns. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_contacts",
+          "signature": "async def list_contacts(limit: int = 100, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of ActiveCampaign contacts.",
+          "endpoint": "GET /api/3/contacts",
+          "category": "contacts"
+        },
+        {
+          "id": "get_contact",
+          "signature": "async def get_contact(contact_id: str) -> dict",
+          "description": "Returns a single ActiveCampaign contact by ID.",
+          "endpoint": "GET /api/3/contacts/{id}",
+          "category": "contacts"
+        },
+        {
+          "id": "list_deals",
+          "signature": "async def list_deals(limit: int = 100, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of ActiveCampaign deals.",
+          "endpoint": "GET /api/3/deals",
+          "category": "deals"
+        },
+        {
+          "id": "get_deal",
+          "signature": "async def get_deal(deal_id: str) -> dict",
+          "description": "Returns a single ActiveCampaign deal by ID.",
+          "endpoint": "GET /api/3/deals/{id}",
+          "category": "deals"
+        },
+        {
+          "id": "list_campaigns",
+          "signature": "async def list_campaigns(limit: int = 100, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of ActiveCampaign campaigns.",
+          "endpoint": "GET /api/3/campaigns",
+          "category": "campaigns"
+        },
+        {
+          "id": "list_lists",
+          "signature": "async def list_lists(limit: int = 100, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of ActiveCampaign subscriber lists.",
+          "endpoint": "GET /api/3/lists",
+          "category": "lists"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every ActiveCampaign object is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "Stable 16-char hex: SHA-256('{type}:{ac_id}')[:16]" },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format varies by object type." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the object's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "Empty string — AC does not have stable deep links." },
+          { "name": "metadata", "type": "dict", "description": "Object-type-specific properties map. Always includes object_type and ac_id keys." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_contact(record, connector_id, tenant_id)",
+          "object_type": "contact",
+          "title_format": "ActiveCampaign contact: {firstName} {lastName} <{email}>",
+          "metadata_keys": ["object_type", "ac_id", "email", "name", "phone", "organization", "cdate", "udate"]
+        },
+        {
+          "function": "normalize_deal(record, connector_id, tenant_id)",
+          "object_type": "deal",
+          "title_format": "ActiveCampaign deal: {title} — {status}",
+          "status_map": {"0": "open", "1": "won", "2": "lost"},
+          "metadata_keys": ["object_type", "ac_id", "title", "value", "currency", "status", "stage", "owner", "cdate", "mdate"]
+        },
+        {
+          "function": "normalize_campaign(record, connector_id, tenant_id)",
+          "object_type": "campaign",
+          "title_format": "ActiveCampaign campaign: {name} ({status})",
+          "status_map": {"0": "draft", "1": "scheduled", "2": "sending", "3": "sent", "4": "paused"},
+          "metadata_keys": ["object_type", "ac_id", "name", "type", "status", "subject", "send_amt", "opens", "cdate"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "ActiveCampaignError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "ActiveCampaignAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "ActiveCampaignRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "ActiveCampaignNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
+          "http_status": 404
+        },
+        {
+          "name": "ActiveCampaignNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "ActiveCampaignServerError",
+          "description": "Raised on 5xx responses from ActiveCampaign. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "API key is invalid, has been regenerated, or the account was deleted.",
+          "solution": "Go to ActiveCampaign Settings → Developer, copy the current API key, and update the connector's api_key field."
+        },
+        {
+          "problem": "403 Forbidden",
+          "cause": "The account associated with the API key does not have permission to read the requested resource.",
+          "solution": "Ensure the account is an admin or has the necessary role in ActiveCampaign."
+        },
+        {
+          "problem": "Incorrect API URL",
+          "cause": "The api_url field contains a typo, includes /api/3/, or uses the wrong subdomain.",
+          "solution": "Copy the exact URL from Settings → Developer. It should look like https://youraccountname.api-us1.com with no trailing path."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "ActiveCampaign rate limit exceeded.",
+          "solution": "The connector retries automatically with exponential backoff honouring Retry-After. For very large accounts, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have started tripping the circuit breaker (fewer than 5 failures).",
+          "solution": "Resolve the underlying network issue and trigger a health check. The circuit breaker resets on a successful call."
+        },
+        {
+          "problem": "Connector health is OFFLINE",
+          "cause": "Authentication failure or circuit breaker has opened (5+ consecutive failures).",
+          "solution": "Fix the root cause (auth or network), then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more records returned unexpected data that caused normalization to fail.",
+          "solution": "Check the connector logs for which record IDs failed. Inspect those records in ActiveCampaign for corrupted or null property values."
+        }
+      ]
+    }
+  ]
+}
