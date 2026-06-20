@@ -1,0 +1,34 @@
+{
+  "connector_type": "freshdesk",
+  "name": "Freshdesk",
+  "display_name": "Freshdesk",
+  "description": "Connect to Freshdesk to sync support tickets, contacts, and agents.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "domain",
+      "label": "Domain",
+      "type": "string",
+      "required": true,
+      "description": "Your Freshdesk domain (e.g. mycompany.freshdesk.com)."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Freshdesk API key from Profile Settings → Your API Key."
+    }
+  ],
+  "capabilities": [
+    "list_tickets",
+    "get_ticket",
+    "list_contacts",
+    "get_contact",
+    "list_agents",
+    "sync"
+  ],
+  "provider": "freshdesk",
+  "category": "customer_support"
+}
