@@ -1,0 +1,45 @@
+{
+  "connector_type": "helpscout",
+  "display_name": "Help Scout",
+  "provider": "helpscout",
+  "service": "helpscout",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Connect to Help Scout to sync conversations, customers, mailboxes, users, and tags.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "App ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Help Scout OAuth app's App ID (client_id). Found under Your Profile → My Apps."
+    },
+    {
+      "key": "client_secret",
+      "label": "App Secret",
+      "type": "password",
+      "required": true,
+      "description": "Your Help Scout OAuth app's App Secret (client_secret). Found under Your Profile → My Apps."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_conversations",
+    "get_conversation",
+    "list_customers",
+    "list_mailboxes",
+    "list_users"
+  ],
+  "resources": [
+    "conversations",
+    "customers",
+    "mailboxes",
+    "users",
+    "tags"
+  ],
+  "category": "customer_support",
+  "api_base": "https://api.helpscout.net/v2/",
+  "token_url": "https://api.helpscout.net/v2/oauth2/token",
+  "pagination": "hal+json"
+}
