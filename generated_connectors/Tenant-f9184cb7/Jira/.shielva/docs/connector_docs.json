@@ -1,0 +1,185 @@
+{
+  "connector": "jira",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Jira connector syncs issues, projects, and boards from your Atlassian Jira Cloud account into the Shielva knowledge base using the Jira REST API v3 and the Jira Agile REST API v1. Authentication uses HTTP Basic Auth with an Atlassian account email and an API token (not the account password). The connector implements cursor-based pagination via startAt/total, exponential backoff retry (up to 3 attempts), and ADF (Atlassian Document Format) text extraction for rich issue descriptions. Each synced issue receives a stable id derived from SHA-256(issue_key)[:16]."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_token",
+          "title": "Atlassian API Token",
+          "content": "Jira REST API v3 uses HTTP Basic Auth: the email is the Atlassian account email, and the API token (generated at id.atlassian.com/manage-profile/security/api-tokens) serves as the password. This is distinct from the Atlassian account password. The token does not expire unless manually revoked.",
+          "steps": [
+            "Go to https://id.atlassian.com/manage-profile/security/api-tokens.",
+            "Click 'Create API token'.",
+            "Give it a descriptive label (e.g., 'Shielva Jira Connector').",
+            "Click 'Create', then copy the token — it is only shown once.",
+            "In the Shielva connector form, enter your Atlassian domain (subdomain only), account email, and the API token."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "domain",
+          "label": "Atlassian Domain",
+          "type": "text",
+          "required": true,
+          "placeholder": "yourcompany",
+          "description": "The subdomain of your Atlassian site. For yourcompany.atlassian.net, enter 'yourcompany' only (no .atlassian.net suffix)."
+        },
+        {
+          "key": "email",
+          "label": "Atlassian Account Email",
+          "type": "text",
+          "required": true,
+          "placeholder": "you@yourcompany.com",
+          "description": "The email address of the Atlassian account used to generate the API token. This is used as the HTTP Basic Auth username."
+        },
+        {
+          "key": "api_token",
+          "label": "Atlassian API Token",
+          "type": "password",
+          "required": true,
+          "placeholder": "your-atlassian-api-token",
+          "description": "API token from id.atlassian.com/manage-profile/security/api-tokens. Used as the HTTP Basic Auth password. Never use your Atlassian account password here."
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "name": "install()",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates that domain, email, and api_token are all present, then calls GET /myself. Returns HEALTHY + CONNECTED on success, OFFLINE + MISSING_CREDENTIALS if any field is blank, OFFLINE + INVALID_CREDENTIALS on 401/403, OFFLINE + FAILED on other errors."
+        },
+        {
+          "id": "health_check",
+          "name": "health_check()",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /myself and returns the current health. HEALTHY on 200, OFFLINE on auth errors, DEGRADED on network or generic errors."
+        },
+        {
+          "id": "sync",
+          "name": "sync(kb_id=\"\")",
+          "signature": "async def sync(kb_id: str = \"\") -> SyncResult",
+          "description": "Fetches all Jira issues via JQL 'ORDER BY updated DESC' with startAt pagination (100 issues/page). Each issue is normalized into a ConnectorDocument with stable SHA-256 id, type='jira_issue', and ADF description extraction. Pass kb_id to trigger ingestion. Returns COMPLETED, PARTIAL (some normalization failures), or FAILED (fetch error)."
+        },
+        {
+          "id": "list_projects",
+          "name": "list_projects()",
+          "signature": "async def list_projects() -> dict",
+          "description": "Calls GET /project/search and returns the paginated project list. Response contains 'values', 'total', 'startAt', 'maxResults'."
+        },
+        {
+          "id": "list_issues",
+          "name": "list_issues(project_key, max_results=50)",
+          "signature": "async def list_issues(project_key: str, max_results: int = 50) -> dict",
+          "description": "Calls GET /search with JQL 'project={project_key} ORDER BY updated DESC'. Returns the standard Jira search response with 'issues', 'total', 'startAt'."
+        },
+        {
+          "id": "get_issue",
+          "name": "get_issue(issue_key)",
+          "signature": "async def get_issue(issue_key: str) -> dict",
+          "description": "Calls GET /issue/{issue_key} and returns the full issue object including all fields."
+        },
+        {
+          "id": "list_boards",
+          "name": "list_boards()",
+          "signature": "async def list_boards() -> dict",
+          "description": "Calls GET /rest/agile/1.0/board (Jira Agile API) and returns all boards. Response contains 'values', 'total'. Requires Jira Software plan."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "description": "Each Jira issue is normalized into a ConnectorDocument with the following fields.",
+      "fields": [
+        {
+          "field": "id",
+          "type": "str",
+          "description": "Stable 16-character hex string derived from SHA-256(issue_key)[:16]. Identical across syncs for the same issue key."
+        },
+        {
+          "field": "source_id",
+          "type": "str",
+          "description": "The Jira internal issue ID (numeric string, e.g. '10001')."
+        },
+        {
+          "field": "title",
+          "type": "str",
+          "description": "Formatted as '[PROJ-1] Fix login bug'."
+        },
+        {
+          "field": "content",
+          "type": "str",
+          "description": "Plain-text representation of the issue: Key, Summary, Status, Priority, Assignee, Reporter, Type, Project, Description (ADF extracted), Labels."
+        },
+        {
+          "field": "type",
+          "type": "str",
+          "description": "Always 'jira_issue'."
+        },
+        {
+          "field": "source_url",
+          "type": "str",
+          "description": "Browse URL: https://{domain}.atlassian.net/browse/{issue_key}."
+        },
+        {
+          "field": "metadata",
+          "type": "dict",
+          "description": "Contains: issue_key, status, priority, assignee, reporter, project_key, issuetype, labels (list), created, updated."
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "entries": [
+        {
+          "symptom": "401 Unauthorized",
+          "cause": "API token revoked, expired, or wrong email used.",
+          "fix": "Generate a new API token at id.atlassian.com/manage-profile/security/api-tokens. Ensure the email matches the account that created the token."
+        },
+        {
+          "symptom": "403 Forbidden",
+          "cause": "Account lacks Browse Projects permission for the requested project.",
+          "fix": "Ask your Jira administrator to grant Browse Projects permission to the account for the relevant projects."
+        },
+        {
+          "symptom": "404 Not Found on /board",
+          "cause": "Jira Software plan not active; Agile boards not available.",
+          "fix": "list_boards() requires Jira Software. Confirm your Atlassian subscription includes Jira Software."
+        },
+        {
+          "symptom": "429 Too Many Requests",
+          "cause": "Atlassian REST API rate limit exceeded for the account.",
+          "fix": "The connector retries automatically (up to 3 times, exponential backoff). For large instances, schedule syncs during off-peak hours or split across multiple accounts with separate connectors."
+        },
+        {
+          "symptom": "Domain field error / OFFLINE after install",
+          "cause": "Domain value contains '.atlassian.net' or a full URL instead of the subdomain only.",
+          "fix": "Enter only the subdomain. For https://acme.atlassian.net enter 'acme'."
+        },
+        {
+          "symptom": "Description is blank in synced documents",
+          "cause": "Issue description is stored as Atlassian Document Format (ADF); extraction may miss custom node types.",
+          "fix": "The ADF extractor covers standard paragraph and text nodes. Custom macros or embed nodes will produce empty text. This is expected — the rest of the metadata (key, summary, status, etc.) is still indexed."
+        }
+      ]
+    }
+  ]
+}
