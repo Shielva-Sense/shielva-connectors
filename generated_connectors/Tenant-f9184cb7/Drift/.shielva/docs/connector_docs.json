@@ -1,0 +1,98 @@
+{
+  "title": "Drift Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Drift** connector integrates Shielva with the [Drift REST API v1](https://devdocs.drift.com/) to sync conversations, contacts, accounts, and messages into Shielva's knowledge base.\n\nDrift is a conversational marketing and sales platform by Salesloft. This connector uses **OAuth 2.0 Authorization Code flow** and exposes **8 API methods** across 4 resource domains — Conversations, Messages, Contacts, and Accounts — with full cursor-based pagination.\n\n**Key capabilities:**\n- OAuth 2.0 Authorization Code flow with `authorize()` URL builder\n- Health check via `GET /users/list`\n- Full paginated sync of conversations, contacts, and accounts\n- Message retrieval per conversation\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All resources normalized to canonical `ConnectorDocument` with stable 16-char SHA-256 source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Drift connector running in under 5 minutes.\n\n### 1. Create a Drift OAuth App\n\n1. Log in to [app.drift.com](https://app.drift.com)\n2. Go to **Settings → Integrations → App Settings**\n3. Click **New App**, add scopes `conversation_read` + `contact_read`\n4. Copy the **Client ID** and **Client Secret**\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Drift**\n2. Enter your **Client ID**, **Client Secret**, and **Redirect URI**\n3. Click **Install** and complete the OAuth authorization flow\n4. Status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with DriftConnector(config={\n    \"access_token\": \"your_oauth_access_token\",\n    \"client_id\": \"your_client_id\",\n    \"client_secret\": \"your_client_secret\",\n}) as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Drift connector uses **OAuth 2.0 Authorization Code flow**.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | OAuth App Client ID from Drift |\n| Client Secret | `client_secret` | password | Yes | OAuth App Client Secret from Drift |\n| Redirect URI | `redirect_uri` | string | No | OAuth redirect URI (defaults to Shielva ACP callback) |\n\n### How it works\n\nEvery request uses Bearer token authentication:\n```\nAuthorization: Bearer {access_token}\nAccept: application/json\n```\n\nThe `authorize()` method builds the authorization URL:\n```\nhttps://dev.drift.com/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}\n```\n\nAfter the user authorizes, the Drift token endpoint issues an access token:\n```\nPOST https://driftapi.com/auth/token\n```\n\n### Security\n\n- Access tokens are stored encrypted in the Shielva vault and never logged\n- Requests go over HTTPS to `https://driftapi.com`\n- Rotate tokens by re-authorizing from the ACP Integrations page"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Drift connector requires OAuth credentials and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"client_id\": \"YOUR_DRIFT_CLIENT_ID\",\n  \"client_secret\": \"YOUR_DRIFT_CLIENT_SECRET\",\n  \"redirect_uri\": \"https://app.shielva.com/oauth/drift/callback\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `API_BASE` | `https://driftapi.com` | Drift API base URL |\n| `AUTH_URL` | `https://dev.drift.com/authorize` | OAuth authorization URL |\n| `TOKEN_URL` | `https://driftapi.com/auth/token` | OAuth token URL |\n| `SYNC_PAGE_SIZE` | `50` | Conversations per page for sync |\n| `CONTACT_PAGE_SIZE` | `100` | Contacts per page for sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the access token by calling `GET /users/list`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Drift as Test User')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing token → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /users/list` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Drift API reachable. User: ...')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the OAuth 2.0 authorization URL.\n\n```python\nurl = await connector.authorize()\n# 'https://dev.drift.com/authorize?response_type=code&client_id=...&redirect_uri=...'\n```\n\n**Returns:** `str` — the full authorization URL"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "Syncs all resources (conversations, contacts, accounts) from Drift.\n\n```python\nresult = await connector.sync(full=True, kb_id=\"kb_abc\")\n# SyncResult(status=SyncStatus.COMPLETED, documents_found=150, documents_synced=150, ...)\n```\n\n**Parameters:**\n- `full: bool` — accepted for interface compatibility\n- `kb_id: str` — knowledge base ID to ingest into (optional)\n\n**Returns:** `SyncResult`"
+        },
+        {
+          "id": "list-conversations",
+          "title": "list_conversations()",
+          "content": "Returns a paginated list of Drift conversations.\n\n```python\nconversations = await connector.list_conversations(limit=50, next_page_token=None)\n```\n\n**Returns:** `list[dict]`"
+        },
+        {
+          "id": "get-conversation",
+          "title": "get_conversation()",
+          "content": "Returns a single conversation by integer ID.\n\n```python\nconv = await connector.get_conversation(55001)\n```\n\n**Returns:** `dict`"
+        },
+        {
+          "id": "get-conversation-messages",
+          "title": "get_conversation_messages()",
+          "content": "Returns all messages for a conversation.\n\n```python\nmessages = await connector.get_conversation_messages(55001)\n```\n\n**Returns:** `list[dict]`"
+        },
+        {
+          "id": "list-contacts",
+          "title": "list_contacts()",
+          "content": "Returns a paginated list of Drift contacts.\n\n```python\ncontacts = await connector.list_contacts(limit=100, next_page_token=None)\n```\n\n**Returns:** `list[dict]`"
+        },
+        {
+          "id": "list-accounts",
+          "title": "list_accounts()",
+          "content": "Returns all Drift accounts.\n\n```python\naccounts = await connector.list_accounts()\n```\n\n**Returns:** `list[dict]`"
+        }
+      ]
+    },
+    {
+      "id": "resources",
+      "title": "Synced Resources",
+      "content": "| Resource | Drift Endpoint | Normalized As |\n|----------|---------------|---------------|\n| Conversations | `GET /conversations` | `ConnectorDocument` with `conversation:{id}` source_id |\n| Contacts | `GET /contacts` | `ConnectorDocument` with `contact:{id}` source_id |\n| Accounts | `GET /accounts` | `ConnectorDocument` with `account:{id}` source_id |\n| Messages | `GET /conversations/{id}/messages` | `ConnectorDocument` with `message:{id}` source_id |\n\n### Source ID scheme\n\nAll source IDs are 16-character hex prefixes of `SHA-256(\"resource_type:{id}\")`. This ensures:\n- Deterministic: same input → same ID across sync runs\n- Collision-resistant: SHA-256 prefix over full ID string\n- Fixed-width: fits within Shielva's 16-char `source_id` budget"
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Drift uses **cursor-based pagination** via `next_page_token`.\n\nThe connector handles pagination automatically during `sync()`. For manual pagination:\n\n```python\ntoken = None\nwhile True:\n    page = await connector.list_conversations(limit=50, next_page_token=token)\n    if not page:\n        break\n    # process page\n    # token = ... (from pagination response)\n    break  # simplified; check response pagination field\n```\n\n### HTTP client pagination params\n\n| Method | Param | Default |\n|--------|-------|--------|\n| `get_conversations` | `limit`, `next_page_token` | `50`, `None` |\n| `get_contacts` | `limit`, `next_page_token` | `100`, `None` |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector uses a typed exception hierarchy:\n\n| Exception | HTTP Status | When raised |\n|-----------|------------|-------------|\n| `DriftAuthError` | 401, 403 | Invalid or expired token |\n| `DriftNotFoundError` | 404 | Resource not found |\n| `DriftRateLimitError` | 429 | Rate limit exceeded |\n| `DriftNetworkError` | 5xx, timeout | Server error or network failure |\n| `DriftError` | other | Catch-all base exception |\n\n### Retry behaviour\n\n- Auth errors: **never retried** (require human action)\n- Rate limit: retries with `retryAfter` delay, then exponential backoff\n- Network/server errors: up to 3 attempts with exponential backoff (1s → 2s → 4s + jitter, max 30s)\n\n```python\nfrom helpers import with_retry\nresult = await with_retry(client.get_conversations, max_attempts=3)\n```"
+    },
+    {
+      "id": "scopes",
+      "title": "Required OAuth Scopes",
+      "content": "| Scope | Resources unlocked |\n|-------|-------------------|\n| `conversation_read` | Conversations, Messages |\n| `contact_read` | Contacts |\n\nAccounts are accessible without a dedicated scope in most Drift plans. If account data is missing, check your Drift plan's API access settings."
+    }
+  ]
+}
