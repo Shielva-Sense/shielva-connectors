@@ -1,0 +1,275 @@
+{
+  "connector": "square",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Square connector syncs payments, orders, customers, and catalog items from your Square account into the Shielva knowledge base using the Square REST API v2. It implements OAuth 2.0 authorization, cursor-based pagination, exponential backoff retry, and a circuit breaker for reliable throttle-safe data ingestion. Payment amounts are normalized from Square's smallest-currency-unit format (cents) to float. Payments receive a stable SHA-256-derived ID."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2",
+          "title": "OAuth 2.0 (required)",
+          "content": "Square uses OAuth 2.0 exclusively for third-party integrations. You must create an application in the Square Developer Dashboard, obtain an Application ID and Application Secret, then redirect users through the OAuth2 authorization flow to receive an access_token.",
+          "auth_url": "https://connect.squareup.com/oauth2/authorize",
+          "token_url": "https://connect.squareup.com/oauth2/token",
+          "scopes": [
+            "MERCHANT_PROFILE_READ",
+            "PAYMENTS_READ",
+            "ORDERS_READ",
+            "CUSTOMERS_READ",
+            "ITEMS_READ"
+          ],
+          "steps": [
+            "Log in to developer.squareup.com and create a new application.",
+            "Copy the Application ID (sq0idp-...) and Application Secret (sq0csp-...) from the Credentials tab.",
+            "Register your OAuth Redirect URI in the OAuth tab of your app.",
+            "Enter Application ID and Application Secret in Shielva and call authorize() to get the authorization URL.",
+            "Complete the OAuth flow in the browser — the access_token is stored by Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "application_id",
+          "label": "Square Application ID",
+          "type": "text",
+          "required": true,
+          "placeholder": "sq0idp-...",
+          "description": "Square application ID from the Credentials tab of your Developer Dashboard app."
+        },
+        {
+          "key": "application_secret",
+          "label": "Square Application Secret",
+          "type": "secret",
+          "required": true,
+          "placeholder": "sq0csp-...",
+          "description": "Square application secret from the Credentials tab. Treat as a password — never expose it."
+        },
+        {
+          "key": "redirect_uri",
+          "label": "OAuth Redirect URI",
+          "type": "text",
+          "required": false,
+          "placeholder": "https://your-app.com/oauth/callback",
+          "description": "OAuth redirect URI. Must match a URI registered in your Square application. Optional — omit when not needed."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of Square payments and customers. For each resource type it fetches all pages using Square's cursor-based pagination (cursor field in the response body). Each raw API record is passed through a normalizer that converts it into a ConnectorDocument and optionally ingests it into the Shielva knowledge base. Orders require a location_id and are available via list_orders() but are not part of the automatic sync.",
+      "pagination": {
+        "mechanism": "cursor-based (cursor field in response body)",
+        "page_size": 100,
+        "payments_endpoint": "GET /v2/payments?limit=100&cursor={cursor}",
+        "customers_endpoint": "GET /v2/customers?limit=100&cursor={cursor}",
+        "orders_endpoint": "POST /v2/orders/search with cursor in request body"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates application_id and application_secret are present. If an access_token is stored (post-OAuth flow), probes GET /merchants/me and returns HEALTHY + CONNECTED on success. Without an access_token, returns HEALTHY + CONNECTED and instructs the caller to run authorize().",
+          "category": "auth"
+        },
+        {
+          "id": "authorize",
+          "signature": "def authorize() -> str",
+          "description": "Returns the Square OAuth2 authorization URL. The URL includes the application_id, requested scopes, response_type=code, and optionally redirect_uri. Redirect the user to this URL to initiate the OAuth flow.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Probes GET /merchants/me. Returns HEALTHY with the merchant business name, DEGRADED on transient errors (circuit not open), or OFFLINE on auth failure or open circuit. Updates the circuit breaker state.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Paginated full sync of payments and customers. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_payments",
+          "signature": "async def list_payments(cursor: str | None = None, limit: int = 100) -> dict",
+          "description": "Returns a paginated page of Square payments.",
+          "endpoint": "GET /v2/payments",
+          "category": "payments"
+        },
+        {
+          "id": "get_payment",
+          "signature": "async def get_payment(payment_id: str) -> dict",
+          "description": "Returns a single Square payment by ID.",
+          "endpoint": "GET /v2/payments/{payment_id}",
+          "category": "payments"
+        },
+        {
+          "id": "list_orders",
+          "signature": "async def list_orders(location_id: str, cursor: str | None = None, limit: int = 100) -> dict",
+          "description": "Searches orders for a specific location using Square's Orders Search API.",
+          "endpoint": "POST /v2/orders/search",
+          "category": "orders"
+        },
+        {
+          "id": "list_customers",
+          "signature": "async def list_customers(cursor: str | None = None, limit: int = 100) -> dict",
+          "description": "Returns a paginated page of Square customers.",
+          "endpoint": "GET /v2/customers",
+          "category": "customers"
+        },
+        {
+          "id": "get_customer",
+          "signature": "async def get_customer(customer_id: str) -> dict",
+          "description": "Returns a single Square customer by ID.",
+          "endpoint": "GET /v2/customers/{customer_id}",
+          "category": "customers"
+        },
+        {
+          "id": "list_catalog_items",
+          "signature": "async def list_catalog_items(cursor: str | None = None, types: str = 'ITEM') -> dict",
+          "description": "Returns a paginated list of Square catalog objects. Use the types parameter to filter (e.g., 'ITEM', 'CATEGORY', 'ITEM,CATEGORY').",
+          "endpoint": "GET /v2/catalog/list",
+          "category": "catalog"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Square resources are normalized into ConnectorDocument instances before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "For payments: SHA-256('payment:' + payment_id)[:16]. For customers: Square customer ID." },
+          { "name": "title", "type": "str", "description": "Human-readable title including resource type, ID/name, status, and amount." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the resource's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "For payments: the receipt_url from Square. For customers: empty string." },
+          { "name": "metadata", "type": "dict", "description": "Resource-specific properties map. Always includes object_type key." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_payment(record, connector_id, tenant_id)",
+          "object_type": "payment",
+          "title_format": "Square payment: {id} — {status} {amount} {currency}",
+          "stable_id": "SHA-256('payment:' + payment_id)[:16]",
+          "amount_normalization": "Square amount_money.amount (integer cents) divided by 100 to float",
+          "metadata_keys": ["object_type", "payment_id", "status", "amount", "currency", "source_type", "location_id", "order_id", "created_at", "updated_at"]
+        },
+        {
+          "function": "normalize_customer(record, connector_id, tenant_id)",
+          "object_type": "customer",
+          "title_format": "Square customer: {given_name} {family_name} <{email_address}>",
+          "metadata_keys": ["object_type", "customer_id", "name", "email", "phone", "reference_id", "created_at", "updated_at"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "SquareError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "SquareAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "SquareRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "SquareNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
+          "http_status": 404
+        },
+        {
+          "name": "SquareNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "SquareServerError",
+          "description": "Raised on 5xx responses from Square. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "The access_token has expired or been revoked.",
+          "solution": "Re-run the OAuth flow by calling authorize() and completing the Square authorization in the browser to obtain a fresh access_token."
+        },
+        {
+          "problem": "403 Forbidden — missing scope",
+          "cause": "The OAuth application does not have one or more required scopes (PAYMENTS_READ, ORDERS_READ, CUSTOMERS_READ, ITEMS_READ, MERCHANT_PROFILE_READ).",
+          "solution": "In the Square Developer Dashboard, update your application's OAuth scopes and re-authorize."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Square per-application rate limit exceeded.",
+          "solution": "The connector retries automatically with exponential backoff, honouring the Retry-After header. For large data sets, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have tripped the circuit breaker (5 consecutive failures).",
+          "solution": "Resolve the underlying network or auth issue, then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more Square records returned unexpected data causing normalization to fail.",
+          "solution": "Check connector logs for which record IDs failed. Inspect those records in the Square Dashboard."
+        },
+        {
+          "problem": "list_orders returns empty results",
+          "cause": "The location_id passed to list_orders does not match any active Square location for the merchant.",
+          "solution": "Call the Square Locations API (GET /v2/locations) to retrieve valid location IDs and use one of those."
+        }
+      ]
+    }
+  ]
+}
