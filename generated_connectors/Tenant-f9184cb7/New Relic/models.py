@@ -25,6 +25,36 @@ class SyncStatus(str, Enum):
     RUNNING = "running"
 
 
+class AlertPolicyIncidentPreference(str, Enum):
+    """New Relic alert policy incident preference."""
+    PER_POLICY = "PER_POLICY"
+    PER_CONDITION = "PER_CONDITION"
+    PER_CONDITION_AND_TARGET = "PER_CONDITION_AND_TARGET"
+
+
+class IncidentStatus(str, Enum):
+    """New Relic incident status values."""
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+class ApplicationHealthStatus(str, Enum):
+    """New Relic APM application health status."""
+    GREEN = "green"
+    YELLOW = "yellow"
+    RED = "red"
+    GRAY = "gray"
+    UNKNOWN = "unknown"
+
+
+class NewRelicRegion(str, Enum):
+    """New Relic data center regions."""
+    US = "US"
+    EU = "EU"
+
+
 @dataclass
 class InstallResult:
     health: ConnectorHealth

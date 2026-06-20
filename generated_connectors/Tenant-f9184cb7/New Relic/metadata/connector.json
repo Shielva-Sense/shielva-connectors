@@ -1,44 +1,63 @@
 {
-  "connector_type": "new_relic",
-  "name": "New Relic",
-  "provider": "New Relic",
-  "service": "new_relic",
+  "connector_type": "newrelic",
+  "display_name": "New Relic",
+  "provider": "newrelic",
+  "service": "newrelic",
   "auth_type": "api_key",
   "version": "1.0.0",
+  "description": "Connect New Relic to sync alert policies, APM applications, incidents, and dashboards for observability intelligence.",
   "install_fields": [
     {
       "key": "api_key",
       "label": "User API Key",
       "type": "password",
       "required": true,
-      "placeholder": "NRAK-XXXXXXXXXXXXXXXXXXXX"
+      "help": "Found in New Relic → Profile icon → API Keys → Create key (User key type)"
     },
     {
       "key": "account_id",
       "label": "Account ID",
       "type": "string",
       "required": true,
-      "placeholder": "1234567"
+      "help": "Found in New Relic → Profile icon → Administration → Account details, or in the URL after /accounts/"
     },
     {
       "key": "region",
-      "label": "Region",
+      "label": "Region (US or EU)",
       "type": "string",
       "required": false,
-      "placeholder": "US or EU"
+      "default": "US",
+      "help": "Select US for api.newrelic.com or EU for api.eu.newrelic.com. Leave blank for US default.",
+      "options": [
+        {"label": "US (api.newrelic.com)", "value": "US"},
+        {"label": "EU (api.eu.newrelic.com)", "value": "EU"}
+      ]
     }
   ],
-  "capabilities": [
-    "sync",
-    "health_check",
-    "list_alerts_policies",
-    "list_applications",
-    "list_incidents"
-  ],
-  "description": "Sync alerts, applications, and incident data from New Relic observability platform.",
-  "endpoints": {
-    "rest_us": "https://api.newrelic.com/v2",
-    "rest_eu": "https://api.eu.newrelic.com/v2",
-    "graphql": "https://api.newrelic.com/graphql"
-  }
+  "capabilities": ["sync", "health_check", "query"],
+  "resources": ["alerts", "applications", "incidents", "dashboards"],
+  "auth": {
+    "headers": [
+      {"name": "Api-Key", "from": "api_key"},
+      {"name": "X-Api-Key", "from": "api_key"}
+    ],
+    "validation_endpoint": "GET /v2/applications.json"
+  },
+  "api": {
+    "rest_base_us": "https://api.newrelic.com/v2/",
+    "rest_base_eu": "https://api.eu.newrelic.com/v2/",
+    "nerdgraph_us": "https://api.newrelic.com/graphql",
+    "nerdgraph_eu": "https://api.eu.newrelic.com/graphql",
+    "versions": ["v2", "nerdgraph"]
+  },
+  "methods": [
+    {"name": "install", "description": "Validate API key and account_id, record connector as installed"},
+    {"name": "health_check", "description": "Verify API key is still valid via GET /v2/applications.json"},
+    {"name": "sync", "description": "Sync alerts, applications, incidents, and dashboards to knowledge base"},
+    {"name": "list_alerts", "description": "List all alert policies with pagination"},
+    {"name": "list_applications", "description": "List all APM applications with pagination"},
+    {"name": "list_incidents", "description": "List recent alert incidents via NerdGraph"},
+    {"name": "list_dashboards", "description": "List all dashboards via NerdGraph entity search"},
+    {"name": "run_nrql", "description": "Execute a NRQL query via NerdGraph and return results"}
+  ]
 }
