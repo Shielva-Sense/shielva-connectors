@@ -1,0 +1,34 @@
+{
+  "connector_type": "bamboohr",
+  "name": "BambooHR",
+  "display_name": "BambooHR",
+  "description": "Connect to BambooHR to sync employee records and time-off requests into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "company_domain",
+      "label": "Company Domain",
+      "type": "string",
+      "required": true,
+      "description": "Your BambooHR subdomain (e.g. 'acme' from acme.bamboohr.com)."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "BambooHR API key generated from your account profile."
+    }
+  ],
+  "capabilities": [
+    "get_employee_directory",
+    "get_employee",
+    "list_time_off_requests",
+    "list_custom_reports",
+    "get_company_info",
+    "sync"
+  ],
+  "provider": "bamboohr",
+  "category": "hr"
+}
