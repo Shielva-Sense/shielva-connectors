@@ -1,0 +1,35 @@
+{
+  "connector_type": "acuity_scheduling",
+  "name": "acuity_scheduling",
+  "display_name": "Acuity Scheduling",
+  "description": "Connect to Acuity Scheduling to sync appointments, clients, and appointment types into Shielva using your User ID and API Key (BasicAuth).",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "user_id",
+      "label": "User ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Acuity Scheduling User ID, found in Integrations → API → Credentials."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Acuity Scheduling API Key, found in Integrations → API → Credentials."
+    }
+  ],
+  "capabilities": [
+    "get_me",
+    "list_appointments",
+    "list_appointment_types",
+    "list_calendars",
+    "list_clients",
+    "sync"
+  ],
+  "provider": "Acuity Scheduling",
+  "service": "Acuity Scheduling",
+  "category": "scheduling"
+}
