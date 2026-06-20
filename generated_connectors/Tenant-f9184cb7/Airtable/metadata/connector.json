@@ -1,0 +1,35 @@
+{
+  "connector_type": "airtable",
+  "display_name": "Airtable",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "description": "Airtable Personal Access Token (starts with 'pat'). Create at airtable.com/create/tokens with data.records:read and schema.bases:read scopes."
+    },
+    {
+      "key": "base_id",
+      "label": "Default Base ID (optional)",
+      "type": "string",
+      "required": false,
+      "description": "Default Airtable Base ID to sync from (e.g. appXXXXXXXXXXXXXX). Found in the URL when viewing a base. Leave blank to sync all accessible bases."
+    }
+  ],
+  "capabilities": [
+    "list_bases",
+    "list_tables",
+    "list_records",
+    "get_record",
+    "list_views",
+    "search_records",
+    "sync"
+  ],
+  "provider": "Airtable",
+  "service": "Airtable",
+  "connector_name": "Airtable",
+  "category": "database"
+}
