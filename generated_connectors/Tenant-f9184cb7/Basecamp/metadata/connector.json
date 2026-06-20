@@ -1,0 +1,53 @@
+{
+  "connector_type": "basecamp",
+  "display_name": "Basecamp",
+  "provider": "37signals",
+  "service": "basecamp",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "authorize_url": "https://launchpad.37signals.com/authorization/new",
+  "token_url": "https://launchpad.37signals.com/authorization/token",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "OAuth 2.0 Client ID from your Basecamp app registration at https://launchpad.37signals.com/integrations."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "OAuth 2.0 Client Secret from your Basecamp app registration."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": true,
+      "description": "The OAuth callback URL registered in your Basecamp app. Example: https://app.shielva.ai/oauth/basecamp/callback"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2",
+    "list_projects",
+    "list_todo_lists",
+    "list_todos",
+    "list_messages",
+    "list_documents"
+  ],
+  "resources": [
+    "projects",
+    "todolists",
+    "todos",
+    "messages",
+    "documents"
+  ],
+  "api_base": "https://3.basecampapi.com/{account_id}",
+  "docs_url": "https://github.com/basecamp/bc3-api",
+  "category": "project_management"
+}
