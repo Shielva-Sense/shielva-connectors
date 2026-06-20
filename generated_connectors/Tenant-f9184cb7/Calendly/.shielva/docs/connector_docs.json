@@ -1,0 +1,88 @@
+{
+  "title": "Calendly Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Calendly** connector integrates Shielva with the [Calendly REST API v2](https://developer.calendly.com/api-docs) to sync event types, scheduled events, and invitee data into the Shielva knowledge base.\n\nCalendly is a leading scheduling platform used by millions of professionals and teams to automate meeting booking. This connector authenticates via **OAuth 2.0** (with Personal Access Token as an alternative) and exposes capabilities for listing event types, scheduled events, invitees, and organization memberships.\n\n**Key capabilities:**\n- OAuth 2.0 authorization flow with `authorize()` returning the consent URL\n- Verify credentials and retrieve authenticated user identity via health_check()\n- List all event types for a Calendly user (auto-paginated)\n- Sync event types + scheduled events with full pagination via `next_page_token`\n- Fetch individual scheduled event details\n- Retrieve per-event invitee lists (auto-paginated)\n- List organization memberships\n- Full and incremental sync with `min_start_time` filter"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Calendly connector uses **OAuth 2.0** for user authorization. Personal Access Tokens (PAT) are also supported as an alternative.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | OAuth App Client ID from the Calendly Developer Portal |\n| Client Secret | `client_secret` | password | Yes | OAuth App Client Secret from the Calendly Developer Portal |\n| Redirect URI | `redirect_uri` | string | No | OAuth callback URI registered in your Calendly OAuth app |\n\n### Config Keys (populated after auth)\n\n| Key | Description |\n|-----|-------------|\n| `access_token` | Bearer token used for all API calls |\n| `refresh_token` | Refresh token for renewing access |\n| `organization_uri` | Calendly organization URI for org-scoped calls |\n| `user_uri` | Authenticated user URI for user-scoped calls |\n\n### OAuth 2.0 Flow\n\n1. Call `connector.authorize()` to get the Calendly consent URL\n2. Redirect the user to that URL\n3. Calendly redirects back with `?code=...`\n4. Exchange the code for tokens at `https://auth.calendly.com/oauth/token`\n5. Store `access_token`, `refresh_token`, `organization_uri`, `user_uri` in config\n\n### Required Scopes\n\n`event_type:read`, `scheduled_event:read`, `organization:read`, `user:read`\n\n### Alternative: Personal Access Token\n\nSet `access_token` directly in config. PATs carry the permissions of the generating user and do not expire unless revoked."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### connector.json (metadata)\n\n```json\n{\n  \"connector_type\": \"calendly\",\n  \"display_name\": \"Calendly\",\n  \"auth_type\": \"oauth2\",\n  \"version\": \"1.0.0\",\n  \"install_fields\": [\n    {\"key\": \"client_id\", \"label\": \"Client ID\", \"type\": \"string\", \"required\": true},\n    {\"key\": \"client_secret\", \"label\": \"Client Secret\", \"type\": \"password\", \"required\": true},\n    {\"key\": \"redirect_uri\", \"label\": \"Redirect URI\", \"type\": \"string\", \"required\": false}\n  ]\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://api.calendly.com` | Calendly API base URL |\n| `SYNC_PAGE_SIZE` | `100` | Records per page |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter (max 30s) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes the following methods. All API calls use `with_retry()` with exponential backoff (auth errors are never retried).",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present. Does not make any network call.\n\n```python\nresult = await connector.install()\n# result.health       → ConnectorHealth.HEALTHY | OFFLINE\n# result.auth_status  → AuthStatus.CONNECTED | MISSING_CREDENTIALS\n# result.connector_id → the connector's ID (on success)\n# result.message      → human-readable status\n```\n\nReturns `HEALTHY / CONNECTED` when both OAuth fields are present. Returns `OFFLINE / MISSING_CREDENTIALS` with field names when any required field is missing."
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "Returns the Calendly OAuth 2.0 authorization URL. The user must visit this URL to grant access.\n\n```python\nurl = connector.authorize()\n# url → \"https://auth.calendly.com/oauth/authorize?client_id=...&response_type=code&scope=...\"\n```\n\nThe URL includes `client_id`, `response_type=code`, `redirect_uri` (when configured), and all required scopes."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /users/me` to verify connectivity and token validity.\n\n```python\nresult = await connector.health_check()\n# result.health      → HEALTHY | DEGRADED | OFFLINE\n# result.message     → includes user name or email on success\n```\n\nReturns `DEGRADED` on auth or network errors (not `OFFLINE`). Returns `OFFLINE` only when the access_token is missing."
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "Performs a full or incremental sync of event types and scheduled events.\n\n```python\n# Full sync\nresult = await connector.sync(full=True)\n\n# Incremental sync since a datetime\nfrom datetime import datetime, timezone\nresult = await connector.sync(full=False, since=datetime(2026, 6, 1, tzinfo=timezone.utc))\n\n# With knowledge base ingestion\nresult = await connector.sync(full=True, kb_id=\"kb-prod-001\")\n\nprint(result.documents_found)   # total records found\nprint(result.documents_synced)  # successfully normalized and ingested\nprint(result.documents_failed)  # normalization errors\nprint(result.status)            # COMPLETED | PARTIAL | FAILED\n```\n\n**Flow:**\n1. Resolves user URI (from stored config or `GET /users/me`)\n2. Fetches event types via `list_event_types` (best-effort)\n3. Paginates `GET /scheduled_events` via `next_page_token`\n4. Normalizes each record to `ConnectorDocument`\n5. Ingests to knowledge base if `kb_id` provided"
+        },
+        {
+          "id": "list-event-types",
+          "title": "list_event_types()",
+          "content": "Returns all event types for a Calendly user. Auto-paginates.\n\n```python\nevent_types = await connector.list_event_types()\n# or with explicit user_uri:\nevent_types = await connector.list_event_types(user_uri=\"https://api.calendly.com/users/ABC\")\nfor et in event_types:\n    print(et[\"name\"], et[\"duration\"], et[\"active\"])\n```\n\n**Calendly endpoint:** `GET /event_types?user={user_uri}&count=100`"
+        },
+        {
+          "id": "list-scheduled-events",
+          "title": "list_scheduled_events()",
+          "content": "Returns all scheduled events (auto-paginated).\n\n```python\nevents = await connector.list_scheduled_events(status=\"active\")\nfor ev in events:\n    print(ev[\"name\"], ev[\"start_time\"], ev[\"status\"])\n```\n\n**Calendly endpoint:** `GET /scheduled_events?user={user_uri}&status={status}&count=100`"
+        },
+        {
+          "id": "get-scheduled-event",
+          "title": "get_scheduled_event()",
+          "content": "Returns a single scheduled event by UUID or full URI.\n\n```python\ndata = await connector.get_scheduled_event(\"EVT001-AAAA-BBBB\")\n# or with full URI:\ndata = await connector.get_scheduled_event(\"https://api.calendly.com/scheduled_events/EVT001-AAAA-BBBB\")\n```\n\nRaises `CalendlyNotFoundError` if the event does not exist.\n\n**Calendly endpoint:** `GET /scheduled_events/{uuid}`"
+        },
+        {
+          "id": "list-event-invitees",
+          "title": "list_event_invitees()",
+          "content": "Returns all invitees for a scheduled event (auto-paginated).\n\n```python\ninvitees = await connector.list_event_invitees(\"EVT001-AAAA-BBBB\")\nfor inv in invitees:\n    print(inv[\"name\"], inv[\"email\"], inv[\"status\"])\n```\n\n**Calendly endpoint:** `GET /scheduled_events/{uuid}/invitees?count=100`"
+        },
+        {
+          "id": "list-organization-memberships",
+          "title": "list_organization_memberships()",
+          "content": "Returns all organization memberships.\n\n```python\nmembers = await connector.list_organization_memberships()\n# or with explicit org URI:\nmembers = await connector.list_organization_memberships(organization_uri=\"https://api.calendly.com/organizations/ORG456\")\nfor m in members:\n    print(m[\"role\"], m[\"user\"][\"email\"])\n```\n\n**Calendly endpoint:** `GET /organization_memberships?organization={uri}&count=100`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "### ConnectorDocument fields\n\n| Field | Description |\n|-------|-------------|\n| `source_id` | 16-char hex SHA-256 prefix. For event types: `sha256(\"event_type:\"+uuid)[:16]`. For scheduled events: `sha256(\"scheduled_event:\"+uuid)[:16]` |\n| `title` | Event type: `name`. Scheduled event: `\"{name} — {start_time}\"` |\n| `content` | Human-readable summary of the record |\n| `source_url` | Calendly scheduling URL (event types) or event URI (scheduled events) |\n| `connector_id` | Shielva connector ID |\n| `tenant_id` | Shielva tenant ID |\n| `metadata` | Dict of type-specific fields (uri, uuid, status, times, location, etc.) |\n\n### Normalizers\n\n- `normalize_event_type(et)` — converts a Calendly event type to ConnectorDocument\n- `normalize_scheduled_event(ev)` — converts a Calendly scheduled event to ConnectorDocument\n- `normalize_event(event, invitees, connector_id, tenant_id)` — legacy full normalizer that includes invitee data in content"
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "```\nCalendlyError (base)\n├── CalendlyAuthError       — 401/403: invalid or expired access token\n├── CalendlyRateLimitError  — 429: rate limit exceeded (has retry_after attribute)\n├── CalendlyNotFoundError   — 404: resource not found\n└── CalendlyNetworkError    — 5xx or connection/timeout error\n```\n\n### Retry behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `CalendlyRateLimitError` | Yes | Up to 3 attempts; honours `Retry-After` header |\n| `CalendlyNetworkError` | Yes | Exponential backoff, up to 3 attempts |\n| `CalendlyAuthError` | No | Immediate raise — must re-authorize |\n| `CalendlyNotFoundError` | No | Immediate raise — resource is gone |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\nAccess token expired or revoked. Re-authorize via OAuth or generate a new PAT.\n\n### 403 Forbidden\nToken lacks required scopes. Re-authorize with: `event_type:read`, `scheduled_event:read`, `organization:read`, `user:read`.\n\n### 429 Too Many Requests\nRate limit exceeded. Connector retries automatically up to 3 times with exponential backoff honouring `Retry-After`.\n\n### sync() returns FAILED with 'Could not retrieve user URI'\n`GET /users/me` returned a response without `resource.uri`. Verify the access token is valid and the account is active.\n\n### 0 documents found\nConfirm the Calendly account has event types or scheduled events. Run with `full=True` to bypass time filters.\n\n### Sync shows PARTIAL\nSome event type or scheduled event normalizations failed. Check `documents_failed` count and inspect connector logs for individual errors."
+    }
+  ]
+}
