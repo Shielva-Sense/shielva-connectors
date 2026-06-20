@@ -1,0 +1,90 @@
+{
+  "connector": "outreach",
+  "version": "1.0.0",
+  "title": "Outreach Connector Documentation",
+  "description": "Connect Shielva to Outreach to sync prospects, sequences, accounts, calls, and mailings via OAuth2.",
+  "auth_type": "oauth2",
+  "oauth2": {
+    "authorization_url": "https://api.outreach.io/oauth/authorize",
+    "token_url": "https://api.outreach.io/oauth/token",
+    "scopes": ["prospects.read", "sequences.read", "mailings.read", "calls.read", "accounts.read"]
+  },
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Outreach connector syncs sales engagement data from Outreach into the Shielva knowledge base using the Outreach REST API (JSON:API format) via OAuth2 Authorization Code flow."
+    },
+    {
+      "id": "setup",
+      "title": "Setup",
+      "steps": [
+        "Create an OAuth app in Outreach → Settings → API → Apps",
+        "Copy the Client ID and Client Secret",
+        "Set the Redirect URI to your Shielva callback URL",
+        "Enable scopes: prospects.read, sequences.read, mailings.read, calls.read, accounts.read",
+        "Enter credentials in Shielva and authorize"
+      ]
+    },
+    {
+      "id": "endpoints",
+      "title": "API Endpoints",
+      "endpoints": [
+        {"method": "GET", "path": "/api/v2/users/current", "description": "Verify access token and return authed user"},
+        {"method": "GET", "path": "/api/v2/prospects", "description": "Paginated prospect list (JSON:API cursor pagination)"},
+        {"method": "GET", "path": "/api/v2/prospects/{id}", "description": "Single prospect by ID"},
+        {"method": "GET", "path": "/api/v2/sequences", "description": "Paginated sequence list"},
+        {"method": "GET", "path": "/api/v2/accounts", "description": "Paginated account list"},
+        {"method": "GET", "path": "/api/v2/calls", "description": "Paginated call list"},
+        {"method": "GET", "path": "/api/v2/mailings", "description": "Paginated mailing list"},
+        {"method": "POST", "path": "/oauth/token", "description": "Exchange refresh token for new access token"}
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "resources": [
+        {
+          "name": "Prospect",
+          "outreach_type": "prospect",
+          "fields": ["firstName", "lastName", "emails", "title", "company", "phones", "stage", "createdAt", "updatedAt"]
+        },
+        {
+          "name": "Sequence",
+          "outreach_type": "sequence",
+          "fields": ["name", "description", "enabled", "sequenceType", "stepCount", "createdAt", "updatedAt"]
+        },
+        {
+          "name": "Account",
+          "outreach_type": "account",
+          "fields": ["name", "domain", "websiteUrl", "industry", "createdAt", "updatedAt"]
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Outreach uses JSON:API cursor pagination. The connector follows links.next until null. Default page size: 100."
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Each resource is normalized into a ConnectorDocument. The source_id is a 16-char SHA-256 hex prefix of '<type>:<id>' ensuring stable, collision-resistant IDs. JSON:API attributes are unwrapped from data.attributes automatically."
+    },
+    {
+      "id": "retry",
+      "title": "Retry Policy",
+      "content": "Network and rate-limit errors are retried up to 3 times with exponential backoff (base 1s, max 30s, factor 2, jitter 0.5s). Auth errors (401/403) are never retried and surface immediately."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {"symptom": "401 Authentication failed", "cause": "Token expired or revoked", "fix": "Re-authorize via OAuth flow"},
+        {"symptom": "403 Forbidden", "cause": "Missing scope on OAuth app", "fix": "Add the required scope in Outreach → Settings → API → Apps"},
+        {"symptom": "429 Rate limited", "cause": "Too many requests", "fix": "Connector retries automatically with backoff"},
+        {"symptom": "Health check OFFLINE", "cause": "access_token not yet obtained", "fix": "Complete the OAuth2 authorization flow"}
+      ]
+    }
+  ]
+}
