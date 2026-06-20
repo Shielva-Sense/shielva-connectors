@@ -1,0 +1,78 @@
+{
+  "title": "WhatsApp Business Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **WhatsApp Business** connector integrates Shielva with the [Meta WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp) (Graph API v18.0) to sync message templates and phone number metadata.\n\nWhatsApp Business is the world's most widely used messaging platform, with over 2 billion active users. This connector gives Shielva access to your **message template library** — approved templates for sending structured, compliant business messages — and **phone number** and **WABA account** metadata.\n\n**Key capabilities:**\n- Sync all message templates (APPROVED, REJECTED, PENDING) with full component rendering\n- Query phone number details: display number, verified business name, quality rating, status\n- Retrieve WABA account details: name, currency, timezone, template namespace\n- Cursor-based pagination — all pages fetched automatically\n- Exponential-backoff retry with Retry-After support for rate limits\n- Auth failure never retried — token errors surface immediately"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the WhatsApp Business connector running in under 10 minutes.\n\n### 1. Gather your credentials\n\nYou need three values from [Meta Business Suite](https://business.facebook.com/):\n\n| Credential | Where to find it |\n|------------|------------------|\n| **Phone Number ID** | WhatsApp Manager → select your number — numeric ID shown below the number |\n| **System User Access Token** | Business Settings → System Users → generate permanent token |\n| **WABA ID** | Business Settings → WhatsApp Accounts → select WABA — ID in URL / panel |\n\n### 2. Install the connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → WhatsApp Business**\n2. Click **Connect**\n3. Enter the three credentials above\n4. Click **Install**\n\nThe connector calls `GET /{phone_number_id}?fields=display_phone_number,verified_name,quality_rating,status` to verify credentials. Status will be `ONLINE` on success.\n\n### 3. Verify health\n\n```python\nresult = await connector.health_check()\nassert result.health == ConnectorHealth.HEALTHY\n```\n\n### 4. Run your first sync\n\n```python\nresult = await connector.sync(full=True, kb_id=\"your-kb-id\")\nprint(f\"Synced {result.documents_synced} templates\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The WhatsApp Business connector uses **API Key authentication** — specifically a Meta System User permanent access token passed as an HTTP Bearer token.\n\n### Install fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Phone Number ID | `phone_number_id` | string | Yes | Numeric ID of the WhatsApp Business phone number |\n| System User Access Token | `access_token` | password | Yes | Meta permanent System User token with `whatsapp_business_management` permission |\n| WABA ID | `waba_id` | string | Yes | WhatsApp Business Account numeric ID |\n\n### How it works\n\nEvery request to the Graph API includes the token in the `Authorization` header:\n\n```\nAuthorization: Bearer EAAtest1234567890...\n```\n\nThe connector's `WhatsAppHTTPClient` injects this header automatically on every request.\n\n### Required permissions\n\n| Permission | Purpose |\n|------------|----------|\n| `whatsapp_business_management` | Read templates, phone numbers, WABA details (required) |\n| `whatsapp_business_messaging` | Send messages (optional — not used by this connector) |\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /{phone_number_id}?fields=...`. A Meta error code 190 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any other error sets `health=OFFLINE` and `auth_status=FAILED`.\n\n### Security\n\n- The token is stored encrypted in the Shielva vault and never logged\n- Use a System User token (not a personal user token) — it does not expire when a person leaves the organisation\n- Minimum required scope: `whatsapp_business_management` only"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The connector requires three install fields and has sensible defaults for all internal parameters.\n\n### Install fields\n\n```json\n{\n  \"phone_number_id\": \"1234567890\",\n  \"access_token\": \"EAAtest...\",\n  \"waba_id\": \"9876543210\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://graph.facebook.com/v18.0` | Meta Graph API base URL |\n| `SYNC_PAGE_SIZE` | `20` | Templates per page for list/sync operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 API methods covering templates, phone numbers, and WABA account details.",
+      "children": [
+        {
+          "id": "list-templates",
+          "title": "list_templates()",
+          "content": "Return all message templates in the WABA, following cursor pagination automatically.\n\n```python\ntemplates = await connector.list_templates(limit=20)\n# Returns: list of raw template dicts\nprint(f\"{len(templates)} templates found\")\nfor t in templates:\n    print(t['name'], t['status'], t['language'])\n```\n\n**Meta endpoint:** `GET /{waba_id}/message_templates?limit={limit}&after={cursor}`\n\nPagination is transparent — all pages are fetched and concatenated into a single flat list.\n\nTemplate statuses: `APPROVED`, `REJECTED`, `PENDING`, `PAUSED`, `DISABLED`."
+        },
+        {
+          "id": "get-template",
+          "title": "get_template(template_id)",
+          "content": "Fetch a single message template by its Meta numeric ID.\n\n```python\ntemplate = await connector.get_template(\"1234567890123\")\nprint(template['name'])       # e.g. \"order_confirmation\"\nprint(template['status'])     # e.g. \"APPROVED\"\nprint(template['components']) # list of header/body/footer/buttons\n```\n\n**Meta endpoint:** `GET /{template_id}?fields=name,status,category,language,components`\n\nRaises `WhatsAppNotFoundError` if the template ID does not exist."
+        },
+        {
+          "id": "list-phone-numbers",
+          "title": "list_phone_numbers()",
+          "content": "List all phone numbers registered to the WABA.\n\n```python\nnumbers = await connector.list_phone_numbers()\nfor n in numbers:\n    print(n['display_phone_number'], n['status'], n['quality_rating'])\n```\n\n**Meta endpoint:** `GET /{waba_id}/phone_numbers?fields=display_phone_number,verified_name,quality_rating,status`\n\nFields returned:\n- `display_phone_number` — formatted phone number string\n- `verified_name` — the business name verified by Meta\n- `quality_rating` — `GREEN`, `YELLOW`, or `RED`\n- `status` — `CONNECTED`, `FLAGGED`, `RESTRICTED`, etc."
+        },
+        {
+          "id": "get-waba",
+          "title": "get_waba()",
+          "content": "Fetch WhatsApp Business Account details.\n\n```python\nwaba = await connector.get_waba()\nprint(waba['name'])                          # Business account name\nprint(waba['currency'])                      # e.g. \"USD\"\nprint(waba['timezone_id'])                   # e.g. \"1\" (UTC)\nprint(waba['message_template_namespace'])    # template namespace string\n```\n\n**Meta endpoint:** `GET /{waba_id}?fields=name,currency,timezone_id,message_template_namespace`"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "Sync all message templates to the Shielva knowledge base.\n\n```python\n# Full sync — fetches all templates\nresult = await connector.sync(full=True, kb_id=\"your-kb-id\")\nprint(result.status)            # SyncStatus.COMPLETED or PARTIAL\nprint(result.documents_found)   # total templates found\nprint(result.documents_synced)  # successfully normalized and ingested\nprint(result.documents_failed)  # normalization failures (0 on clean run)\n```\n\nNote: Meta's template API does not support filtering by created/updated date. The connector always fetches all templates on each sync run. The `full` and `since` parameters are accepted for interface compatibility but do not change behavior.\n\nEach template is normalized to a `ConnectorDocument` via `normalize_template()` with:\n- `source_id` — 16-char SHA-256 prefix of the template ID (stable)\n- `title` — `Template: {name} ({language})`\n- `content` — HEADER / BODY / FOOTER / BUTTONS rendered as human-readable text\n- `metadata` — template_id, name, status, category, language, waba_id"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception hierarchy\n\n```\nWhatsAppError (base)\n├── WhatsAppAuthError        — Meta error code 190: invalid/expired token\n├── WhatsAppNetworkError     — 5xx responses, timeouts, connection errors\n├── WhatsAppRateLimitError   — 429: rate limit exceeded (has retry_after attr)\n└── WhatsAppNotFoundError    — error code 100 + subcode 33: resource not found\n```\n\n### Meta error codes\n\n| Code | Meaning | Exception raised |\n|------|---------|------------------|\n| 190 | Invalid or expired access token | `WhatsAppAuthError` |\n| 100 | Invalid parameter | `WhatsAppError` |\n| 100 + subcode 33 | Object not found | `WhatsAppNotFoundError` |\n| 429 | Rate limit | `WhatsAppRateLimitError` |\n| 5xx | Meta server error | `WhatsAppNetworkError` |\n\n### Retry behaviour\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `WhatsAppRateLimitError` | Yes | Up to 3 attempts; honours `Retry-After` header |\n| `WhatsAppNetworkError` | Yes | Exponential backoff, up to 3 attempts |\n| `WhatsAppAuthError` | No | Immediate failure — token must be fixed |\n| `WhatsAppNotFoundError` | No | Immediate failure — resource ID must be corrected |\n| `WhatsAppError` (other) | Yes | Exponential backoff, up to 3 attempts |"
+    },
+    {
+      "id": "sync-schema",
+      "title": "Sync & Document Schema",
+      "content": "### Normalized template document\n\nEvery message template is normalized to a `ConnectorDocument`:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(template_id)[:16]` — stable 16-char hex string |\n| `title` | `Template: {name} ({language})` — e.g. `Template: order_confirmation (en_US)` |\n| `content` | Components rendered as text: HEADER / BODY / FOOTER / BUTTON lines |\n| `connector_id` | Connector instance ID |\n| `tenant_id` | Tenant scoping ID |\n| `source_url` | WhatsApp Manager URL for the WABA |\n| `metadata.template_id` | Raw Meta template ID |\n| `metadata.name` | Template name (snake_case) |\n| `metadata.status` | APPROVED / REJECTED / PENDING / PAUSED / DISABLED |\n| `metadata.category` | MARKETING / TRANSACTIONAL / OTP / AUTHENTICATION |\n| `metadata.language` | BCP-47 language tag (e.g. en_US, pt_BR) |\n| `metadata.waba_id` | WhatsApp Business Account ID |\n\n### Component rendering\n\nTemplate components are rendered to human-readable text:\n\n```\nHEADER: Order Confirmed\nBODY: Hi {{1}}, your order {{2}} has been placed.\nFOOTER: Thank you for shopping with us.\nBUTTON [QUICK_REPLY]: Track Order\n```\n\nMedia headers (IMAGE, VIDEO, DOCUMENT) render as `HEADER: [IMAGE]` etc."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `health=OFFLINE`, `auth_status=INVALID_CREDENTIALS`\n\n**Cause:** The access token has expired or been revoked (Meta error code 190).\n\n**Fix:** Generate a new permanent System User token in Meta Business Settings → System Users → select the user → Generate Token. Update the connector credentials in Shielva ACP.\n\n---\n\n### `auth_status=MISSING_CREDENTIALS`\n\n**Cause:** One or more of the three required fields (`phone_number_id`, `access_token`, `waba_id`) is empty.\n\n**Fix:** Re-install the connector and provide all three values.\n\n---\n\n### `WhatsAppError: Invalid parameter` (code 100)\n\n**Cause:** The `phone_number_id` is wrong, or the System User does not have access to the WABA.\n\n**Fix:**\n- Verify the Phone Number ID in [WhatsApp Manager](https://business.facebook.com/wa/manage/phone-numbers/) — it is the numeric ID, not the phone number string\n- Confirm the System User has Manage access on the correct WABA\n\n---\n\n### `WhatsAppRateLimitError` (429)\n\n**Cause:** Meta Graph API rate limit hit.\n\n**Fix:** The connector retries automatically (up to 3×) honouring the `Retry-After` header. If persistent, reduce the sync schedule frequency.\n\n---\n\n### Sync returns 0 templates\n\n**Cause:** No message templates have been created in the WABA yet, or the System User's token does not have `whatsapp_business_management` permission.\n\n**Fix:**\n1. Check [WhatsApp Manager](https://business.facebook.com/wa/manage/message-templates/) to confirm templates exist\n2. Verify the token permission in Business Settings → System Users → token permissions\n\n---\n\n### `ModuleNotFoundError: No module named 'aiohttp'`\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install aiohttp>=3.9.0\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a full unit test suite — no Meta account required.\n\n### Run unit tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/whatsapp_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 63 passed in < 15 seconds\n```\n\nAll HTTP calls are mocked via `AsyncMock` — zero network I/O.\n\n### Test coverage\n\n| Area | Tests |\n|------|-------|\n| `install()` | success, missing fields (all combinations), invalid token, generic exception, connector_id fallback |\n| `health_check()` | healthy, invalid token, network error, generic exception, missing credentials |\n| `sync()` | empty, single page, pagination (2 pages), partial failure, API error, kb_id ingest, since param |\n| `list_templates()` | single page, cursor follow, empty, three pages |\n| `get_template()` | success, not found, auth error |\n| `list_phone_numbers()` | single, empty, multiple |\n| `get_waba()` | success, auth error |\n| `normalize_template()` | basic fields, source_id length/stability/uniqueness, all component types, missing optional fields |\n| Exception hierarchy | all 5 exception types and their attributes |\n| `with_retry()` | first-attempt success, auth error no-retry, retry on network error, max-attempts, rate-limit retry_after |\n| Lifecycle | aclose, safe when no client, context manager, _ensure_client, _missing_fields |"
+    }
+  ]
+}
