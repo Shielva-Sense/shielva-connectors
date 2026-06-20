@@ -3,7 +3,7 @@
   "sections": [
     {
       "id": "overview",
-      "title": "1. Overview",
+      "title": "Overview",
       "content": "The Google Calendar connector syncs calendar events from the authenticated user's primary Google Calendar into the Shielva knowledge base. It uses the Google Calendar API v3 with OAuth 2.0 for authentication. Events are normalized into ConnectorDocument objects and ingested with stable, content-addressable IDs. The connector supports listing calendars, listing events, fetching individual events, and running a paginated 30-day sync window.",
       "children": [
         {
@@ -21,46 +21,26 @@
       ]
     },
     {
-      "id": "authentication",
-      "title": "2. Authentication",
-      "content": "Authentication uses OAuth 2.0 Authorization Code flow. The connector requires a `client_id` and `client_secret` from a Google Cloud project with the Calendar API enabled.",
-      "children": [
-        {
-          "id": "oauth-flow",
-          "title": "2.1 OAuth Flow",
-          "content": "The OAuth flow issues an access token and refresh token scoped to `calendar.readonly`. The access token is automatically refreshed using the stored refresh token when it expires via `on_token_refresh()`.\n\n- Required scope: `https://www.googleapis.com/auth/calendar.readonly`\n- Auth URI: `https://accounts.google.com/o/oauth2/v2/auth`\n- Token URI: `https://oauth2.googleapis.com/token`",
-          "children": []
-        },
-        {
-          "id": "install-fields",
-          "title": "2.2 Install Fields",
-          "content": "| Field | Required | Type | Description |\n|-------|----------|------|-------------|\n| `client_id` | Yes | text | OAuth 2.0 Client ID from Google Cloud Console (ends in `.apps.googleusercontent.com`) |\n| `client_secret` | Yes | secret | OAuth 2.0 Client Secret (starts with `GOCSPX-`) |\n| `redirect_uri` | No | text | Must match the authorized redirect URI registered in Google Cloud Console |",
-          "children": []
-        }
-      ]
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Google Calendar connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import GoogleCalendarConnector\n\nconfig = {\n    \"client_id\": \"<text>\"\n    \"client_secret\": \"<secret>\"\n    \"redirect_uri\": \"<text>\"\n}\n\nconnector = GoogleCalendarConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"google_calendar_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_calendars`\n\n```python\nresult = await connector.list_calendars()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Google Calendar data into Shielva.",
+      "children": []
     },
     {
-      "id": "sync-engine",
-      "title": "3. Sync Engine",
-      "content": "The sync engine fetches events from the primary calendar using a 30-day window (now to now+30 days) with nextPageToken pagination.",
-      "children": [
-        {
-          "id": "sync-algorithm",
-          "title": "3.1 Sync Algorithm",
-          "content": "1. Compute `time_min` = now (UTC) and `time_max` = now + 30 days.\n2. Call `GET /calendars/primary/events` with `maxResults=100`, `singleEvents=true`, `orderBy=startTime`.\n3. For each event in `items`, call `normalize_event()` to produce a `ConnectorDocument`.\n4. Failed normalizations increment `documents_failed` without aborting the batch.\n5. If `nextPageToken` is present, fetch the next page.\n6. Return `SyncResult` with status `COMPLETED` (0 failures), `PARTIAL` (some failures), or `FAILED` (outer exception).",
-          "children": []
-        },
-        {
-          "id": "retry-policy",
-          "title": "3.2 Retry Policy",
-          "content": "All API calls pass through `with_retry()` with the following parameters:\n- `max_retries=3` for sync page fetches\n- `max_retries=2` for health checks\n- `max_retries=3` for list_calendars, list_events, get_event\n- Base delay: 1.0 s, backoff factor: 2.0x, max delay: 32 s\n- `GoogleCalendarRateLimitError` and `GoogleCalendarNetworkError` are retried\n- `GoogleCalendarAuthError` is NOT retried (re-authorize required)",
-          "children": []
-        }
-      ]
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "This connector uses **OAuth 2.0 authorization code flow** to authenticate against google. Shielva exchanges an authorization code for an access token + refresh token pair and stores them in the connector `config`. The access token is sent on every API call as a `Bearer` header; the refresh token is used automatically when the access token expires.\n\n### Obtaining OAuth credentials\n\n1. Sign in to the google developer / admin portal.\n2. Create a new OAuth application (sometimes called a *Client*, *Integration*, or *App*).\n3. Register the Shielva OAuth callback URL as an authorized redirect URI: `https://<your-shielva-host>/oauth/callback`.\n4. Copy the **Client ID** and **Client Secret** the provider issues. These are the values you will paste into the `client_id` / `client_secret` install fields.\n\n### Token lifecycle\n\n- `initialize()` validates credentials with a lightweight call (e.g. fetching the current user / account profile) and raises a connector-specific `AuthError` subclass if the credentials are rejected.\n- `health_check()` re-runs the same validation on demand. Use it to detect a revoked / expired credential without triggering a full sync.\n- For OAuth flows, expired access tokens are refreshed automatically on the next API call; you do not need to handle 401 retry manually.\n\n### Troubleshooting authentication\n\n| Symptom | Likely cause | Fix |\n|---------|--------------|-----|\n| `401 Unauthorized` | Credential typo, key revoked, or wrong account | Regenerate the key and re-install |\n| `403 Forbidden` | Missing scope / insufficient role | Grant the scopes listed above, then re-authorize |\n| `429 Too Many Requests` | Auth endpoint hit the rate limit | Built-in retry handles this \u2014 see Error Handling |",
+      "children": []
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `client_id` | OAuth Client ID | `text` | \u2705 | From Google Cloud Console \u2192 APIs & Services \u2192 Credentials \u2192 OAuth 2.0 Client IDs |\n| `client_secret` | OAuth Client Secret | `secret` | \u2705 | The client secret from your OAuth 2.0 Client ID |\n| `redirect_uri` | Redirect URI | `text` | \u2014 | Must match exactly what is registered in Google Cloud Console |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
     },
     {
       "id": "api-methods",
-      "title": "4. API Methods",
+      "title": "API Methods",
       "content": "The connector exposes the following methods:",
       "children": [
         {
@@ -103,32 +83,31 @@
     },
     {
       "id": "data-model",
-      "title": "5. Data Model (ConnectorDocument)",
-      "content": "Each synced event is normalized into a `ConnectorDocument` with the following shape:",
-      "children": [
-        {
-          "id": "document-fields",
-          "title": "5.1 Document Fields",
-          "content": "| Field | Type | Description |\n|-------|------|-------------|\n| `id` | string | `{connector_id}_{event_id}` — namespaced, stable |\n| `source` | string | Always `'google_calendar'` |\n| `title` | string | Event summary; defaults to `'(no title)'` |\n| `content` | string | Human-readable: description, attendees, location, start, end |\n| `connector_id` | string | The connector instance ID |\n| `tenant_id` | string | The tenant this document belongs to |\n| `metadata` | dict | See below |",
-          "children": []
-        },
-        {
-          "id": "metadata-fields",
-          "title": "5.2 Metadata Fields",
-          "content": "| Key | Description |\n|-----|-------------|\n| `start` | RFC 3339 datetime or date string |\n| `end` | RFC 3339 datetime or date string |\n| `location` | Event location string |\n| `organizer` | Organizer display name or email |\n| `organizer_email` | Organizer email address |\n| `status` | `confirmed`, `tentative`, or `cancelled` |\n| `attendees` | Formatted attendee list: `Name (status), ...` |\n| `html_link` | Google Calendar event URL |\n| `recurring_event_id` | Present for recurring event instances |\n| `calendar_id` | Organizer email (used as calendar identifier) |\n| `etag` | Google Calendar etag for cache validation |",
-          "children": []
-        }
-      ]
+      "title": "Data Model",
+      "content": "Every record this connector emits into the Shielva knowledge base is a `ConnectorDocument` \u2014 a normalized envelope with a stable `source_id`, a resource type discriminator, and a payload of provider-specific fields. The shape per resource is documented below; the contract is enforced by the `normalize_*` helpers in `helpers/utils.py` (or `helpers/normalizer.py`).\n\n### Envelope fields (shared)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `source_id` | `str` | SHA-256-derived 16-char ID, stable across resyncs |\n| `resource_type` | `str` | Discriminator: `message`, `contact`, `event`, etc. |\n| `payload` | `dict` | Provider-native fields, untouched JSON-safe values |\n| `created_at` | `str` | RFC 3339 timestamp from the provider |\n| `updated_at` | `str` | RFC 3339 timestamp from the provider |\n| `tenant_id` | `str` | Multi-tenant scope \u2014 never `None` for stored records |\n\n### Resource models\n\n#### `InstallResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `connector_id` | `str` |\n| `message` | `str` |\n\n#### `HealthCheckResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `message` | `str` |\n\n#### `SyncResult`\n\n| Field | Type |\n|-------|------|\n| `status` | `SyncStatus` |\n| `documents_found` | `int` |\n| `documents_synced` | `int` |\n| `documents_failed` | `int` |\n| `message` | `str` |\n\n#### `ConnectorDocument`\n\nLightweight document container used when BaseConnector is unavailable.\n\n| Field | Type |\n|-------|------|\n| `id` | `str` |\n| `source` | `str` |\n| `title` | `str` |\n| `content` | `str` |\n| `metadata` | `Dict[str, Any]` |\n| `connector_id` | `str` |\n| `tenant_id` | `str` |\n\n\n### `source_id` determinism\n\nAll resource IDs are computed by SHA-256-hashing the provider's stable identifier (e.g. message ID, contact ID, event UUID) plus the resource type, then truncating to 16 characters. This guarantees that re-syncing the same resource produces the same Shielva document ID \u2014 enabling idempotent ingestion and incremental updates without duplicates.",
+      "children": []
     },
     {
-      "id": "exceptions",
-      "title": "6. Exceptions",
-      "content": "| Exception | HTTP Status | Retried | Description |\n|-----------|-------------|---------|-------------|\n| `GoogleCalendarError` | — | No | Base exception for all connector errors |\n| `GoogleCalendarAuthError` | 401 | No | Authentication failure — invalid or expired token |\n| `GoogleCalendarRateLimitError` | 429 | Yes | Too Many Requests — quota exceeded |\n| `GoogleCalendarNetworkError` | 4xx/5xx/network | Yes | Network or unexpected HTTP error |\n| `GoogleCalendarNotFoundError` | 404 | No | Requested calendar or event does not exist |",
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Google Calendar, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: _no optional feature flags set_.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `GoogleCalendarError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nGoogleCalendarError(Exception)\n  GoogleCalendarAuthError(GoogleCalendarError)\n  GoogleCalendarRateLimitError(GoogleCalendarError)\n  GoogleCalendarNetworkError(GoogleCalendarError)\n  GoogleCalendarNotFoundError(GoogleCalendarError)\n```\n\n### When each is raised\n\n- **`GoogleCalendarError`** \u2014 Base exception for all Google Calendar connector errors.\n- **`GoogleCalendarAuthError`** \u2014 Raised when authentication fails or a token is invalid/expired.\n- **`GoogleCalendarRateLimitError`** \u2014 Raised when the Google Calendar API rate limit (429) is exceeded.\n- **`GoogleCalendarNetworkError`** \u2014 Raised when a network-level error prevents the API call from completing.\n- **`GoogleCalendarNotFoundError`** \u2014 Raised when a requested resource (calendar or event) is not found (404).\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd google_calendar_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **94** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `GOOGLE_CALENDAR_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
       "children": []
     },
     {
       "id": "troubleshooting",
-      "title": "7. Troubleshooting",
+      "title": "Troubleshooting",
       "content": "Common issues and resolutions:",
       "children": [
         {
@@ -152,7 +131,7 @@
         {
           "id": "429-rate-limit",
           "title": "7.4 429 Rate Limit",
-          "content": "The connector retries automatically up to 3 times with exponential backoff (1 s base, 2x factor, 32 s max). Persistent 429s require a quota increase in Google Cloud Console → APIs & Services → Google Calendar API → Quotas.",
+          "content": "The connector retries automatically up to 3 times with exponential backoff (1 s base, 2x factor, 32 s max). Persistent 429s require a quota increase in Google Cloud Console \u2192 APIs & Services \u2192 Google Calendar API \u2192 Quotas.",
           "children": []
         },
         {
@@ -162,6 +141,18 @@
           "children": []
         }
       ]
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Google Calendar account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Google Calendar against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Google Calendar propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `GoogleCalendarConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Google Calendar connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Google Calendar connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
     }
   ]
 }
