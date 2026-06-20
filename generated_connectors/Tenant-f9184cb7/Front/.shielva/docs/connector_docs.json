@@ -1,0 +1,92 @@
+{
+  "title": "Front Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Front connector syncs team email conversations, contacts, teammates, inboxes, and tags from the Front Core API v1 into the Shielva knowledge base. It is used by customer support, customer success, and sales teams who collaborate through Front's shared inbox and want AI-powered search and analysis of their customer communications.\n\n**Key capabilities:**\n- Sync all conversations with full cursor-based pagination (100 per page)\n- Sync all contacts with cursor-based pagination\n- Direct access to individual conversation messages via `list_messages()`\n- List teammates, inboxes, and tags without pagination overhead\n- Bearer API token authentication (`Authorization: Bearer {api_token}`)\n- Automatic retry via `with_retry()` on transient failures\n- Graceful partial sync — contacts sync failure returns `PARTIAL` rather than aborting\n\n**Auth model:** API key (Bearer token) — obtained from Front's developer settings.\n\n**Resources synced:** `conversations`, `contacts`\n\n**Additional resources accessible (not synced by default):** `teammates`, `inboxes`, `tags`, `messages`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Obtain a Front API Token\n\n1. Log in to [app.frontapp.com](https://app.frontapp.com).\n2. Go to **Settings → Developers → API Tokens**.\n3. Click **New Token**, give it a name (e.g. `Shielva`), and copy the generated token.\n\n### 2. Install the connector\n\n```python\nimport asyncio\nfrom connector import FrontConnector\n\nasync def main():\n    connector = FrontConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"front-prod\",\n        config={\n            \"api_token\": \"eyJ...\",\n        },\n    )\n    result = await connector.install()\n    print(result.health)       # ConnectorHealth.HEALTHY\n    print(result.auth_status)  # AuthStatus.CONNECTED\n    print(result.message)      # \"Connected to Front as Jane Smith\"\n\nasyncio.run(main())\n```\n\n### 3. Run a health check\n\n```python\nhealth = await connector.health_check()\nprint(health.health)    # ConnectorHealth.HEALTHY\nprint(health.message)   # \"Front API is reachable\"\n```\n\n### 4. Sync conversations and contacts\n\n```python\nasync with FrontConnector(\n    tenant_id=\"t1\",\n    connector_id=\"front-prod\",\n    config={\"api_token\": \"eyJ...\"},\n) as connector:\n    result = await connector.sync(kb_id=\"my-kb-id\")\n    print(f\"Found: {result.documents_found}, Synced: {result.documents_synced}\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` (Bearer token)\n\nFront uses a Bearer API token sent via the `Authorization` header on every request:\n\n```\nAuthorization: Bearer {api_token}\n```\n\n### Validation flow\n\n1. The connector reads `api_token` from the config dict on construction and strips leading/trailing whitespace.\n2. On `install()`, it calls `GET https://api2.frontapp.com/me` to verify the token grants access and to retrieve the authenticated teammate's name and email.\n3. If `api_token` is empty, `install()` returns `AuthStatus.MISSING_CREDENTIALS` immediately without making any API call.\n4. A `401` or `403` response raises `FrontAuthError`, which is caught and returned as `AuthStatus.INVALID_CREDENTIALS`.\n\n### Token capabilities\n\nFront API tokens are scoped to the company account. The token inherits the permissions of the user who created it. For full conversation and contact access, the token owner must have appropriate Front roles.\n\n### Where to find your API token\n\n**Front → Settings → Developers → API Tokens**"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Fields provided during connector installation (from `metadata/connector.json`):\n\n| Field | Type | Required | Description |\n|---|---|---|---|\n| `api_token` | `password` | Yes | Front API token. Sent as `Authorization: Bearer {value}` on every request. Found in Front → Settings → Developers → API Tokens. Leading/trailing whitespace is stripped automatically. |\n\n**Runtime constants (set in `connector.py`, not configurable via install fields):**\n\n| Constant | Value | Description |\n|---|---|---|\n| `SYNC_PAGE_LIMIT` | `100` | Number of conversations or contacts fetched per pagination page |\n| `CONNECTOR_TYPE` | `\"front\"` | Internal connector type identifier |\n| `AUTH_TYPE` | `\"api_key\"` | Authentication model |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `FrontConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates the `api_token` is non-empty, then calls `GET /me` to confirm the token is accepted by Front and to retrieve the authenticated teammate's display name.\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | `message` |\n|---|---|---|---|\n| `api_token` empty | `OFFLINE` | `MISSING_CREDENTIALS` | `\"Missing required field: api_token\"` |\n| Token rejected (401/403) | `OFFLINE` | `INVALID_CREDENTIALS` | Exception message from Front |\n| Unexpected error | `OFFLINE` | `FAILED` | Exception message |\n| Success | `HEALTHY` | `CONNECTED` | `\"Connected to Front as {name}\"` |\n\nThe `message` on success uses the teammate's `first_name + last_name` from `/me`. Falls back to `email` if name is absent, or `\"Unknown teammate\"` if both are missing.\n\n```python\nfrom connector import FrontConnector\n\nconnector = FrontConnector(\n    tenant_id=\"t1\",\n    connector_id=\"front-prod\",\n    config={\"api_token\": \"eyJ...\"},\n)\nresult = await connector.install()\nprint(result.message)  # \"Connected to Front as Jane Smith\"\nprint(result.connector_id)  # \"front-prod\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /me` and returns the current connector health. Distinguishes between auth failures (`FrontAuthError`) and transient network failures (`FrontNetworkError`).\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` |\n|---|---|---|\n| `api_token` empty | `OFFLINE` | `MISSING_CREDENTIALS` |\n| Token rejected (401/403) | `OFFLINE` | `INVALID_CREDENTIALS` |\n| Network/transient error | `DEGRADED` | `FAILED` |\n| Success | `HEALTHY` | `CONNECTED` |\n\n```python\nresult = await connector.health_check()\nprint(result.health)   # ConnectorHealth.HEALTHY\nprint(result.message)  # \"Front API is reachable\"\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all conversations and then all contacts from Front. Both resource types are paginated with cursor-based pagination (`_pagination.next` from the Front API response). Documents are optionally ingested when `kb_id` is provided.\n\n**Pagination:** Each page returns up to `SYNC_PAGE_LIMIT = 100` items. The connector loops until `_pagination.next` is absent or `_results` is empty.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When non-empty, documents are ingested via `_ingest_document()`. |\n| `**kwargs` | `Any` | — | Additional keyword arguments (ignored). |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED` if zero failures; `PARTIAL` if any normalization/ingestion errors; `FAILED` if conversations fetch fails entirely |\n| `documents_found` | `int` | Total conversations + contacts discovered |\n| `documents_synced` | `int` | Successfully normalized and ingested |\n| `documents_failed` | `int` | Items that raised exceptions during normalization/ingestion |\n\n**Error handling in sync:**\n- If conversations fetch fails with `FrontError`, returns `SyncStatus.FAILED` immediately.\n- If contacts fetch fails with `FrontError`, returns `SyncStatus.PARTIAL` (conversations already synced are preserved).\n\n```python\nresult = await connector.sync(kb_id=\"kb-123\")\nprint(result.status)           # SyncStatus.COMPLETED\nprint(result.documents_found)  # e.g. 3420 (3200 conversations + 220 contacts)\n```"
+        },
+        {
+          "id": "method-list-conversations",
+          "title": "list_conversations()",
+          "content": "Returns all conversations, auto-paginating through all pages using `_pagination.next` cursors.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `**kwargs` | `Any` | Additional query parameters forwarded to `get_conversations()` |\n\n**Returns:** `list[dict[str, Any]]` — raw Front conversation objects\n\n```python\nconversations = await connector.list_conversations()\nfor c in conversations:\n    print(c[\"id\"], c[\"subject\"], c[\"status\"])\n```"
+        },
+        {
+          "id": "method-get-conversation",
+          "title": "get_conversation()",
+          "content": "Returns a single conversation by its Front conversation ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `conversation_id` | `str` | Front conversation ID (e.g. `cnv_abc123`) |\n\n**Returns:** `dict[str, Any]` — raw Front conversation object\n\n```python\nconv = await connector.get_conversation(conversation_id=\"cnv_abc123\")\nprint(conv[\"subject\"], conv[\"assignee\"][\"email\"])\n```"
+        },
+        {
+          "id": "method-list-messages",
+          "title": "list_messages()",
+          "content": "Returns all messages within a specific conversation.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `conversation_id` | `str` | Front conversation ID |\n\n**Returns:** `list[dict[str, Any]]` — raw Front message objects from `_results`\n\n```python\nmessages = await connector.list_messages(conversation_id=\"cnv_abc123\")\nfor m in messages:\n    print(m[\"type\"], m[\"author\"][\"email\"], m[\"body\"][:100])\n```"
+        },
+        {
+          "id": "method-list-contacts",
+          "title": "list_contacts()",
+          "content": "Returns all contacts, auto-paginating through all pages using `_pagination.next` cursors.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `**kwargs` | `Any` | Additional query parameters forwarded to `get_contacts()` |\n\n**Returns:** `list[dict[str, Any]]` — raw Front contact objects\n\n```python\ncontacts = await connector.list_contacts()\nfor c in contacts:\n    print(c[\"name\"], c[\"handles\"])\n```"
+        },
+        {
+          "id": "method-list-teammates",
+          "title": "list_teammates()",
+          "content": "Returns all teammates in the Front company account.\n\n**Returns:** `list[dict[str, Any]]` — raw Front teammate objects from `_results`\n\n```python\nteammates = await connector.list_teammates()\nfor t in teammates:\n    print(t[\"email\"], t[\"first_name\"], t[\"last_name\"])\n```"
+        },
+        {
+          "id": "method-list-inboxes",
+          "title": "list_inboxes()",
+          "content": "Returns all inboxes in the Front company account.\n\n**Returns:** `list[dict[str, Any]]` — raw Front inbox objects from `_results`\n\n```python\ninboxes = await connector.list_inboxes()\nfor i in inboxes:\n    print(i[\"id\"], i[\"name\"], i[\"type\"])\n```"
+        },
+        {
+          "id": "method-list-tags",
+          "title": "list_tags()",
+          "content": "Returns all tags defined in the Front company account.\n\n**Returns:** `list[dict[str, Any]]` — raw Front tag objects from `_results`\n\n```python\ntags = await connector.list_tags()\nfor t in tags:\n    print(t[\"id\"], t[\"name\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector defines a dedicated exception hierarchy in `exceptions.py`. All exceptions carry `.message`, `.status_code`, and `.code`.\n\n| Exception | HTTP Status | `.code` | Meaning |\n|---|---|---|---|\n| `FrontError` | varies | varies | Base class for all Front connector errors |\n| `FrontAuthError` | 401 / 403 | — | API Bearer token rejected or revoked |\n| `FrontRateLimitError` | 429 | `rate_limit` | Too many requests; `.retry_after` (float, seconds) |\n| `FrontNotFoundError` | 404 | `resource_missing` | The requested conversation, contact, or resource does not exist |\n| `FrontNetworkError` | 5xx / timeout | — | Transient network failure or Front API 5xx error |\n\n### How the connector handles each error\n\n- **`FrontAuthError`** — caught in `install()` and `health_check()`, returned as `AuthStatus.INVALID_CREDENTIALS`. In `sync()`, a conversations-level `FrontError` returns `SyncStatus.FAILED`; a contacts-level failure returns `SyncStatus.PARTIAL`.\n- **`FrontNetworkError`** — caught in `health_check()` and returned as `ConnectorHealth.DEGRADED`. In `sync()`, `with_retry()` retries before raising.\n- **`FrontRateLimitError`** — raised on 429. The `with_retry()` helper honours `retry_after`.\n- **`FrontNotFoundError`** — raised on 404 for missing resources. Surfaced in the error message.\n- **Per-document failures in `sync()`** — caught with a bare `except Exception: failed += 1`. A single conversation or contact that fails normalization/ingestion does not stop the rest of the page from being processed."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `AuthStatus.MISSING_CREDENTIALS` on install\n\n**Cause:** `api_token` is absent or empty in the config.\n\n**Fix:** Provide the token:\n```python\nconfig = {\n    \"api_token\": \"your_front_api_token\",  # must not be empty\n}\n```\n\n### `AuthStatus.INVALID_CREDENTIALS` — 401 from Front\n\n**Cause:** The `api_token` is wrong, expired, or was deleted from Front.\n\n**Fix:**\n1. Go to **Front → Settings → Developers → API Tokens**.\n2. Verify the token exists. If it was rotated, delete the old token and create a new one.\n3. Update the connector config with the new token.\n\n### `install()` shows name as \"Unknown teammate\"\n\n**Cause:** The `/me` endpoint returned a teammate with neither a name nor an email. This can happen with certain API token configurations.\n\n**Fix:** This is cosmetic only — the connector is still connected. Verify the token belongs to a real teammate account.\n\n### `SyncStatus.PARTIAL` — contacts sync failed\n\n**Cause:** The conversations sync completed successfully, but the subsequent contacts sync raised a `FrontError`.\n\n**Fix:** Check the `message` field of the `SyncResult` for the specific error. Common causes: the token lacks contacts read permission, or the Front plan does not include the contacts API.\n\n### Empty `_results` — no conversations or contacts returned\n\n**Cause:** The token may be scoped to a teammate account with no access to shared inboxes, or the Front account has no conversations/contacts yet.\n\n**Fix:** Ensure the token owner has access to shared inboxes in Front. Check **Settings → Teammates → your teammate → Inboxes** to verify inbox assignments.\n\n### `FrontRateLimitError` — 429 Too Many Requests\n\n**Cause:** Front's API rate limit was hit. The Core API v1 is limited per token.\n\n**Fix:** The `with_retry()` helper handles backoff automatically. Reduce sync frequency if you manage a high-volume inbox with thousands of conversations.\n\n### Pagination stops early — fewer documents than expected\n\n**Cause:** If a page returns an empty `_results` list or no `_pagination.next`, the sync loop exits. This is the correct behavior for the last page.\n\n**Fix:** Verify the total count matches Front's conversation count in **Settings → Reports**. If it doesn't, file a support issue with the page count at which the loop exited."
+    }
+  ]
+}
