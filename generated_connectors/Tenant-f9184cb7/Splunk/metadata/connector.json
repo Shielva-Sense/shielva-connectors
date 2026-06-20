@@ -1,0 +1,67 @@
+{
+  "connector_type": "splunk",
+  "display_name": "Splunk",
+  "provider": "Splunk",
+  "service": "Splunk Enterprise / Splunk Cloud",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect Splunk to sync saved searches, indexes, apps, and users for SIEM and log analytics intelligence.",
+  "install_fields": [
+    {
+      "key": "host",
+      "label": "Splunk Host",
+      "type": "string",
+      "required": true,
+      "help": "Hostname or IP of your Splunk instance (e.g. splunk.example.com)"
+    },
+    {
+      "key": "port",
+      "label": "Management Port",
+      "type": "string",
+      "required": false,
+      "help": "Splunk REST API management port (default: 8089)"
+    },
+    {
+      "key": "token",
+      "label": "API Token (Bearer token)",
+      "type": "password",
+      "required": true,
+      "help": "Splunk session token or HTTP Event Collector token. Create in Settings → Tokens."
+    },
+    {
+      "key": "index",
+      "label": "Default Index",
+      "type": "string",
+      "required": false,
+      "help": "Optional default index to scope searches (e.g. main)"
+    },
+    {
+      "key": "verify_ssl",
+      "label": "Verify SSL",
+      "type": "string",
+      "required": false,
+      "help": "Set to 'false' to disable SSL certificate verification (not recommended for production)"
+    }
+  ],
+  "capabilities": ["sync", "health_check", "search"],
+  "resources": ["saved_searches", "indexes", "apps", "users"],
+  "auth": {
+    "header": "Authorization: Bearer {token}",
+    "validation_endpoint": "GET /services/server/info"
+  },
+  "api": {
+    "base_url_template": "https://{host}:{port}",
+    "default_port": 8089,
+    "version": "REST API v8+"
+  },
+  "methods": [
+    {"name": "install", "description": "Validate host and token via GET /services/server/info"},
+    {"name": "health_check", "description": "Check connectivity and return server version"},
+    {"name": "sync", "description": "Sync saved searches, indexes, and apps to knowledge base"},
+    {"name": "list_indexes", "description": "List all Splunk indexes"},
+    {"name": "list_saved_searches", "description": "List all Splunk saved searches"},
+    {"name": "list_apps", "description": "List all installed Splunk apps"},
+    {"name": "list_users", "description": "List all Splunk users"},
+    {"name": "run_search", "description": "Run an ad-hoc SPL search and return results"}
+  ]
+}
