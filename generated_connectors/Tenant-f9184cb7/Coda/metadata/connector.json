@@ -1,0 +1,23 @@
+{
+  "connector_type": "coda",
+  "display_name": "Coda",
+  "provider": "coda",
+  "service": "coda",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "help": "Your Coda API token. Generate one at https://coda.io/account under 'API Settings'."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["doc", "page", "table", "row"],
+  "api_base": "https://coda.io/apis/v1",
+  "auth_header": "Authorization: Bearer {api_token}",
+  "pagination": "cursor (nextPageToken / nextPageLink)",
+  "rate_limit": "10 requests/second per token"
+}
