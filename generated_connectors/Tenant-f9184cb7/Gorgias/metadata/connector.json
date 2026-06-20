@@ -1,0 +1,60 @@
+{
+  "connector_type": "gorgias",
+  "display_name": "Gorgias",
+  "provider": "gorgias",
+  "service": "gorgias",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync Gorgias eCommerce customer support tickets, customers, tags, macros, and satisfaction surveys.",
+  "install_fields": [
+    {
+      "key": "account",
+      "label": "Gorgias Account (subdomain)",
+      "type": "string",
+      "required": true,
+      "placeholder": "mystore",
+      "help": "Your Gorgias subdomain — the part before .gorgias.com (e.g. mystore)."
+    },
+    {
+      "key": "email",
+      "label": "Email",
+      "type": "string",
+      "required": true,
+      "placeholder": "support@mystore.com",
+      "help": "The email address associated with your Gorgias account."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "••••••••••••",
+      "help": "Generate an API key in Gorgias → Settings → REST API."
+    }
+  ],
+  "resources": [
+    "tickets",
+    "customers",
+    "tags",
+    "macros",
+    "satisfaction_surveys"
+  ],
+  "capabilities": ["sync", "health_check"],
+  "auth_details": {
+    "method": "Basic",
+    "header": "Authorization",
+    "format": "Basic base64(email:api_key)",
+    "notes": "Gorgias uses standard HTTP Basic Auth. Username = email, Password = API key."
+  },
+  "api_base": "https://{account}.gorgias.com/api/",
+  "pagination": {
+    "strategy": "cursor",
+    "cursor_field": "meta.next_cursor",
+    "default_page_size": 100
+  },
+  "rate_limits": {
+    "requests_per_second": 2,
+    "retry_on_429": true,
+    "respect_retry_after_header": true
+  }
+}
