@@ -1,0 +1,82 @@
+{
+  "title": "Recurly Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Recurly connector syncs subscription billing data from [Recurly](https://recurly.com) into the Shielva knowledge base. It is designed for SaaS finance and billing teams who need AI-powered search over their subscription data.\n\n**What it syncs:**\n- **Accounts** — customer accounts with contact and billing details\n- **Subscriptions** — active and historical subscriptions linked to accounts and plans\n- **Invoices** — charge and credit invoices with payment and balance details\n- **Plans** — subscription plan definitions including pricing, intervals, and trial terms\n- **Transactions** — payment transactions including purchases, refunds, and voids\n\n**Key capabilities:**\n- Cursor-based pagination across all five resource types — no records are skipped\n- Page size of 200 records per request (Recurly v3 maximum)\n- Automatic retry with exponential back-off on transient failures via `with_retry`\n- Typed error hierarchy (`RecurlyAuthError`, `RecurlyRateLimitError`, `RecurlyNotFoundError`, `RecurlyNetworkError`) for precise failure handling\n- Authentication via Recurly Private API Key using HTTP Basic Auth (key as username, empty password)\n- Requires `Accept: application/vnd.recurly.v2021-02-25` version header on every request"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Recurly Private API Key\n\n1. Log in to your [Recurly dashboard](https://app.recurly.com).\n2. Navigate to **Integrations → API Credentials**.\n3. Click **Add Private API Key**, give it a descriptive name, and copy the generated key (begins with `rk_live_` for production or `rk_test_` for sandbox).\n\n### 2. Install the connector\n\nProvide the following fields during installation:\n\n| Field | Example value |\n|-------|---------------|\n| `api_key` | `rk_live_abc123...` |\n| `subdomain` | `mycompany` (optional) |\n\nThe connector calls `GET https://v3.recurly.com/sites` to validate the key. On success, it returns `ConnectorHealth.HEALTHY` and `AuthStatus.CONNECTED`.\n\n### 3. Run your first sync\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-recurly-01\",\n        config={\n            \"api_key\": \"rk_live_your_private_api_key\",\n            \"subdomain\": \"mycompany\",\n        },\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(result.status, result.documents_synced, result.documents_found)\n\nasyncio.run(main())\n```\n\nThe sync processes resources in order: accounts → subscriptions → invoices → plans → transactions. If accounts fail the whole sync returns `SyncStatus.FAILED`. If a later resource fails the status becomes `SyncStatus.PARTIAL`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` — HTTP Basic Auth\n\nRecurly v3 authenticates by HTTP Basic Auth where the Private API Key is the **username** and the password is always an **empty string**:\n\n```\nAuthorization: Basic base64(api_key:)\n```\n\nEvery request also requires a version header:\n\n```\nAccept: application/vnd.recurly.v2021-02-25\nContent-Type: application/json\n```\n\n**Base URL:** `https://v3.recurly.com`\n\n**Health check endpoint:** `GET /sites`\n\nThe connector calls `GET /sites` during both `install()` and `health_check()` to verify the key. A `401` or `403` response raises `RecurlyAuthError` and sets `auth_status=AuthStatus.INVALID_CREDENTIALS`. A `5xx` or connection failure raises `RecurlyNetworkError` and results in `ConnectorHealth.DEGRADED`.\n\n**Where to find your API key:**\nRecurly dashboard → **Integrations → API Credentials** → **Add Private API Key**. Keys begin with `rk_live_` (production) or `rk_test_` (sandbox)."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `api_key` | password | Yes | Your Recurly Private API Key. Found in the Recurly dashboard under **Integrations → API Credentials**. Begins with `rk_live_` (production) or `rk_test_` (sandbox). Example: `rk_live_abc123def456`. |\n| `subdomain` | string | No | Your Recurly account subdomain (e.g. `mycompany` from `mycompany.recurly.com`). Only used for generating direct dashboard links in synced documents — does not affect API authentication or sync behavior. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `RecurlyConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates the `api_key` by calling `GET /sites` on the Recurly v3 API. Returns an `InstallResult` indicating whether the connector is ready to sync.\n\n**Returns:** `InstallResult`\n\n| Field | Value on success | Value on failure |\n|-------|-----------------|------------------|\n| `health` | `ConnectorHealth.HEALTHY` | `ConnectorHealth.OFFLINE` |\n| `auth_status` | `AuthStatus.CONNECTED` | `AuthStatus.MISSING_CREDENTIALS` or `AuthStatus.INVALID_CREDENTIALS` or `AuthStatus.FAILED` |\n| `connector_id` | Set from `self.connector_id` | Not set |\n| `message` | `\"Connected to Recurly API successfully\"` | Error description string |\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-recurly-01\",\n        config={\"api_key\": \"rk_live_abc123\"},\n    )\n    result = await connector.install()\n    print(result.health, result.auth_status, result.message)\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /sites` and returns the current connector health. Unlike `install()`, this uses a fresh HTTP client on each call.\n\n**Returns:** `HealthCheckResult`\n\n| Scenario | `health` | `auth_status` |\n|----------|----------|---------------|\n| API reachable and key valid | `HEALTHY` | `CONNECTED` |\n| Key missing | `OFFLINE` | `MISSING_CREDENTIALS` |\n| 401 or 403 from Recurly | `OFFLINE` | `INVALID_CREDENTIALS` |\n| Network timeout or 5xx | `DEGRADED` | `FAILED` |\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    result = await connector.health_check()\n    print(result.health)  # ConnectorHealth.HEALTHY\n    print(result.message)  # \"Recurly API is reachable\"\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all five resource types using cursor-based pagination (200 records per page). Pass `kb_id` to ingest normalized `ConnectorDocument` objects into the Shielva knowledge base.\n\n**Signature:**\n```python\nasync def sync(self, full: bool = False, kb_id: str = \"\", **kwargs) -> SyncResult\n```\n\n**Parameters:**\n- `full` (`bool`, default `False`) — reserved for future full re-sync differentiation\n- `kb_id` (`str`, default `\"\"`) — knowledge base ID to ingest into; if empty, documents are normalized but not ingested\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (zero failures), `PARTIAL` (some failures), or `FAILED` (accounts error) |\n| `documents_found` | int | Total records discovered across all resource types |\n| `documents_synced` | int | Records successfully normalized and ingested |\n| `documents_failed` | int | Records that raised an exception during normalization |\n| `message` | str | Set only on `FAILED` or `PARTIAL` to describe the failing resource |\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-recurly-01\",\n        config={\"api_key\": \"rk_live_abc123\", \"subdomain\": \"mycompany\"},\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(f\"{result.status}: {result.documents_synced}/{result.documents_found} synced\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-accounts",
+          "title": "list_accounts()",
+          "content": "Returns all Recurly customer accounts by exhausting all cursor pages.\n\n**Returns:** `list[dict[str, Any]]` — raw Recurly account objects\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    accounts = await connector.list_accounts()\n    print(f\"Found {len(accounts)} accounts\")\n    for acct in accounts[:3]:\n        print(acct.get(\"code\"), acct.get(\"email\"))\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-subscriptions",
+          "title": "list_subscriptions()",
+          "content": "Returns all subscriptions (active and historical) by exhausting all cursor pages.\n\n**Returns:** `list[dict[str, Any]]` — raw Recurly subscription objects\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    subs = await connector.list_subscriptions()\n    print(f\"Found {len(subs)} subscriptions\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-invoices",
+          "title": "list_invoices()",
+          "content": "Returns all invoices (charge and credit) by exhausting all cursor pages.\n\n**Returns:** `list[dict[str, Any]]` — raw Recurly invoice objects\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    invoices = await connector.list_invoices()\n    print(f\"Found {len(invoices)} invoices\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-plans",
+          "title": "list_plans()",
+          "content": "Returns all subscription plan definitions. Plans are fetched in a single request (up to 200).\n\n**Returns:** `list[dict[str, Any]]` — raw Recurly plan objects\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    plans = await connector.list_plans()\n    for plan in plans:\n        print(plan.get(\"code\"), plan.get(\"name\"))\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-transactions",
+          "title": "list_transactions()",
+          "content": "Returns all payment transactions (purchases, refunds, voids) by exhausting all cursor pages.\n\n**Returns:** `list[dict[str, Any]]` — raw Recurly transaction objects\n\n```python\nimport asyncio\nfrom connector import RecurlyConnector\n\nasync def main():\n    connector = RecurlyConnector(config={\"api_key\": \"rk_live_abc123\"})\n    txns = await connector.list_transactions()\n    print(f\"Found {len(txns)} transactions\")\n\nasyncio.run(main())\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions inherit from `RecurlyError`. The HTTP client maps Recurly HTTP status codes to typed exception subclasses.\n\n| Exception class | HTTP status | Raised when | Effect in connector |\n|-----------------|------------|-------------|---------------------|\n| `RecurlyAuthError` | 401, 403 | API key is invalid, revoked, or missing required permissions | `install()` / `health_check()` → `auth_status=INVALID_CREDENTIALS`, `health=OFFLINE`. Sync → `FAILED`. Not retried. |\n| `RecurlyRateLimitError` | 429 | Request rate exceeded | Carries `retry_after` seconds from `X-RateLimit-Reset` response header. `with_retry` backs off automatically. |\n| `RecurlyNotFoundError` | 404 | A specific resource ID does not exist | Raised by HTTP client; surfaces as `RecurlyError` in sync context. |\n| `RecurlyNetworkError` | 5xx, connection error, timeout | Recurly server error or network failure | `health_check()` → `health=DEGRADED`. Retried by `with_retry`. |\n| `RecurlyError` | 422, other 4xx | Validation error or unexpected status | Base class; carries `status_code` and `code` string attributes. |\n\n**Retry policy:** `with_retry` wraps all HTTP calls. It retries on `RecurlyNetworkError` and `RecurlyRateLimitError` with exponential back-off. `RecurlyAuthError` propagates immediately without retry.\n\n**Sync failure semantics:**\n- Accounts section raises `RecurlyError` → returns `SyncStatus.FAILED` immediately\n- Subscriptions, invoices, plans, or transactions raise `RecurlyError` → returns `SyncStatus.PARTIAL` with counts from previously synced resources included"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### install() returns `AuthStatus.MISSING_CREDENTIALS`\n\n**Cause:** `api_key` is empty or was not provided in the config dict.\n**Fix:** Ensure `api_key` is present and non-empty when constructing `RecurlyConnector`.\n\n### install() returns `AuthStatus.INVALID_CREDENTIALS`\n\n**Cause:** Recurly returned 401 or 403 for `GET /sites`.\n**Fix:**\n1. Confirm you are using a **Private** API Key (not a public key). Only private keys work for server-side calls.\n2. Check that the key has not been revoked in **Recurly dashboard → Integrations → API Credentials**.\n3. For sandbox environments the key must start with `rk_test_`, not `rk_live_`.\n\n### sync() returns `SyncStatus.PARTIAL`\n\n**Cause:** One or more resource types after accounts encountered a `RecurlyError` mid-sync.\n**Fix:** Inspect the `message` field of the `SyncResult` — it identifies which resource type failed and includes the underlying error message. Common causes: temporary Recurly 5xx outages, rate limiting on large accounts.\n\n### Persistent rate limiting (429) during large syncs\n\n**Cause:** Recurly enforces rate limits on API v3.\n**Fix:** `RecurlyRateLimitError` carries `retry_after` seconds from the `X-RateLimit-Reset` header. `with_retry` respects this automatically. For persistently large syncs contact Recurly support to increase your API quota.\n\n### health_check() returns `ConnectorHealth.DEGRADED`\n\n**Cause:** `RecurlyNetworkError` — typically a 5xx response, connection refused, or request timeout to `v3.recurly.com`.\n**Fix:** This is usually transient. Retry after a few minutes. Check [Recurly's status page](https://status.recurly.com) for active incidents.\n\n### Unexpected response shape from the API\n\n**Cause:** The `Accept: application/vnd.recurly.v2021-02-25` version header is required but may be stripped by an intermediate proxy.\n**Fix:** Ensure no proxy layer modifies the `Accept` header. The `RecurlyHTTPClient` always sets this header — verify network path."
+    }
+  ]
+}
