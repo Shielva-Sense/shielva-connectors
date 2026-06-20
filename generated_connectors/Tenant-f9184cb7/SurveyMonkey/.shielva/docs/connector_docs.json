@@ -1,0 +1,92 @@
+{
+  "title": "SurveyMonkey Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The SurveyMonkey connector syncs **surveys**, **responses**, **collectors**, and **groups/teams** from SurveyMonkey into the Shielva knowledge base using the **SurveyMonkey API v3** with **OAuth 2.0 Authorization Code** authentication.\n\nKey capabilities:\n- Full sync of all surveys with page-based pagination (50 surveys per page)\n- Per-survey response sync with pagination (100 responses per page)\n- Direct access to survey metadata, full survey details (questions/pages), bulk responses, collectors, and groups\n- OAuth 2.0 Authorization Code flow\n- Automatic retry on transient failures\n\nTypical users: researchers, product teams, and customer success managers who need survey results and response data searchable from within Shielva."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create a SurveyMonkey app\n\n1. Go to [developer.surveymonkey.com](https://developer.surveymonkey.com) and log in.\n2. Click **My Apps → Add a New App**.\n3. Set your **OAuth Redirect URL** (e.g. `https://yourapp.com/oauth/callback`).\n4. Note the **Client ID** and **Client Secret** from the app settings.\n\n### 2. Install the connector with OAuth credentials\n\n```python\nimport asyncio\nfrom connector import SurveyMonkeyConnector\n\nasync def main():\n    connector = SurveyMonkeyConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"surveymonkey-main\",\n        config={\n            \"client_id\": \"YOUR_CLIENT_ID\",\n            \"client_secret\": \"YOUR_CLIENT_SECRET\",\n            \"redirect_uri\": \"https://yourapp.com/oauth/callback\",\n        },\n    )\n    result = await connector.install()\n    print(result)  # MISSING_CREDENTIALS until access_token is present\nasyncio.run(main())\n```\n\n### 3. Complete the OAuth flow\n\n```python\n# Get the authorization URL and redirect the user to it\nauth_url = await connector.authorize()\n# https://api.surveymonkey.com/oauth/authorize?client_id=...&redirect_uri=...&response_type=code\n\n# After the user authorizes, SurveyMonkey redirects to redirect_uri?code=CODE\n# Exchange the code at POST https://api.surveymonkey.com/oauth/token\n# Store access_token in config[\"access_token\"]\n```\n\n### 4. Run your first sync\n\n```python\nconfig = {\n    \"client_id\": \"...\",\n    \"client_secret\": \"...\",\n    \"redirect_uri\": \"...\",\n    \"access_token\": \"EXCHANGED_TOKEN\",\n}\nasync with SurveyMonkeyConnector(config=config) as connector:\n    result = await connector.sync(kb_id=\"my-kb\")\n    print(f\"Synced {result.documents_synced}/{result.documents_found} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `oauth2`\n\nThe connector uses **OAuth 2.0 Authorization Code** flow.\n\n### Authorization URL\n\n```\nhttps://api.surveymonkey.com/oauth/authorize\n```\n\nParameters: `client_id`, `redirect_uri`, `response_type=code`.\n\n### Token URL\n\n```\nhttps://api.surveymonkey.com/oauth/token\n```\n\nThe token exchange is handled by the Shielva platform OAuth handler. The resulting `access_token` is stored in `config[\"access_token\"]` and sent as:\n\n```\nAuthorization: Bearer {access_token}\n```\n\n### Required scopes\n\n| Scope | Purpose |\n|---|---|\n| `surveys_read` | Read survey definitions and metadata |\n| `responses_read` | Read survey responses |\n\n### Validation endpoint\n\n`GET https://api.surveymonkey.com/v3/users/me`\n\nBoth `install()` and `health_check()` call this endpoint to verify the access token.\n\n### Auth errors\n\n| HTTP Status | Error class | Meaning |\n|---|---|---|\n| 401 | `SurveyMonkeyAuthError` | Access token is invalid or expired |\n| 403 | `SurveyMonkeyAuthError` | Token lacks required scopes |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|---|---|---|---|\n| `client_id` | string | Yes | OAuth 2.0 Client ID from the SurveyMonkey Developer Portal. |\n| `client_secret` | password | Yes | OAuth 2.0 Client Secret from the SurveyMonkey Developer Portal. |\n| `redirect_uri` | string | Yes | The callback URL registered in your SurveyMonkey app. Must match exactly. |\n| `access_token` | string | After OAuth | The OAuth access token obtained after user authorization. Required for `health_check()` and `sync()`. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that all install fields are present and, if an access token exists, verifies it by calling `GET /users/me`.\n\n**Returns:** `InstallResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `OFFLINE` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `connector_id` | str | Passed-in connector ID |\n| `message` | str | e.g. `\"Connected to SurveyMonkey as jsmith\"` |\n\n```python\nfrom connector import SurveyMonkeyConnector\n\nasync def example():\n    connector = SurveyMonkeyConnector(\n        tenant_id=\"t1\",\n        config={\n            \"client_id\": \"abc\",\n            \"client_secret\": \"secret\",\n            \"redirect_uri\": \"https://app.example.com/callback\",\n            \"access_token\": \"TOKEN\",\n        },\n    )\n    result = await connector.install()\n    print(result.auth_status, result.message)\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /users/me` and returns current health, username, and email.\n\n**Returns:** `HealthCheckResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `DEGRADED` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `message` | str | e.g. `\"SurveyMonkey API reachable. Account: jsmith\"` |\n| `username` | str | SurveyMonkey username |\n| `email` | str | Account email address |\n\n```python\nresult = await connector.health_check()\nprint(result.health, result.username, result.email)\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all surveys and their responses into the knowledge base. Paginated: 50 surveys per page, 100 responses per survey page.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `kb_id` | str | `\"\"` | Knowledge base ID for document ingestion |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED` or `PARTIAL` |\n| `documents_found` | int | Total surveys + responses fetched |\n| `documents_synced` | int | Records successfully normalized and ingested |\n| `documents_failed` | int | Records that failed normalization |\n| `message` | str | Error string if survey listing fails fatally |\n\n```python\nresult = await connector.sync(kb_id=\"kb-surveys\")\nprint(result.status, result.documents_synced, result.documents_found)\n```"
+        },
+        {
+          "id": "method-authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the OAuth 2.0 authorization URL. Redirect the user's browser to this URL.\n\n**Returns:** `str` — the full authorization URL.\n\n```python\nfrom connector import SurveyMonkeyConnector\n\nconnector = SurveyMonkeyConnector(\n    config={\n        \"client_id\": \"abc123\",\n        \"client_secret\": \"secret\",\n        \"redirect_uri\": \"https://app.example.com/oauth/callback\",\n    }\n)\nauth_url = await connector.authorize()\nprint(\"Visit:\", auth_url)\n# https://api.surveymonkey.com/oauth/authorize?client_id=abc123&redirect_uri=...&response_type=code\n```"
+        },
+        {
+          "id": "method-list-surveys",
+          "title": "list_surveys()",
+          "content": "Returns a flat list of survey objects for a single page.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number (1-indexed) |\n| `per_page` | int | 50 | Number of surveys per page (max 100) |\n\n**Returns:** `list[dict[str, Any]]` — raw SurveyMonkey survey objects.\n\n```python\nsurveys = await connector.list_surveys(page=1, per_page=50)\nfor s in surveys:\n    print(s[\"id\"], s[\"title\"])\n```"
+        },
+        {
+          "id": "method-get-survey",
+          "title": "get_survey()",
+          "content": "Returns metadata for a single survey.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `survey_id` | str | The SurveyMonkey survey ID |\n\n**Returns:** `dict[str, Any]` — raw survey metadata.\n\n```python\nsurvey = await connector.get_survey(\"123456789\")\nprint(survey[\"title\"], survey[\"response_count\"])\n```"
+        },
+        {
+          "id": "method-get-survey-details",
+          "title": "get_survey_details()",
+          "content": "Returns the full survey structure including all pages and questions.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `survey_id` | str | The SurveyMonkey survey ID |\n\n**Returns:** `dict[str, Any]` — full survey object with `pages` and nested `questions` arrays.\n\n```python\ndetails = await connector.get_survey_details(\"123456789\")\nfor page in details.get(\"pages\", []):\n    for q in page.get(\"questions\", []):\n        print(q[\"headings\"][0][\"heading\"])\n```"
+        },
+        {
+          "id": "method-list-responses",
+          "title": "list_responses()",
+          "content": "Returns a flat list of bulk responses for a single page of a survey. Also callable as `get_survey_responses()` (canonical alias).\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `survey_id` | str | required | The SurveyMonkey survey ID |\n| `page` | int | 1 | Page number |\n| `per_page` | int | 100 | Responses per page (max 100) |\n\n**Returns:** `list[dict[str, Any]]` — raw response objects.\n\n```python\nresponses = await connector.list_responses(\"123456789\", page=1, per_page=100)\nfor r in responses:\n    print(r[\"id\"], r[\"date_created\"])\n```"
+        },
+        {
+          "id": "method-list-collectors",
+          "title": "list_collectors()",
+          "content": "Returns all global collectors via `GET /collectors` (paginated).\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number |\n| `per_page` | int | 100 | Collectors per page |\n\n**Returns:** `list[dict[str, Any]]` — raw collector objects.\n\n```python\ncollectors = await connector.list_collectors()\nfor c in collectors:\n    print(c[\"id\"], c[\"name\"], c[\"type\"])\n```"
+        },
+        {
+          "id": "method-list-groups",
+          "title": "list_groups()",
+          "content": "Returns all teams/groups the authenticated user belongs to via `GET /groups`.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number |\n| `per_page` | int | 100 | Groups per page |\n\n**Returns:** `list[dict[str, Any]]` — raw group objects.\n\n```python\ngroups = await connector.list_groups()\nfor g in groups:\n    print(g[\"id\"], g[\"name\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All error classes are defined in `exceptions.py` and inherit from `SurveyMonkeyError`.\n\n| Exception class | HTTP Status | When raised |\n|---|---|---|\n| `SurveyMonkeyError` | any | Base class; carries `message`, `status_code`, `code` |\n| `SurveyMonkeyAuthError` | 401, 403 | Access token invalid, expired, or lacks scopes |\n| `SurveyMonkeyNetworkError` | timeout / 5xx | Transient network or server failure |\n| `SurveyMonkeyRateLimitError` | 429 | Rate limit exceeded; `retry_after` float is set |\n| `SurveyMonkeyNotFoundError` | 404 | Survey or resource does not exist |\n\n### Behavior in sync()\n\n- If **survey listing** raises `SurveyMonkeyError`, sync returns `SyncStatus.FAILED` immediately.\n- If an individual **response page** fails, `documents_failed` is incremented and the connector moves to the next survey.\n- Individual record normalization failures increment `documents_failed` without aborting the sync."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `auth_status: MISSING_CREDENTIALS`\n\n- On `install()`: one or more of `client_id`, `client_secret`, `redirect_uri` is missing.\n- On `health_check()`: `access_token` is absent. Complete the OAuth flow via `authorize()` first.\n\n### `auth_status: INVALID_CREDENTIALS` (401/403)\n\n- **401**: The access token has expired or been revoked. Re-authorize via `authorize()`.\n- **403**: The token lacks `surveys_read` or `responses_read` scope. Ensure those scopes are enabled in your app settings before re-authorizing.\n\n### sync() returns 0 surveys\n\nThe authenticated account has no surveys, or the wrong account was authorized. Verify the account that owns the surveys is the one completing the OAuth flow.\n\n### sync() returns `SyncStatus.PARTIAL`\n\nSome response pages failed (common on large surveys with transient errors). Re-run sync to retry those pages.\n\n### `SurveyMonkeyRateLimitError` (429)\n\nSurveyMonkey enforces rate limits per token. The retry helper respects `retry_after`. For large response sets, reduce `per_page` or add delays between calls."
+    }
+  ]
+}
