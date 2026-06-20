@@ -1,0 +1,199 @@
+{
+  "connector": "mixpanel",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Mixpanel connector integrates your Mixpanel project with Shielva by streaming raw events via the Data Export API (NDJSON) and querying analytics data (segmentation, funnels, retention) via the Mixpanel API. Authentication uses HTTP Basic Auth with a Mixpanel Service Account (username + secret). Both US and EU data-residency regions are supported. Each raw event is normalized into a ConnectorDocument with a stable 16-char SHA-256-based id for idempotent syncs."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "HTTP Basic Auth: Authorization: Basic base64(username:secret). username = Mixpanel Service Account Username. secret = Mixpanel Service Account Secret. Service accounts are created in Project Settings → Service Accounts and require at least Analyst (read) role. No OAuth flow required.",
+      "steps": [
+        "Log in to mixpanel.com and open your project.",
+        "Navigate to Settings → Project Settings to find your Project ID.",
+        "Go to Settings → Project Settings → Service Accounts.",
+        "Click Add Service Account, name it, assign Analyst role.",
+        "Copy the Service Account Username and Secret shown at creation (secret shown only once).",
+        "Enter username, secret, project_id (and optionally region) in Shielva."
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "username",
+          "label": "Service Account Username",
+          "type": "string",
+          "required": true,
+          "description": "Mixpanel Service Account Username. Created in Project Settings → Service Accounts."
+        },
+        {
+          "key": "secret",
+          "label": "Service Account Secret",
+          "type": "password",
+          "required": true,
+          "description": "Mixpanel Service Account Secret. Generated at creation — shown only once."
+        },
+        {
+          "key": "project_id",
+          "label": "Project ID",
+          "type": "string",
+          "required": true,
+          "description": "Mixpanel Project ID. Found in Project Settings → Project ID."
+        },
+        {
+          "key": "region",
+          "label": "Region (US or EU)",
+          "type": "string",
+          "required": false,
+          "description": "Data residency region. Set to EU for EU data residency projects. Defaults to US."
+        }
+      ]
+    },
+    {
+      "id": "api_urls",
+      "title": "API Base URLs",
+      "us": {
+        "api": "https://mixpanel.com/api/",
+        "data_export": "https://data.mixpanel.com/api/2.0/"
+      },
+      "eu": {
+        "api": "https://eu.mixpanel.com/api/",
+        "data_export": "https://eu.data.mixpanel.com/api/2.0/"
+      }
+    },
+    {
+      "id": "http_client_methods",
+      "title": "HTTP Client Methods",
+      "class": "MixpanelHTTPClient",
+      "methods": [
+        {
+          "name": "get_projects",
+          "signature": "async def get_projects() -> dict",
+          "url": "GET https://mixpanel.com/api/app/me/",
+          "description": "Returns current user and accessible projects. Used for health check and install validation."
+        },
+        {
+          "name": "query_events",
+          "signature": "async def query_events(event_names=None, from_date=None, to_date=None, limit=100) -> AsyncGenerator",
+          "url": "GET .../api/2.0/export/",
+          "description": "NDJSON export of raw events. Returns async generator yielding one dict per event line. Splits response by newlines and json.loads each line.",
+          "note": "Returns NDJSON — not a regular JSON array."
+        },
+        {
+          "name": "query_funnels",
+          "signature": "async def query_funnels(funnel_id, from_date, to_date, unit='day') -> dict",
+          "url": "GET .../api/2.0/funnels/?project_id={}&funnel_id={}&from_date={}&to_date={}&unit={}",
+          "description": "Funnel conversion data for a specific funnel_id."
+        },
+        {
+          "name": "list_funnels",
+          "signature": "async def list_funnels() -> dict",
+          "url": "GET .../api/2.0/funnels/list/?project_id={}",
+          "description": "Lists all saved funnels in the project."
+        },
+        {
+          "name": "query_retention",
+          "signature": "async def query_retention(from_date, to_date, retention_type='birth', interval=1, unit='week') -> dict",
+          "url": "GET .../api/2.0/retention/?project_id={}&...",
+          "description": "User retention data."
+        },
+        {
+          "name": "query_segmentation",
+          "signature": "async def query_segmentation(event, from_date, to_date, type='general', unit='day') -> dict",
+          "url": "GET .../api/2.0/segmentation/?project_id={}&event={}&from_date={}&to_date={}&type={}&unit={}",
+          "description": "Aggregated event counts by date segment."
+        },
+        {
+          "name": "get_event_properties",
+          "signature": "async def get_event_properties(event_name) -> dict",
+          "url": "GET .../api/2.0/events/properties/?project_id={}&event={}&type=general",
+          "description": "Property metadata for a named event."
+        }
+      ]
+    },
+    {
+      "id": "connector_methods",
+      "title": "Connector Methods",
+      "class": "MixpanelConnector",
+      "methods": [
+        {
+          "name": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates username, secret, project_id presence then calls get_projects(). Returns HEALTHY/CONNECTED on success."
+        },
+        {
+          "name": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Calls get_projects() and returns current health status."
+        },
+        {
+          "name": "sync",
+          "signature": "async def sync(**kwargs) -> SyncResult",
+          "description": "Queries events for the last 30 days, normalizes each to a ConnectorDocument, returns SyncResult."
+        },
+        {
+          "name": "query_events",
+          "signature": "async def query_events(event_names=None, from_date=None, to_date=None, limit=100) -> list[dict]",
+          "description": "Returns list of raw event dicts from the NDJSON export endpoint."
+        },
+        {
+          "name": "list_funnels",
+          "signature": "async def list_funnels() -> list[dict]",
+          "description": "Returns list of funnel dicts."
+        },
+        {
+          "name": "query_funnel",
+          "signature": "async def query_funnel(funnel_id, from_date=None, to_date=None) -> dict",
+          "description": "Returns funnel data dict. Uses last 30 days if dates not provided."
+        },
+        {
+          "name": "query_segmentation",
+          "signature": "async def query_segmentation(event, from_date=None, to_date=None) -> dict",
+          "description": "Returns segmentation data dict. Uses last 30 days if dates not provided."
+        }
+      ]
+    },
+    {
+      "id": "normalizer",
+      "title": "Event Normalizer",
+      "function": "normalize_event(event: dict) -> ConnectorDocument",
+      "id_formula": "sha256('event:' + distinct_id + '_' + time)[:16]",
+      "source": "mixpanel",
+      "type": "analytics_event",
+      "fields": [
+        {"name": "id", "description": "sha256('event:' + distinct_id + '_' + time)[:16] — stable 16-char hex"},
+        {"name": "source", "value": "mixpanel"},
+        {"name": "type", "value": "analytics_event"},
+        {"name": "title", "format": "Mixpanel event: {event_name}"},
+        {"name": "content", "description": "Newline-delimited key-value of all event properties"},
+        {"name": "metadata", "keys": ["event_name", "distinct_id", "timestamp", "insert_id", "browser", "os", "city", "country_code", "raw_properties"]}
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {"name": "MixpanelError", "description": "Base exception. Carries message, status_code, code.", "http_status": null},
+        {"name": "MixpanelAuthError", "description": "401 / 403. Never retried.", "http_status": [401, 403]},
+        {"name": "MixpanelNetworkError", "description": "5xx or connection-level failures. Retried.", "http_status": "5xx"},
+        {"name": "MixpanelNotFoundError", "description": "404 Not Found.", "http_status": 404},
+        {"name": "MixpanelRateLimitError", "description": "429 Too Many Requests. Carries retry_after.", "http_status": 429}
+      ]
+    },
+    {
+      "id": "retry",
+      "title": "Retry Logic",
+      "max_attempts": 3,
+      "base_delay_s": 1.0,
+      "backoff": "exponential with jitter",
+      "max_delay_s": 30.0,
+      "auth_errors_retried": false,
+      "rate_limit_honours_retry_after": true
+    }
+  ]
+}
