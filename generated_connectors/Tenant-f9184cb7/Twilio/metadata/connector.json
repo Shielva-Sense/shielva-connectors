@@ -1,0 +1,15 @@
+{
+  "connector_type": "twilio",
+  "display_name": "Twilio",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "provider": "Twilio",
+  "service": "Twilio",
+  "description": "Connect to Twilio to sync SMS messages, voice calls, and phone numbers.",
+  "install_fields": [
+    {"key": "account_sid", "label": "Account SID", "type": "string", "required": true, "description": "Your Twilio Account SID from the Twilio Console dashboard."},
+    {"key": "auth_token", "label": "Auth Token", "type": "password", "required": true, "description": "Your Twilio Auth Token from the Twilio Console dashboard."}
+  ],
+  "capabilities": ["list_messages", "get_message", "list_calls", "get_call", "list_recordings", "list_phone_numbers", "sync"],
+  "category": "communications"
+}

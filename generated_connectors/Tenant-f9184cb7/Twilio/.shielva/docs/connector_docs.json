@@ -1,0 +1,73 @@
+{
+  "title": "Twilio Connector Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Twilio** connector integrates Shielva with the [Twilio REST API](https://www.twilio.com/docs/usage/api) to sync SMS messages, voice calls, and phone numbers from your Twilio account.\n\nTwilio is the leading cloud communications platform used by developers to build SMS, voice, and messaging applications. This connector exposes **6 APIs** across 3 resource domains — Messages, Calls, and Phone Numbers — enabling communication data ingestion and call/message analytics inside Shielva workflows.\n\n**Key capabilities:**\n- Sync the full SMS message history with pagination\n- Sync the full voice call log with pagination\n- List all provisioned incoming phone numbers\n- Incremental sync support via date filters\n- All data normalized to Shielva's canonical `ConnectorDocument` schema\n- Automatic retry with exponential backoff on transient errors\n- Auth errors never retried — immediate human-readable failure"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Twilio connector running in under 5 minutes.\n\n### 1. Obtain Credentials\n\n1. Log in to [console.twilio.com](https://console.twilio.com)\n2. On the main dashboard, locate the **Account Info** panel (lower-left)\n3. Copy your **Account SID** (starts with `AC`)\n4. Click **show** next to **Auth Token** and copy it\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Twilio**\n2. Click **Connect**\n3. Enter `account_sid` and `auth_token`\n4. Click **Install**\n\nThe connector verifies credentials against `GET /2010-04-01/Accounts/{account_sid}.json` and returns `HEALTHY/CONNECTED` on success.\n\n### 3. Run Your First Sync\n\n```python\nresult = await connector.sync(full=True)\nprint(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Twilio connector uses **HTTP Basic Authentication** with your Account SID as the username and Auth Token as the password. Credentials are base64-encoded and sent in the `Authorization` header on every request.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Account SID | `account_sid` | string | Yes | Your Twilio Account SID (`AC...`) from the Console dashboard. |\n| Auth Token | `auth_token` | password | Yes | Your Twilio Auth Token from the Console dashboard. |\n\n### How it works\n\nEvery request is authenticated via:\n```\nAuthorization: Basic base64(account_sid:auth_token)\n```\n\nThe `TwilioHTTPClient` encodes and injects this header automatically.\n\n### Security\n\n- The Auth Token is stored encrypted in the Shielva vault and never logged\n- If the Auth Token is compromised, rotate it in the Twilio Console under Account Settings → Auth Tokens\n- Subaccounts use their own Account SID + Auth Token pair"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Twilio connector requires only two install fields. All other parameters are internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"account_sid\": \"ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n  \"auth_token\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://api.twilio.com/2010-04-01` | Twilio REST API base URL |\n| `PAGE_SIZE` | `100` | Records per page for list operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 API methods across 3 resource domains. All list methods automatically follow `next_page_uri` pagination.",
+      "children": [
+        {
+          "id": "messages",
+          "title": "Messages",
+          "content": "Retrieve SMS message records from the account.\n\n### `list_messages(page_size=100, date_sent_after=None)`\nReturns all messages following `next_page_uri` pagination.\n```python\nmessages = await connector.list_messages()\n# Returns: list of raw Twilio message dicts\n\n# With date filter:\nmessages = await connector.list_messages(date_sent_after=\"2026-06-01\")\n```\n**Twilio endpoint:** `GET /2010-04-01/Accounts/{sid}/Messages.json`\n\n---\n\n### `get_message(message_sid)`\nFetch a single message by SID.\n```python\nmsg = await connector.get_message(\"SMxxxxxxxx\")\n```\n**Twilio endpoint:** `GET /2010-04-01/Accounts/{sid}/Messages/{Sid}.json`"
+        },
+        {
+          "id": "calls",
+          "title": "Calls",
+          "content": "Retrieve voice call records from the account.\n\n### `list_calls(page_size=100, start_time_after=None)`\nReturns all calls following `next_page_uri` pagination.\n```python\ncalls = await connector.list_calls()\n\n# With time filter:\ncalls = await connector.list_calls(start_time_after=\"2026-06-01\")\n```\n**Twilio endpoint:** `GET /2010-04-01/Accounts/{sid}/Calls.json`\n\n---\n\n### `get_call(call_sid)`\nFetch a single call by SID.\n```python\ncall = await connector.get_call(\"CAxxxxxxxx\")\n```\n**Twilio endpoint:** `GET /2010-04-01/Accounts/{sid}/Calls/{Sid}.json`"
+        },
+        {
+          "id": "phone-numbers",
+          "title": "Phone Numbers",
+          "content": "Retrieve incoming phone numbers provisioned to the account.\n\n### `list_phone_numbers()`\nReturns all incoming phone numbers.\n```python\nnumbers = await connector.list_phone_numbers()\n# Returns: list of phone number dicts with phone_number, friendly_name, capabilities\n```\n**Twilio endpoint:** `GET /2010-04-01/Accounts/{sid}/IncomingPhoneNumbers.json`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Incremental Ingestion",
+      "content": "The `sync()` method ingests SMS messages and voice calls into the Shielva knowledge base.\n\n### How sync works\n\n1. Calls `list_messages()` — fetches all pages via `next_page_uri`\n2. Normalizes each message to a `ConnectorDocument` via `normalize_message()`\n3. Calls `list_calls()` — fetches all pages via `next_page_uri`\n4. Normalizes each call to a `ConnectorDocument` via `normalize_call()`\n5. On `kb_id`, calls `_ingest_document()` to write each doc to the knowledge base\n\n### Usage\n\n```python\n# Full sync — fetches all records\nresult = await connector.sync(full=True)\n\n# Incremental sync — records created on or after this date\nfrom datetime import datetime, timezone\nresult = await connector.sync(since=datetime(2026, 6, 1, tzinfo=timezone.utc))\n\nprint(result.documents_found)   # total records across messages + calls\nprint(result.documents_synced)  # successfully normalized\nprint(result.documents_failed)  # normalization failures\nprint(result.status)            # COMPLETED | PARTIAL | FAILED\n```\n\n### SyncResult statuses\n\n| Status | Meaning |\n|--------|---------|\n| `COMPLETED` | All records synced successfully |\n| `PARTIAL` | Some records failed normalization (check `documents_failed`) |\n| `FAILED` | The API call itself failed before any records were synced |"
+    },
+    {
+      "id": "data-models",
+      "title": "Data Models",
+      "content": "### ConnectorDocument (normalized output)\n\nAll Twilio resources are normalized to `ConnectorDocument`:\n\n```python\n@dataclass\nclass ConnectorDocument:\n    source_id: str        # sha256(sid)[:16] — stable unique ID\n    title: str            # human-readable title\n    content: str          # message body or call summary\n    connector_id: str\n    tenant_id: str\n    source_url: str       # deep link to Twilio Console\n    metadata: dict        # raw Twilio fields\n```\n\n### SMS Message document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(message.sid)[:16]` |\n| `title` | `\"SMS from {from} to {to}\"` |\n| `content` | Message body text |\n| `source_url` | `https://console.twilio.com/us1/monitor/logs/sms/{sid}` |\n| `metadata` | `sid`, `from`, `to`, `direction`, `status`, `date_sent`, `num_segments`, `price` |\n\n### Voice Call document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(call.sid)[:16]` |\n| `title` | `\"Call from {from} to {to} ({duration}s)\"` |\n| `content` | `\"Direction: ..., Status: ..., Duration: ...s, Price: ...\"` |\n| `source_url` | `https://console.twilio.com/us1/monitor/logs/calls/{sid}` |\n| `metadata` | `sid`, `from`, `to`, `direction`, `status`, `duration`, `start_time`, `price` |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nTwilioError (base)\n├── TwilioAuthError          — 401/403: invalid credentials\n├── TwilioRateLimitError     — 429: too many requests (has retry_after)\n├── TwilioNotFoundError      — 404: resource not found\n└── TwilioNetworkError       — timeouts, connection errors, 5xx\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `TwilioNetworkError` (5xx) | Yes | Exponential backoff, up to 3 attempts |\n| `TwilioRateLimitError` (429) | Yes | Retry-After header or exponential backoff |\n| `TwilioAuthError` (401/403) | No | Immediate failure — check credentials |\n| `TwilioNotFoundError` (404) | No | Immediate failure — check resource SID |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `health=OFFLINE` / `INVALID_CREDENTIALS` after install\n\n**Cause:** Wrong Account SID or Auth Token.\n\n**Fix:** Copy both values fresh from the Twilio Console Account Info panel. Ensure you use the **primary** Auth Token (not a secondary or API key).\n\n---\n\n### Error code 20003\n\nTwilio error code 20003 means \"Authenticate\". The Account SID or Auth Token is incorrect.\n\n**Fix:** Re-enter both credentials carefully. Make sure there are no trailing spaces.\n\n---\n\n### Error code 20429 / `TwilioRateLimitError`\n\nTwilio rate-limited the request. The connector retries automatically. If persistent, reduce sync frequency.\n\n---\n\n### No records returned on sync\n\nYour Twilio account has no message or call history yet. Send a test SMS or make a test call via the Twilio Console first.\n\n---\n\n### `list_phone_numbers()` returns empty list\n\nYou have not provisioned a Twilio phone number. Go to **Phone Numbers → Manage → Buy a number** in the Twilio Console.\n\n---\n\n### Trial account restrictions\n\nTrial accounts can only message/call verified phone numbers. The connector reads data fine but your history will only contain trial-mode records."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a full unit test suite — no Twilio account required.\n\n### Unit Tests (71 tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/twilio_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 71 passed\n```\n\nAll HTTP calls are mocked via `AsyncMock`.\n\n**Coverage:**\n- `install()` — success, missing SID, missing token, missing both, invalid creds, 401, 403, network error, connector_id fallback\n- `health_check()` — success, missing creds, auth error, network error, unexpected error\n- `sync()` — empty, messages+calls, message pagination, call pagination, partial normalization failure, API error on messages, API error on calls, `since` date filter, `full=True`\n- `list_messages()` — single page, multiple pages, empty, date filter\n- `get_message()` — success, 404\n- `list_calls()` — single page, multiple pages, empty, time filter\n- `get_call()` — success, 404\n- `list_phone_numbers()` — success, empty, multiple\n- `normalize_message()` — title, content, source_id, source_url, metadata, tenant/connector, null body, `from_` field\n- `normalize_call()` — title, content, source_id, source_url, metadata, tenant/connector, zero duration, `from_` field, null price\n- `with_retry()` — success first attempt, retry on transient, no retry on auth, exhausted attempts, rate-limit retry_after\n- Exception hierarchy assertions\n- ConnectorDocument model defaults\n- Lifecycle: aclose, noop aclose, context manager\n- `_ensure_client` lazy init and reuse"
+    }
+  ]
+}
