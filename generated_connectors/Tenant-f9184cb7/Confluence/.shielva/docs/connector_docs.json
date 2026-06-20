@@ -1,0 +1,240 @@
+{
+  "connector": "confluence",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Confluence connector syncs spaces, pages, and blog posts from Confluence Cloud into the Shielva knowledge base using the Confluence REST API v2. Authentication is performed via HTTP Basic Auth with an Atlassian account email and API token. The connector implements cursor-based pagination (via _links.next), exponential backoff retry, and HTML stripping to produce clean indexable plain text from Confluence's storage format."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_token",
+          "title": "Atlassian API Token",
+          "content": "All requests use HTTP Basic Auth: the email of your Atlassian account as the username, and an Atlassian API token as the password. API tokens are generated at id.atlassian.com/manage-profile/security/api-tokens and do not expire unless manually revoked.",
+          "steps": [
+            "Log in to id.atlassian.com and go to Security → API tokens.",
+            "Click Create API token and give it a descriptive label.",
+            "Copy the generated token — it is shown only once.",
+            "Enter your Confluence subdomain (e.g. 'mycompany' from mycompany.atlassian.net), your Atlassian account email, and the token in the Shielva connector install form."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "domain",
+          "label": "Confluence Domain",
+          "type": "text",
+          "required": true,
+          "placeholder": "yourcompany",
+          "description": "Your Atlassian subdomain. If your URL is yourcompany.atlassian.net, enter 'yourcompany'. Do not include the protocol or .atlassian.net suffix."
+        },
+        {
+          "key": "email",
+          "label": "Atlassian Account Email",
+          "type": "text",
+          "required": true,
+          "placeholder": "you@yourcompany.com",
+          "description": "The email address associated with the Atlassian account that owns the API token."
+        },
+        {
+          "key": "api_token",
+          "label": "API Token",
+          "type": "password",
+          "required": true,
+          "placeholder": "ATATT3xFfGF0...",
+          "description": "Atlassian API token from id.atlassian.com/manage-profile/security/api-tokens. This is used as the Basic Auth password alongside your email."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of all Confluence content accessible to the configured account. It first fetches all spaces, then for each space fetches all pages and blog posts using cursor-based pagination. Each raw API record is normalized into a ConnectorDocument with a stable SHA-256-derived ID and optionally ingested into the Shielva knowledge base.",
+      "pagination": {
+        "mechanism": "cursor-based (via _links.next URL in response body)",
+        "page_size": 50,
+        "endpoint_pattern": "GET /wiki/api/v2/spaces/{id}/pages?limit=50&cursor={cursor}"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials by probing GET /wiki/rest/api/user/current. Returns HEALTHY + CONNECTED on success, or OFFLINE + appropriate AuthStatus on failure.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /wiki/rest/api/user/current. Returns HEALTHY, DEGRADED (transient network error), or OFFLINE (auth failure).",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(kb_id: str = '') -> SyncResult",
+          "description": "Full sync of all Confluence spaces, pages, and blog posts. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_spaces",
+          "signature": "async def list_spaces(limit: int = 50) -> dict",
+          "description": "Returns the first page of Confluence spaces.",
+          "endpoint": "GET /wiki/api/v2/spaces",
+          "category": "spaces"
+        },
+        {
+          "id": "list_pages",
+          "signature": "async def list_pages(space_id: str, limit: int = 50) -> dict",
+          "description": "Returns the first page of pages in a specific Confluence space.",
+          "endpoint": "GET /wiki/api/v2/spaces/{space_id}/pages",
+          "category": "pages"
+        },
+        {
+          "id": "get_page",
+          "signature": "async def get_page(page_id: str) -> dict",
+          "description": "Returns a single Confluence page with full body content in storage format.",
+          "endpoint": "GET /wiki/api/v2/pages/{page_id}?body-format=storage",
+          "category": "pages"
+        },
+        {
+          "id": "list_blog_posts",
+          "signature": "async def list_blog_posts(space_id: str, limit: int = 50) -> dict",
+          "description": "Returns the first page of blog posts in a specific Confluence space.",
+          "endpoint": "GET /wiki/api/v2/spaces/{space_id}/blogposts",
+          "category": "blog_posts"
+        },
+        {
+          "id": "search_content",
+          "signature": "async def search_content(query: str, limit: int = 50) -> dict",
+          "description": "CQL full-text search over all Confluence content accessible to the account.",
+          "endpoint": "GET /wiki/rest/api/search?cql=text~\"{query}\"",
+          "category": "search"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying aiohttp.ClientSession and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Confluence content item is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          {"name": "id", "type": "str", "description": "Stable 16-hex-char ID: first 16 chars of SHA-256(page_id or post_id)."},
+          {"name": "source_id", "type": "str", "description": "Raw Confluence content ID (numeric string)."},
+          {"name": "title", "type": "str", "description": "Page or blog post title."},
+          {"name": "content", "type": "str", "description": "Newline-delimited plain text: title, space ID, author, timestamps, and stripped body text."},
+          {"name": "type", "type": "str", "description": "'confluence_page' for pages, 'confluence_blog_post' for blog posts."},
+          {"name": "connector_id", "type": "str", "description": "Shielva connector instance ID."},
+          {"name": "tenant_id", "type": "str", "description": "Shielva tenant ID."},
+          {"name": "source_url", "type": "str", "description": "Deep link to the content in Confluence UI."},
+          {"name": "metadata", "type": "dict", "description": "Content-type-specific properties map."}
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_page(page, connector_id, tenant_id, domain)",
+          "document_type": "confluence_page",
+          "stable_id": "SHA-256(page_id)[:16]",
+          "metadata_keys": ["page_id", "space_id", "author", "created_at", "updated_at", "status"]
+        },
+        {
+          "function": "normalize_blog_post(post, connector_id, tenant_id, domain)",
+          "document_type": "confluence_blog_post",
+          "stable_id": "SHA-256(post_id)[:16]",
+          "metadata_keys": ["post_id", "space_id", "created_at", "updated_at", "status"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "ConfluenceError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "ConfluenceAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "ConfluenceRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "ConfluenceNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
+          "http_status": 404
+        },
+        {
+          "name": "ConfluenceNetworkError",
+          "description": "Raised on aiohttp timeout or connection error. Retried with exponential backoff.",
+          "http_status": null
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "API token is invalid, has been revoked, or the email is incorrect.",
+          "solution": "Go to id.atlassian.com/manage-profile/security/api-tokens, generate a new token, and update the connector's api_token field."
+        },
+        {
+          "problem": "403 Forbidden",
+          "cause": "The Atlassian account lacks view access to one or more Confluence spaces.",
+          "solution": "Ask a Confluence admin to grant the account space viewer access, or use credentials for an account with broader access."
+        },
+        {
+          "problem": "404 Not Found",
+          "cause": "The domain field is incorrect.",
+          "solution": "Verify you entered only the subdomain (e.g., 'mycompany' not 'mycompany.atlassian.net')."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Atlassian rate limit exceeded.",
+          "solution": "The connector retries automatically with exponential backoff. For very large Confluence instances, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have occurred.",
+          "solution": "Resolve the underlying network issue, then trigger a health check to verify recovery."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more records returned unexpected data that caused normalization or fetch to fail.",
+          "solution": "Check the connector logs for which space or page IDs failed. Common causes: private spaces with no access, corrupted page metadata."
+        }
+      ]
+    }
+  ]
+}
