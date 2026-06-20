@@ -1,0 +1,30 @@
+{
+  "connector_type": "greenhouse",
+  "name": "Greenhouse",
+  "display_name": "Greenhouse",
+  "description": "Connect to Greenhouse ATS to sync jobs, candidates, and applications into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Harvest API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Greenhouse Harvest API key. Found in Greenhouse → Configure → Dev Center → API Credential Management."
+    }
+  ],
+  "capabilities": [
+    "list_jobs",
+    "get_job",
+    "list_candidates",
+    "get_candidate",
+    "list_applications",
+    "get_application",
+    "list_departments",
+    "sync"
+  ],
+  "provider": "greenhouse",
+  "service": "greenhouse",
+  "category": "ats"
+}
