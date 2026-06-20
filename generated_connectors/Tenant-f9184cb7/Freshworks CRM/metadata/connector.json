@@ -1,0 +1,41 @@
+{
+  "connector_type": "freshworks_crm",
+  "name": "Freshworks CRM",
+  "display_name": "Freshworks CRM",
+  "description": "Connect to Freshworks CRM (Freshsales) to sync contacts, deals, and accounts.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "provider": "freshworks",
+  "service": "freshworks_crm",
+  "category": "crm",
+  "install_fields": [
+    {
+      "key": "domain",
+      "label": "Domain",
+      "type": "string",
+      "required": true,
+      "placeholder": "acme",
+      "description": "Your Freshworks CRM subdomain (e.g. 'acme' from acme.myfreshworks.com)."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Freshworks CRM API key from Profile Settings → API Settings."
+    }
+  ],
+  "capabilities": [
+    "install",
+    "health_check",
+    "sync",
+    "list_contacts",
+    "get_contact",
+    "list_deals",
+    "get_deal",
+    "list_accounts",
+    "get_account"
+  ],
+  "api_base_url": "https://{domain}.myfreshworks.com/crm/sales/api/v2",
+  "auth_header": "Authorization: Token token={api_key}"
+}
