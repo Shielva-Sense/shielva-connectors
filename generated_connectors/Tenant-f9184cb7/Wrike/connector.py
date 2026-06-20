@@ -11,19 +11,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
 
-try:
-    from shielva_connectors.base import BaseConnector
-except ImportError:
-    class BaseConnector:  # type: ignore[no-redef]
-        def __init__(
-            self,
-            tenant_id: str = "",
-            connector_id: str = "",
-            config: dict[str, Any] | None = None,
-        ) -> None:
-            self.tenant_id = tenant_id
-            self.connector_id = connector_id
-            self.config = config or {}
+from shared.base_connector import BaseConnector
 
 from client.http_client import WrikeHTTPClient
 from exceptions import WrikeAuthError, WrikeError, WrikeNetworkError
