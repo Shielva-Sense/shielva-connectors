@@ -1,0 +1,102 @@
+{
+  "connector_type": "brevo",
+  "connector_id": "brevo",
+  "name": "Brevo",
+  "provider": "Brevo",
+  "service": "Brevo",
+  "version": "1.0.0",
+  "description": "Sync Brevo contacts, email campaigns, and contact lists into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Brevo API key",
+      "help": "Your Brevo API key. Found in Settings → API Keys in your Brevo account."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_id"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate api_key by calling GET /v3/account.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /v3/account and return HEALTHY, DEGRADED, or OFFLINE with account email and plan.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Brevo contacts and email campaigns into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of Brevo contacts (offset-based).",
+      "category": "contacts",
+      "endpoint": "GET /v3/contacts"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Retrieve a single contact by email or id.",
+      "category": "contacts",
+      "endpoint": "GET /v3/contacts/{identifier}"
+    },
+    {
+      "id": "list_contact_lists",
+      "name": "List Contact Lists",
+      "description": "Paginated list of Brevo contact lists (offset-based).",
+      "category": "lists",
+      "endpoint": "GET /v3/contacts/lists"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Paginated list of Brevo email campaigns, optionally filtered by status.",
+      "category": "campaigns",
+      "endpoint": "GET /v3/emailCampaigns"
+    },
+    {
+      "id": "list_senders",
+      "name": "List Senders",
+      "description": "List all Brevo senders.",
+      "category": "senders",
+      "endpoint": "GET /v3/senders"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "contacts",
+    "lists",
+    "campaigns",
+    "senders"
+  ],
+  "apis": [
+    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Records", "id": "sync", "category": "sync" },
+    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
+    { "name": "Get Contact", "id": "get_contact", "category": "contacts" },
+    { "name": "List Contact Lists", "id": "list_contact_lists", "category": "lists" },
+    { "name": "List Campaigns", "id": "list_campaigns", "category": "campaigns" },
+    { "name": "List Senders", "id": "list_senders", "category": "senders" }
+  ]
+}
