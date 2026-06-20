@@ -1,0 +1,83 @@
+{
+  "title": "Culture Amp Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Culture Amp** connector integrates Shielva with the Culture Amp REST API to sync engagement surveys, employee records, and performance goals into Shielva's knowledge base.\n\nCulture Amp is a leading employee engagement and performance platform. This connector exposes **7 API methods** across 5 resource domains — Surveys, Employees, Goals, Reviews, and Groups — and implements a full sync engine that ingests all data as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /v1/surveys`\n- Full engagement survey sync with normalized documents\n- Employee directory sync with stable 16-char source IDs\n- Performance goals sync (non-fatal — employees and surveys always succeed first)\n- Performance reviews listing\n- Groups (departments/teams) listing\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All data normalized to canonical `ConnectorDocument` with SHA-256-based source IDs\n- Bearer token auth: `Authorization: Bearer {api_token}`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Culture Amp connector running in under 5 minutes.\n\n### 1. Generate an API Token\n\n1. Log in to Culture Amp\n2. Go to **Settings → Integrations → API Access**\n3. Click **Generate New Token**, give it a name, copy the token\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Culture Amp**\n2. Enter your **API Token**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with CultureAmpConnector(api_token=\"your_token\") as conn:\n    result = await conn.sync()\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Culture Amp connector uses **API Token** authentication via Bearer token.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | Culture Amp API token from Settings → Integrations → API Access |\n\n### How it works\n\nEvery request uses Bearer token authentication:\n```\nAuthorization: Bearer <api_token>\n```\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /v1/surveys`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged\n- The API token is never written to disk or included in any log output\n- Rotate tokens at Culture Amp → Settings → Integrations → API Access"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes list/get methods for all major Culture Amp resources plus `install()`, `health_check()`, and `sync()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /v1/surveys`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Culture Amp successfully.')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing token → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /v1/surveys` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Culture Amp API reachable.')\n```"
+        },
+        {
+          "id": "sync",
+          "title": "sync(**kwargs)",
+          "content": "Fetches all surveys, employees, and goals; normalizes each into a `ConnectorDocument`.\n\n```python\nresult = await connector.sync(kb_id=\"your_kb_id\")\n# SyncResult(status=SyncStatus.COMPLETED, documents_found=N, documents_synced=N, ...)\n```\n\n**Sync order:**\n1. Surveys (fatal on error)\n2. Employees (fatal on error)\n3. Goals (non-fatal — failure does not stop the sync)\n\n**Pagination:** handled internally via `_fetch_all_pages` (50 items/page by default)."
+        },
+        {
+          "id": "list-surveys",
+          "title": "list_surveys(page, per_page)",
+          "content": "Returns raw paginated survey response from `GET /v1/surveys`.\n\n```python\nresult = await connector.list_surveys(page=1, per_page=50)\n# {\"data\": [{\"id\": \"survey-001\", \"name\": \"Q2 Engagement\", ...}]}\n```"
+        },
+        {
+          "id": "list-employees",
+          "title": "list_employees(page, per_page)",
+          "content": "Returns raw paginated employee response from `GET /v1/employees`."
+        },
+        {
+          "id": "list-goals",
+          "title": "list_goals(page, per_page)",
+          "content": "Returns raw paginated goals response from `GET /v1/goals`."
+        },
+        {
+          "id": "list-reviews",
+          "title": "list_reviews(page, per_page)",
+          "content": "Returns raw paginated performance reviews from `GET /v1/performance/reviews`."
+        },
+        {
+          "id": "list-groups",
+          "title": "list_groups(page)",
+          "content": "Returns raw paginated groups (departments/teams) from `GET /v1/groups`."
+        },
+        {
+          "id": "get-survey",
+          "title": "get_survey(survey_id)",
+          "content": "Returns a single survey by ID from `GET /v1/surveys/{survey_id}`."
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Each resource type has a dedicated normalizer function that converts raw API data into a `ConnectorDocument`.\n\n### Source ID scheme\n\nAll source IDs use `SHA-256(prefix:id)[:16]` — a 16-character hex string that is:\n- Deterministic: same input always produces the same ID\n- Collision-resistant: SHA-256 prefix with per-type namespacing\n- Compact: fits the 16-char Shielva source_id budget\n\n| Resource | Prefix | Example |\n|----------|--------|---------|\n| Survey | `survey:` | `sha256('survey:survey-001')[:16]` |\n| Employee | `employee:` | `sha256('employee:emp-101')[:16]` |\n| Goal | `goal:` | `sha256('goal:goal-201')[:16]` |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nCultureAmpError (base)\n├── CultureAmpAuthError        # 401 / 403 — never retried\n├── CultureAmpRateLimitError   # 429 — retried with Retry-After\n├── CultureAmpNotFoundError    # 404\n└── CultureAmpNetworkError     # 5xx / connection errors — retried\n```\n\n### Retry policy\n\n- Max attempts: 3\n- Backoff: exponential (1s → 2s → 4s) + jitter (0–0.5s), max 30s\n- Auth errors: never retried\n- Rate limit: honours `Retry-After` header if present"
+    }
+  ]
+}
