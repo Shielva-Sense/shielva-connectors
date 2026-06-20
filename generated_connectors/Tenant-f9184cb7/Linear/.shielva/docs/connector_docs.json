@@ -1,0 +1,88 @@
+{
+  "title": "Linear Connector Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Linear** connector integrates Shielva with the [Linear GraphQL API](https://developers.linear.app/docs/graphql/working-with-the-graphql-api) to sync issues from all teams into Shielva's knowledge base.\n\nLinear is a modern project management tool built for software teams. This connector exposes **5 API methods** across 3 resource domains — Teams, Issues, and Projects — and implements a full cursor-paginated sync engine that ingests all issue content as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via GraphQL `{ viewer { name email } }`\n- Full sync of all issues across all teams with cursor-based pagination\n- Filter issues by team, paginate manually with cursor support\n- Look up individual issues by ID\n- List all projects with state\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All issues normalized to canonical `ConnectorDocument` with stable 16-char source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Linear connector running in under 3 minutes.\n\n### 1. Create a Personal API Key\n\n1. Log in to your Linear workspace\n2. Navigate to **Settings → Account → API → Personal API keys**\n3. Click **Create key**, enter a label, click **Create key**\n4. Copy the key — shown only once\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Linear**\n2. Paste your **API Key**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with LinearConnector(api_key=\"lin_api_...\") as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_engineering\")\n    print(f\"Synced {result.documents_synced} issues\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Linear connector uses **Personal API key** authentication — Linear's recommended method for server-to-server integrations.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Linear Personal API key from Settings → API → Personal API keys |\n\n### How it works\n\nEvery GraphQL request includes:\n```\nPOST https://api.linear.app/graphql\nAuthorization: <api_key>\nContent-Type: application/json\n```\n\nLinear accepts the Personal API key directly as the Authorization header value (no `Bearer ` prefix needed for personal keys).\n\n### Install Validation\n\nDuring `install()`, the connector executes `{ viewer { name email } }`. A GraphQL `AUTHENTICATION_ERROR` or `FORBIDDEN` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Network errors set `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- API key is stored encrypted in the Shielva vault and never logged\n- Rotate the key in Linear Settings → API → Personal API keys → Delete + create new"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Linear connector requires one install field and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"lin_api_YOUR_KEY_HERE\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `LINEAR_GRAPHQL_URL` | `https://api.linear.app/graphql` | Linear GraphQL endpoint |\n| `SYNC_PAGE_SIZE` | `50` | Issues per page during sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by executing the GraphQL `viewer` query.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#   message='Connected to Linear as Alice Dev (alice@example.com)')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing `api_key` → `OFFLINE / MISSING_CREDENTIALS`\n- GraphQL auth error → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings the Linear GraphQL API via the `viewer` query to verify connectivity.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#   message='Linear API reachable. User: Alice Dev')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Linear issues from all teams into the knowledge base.\n\n```python\n# Full sync — all teams, all issues\nresult = await connector.sync(full=True, kb_id=\"kb_engineering\")\n\nprint(result.documents_found)   # total issues found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\nprint(result.status)            # COMPLETED / PARTIAL / FAILED\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), `documents_found`, `documents_synced`, `documents_failed`, `message`\n\n**How it works:**\n1. Fetches all teams via `{ teams { nodes { id name key } } }`\n2. For each team, paginates through issues using cursor-based pagination (50 per page)\n3. Normalizes each issue to `ConnectorDocument` via `normalize_issue()`\n4. Calls `_ingest_document(doc, kb_id)` for each document (wired by Shielva runtime)\n5. Follows `pageInfo.endCursor` until `hasNextPage` is false"
+        },
+        {
+          "id": "list-teams",
+          "title": "list_teams()",
+          "content": "Returns all Linear teams in the workspace.\n\n```python\nresult = await connector.list_teams()\n# {\"nodes\": [{\"id\": \"team_ENG001\", \"name\": \"Engineering\", \"key\": \"ENG\"}, ...]}\n```\n\n**Linear GraphQL:** `{ teams { nodes { id name key } } }`"
+        },
+        {
+          "id": "list-issues",
+          "title": "list_issues(team_id, limit, after)",
+          "content": "Returns a page of Linear issues with optional team filter and cursor pagination.\n\n```python\n# All issues (no filter)\npage = await connector.list_issues(limit=50)\n\n# Filter by team\npage = await connector.list_issues(team_id=\"team_ENG001\", limit=25)\n\n# Next page using cursor\nif page[\"pageInfo\"][\"hasNextPage\"]:\n    next_page = await connector.list_issues(after=page[\"pageInfo\"][\"endCursor\"])\n\n# page = {\"nodes\": [...], \"pageInfo\": {\"hasNextPage\": bool, \"endCursor\": str|None}}\n```\n\n**Linear GraphQL:** `issues(filter: {team: {id: {eq: team_id}}}, first: limit, after: cursor)`"
+        },
+        {
+          "id": "get-issue",
+          "title": "get_issue(issue_id)",
+          "content": "Returns a single Linear issue by its ID.\n\n```python\nissue = await connector.get_issue(\"ISSUE_ABC001\")\n# {\n#   \"id\": \"ISSUE_ABC001\",\n#   \"title\": \"Fix login bug\",\n#   \"description\": \"...\",\n#   \"state\": {\"name\": \"In Progress\"},\n#   \"priority\": 2,\n#   \"assignee\": {\"name\": \"Bob Builder\"},\n#   \"team\": {\"name\": \"Engineering\", \"key\": \"ENG\"},\n#   \"createdAt\": \"2026-06-01T10:00:00Z\",\n#   \"updatedAt\": \"2026-06-02T12:00:00Z\"\n# }\n```\n\nRaises `LinearNotFoundError` when the issue does not exist.\n\n**Linear GraphQL:** `issue(id: $id) { ... }`"
+        },
+        {
+          "id": "list-projects",
+          "title": "list_projects()",
+          "content": "Returns all Linear projects in the workspace.\n\n```python\nresult = await connector.list_projects()\n# {\"nodes\": [{\"id\": \"proj_001\", \"name\": \"Platform Refresh\", \"description\": \"...\", \"state\": \"started\"}, ...]}\n```\n\n**Linear GraphQL:** `{ projects { nodes { id name description state } } }`"
+        }
+      ]
+    },
+    {
+      "id": "sync-details",
+      "title": "Sync & Document Schema",
+      "content": "### Document Schema\n\nEach Linear issue is normalized to a `ConnectorDocument`:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(issue_id)[:16]` — stable 16-char hex |\n| `title` | `[TEAM_KEY] Issue title` |\n| `content` | Description + Status + Priority + Assignee + Team (newline-separated) |\n| `source_url` | `https://linear.app/issue/{id}` |\n| `metadata.issue_id` | Linear issue ID string |\n| `metadata.state` | State name (e.g. \"In Progress\", \"Todo\", \"Done\") |\n| `metadata.priority` | Priority integer (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low) |\n| `metadata.priority_label` | Human-readable priority string |\n| `metadata.assignee` | Assignee name or \"Unassigned\" |\n| `metadata.team_name` | Team name |\n| `metadata.team_key` | Team key abbreviation |\n| `metadata.created_at` | ISO 8601 creation timestamp |\n| `metadata.updated_at` | ISO 8601 last-updated timestamp |\n\n### Cursor-based Pagination\n\nLinear uses cursor-based pagination — not page numbers. The connector automatically follows `pageInfo.endCursor` until `hasNextPage` is false. Manual callers should do the same:\n\n```python\ncursor = None\nwhile True:\n    page = await connector.list_issues(team_id=\"...\", limit=50, after=cursor)\n    process(page[\"nodes\"])\n    if not page[\"pageInfo\"][\"hasNextPage\"]:\n        break\n    cursor = page[\"pageInfo\"][\"endCursor\"]\n```\n\n### Recommended sync schedule\n\nRun full sync on first install. For incremental updates, re-run `sync()` on a schedule (every 15–30 minutes is typical for Linear). The connector fetches all teams and pages through all issues each time."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nLinearError (base)\n├── LinearAuthError      — auth failure (GraphQL AUTHENTICATION_ERROR / FORBIDDEN, HTTP 401/403)\n├── LinearRateLimitError — HTTP 429 (stores retry_after seconds)\n├── LinearNotFoundError  — resource does not exist (GraphQL NOT_FOUND, issue(id) → null)\n└── LinearNetworkError   — 5xx / connection error / timeout\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `LinearNetworkError` | Yes | Exponential backoff: 1s, 2s, 4s + jitter |\n| `LinearRateLimitError` | Yes | Respects `Retry-After` header; falls back to backoff |\n| `LinearAuthError` | **No** | Immediate failure — fix credentials |\n| `LinearNotFoundError` | **No** | Immediate failure — resource is gone |\n\n### Handling in code\n\n```python\nfrom exceptions import LinearAuthError, LinearRateLimitError, LinearNotFoundError\ntry:\n    issue = await connector.get_issue(\"ISSUE_XYZ\")\nexcept LinearNotFoundError:\n    # issue was deleted\nexcept LinearAuthError:\n    # credentials expired — prompt user to reconnect\nexcept LinearRateLimitError as e:\n    # e.retry_after gives seconds to wait\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### Authentication failed (UNAUTHORIZED / AUTHENTICATION_ERROR)\n\n**Cause:** Invalid, expired, or revoked API key.\n\n**Fix:** Generate a new Personal API key in Linear Settings → API → Personal API keys. Paste the new key in the Shielva ACP connector settings and click **Reinstall**.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Linear API rate limit reached.\n\n**Fix:** The connector retries automatically. If persistent, reduce sync frequency.\n\n---\n\n### Sync returns 0 issues\n\n**Cause 1:** No teams visible to the API key owner.\n**Fix:** Verify the account is a member of at least one Linear team.\n\n**Cause 2:** Teams have no issues.\n**Fix:** Create at least one issue in Linear and retry.\n\n---\n\n### `ModuleNotFoundError: No module named 'aiohttp'`\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install aiohttp>=3.9.0\n```\n\n---\n\n### `LinearNotFoundError` on `get_issue()`\n\n**Cause:** The issue ID does not exist or was deleted.\n\n**Fix:** Use `list_issues()` to browse valid issue IDs."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 80 unit tests — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/linear_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 80 passed\n```\n\n### Coverage\n\n- `install()` — success, missing api_key, invalid creds, network error, unexpected error, client stored on success\n- `health_check()` — healthy, auth error, network error, missing credentials, generic error\n- `sync()` — empty teams, single issue, cursor pagination (3 calls), teams API error → FAILED, issues API error → FAILED, partial normalize failure, multiple teams\n- `list_teams()` — returns nodes, empty\n- `list_issues()` — no filter, team_id filter variables, cursor after variable, default limit=50\n- `get_issue()` — success, not found raises LinearNotFoundError, passes issue_id in variables\n- `list_projects()` — returns nodes, empty\n- `normalize_issue()` — title, source_id length=16, source_id hex, deterministic, different IDs differ, all metadata fields, description in content, state in content, priority in content, no assignee, no description, all 5 priority labels, team key in title, no team\n- `normalize_project()` — basic, source_id 16 chars, metadata, no description\n- `_short_hash()` — length, hex, deterministic, different inputs\n- `with_retry()` — success first attempt, retries on network error, never retries auth, raises after max, rate limit reraises\n- Exception hierarchy — all 4 subclasses are LinearError, retry_after stored, status_code/code stored\n- HTTP client — auth header format, GraphQL auth error, GraphQL not found, 429 rate limit, 401 auth, 500 network, missing data field, success returns data\n- Connector config — config dict, kwarg, config precedence, _missing_credentials all/none\n- Lifecycle — context manager, aclose clears client, _ensure_client creates/reuses, CONNECTOR_TYPE/AUTH_TYPE constants"
+    }
+  ]
+}
