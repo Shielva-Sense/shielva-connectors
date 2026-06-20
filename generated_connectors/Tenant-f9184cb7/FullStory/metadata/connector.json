@@ -1,0 +1,25 @@
+{
+  "connector_type": "fullstory",
+  "display_name": "FullStory",
+  "provider": "FullStory",
+  "service": "FullStory",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "FullStory digital experience analytics — sync session recordings, users, and segments via the FullStory REST API v2.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in FullStory Settings → Integrations → API Keys. Pass as Bearer token."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["sessions", "users", "segments", "events"],
+  "api_base": "https://api.fullstory.com",
+  "docs_url": "https://developer.fullstory.com/",
+  "rate_limits": {
+    "note": "FullStory enforces per-organization rate limits on REST API v2 calls. The connector respects 429 responses and retries with exponential backoff."
+  }
+}
