@@ -1,0 +1,166 @@
+{
+  "title": "Microsoft Teams Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Microsoft Teams connector integrates with Microsoft Graph API v1.0 to sync team channel messages and conversations into the Shielva knowledge base. It uses OAuth2 via Azure Active Directory for secure, delegated access.",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`microsoft_teams`"
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "`microsoft`"
+        },
+        {
+          "id": "auth-type",
+          "title": "Authentication Type",
+          "content": "`oauth2` — Azure Active Directory OAuth2 Authorization Code Flow"
+        },
+        {
+          "id": "api-base",
+          "title": "API Base URL",
+          "content": "`https://graph.microsoft.com/v1.0/`"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates client_id and client_secret are present |\n| `authorize()` | Returns Microsoft OAuth2 authorization URL |\n| `health_check()` | Calls GET /me to verify access token validity |\n| `sync()` | Fetches messages from all joined teams and channels |\n| `list_teams()` | Lists all joined Microsoft Teams |\n| `list_channels(team_id)` | Lists channels within a team |\n| `list_messages(team_id, channel_id)` | Lists messages in a channel with pagination |\n| `get_message(team_id, channel_id, message_id)` | Fetches a single message |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses OAuth2 Authorization Code Flow via Azure Active Directory. You must register an Azure AD application and provide its credentials.",
+      "children": [
+        {
+          "id": "oauth-endpoints",
+          "title": "OAuth2 Endpoints",
+          "content": "- **Authorize URL**: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize`\n- **Token URL**: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token`\n\nWhen `tenant_hint` is not provided, `common` is used to support multi-tenant sign-in."
+        },
+        {
+          "id": "required-scopes",
+          "title": "Required OAuth2 Scopes",
+          "content": "| Scope | Purpose |\n|-------|--------|\n| `https://graph.microsoft.com/Team.ReadBasic.All` | List teams the user has joined |\n| `https://graph.microsoft.com/Channel.ReadBasic.All` | List channels within teams |\n| `https://graph.microsoft.com/ChannelMessage.Read.All` | Read all channel messages |\n| `offline_access` | Maintain access via refresh token |"
+        },
+        {
+          "id": "credential-fields",
+          "title": "Credential Fields",
+          "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `client_id` | string | Yes | Azure AD Application (client) ID |\n| `client_secret` | password | Yes | Azure AD client secret value |\n| `tenant_hint` | string | No | Azure AD Directory (tenant) ID; defaults to 'common' |\n| `redirect_uri` | string | No | OAuth2 redirect URI registered in Azure Portal |"
+        },
+        {
+          "id": "azure-setup",
+          "title": "Azure AD Setup Steps",
+          "content": "1. Go to Azure Portal → Azure Active Directory → App registrations\n2. Click **New registration** and name your app\n3. Set the Redirect URI to your callback URL\n4. Navigate to **Certificates & secrets** → create a Client secret\n5. Navigate to **API permissions** → Add delegated permissions for Microsoft Graph\n6. Grant admin consent for your organization"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All API methods communicate with Microsoft Graph API v1.0. Authentication is via Bearer token in the Authorization header.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present in the connector configuration.\n\n**Returns**: `InstallResult` with health `HEALTHY` if credentials are present, `OFFLINE` if missing.\n\n**Note**: Does not make any API calls — use `health_check()` to verify connectivity."
+        },
+        {
+          "id": "authorize",
+          "title": "authorize(state?)",
+          "content": "Generates the Microsoft OAuth2 authorization URL the user should be redirected to.\n\n**Parameters**:\n- `state` (optional): CSRF protection state parameter\n\n**Returns**: `str` — full authorization URL with scopes, client_id, and redirect_uri encoded."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Calls `GET https://graph.microsoft.com/v1.0/me` to verify the access token is valid.\n\n**Returns**: `HealthCheckResult`\n- Health `HEALTHY` + AuthStatus `CONNECTED` on success\n- Health `DEGRADED` + AuthStatus `INVALID_CREDENTIALS` on 401/403\n- Health `DEGRADED` + AuthStatus `FAILED` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full?, since?, kb_id?)",
+          "content": "Fetches all messages from all joined teams and channels.\n\n**Flow**:\n1. Calls `list_teams()` to get all joined teams\n2. For each team, calls `list_channels(team_id)` to get all channels\n3. For each channel, calls `list_messages(team_id, channel_id)` to get all messages\n4. Normalizes each message to a `ConnectorDocument`\n\n**Returns**: `SyncResult` with `documents_found`, `documents_synced`, `documents_failed`, and `documents` list."
+        },
+        {
+          "id": "list-teams",
+          "title": "list_teams()",
+          "content": "Calls `GET /me/joinedTeams` to list all Microsoft Teams the authorized user has joined.\n\n**Returns**: `List[Dict]` — list of team objects with `id`, `displayName`, `description`."
+        },
+        {
+          "id": "list-channels",
+          "title": "list_channels(team_id)",
+          "content": "Calls `GET /teams/{team_id}/channels` to list all channels within a team.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n\n**Returns**: `List[Dict]` — list of channel objects with `id`, `displayName`, `membershipType`."
+        },
+        {
+          "id": "list-messages",
+          "title": "list_messages(team_id, channel_id)",
+          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages` and automatically follows `@odata.nextLink` for pagination.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n\n**Returns**: `List[Dict]` — all message objects including body, sender, timestamps, and attachments."
+        },
+        {
+          "id": "get-message",
+          "title": "get_message(team_id, channel_id, message_id)",
+          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages/{message_id}` to fetch a single message.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n- `message_id`: The message's unique identifier\n\n**Returns**: `Dict` — single message object."
+        },
+        {
+          "id": "normalize-message",
+          "title": "normalize_message(msg, team_id, channel_id)",
+          "content": "Converts a Microsoft Graph message object into a `ConnectorDocument`.\n\n**Stable ID**: `SHA-256(team_id + ':' + channel_id + ':' + message_id)[:16]`\n\n**Document fields**:\n- `id`: 16-char hex SHA-256 prefix\n- `title`: Formatted `Team:{id[:8]} — Channel:{id[:8]} — @{sender}`\n- `content`: Structured text with team, channel, sender, timestamp, body, attachments\n- `type`: `teams_message`\n- `metadata`: team_id, channel_id, message_id, sender_name, sender_id, created_at, importance, reply_to_id, attachments_count, source"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector uses a typed exception hierarchy for precise error handling and retry logic.",
+      "children": [
+        {
+          "id": "exception-hierarchy",
+          "title": "Exception Hierarchy",
+          "content": "```\nMicrosoftTeamsError (base)\n├── MicrosoftTeamsAuthError      — 401/403 responses; not retried\n├── MicrosoftTeamsNetworkError   — connection/timeout/5xx; retried with backoff\n├── MicrosoftTeamsNotFoundError  — 404 responses; not retried\n└── MicrosoftTeamsRateLimitError — 429 responses; retried with backoff\n```"
+        },
+        {
+          "id": "retry-policy",
+          "title": "Retry Policy",
+          "content": "The `with_retry()` utility applies exponential backoff:\n- **Max attempts**: 3 (configurable)\n- **Base delay**: 1.0 second, doubled each retry\n- **Auth errors**: NOT retried — require re-authorization\n- **Network/rate-limit errors**: Retried up to max_attempts"
+        },
+        {
+          "id": "http-status-mapping",
+          "title": "HTTP Status Code Mapping",
+          "content": "| Status | Exception |\n|--------|----------|\n| 401 | `MicrosoftTeamsAuthError` |\n| 403 | `MicrosoftTeamsAuthError` |\n| 404 | `MicrosoftTeamsNotFoundError` |\n| 429 | `MicrosoftTeamsRateLimitError` |\n| 5xx | `MicrosoftTeamsNetworkError` |\n| Network failure | `MicrosoftTeamsNetworkError` |"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their solutions when setting up the Microsoft Teams connector.",
+      "children": [
+        {
+          "id": "auth-errors",
+          "title": "Authentication Errors",
+          "content": "| Error | Cause | Solution |\n|-------|-------|----------|\n| `AADSTS700016` | Application not found | Verify Client ID matches the registered Azure AD app |\n| `AADSTS70011` | Invalid scope | Ensure all four permissions are added and admin consent granted |\n| `AADSTS50126` | Invalid credentials | Verify the client secret value (not the secret ID) |\n| `AADSTS65001` | Consent required | Admin must grant consent for ChannelMessage.Read.All |\n| `401 Unauthorized` | Token expired | Re-authorize the connector to get a new access token |"
+        },
+        {
+          "id": "permission-errors",
+          "title": "Permission Errors",
+          "content": "- **403 on list_messages**: `ChannelMessage.Read.All` requires admin consent in most organizations\n- **403 on list_channels**: User may not have access to private channels\n- **Empty teams list**: User has not joined any teams, or token belongs to a non-Teams account"
+        },
+        {
+          "id": "rate-limiting",
+          "title": "Rate Limiting",
+          "content": "Microsoft Graph API enforces throttling per application:\n- Typical limit: 10,000 requests per 10 minutes per application\n- The connector retries on 429 responses automatically\n- For large organizations with many teams/channels, syncs may take longer due to throttling\n- The `Retry-After` header value is logged when rate limiting occurs"
+        },
+        {
+          "id": "scope-consent",
+          "title": "Admin Consent for ChannelMessage.Read.All",
+          "content": "`ChannelMessage.Read.All` is a highly privileged scope that requires admin consent:\n1. Navigate to Azure Portal → Azure Active Directory → App registrations → Your App → API permissions\n2. Click **Grant admin consent for [Your Organization]**\n3. A Global Administrator must approve this consent\n4. Without this consent, `list_messages()` will return 403"
+        }
+      ]
+    }
+  ]
+}
