@@ -1,0 +1,87 @@
+{
+  "title": "RingCentral Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The RingCentral connector syncs cloud communications data from [RingCentral](https://ringcentral.com) into the Shielva knowledge base. It is designed for business communications teams and IT administrators who need AI-powered access to call history, messages, and directory data.\n\n**What it syncs:**\n- **Call Logs** — inbound and outbound call records including duration, result, caller/recipient parties, and timestamps\n- **Messages** — SMS, MMS, Fax, Pager, and Voicemail messages from the extension message store\n- **Extensions** — all account extensions including user extensions, virtual numbers, and IVR menus\n- **Contacts** — personal address book contacts for the authorized extension (up to 250 per page)\n- **Meetings** — scheduled and instant meetings from RingCentral Video / Meetings\n\n**Key capabilities:**\n- OAuth 2.0 Authorization Code flow — no long-lived passwords stored\n- Automatic token refresh via `refresh_token` when `access_token` expires\n- Page-based pagination using `paging.totalPages` from the RingCentral REST API v1\n- Per-resource error isolation — a failure on one resource does not stop others\n- Typed exception hierarchy (`RingCentralAuthError`, `RingCentralNetworkError`, `RingCentralNotFoundError`, `RingCentralRateLimitError`)\n- Supports both production (`platform.ringcentral.com`) and sandbox (`platform.devtest.ringcentral.com`) environments"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create a RingCentral App\n\n1. Log in to the [RingCentral Developer Portal](https://developers.ringcentral.com).\n2. Go to **Console → Apps → Create App**.\n3. Choose **Server-side (authorization code)** as the app type.\n4. Under **Permissions**, add: `ReadCallLog`, `ReadMessages`, `ReadContacts`, `Meetings`.\n5. Set a **Redirect URI** (e.g. `https://your-shielva-instance.com/connectors/ringcentral/callback`).\n6. Copy the **Client ID** and **Client Secret**.\n\n### 2. Install the connector\n\nProvide the following fields during installation:\n\n| Field | Example value |\n|-------|---------------|\n| `client_id` | `ABCdef123456` |\n| `client_secret` | `xyzSecretValue` |\n| `server_url` | `https://platform.ringcentral.com` (default; omit for production) |\n\n`install()` validates that required fields are present and returns the OAuth redirect URL. No API call is made at this step.\n\n### 3. Complete OAuth authorization\n\n```python\nimport asyncio\nfrom connector import RingCentralConnector\n\nasync def main():\n    connector = RingCentralConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rc-01\",\n        config={\n            \"client_id\": \"ABCdef123456\",\n            \"client_secret\": \"xyzSecretValue\",\n            \"redirect_uri\": \"https://your-app.com/callback\",\n        },\n    )\n    install_result = await connector.install()\n    auth_url = await connector.authorize()\n    print(\"Redirect user to:\", auth_url)\n    # After user grants consent and you receive ?code=...,\n    # exchange it for tokens via the token endpoint.\n\nasyncio.run(main())\n```\n\n### 4. Run your first sync\n\n```python\nasync def main():\n    connector = RingCentralConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rc-01\",\n        config={\n            \"client_id\": \"ABCdef123456\",\n            \"client_secret\": \"xyzSecretValue\",\n            \"access_token\": \"<token-from-oauth-flow>\",\n            \"refresh_token\": \"<refresh-token>\",\n        },\n    )\n    result = await connector.sync()\n    print(result.status, result.records_synced)\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `oauth2` — Authorization Code flow\n\nRingCentral uses the OAuth 2.0 Authorization Code grant. After the user grants consent, an `access_token` and `refresh_token` are returned by the token endpoint and stored in the connector config.\n\n**Authorization endpoint:**\n```\nhttps://platform.ringcentral.com/restapi/oauth/authorize\n```\n\n**Token endpoint:**\n```\nhttps://platform.ringcentral.com/restapi/oauth/token\n```\n\n**Required OAuth scopes:**\n\n| Scope | What it grants |\n|-------|----------------|\n| `ReadCallLog` | Read inbound and outbound call records |\n| `ReadMessages` | Read SMS, MMS, Fax, Pager, and Voicemail messages |\n| `ReadContacts` | Read address book contacts |\n| `Meetings` | Read meeting records |\n\n**Authorization URL construction (via `authorize()`):**\n\n```\nGET {server_url}/restapi/oauth/authorize\n  ?response_type=code\n  &client_id={client_id}\n  &scope=ReadCallLog ReadMessages ReadContacts Meetings\n  &redirect_uri={redirect_uri}\n  &state={state}\n```\n\n**Token refresh:** The `RingCentralHTTPClient.refresh_access_token()` method POSTs to the token endpoint with `grant_type=refresh_token`. The client ID and secret are Base64-encoded as HTTP Basic Auth credentials. The new `access_token` and `refresh_token` are updated in memory after a successful refresh.\n\n**All API requests** use `Authorization: Bearer {access_token}` headers.\n\n**Sandbox environment:** Use `server_url = https://platform.devtest.ringcentral.com` for sandbox testing."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `client_id` | string | Yes | The Client ID from your RingCentral Developer Portal app. Used in the OAuth authorization URL and token refresh requests. |\n| `client_secret` | password | Yes | The Client Secret from your RingCentral Developer Portal app. Used for token refresh via Basic Auth. |\n| `server_url` | string | No | Override the RingCentral API base URL. Defaults to `https://platform.ringcentral.com`. Use `https://platform.devtest.ringcentral.com` for the sandbox environment. |\n| `access_token` | password | No (set after OAuth) | The OAuth access token obtained after the user completes the authorization flow. Required for all API calls. |\n| `refresh_token` | password | No (set after OAuth) | The OAuth refresh token. Used to obtain a new access token when the current one expires. |\n| `redirect_uri` | string | No | The OAuth redirect URI registered in the RingCentral Developer Portal. Required if `redirect_uri` was specified at app creation. |\n| `state` | string | No | Optional CSRF state parameter included in the authorization URL. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `RingCentralConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present in the config. Does **not** make any API call — the OAuth dance happens in `authorize()` and the subsequent token exchange.\n\n**Returns:** `InstallResult`\n\n| Field | Value on success | Value on failure |\n|-------|-----------------|------------------|\n| `success` | `True` | `False` |\n| `message` | `\"RingCentral connector installed. Proceed to authorize().\"` | `\"Missing required fields: {field_names}\"` |\n| `install_fields` | List of field definitions | List of field definitions |\n\n```python\nimport asyncio\nfrom connector import RingCentralConnector\n\nasync def main():\n    connector = RingCentralConnector(\n        config={\"client_id\": \"ABC\", \"client_secret\": \"XYZ\"}\n    )\n    result = await connector.install()\n    print(result.success, result.message)\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the OAuth 2.0 authorization URL. The caller should redirect the user's browser to this URL. After the user grants consent, RingCentral redirects to `redirect_uri` with `?code=...` which must be exchanged for tokens at the token endpoint.\n\n**Returns:** `str` — the complete authorization URL\n\n```python\nimport asyncio\nfrom connector import RingCentralConnector\n\nasync def main():\n    connector = RingCentralConnector(\n        config={\n            \"client_id\": \"ABCdef123456\",\n            \"redirect_uri\": \"https://your-app.com/callback\",\n            \"state\": \"csrf-token-abc\",\n        }\n    )\n    auth_url = await connector.authorize()\n    print(auth_url)\n    # https://platform.ringcentral.com/restapi/oauth/authorize\n    # ?response_type=code&client_id=ABCdef123456\n    # &scope=ReadCallLog+ReadMessages+ReadContacts+Meetings\n    # &redirect_uri=https%3A%2F%2Fyour-app.com%2Fcallback\n    # &state=csrf-token-abc\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Verifies connectivity by calling `GET /account/~/extension/~` (the current extension info endpoint). Returns extension ID, extension number, and display name in the `details` dict on success.\n\n**Returns:** `HealthCheckResult`\n\n| Scenario | `status` | `message` |\n|----------|----------|-----------|\n| Access token valid | `HEALTHY` | `\"RingCentral API reachable\"` |\n| 401 or 403 | `UNHEALTHY` | `\"Auth error: ...\"` |\n| API or network error | `UNHEALTHY` | `\"API error: ...\"` or `\"Unexpected error: ...\"` |\n\n```python\nimport asyncio\nfrom connector import RingCentralConnector\n\nasync def main():\n    connector = RingCentralConnector(\n        config={\"client_id\": \"ABC\", \"access_token\": \"<token>\"}\n    )\n    result = await connector.health_check()\n    print(result.status)   # HealthStatus.HEALTHY\n    print(result.details)  # {\"extension_id\": \"123\", \"name\": \"Jane Doe\", ...}\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all five resource types sequentially. Each resource is fetched via `list_*()` and normalized to `ConnectorDocument` objects. Per-resource errors are captured — a failure on one resource does not stop others.\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `OK` (no errors), `PARTIAL` (some resource errors), or `FAILED` (nothing synced and errors present) |\n| `records_synced` | int | Total normalized documents across all resources |\n| `resources` | `dict[str, int]` | Per-resource count: `{\"call_logs\": 42, \"messages\": 10, ...}` |\n| `errors` | `list[str]` | Per-resource error messages if any resource failed |\n\n```python\nimport asyncio\nfrom connector import RingCentralConnector\n\nasync def main():\n    connector = RingCentralConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rc-01\",\n        config={\"client_id\": \"ABC\", \"access_token\": \"<token>\"},\n    )\n    result = await connector.sync()\n    print(result.status, result.records_synced)\n    print(result.resources)  # {\"call_logs\": 150, \"contacts\": 300, ...}\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-call-logs",
+          "title": "list_call_logs()",
+          "content": "Fetches and normalizes all call log records across all pages (default 100 records/page).\n\n**Parameters:** Accepts `**kwargs` forwarded to the HTTP client (e.g. `per_page=50`).\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nasync def main():\n    connector = RingCentralConnector(config={\"access_token\": \"<token>\"})\n    call_logs = await connector.list_call_logs()\n    print(f\"Found {len(call_logs)} call log records\")\n```"
+        },
+        {
+          "id": "method-list-messages",
+          "title": "list_messages()",
+          "content": "Fetches and normalizes all messages (SMS, MMS, Fax, Pager, Voicemail) from the extension message store.\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nasync def main():\n    connector = RingCentralConnector(config={\"access_token\": \"<token>\"})\n    messages = await connector.list_messages()\n    print(f\"Found {len(messages)} messages\")\n```"
+        },
+        {
+          "id": "method-list-extensions",
+          "title": "list_extensions()",
+          "content": "Fetches and normalizes all account extensions (user extensions, virtual numbers, IVRs).\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nasync def main():\n    connector = RingCentralConnector(config={\"access_token\": \"<token>\"})\n    extensions = await connector.list_extensions()\n    print(f\"Found {len(extensions)} extensions\")\n```"
+        },
+        {
+          "id": "method-list-contacts",
+          "title": "list_contacts()",
+          "content": "Fetches and normalizes all personal address book contacts for the authorized extension (250 records/page).\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nasync def main():\n    connector = RingCentralConnector(config={\"access_token\": \"<token>\"})\n    contacts = await connector.list_contacts()\n    print(f\"Found {len(contacts)} contacts\")\n```"
+        },
+        {
+          "id": "method-list-meetings",
+          "title": "list_meetings()",
+          "content": "Fetches and normalizes all meetings from RingCentral Video / Meetings.\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nasync def main():\n    connector = RingCentralConnector(config={\"access_token\": \"<token>\"})\n    meetings = await connector.list_meetings()\n    print(f\"Found {len(meetings)} meetings\")\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions inherit from `RingCentralError`. The HTTP client maps status codes to typed subclasses.\n\n| Exception class | HTTP status | When raised | Effect in connector |\n|-----------------|------------|-------------|---------------------|\n| `RingCentralAuthError` | 401, 403 | Expired/invalid access token or insufficient OAuth scope | `health_check()` → `status=UNHEALTHY`. In `sync()`: captured per-resource as an error string; `records_synced` for that resource is 0. |\n| `RingCentralNotFoundError` | 404 | Extension or account resource not found | Captured per-resource in sync `errors` list. |\n| `RingCentralRateLimitError` | 429 | Rate limit exceeded | Captured per-resource; caller should back off before retrying. |\n| `RingCentralNetworkError` | 5xx or transport error | Server error or connection failure | Captured per-resource in sync `errors` list. |\n| `RingCentralError` | Other 4xx | Unexpected client error | Base class; carries `message` and `status_code` attributes. |\n\n**Sync isolation:** Each of the five resource types runs in a separate try/except block within `sync()`. An auth error on call_logs will set `resources[\"call_logs\"] = 0` and add an entry to `errors`, but messages, extensions, contacts, and meetings continue processing.\n\n**Status resolution:**\n- All resources succeed → `SyncStatus.OK`\n- Some errors, but at least one resource synced → `SyncStatus.PARTIAL`\n- All resources failed and `records_synced == 0` → `SyncStatus.FAILED`"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### install() returns `success=False` with \"Missing required fields\"\n\n**Cause:** `client_id` or `client_secret` is absent from the config.\n**Fix:** Provide both values from your app in the RingCentral Developer Portal.\n\n### health_check() returns `UNHEALTHY` with \"Auth error\"\n\n**Cause:** The `access_token` is expired or missing, or the OAuth scope is insufficient.\n**Fix:**\n1. Use `RingCentralHTTPClient.refresh_access_token()` to obtain a new access token from the stored `refresh_token`.\n2. If the refresh token is also expired, re-run the full OAuth authorization flow via `authorize()`.\n3. Verify the app in the Developer Portal still has all four required scopes: `ReadCallLog`, `ReadMessages`, `ReadContacts`, `Meetings`.\n\n### sync() returns `SyncStatus.PARTIAL` with resource errors\n\n**Cause:** One or more resources failed. Inspect `result.errors` for the specific resource and message.\n- `call_logs: auth error` → access token needs refresh\n- `meetings: API error` → RingCentral Meetings may not be enabled on the account\n- `contacts: 404` → The extension address book may be empty or the extension scope is wrong\n\n### Sandbox vs. production confusion\n\n**Cause:** Using a sandbox app credential against the production URL (or vice versa).\n**Fix:** Set `server_url = https://platform.devtest.ringcentral.com` when using sandbox/developer credentials. Production apps use the default `https://platform.ringcentral.com`.\n\n### Token refresh fails with 401\n\n**Cause:** The `refresh_token` has expired (typically after 7 days of inactivity for sandbox, 60 days for production).\n**Fix:** Re-run the OAuth flow via `authorize()` to obtain fresh tokens. Ensure your integration regularly calls APIs to keep the refresh token alive."
+    }
+  ]
+}
