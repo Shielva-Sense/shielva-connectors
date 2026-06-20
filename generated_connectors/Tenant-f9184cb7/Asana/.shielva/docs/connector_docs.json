@@ -1,0 +1,73 @@
+{
+  "title": "Asana Connector Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Asana** connector integrates Shielva with the [Asana REST API v1](https://developers.asana.com/reference/rest-api-reference) to sync tasks and projects from all workspaces into your Shielva knowledge base.\n\nAsana is a leading project management platform used by teams worldwide to track work and manage projects. This connector exposes **6 API methods** across 4 resource domains — Workspaces, Projects, Tasks, and Tags — and normalises all data to Shielva's `ConnectorDocument` schema for downstream search and AI workflows.\n\n**Key capabilities:**\n- Full sync across all workspaces, projects, and tasks with automatic cursor-based pagination (`next_page.offset`)\n- Tasks normalised with name, notes, assignee, due date, and completion status\n- Projects normalised with name, notes, and color\n- Bearer token auth (Asana Personal Access Token) — no OAuth round-trip required\n- Asana's `{\"data\": ...}` response envelope is unwrapped automatically\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid or revoked tokens"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Asana connector running in under 5 minutes.\n\n### 1. Generate a Personal Access Token\n\n1. Log in to Asana.\n2. Click your **profile avatar** → **My Profile Settings** → **Apps** tab.\n3. Under **Personal access tokens**, click **New access token**.\n4. Name it (e.g. `Shielva Integration`) and click **Create**.\n5. Copy the token immediately — it is only shown once.\n\n### 2. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Asana**.\n2. Paste your **Personal Access Token** into the `access_token` field.\n3. Click **Install**.\n\nThe connector calls `GET /users/me` to validate credentials and returns the connected user's name on success.\n\n### 3. Run a sync\n\n```python\nasync with AsanaConnector(config={\"access_token\": \"YOUR_PAT\"}) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_projects_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Asana connector uses **Bearer token authentication** with an Asana Personal Access Token (PAT).\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Personal Access Token | `access_token` | password | Yes | From My Profile Settings → Apps → Personal access tokens |\n\n### How it works\n\nThe PAT is sent in the `Authorization` header on every request:\n\n```\nAuthorization: Bearer 1/1234567890:abcdefghijklmnop...\n```\n\nThe `AsanaHTTPClient` injects this via `_headers()` automatically.\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /users/me`. A `401` or `403` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network failure sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- The PAT is stored encrypted in the Shielva vault and never logged.\n- Personal access tokens can be revoked at any time from **My Profile Settings → Apps → Personal access tokens**.\n- The token grants the same permissions as your Asana user account — no elevated service permissions needed."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Asana connector requires one install field.\n\n### Install fields\n\n```json\n{\n  \"access_token\": \"1/1234567890:abcdefghijklmnopqrstuvwxyz\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `limit` | `100` | Results per page for list operations (Asana max) |\n| `opt_fields` (tasks) | `name,notes,completed,due_on,assignee,created_at,modified_at` | Fields fetched per task |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 API methods across 4 resource domains.",
+      "children": [
+        {
+          "id": "workspaces",
+          "title": "Workspaces",
+          "content": "List all Asana workspaces the authenticated user belongs to.\n\n### `list_workspaces()`\nReturns all workspaces. No pagination needed — Asana returns all in one call.\n\n```python\nworkspaces = await connector.list_workspaces()\n# Returns: [{\"gid\": \"...\", \"name\": \"My Workspace\", ...}, ...]\n```\n\n**Asana endpoint:** `GET /workspaces`"
+        },
+        {
+          "id": "projects",
+          "title": "Projects",
+          "content": "Fetch projects within a workspace.\n\n### `list_projects(workspace_gid, offset=None)`\nReturns one page of projects. The response includes a `next_page` cursor for pagination.\n\n```python\npage = await connector.list_projects(\"ws_gid_123\")\nprojects = page[\"data\"]\nnext_offset = page.get(\"next_page\", {}).get(\"offset\") if page.get(\"next_page\") else None\n```\n\n**Asana endpoint:** `GET /projects?workspace={workspace_gid}`"
+        },
+        {
+          "id": "tasks",
+          "title": "Tasks",
+          "content": "Fetch tasks within a project.\n\n### `list_tasks(project_gid, opt_fields, offset=None)`\nReturns one page of tasks with optional cursor for pagination.\n\n```python\npage = await connector.list_tasks(\"proj_gid_456\")\ntasks = page[\"data\"]\n```\n\n**Asana endpoint:** `GET /tasks?project={project_gid}&opt_fields=name,notes,...`\n\n---\n\n### `get_task(task_gid)`\nFetch a single task by GID.\n\n```python\ntask = await connector.get_task(\"task_gid_789\")\n```\n\n**Asana endpoint:** `GET /tasks/{task_gid}`"
+        },
+        {
+          "id": "tags",
+          "title": "Tags",
+          "content": "List tags in a workspace.\n\n### `list_tags(workspace_gid)`\nReturns all tags in the workspace.\n\n```python\ntags = await connector.list_tags(\"ws_gid_123\")\n# Returns: [{\"gid\": \"...\", \"name\": \"urgent\", ...}, ...]\n```\n\n**Asana endpoint:** `GET /tags?workspace={workspace_gid}`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Ingestion",
+      "content": "The `sync()` method traverses all workspaces → projects → tasks with full cursor-based pagination.\n\n### How sync works\n\n1. **Workspaces:** calls `GET /workspaces` once to get all workspaces.\n2. **Projects per workspace:** pages through `GET /projects?workspace={gid}` using `next_page.offset` cursors. Each project is normalised via `normalize_project()` into a `ConnectorDocument`.\n3. **Tasks per project:** pages through `GET /tasks?project={gid}` using `next_page.offset` cursors. Each task is normalised via `normalize_task()` into a `ConnectorDocument`.\n4. All documents call `_ingest_document(doc, kb_id)` when `kb_id` is provided (wired by Shielva runtime).\n\n### Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | `False` | Accepted for API compatibility; all data is always fetched |\n| `since` | `datetime\\|None` | `None` | Accepted for API compatibility; filter `modified_at` downstream |\n| `kb_id` | str | `\"\"` | Knowledge base ID to ingest into; skipped if empty |\n\n### Normalized document schema\n\n**Task:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(task_gid)[:16] |\n| `title` | task.name |\n| `content` | task name + notes + assignee + due date + status |\n| `source_url` | `https://app.asana.com/0/{workspace_gid}/{task_gid}` |\n| `metadata.task_gid` | task.gid |\n| `metadata.completed` | task.completed |\n| `metadata.due_on` | task.due_on |\n| `metadata.assignee_gid` | task.assignee.gid |\n| `metadata.assignee_name` | task.assignee.name |\n| `metadata.created_at` | task.created_at |\n| `metadata.modified_at` | task.modified_at |\n\n**Project:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(project_gid)[:16] |\n| `title` | project.name |\n| `content` | project name + notes + color |\n| `source_url` | `https://app.asana.com/0/{project_gid}/list` |\n| `metadata.project_gid` | project.gid |\n| `metadata.color` | project.color |\n| `metadata.created_at` | project.created_at |\n| `metadata.modified_at` | project.modified_at |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception hierarchy\n\n```\nAsanaError (base)\n├── AsanaAuthError       — 401 / 403: invalid or revoked PAT\n├── AsanaRateLimitError  — 429: too many requests (includes retry_after)\n├── AsanaNotFoundError   — 404: resource not found\n└── AsanaNetworkError    — 5xx / connection errors / timeouts\n```\n\n### Retry behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `AsanaRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts |\n| `AsanaNetworkError` (5xx / timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `AsanaAuthError` (401 / 403) | No | Fail-fast — check PAT |\n| `AsanaNotFoundError` (404) | No | Fail-fast — check GID |\n\n### Rate limits\n\nAsana enforces rate limits per token. Limits vary by plan but are generous for read-only sync. The `retry_after` field on `AsanaRateLimitError` carries the `Retry-After` header value in seconds when provided."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their fixes.\n\n### `health=OFFLINE` after install\n\n**Cause:** Invalid or revoked Personal Access Token.\n\n**Fix:**\n- Go to **My Profile Settings → Apps → Personal access tokens** in Asana.\n- Revoke the old token and create a new one.\n- Update the connector credentials in Shielva ACP → Integrations → Asana → Edit credentials.\n\n---\n\n### `AsanaAuthError: 401 Unauthorized`\n\n**Cause:** The stored PAT was revoked or is incorrect.\n\n**Fix:** Generate a new PAT in Asana and update the connector.\n\n---\n\n### `AsanaAuthError: 403 Forbidden`\n\n**Cause:** The account does not have access to a specific workspace or project.\n\n**Fix:** Verify your account is a member of the workspace in Asana. Ask a workspace admin to grant access.\n\n---\n\n### `AsanaRateLimitError: 429 Too Many Requests`\n\n**Cause:** Too many API requests in a short window.\n\n**Fix:** The connector retries automatically. If persistent, reduce sync frequency.\n\n---\n\n### Sync returns 0 documents\n\n**Cause:** No workspaces, projects, or tasks accessible to the PAT owner.\n\n**Fix:** Verify the account has at least one workspace with projects and tasks. Run a health_check() to confirm connectivity.\n\n---\n\n### Unit tests fail with `ModuleNotFoundError: aiohttp`\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install aiohttp pytest pytest-asyncio\ncd /Users/vivekvarshavaishvik/Documents/client_dir/asana_connector\npytest tests/ -v\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a full unit test suite — no live Asana account required.\n\n### Run unit tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/asana_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 67 passed in < 30 seconds\n```\n\nAll HTTP calls are mocked via `AsyncMock` and `MagicMock`.\n\n### Coverage\n\n- `install()` — success (with user name), missing token, invalid credentials (401), network error, unknown exception, email fallback, unknown user fallback\n- `health_check()` — healthy (with user name), invalid key, network error, generic error, missing creds\n- `sync()` — empty workspaces, no projects, one project no tasks, one project with tasks, multiple workspaces, workspace list failure, project list failure, task list failure, normalizer failure, ingest called with kb_id, project pagination, task pagination, workspace with no gid skipped\n- `list_workspaces()` — returns list, empty\n- `list_projects()` — returns page, empty, with offset\n- `list_tasks()` — returns page, empty, custom opt_fields\n- `get_task()` — success, 404 propagated, auth error propagated\n- `list_tags()` — success, empty\n- `normalize_task()` — basic fields, sha256 source_id, notes in content, completed status, no assignee, no gid fallback, no workspace URL, due date in content\n- `normalize_project()` — basic fields, sha256 source_id, notes in content, no notes, color in content, no gid fallback\n- `with_retry()` — first-attempt success, second-attempt success, auth fail-fast, exhausted attempts, rate limit retried\n- Exception types — hierarchy, message, status_code, retry_after, base fields\n- Constants — CONNECTOR_TYPE, AUTH_TYPE, class constants\n- Lifecycle — aclose clears client, aclose idempotent, context manager"
+    }
+  ]
+}
