@@ -1,0 +1,126 @@
+{
+  "title": "Segment Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Segment connector** integrates with Twilio Segment via the Public API v1. It enables Shielva to sync sources, spaces, and functions from your Segment workspace into the knowledge base.\n\nThis connector uses **Bearer token** authentication — a single Public API access token sent as `Authorization: Bearer {token}` on every request.\n\n**Key capabilities:**\n- Validate the access token via `GET /workspaces` on install and health check\n- Sync all sources with cursor-based pagination (handles workspaces of any size)\n- Sync Profiles AI spaces and custom functions\n- Stable document IDs via SHA-256(\"source:\" + resource_id)[:16] for deduplication across syncs\n- Automatic retry with exponential back-off for transient errors and rate limits\n- Circuit breaker (threshold: 5 failures, 60s recovery) for health degradation detection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`segment` — registered in ACP as **Segment**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Twilio Segment (Segment Public API v1 — `https://api.segmentapis.com/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates access_token by calling GET /workspaces; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Calls GET /workspaces to verify token; returns workspace name in message |\n| `sync()` | Fetches all sources (cursor-paginated) + spaces + functions; normalizes to ConnectorDocuments |\n| `list_workspaces()` | GET /workspaces — returns single workspace for this token |\n| `list_sources(pagination_cursor)` | Cursor-paginated GET /sources |\n| `get_source(source_id)` | GET /sources/{source_id} for a single source |\n| `list_destinations(source_id)` | GET /sources/{source_id}/destinations — all destinations for a source |\n| `list_spaces()` | GET /spaces — all Profiles AI spaces |\n| `list_functions(pagination_cursor)` | Cursor-paginated GET /functions |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Bearer token** authentication. The Public API access token is sent as `Authorization: Bearer {access_token}` on every request.\n\n**How to obtain a token:**\n1. Log in to [app.segment.com](https://app.segment.com)\n2. Go to Settings → Access Management → Tokens\n3. Click **Create Token** — choose Workspace Member (read) or higher\n4. Copy the token immediately — it is shown only once\n\n**Install fields:**\n\n| Field | Key | Type | Required |\n|-------|-----|------|----------|\n| Public API Access Token | `access_token` | password | Yes |\n\n**Validation endpoint:** `GET /workspaces` — called during install and health check.",
+      "children": [
+        {
+          "id": "token-scopes",
+          "title": "Required Token Scopes",
+          "content": "The connector requires at minimum **Workspace Member** role (read access). Workspace Owner is recommended for full access to all resource types including functions."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync Behavior",
+      "content": "The `sync()` method fetches three resource types in order:\n\n1. **Sources** — cursor-paginated via `pagination[cursor]`; follows all pages until `pagination.next` is null\n2. **Spaces** — single request; failures are non-fatal\n3. **Functions** — cursor-paginated; failures are non-fatal\n\nEach resource is normalized to a `ConnectorDocument` and optionally pushed to a knowledge base via `_ingest_document()`.\n\n**Return values:**\n- `SyncStatus.COMPLETED` — zero document failures\n- `SyncStatus.PARTIAL` — some documents failed to normalize\n- `SyncStatus.FAILED` — the sources API returned a fatal error (auth failure, etc.)",
+      "children": [
+        {
+          "id": "pagination",
+          "title": "Cursor Pagination",
+          "content": "Segment uses cursor-based pagination in the response envelope:\n\n```json\n{\n  \"data\": {\n    \"sources\": [...],\n    \"pagination\": {\n      \"current\": \"MA==\",\n      \"next\": \"MjAw\"\n    }\n  }\n}\n```\n\nThe connector passes `next` as `pagination[cursor]` on the subsequent request, repeating until `next` is `null` or the page is empty."
+        },
+        {
+          "id": "document-ids",
+          "title": "Document ID Stability",
+          "content": "Each document receives a stable 16-character hex ID: `SHA-256(\"source:\" + resource_id)[:16]`. This ensures the same Segment resource always maps to the same Shielva document ID across syncs, enabling upsert deduplication."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector defines a typed exception hierarchy:\n\n| Exception | Trigger | Retried? |\n|-----------|---------|----------|\n| `SegmentAuthError` | 401 / 403 | No — requires human intervention |\n| `SegmentRateLimitError` | 429 | Yes — up to 3 attempts with `Retry-After` honour |\n| `SegmentNetworkError` | Timeout / connection refused | Yes — exponential back-off |\n| `SegmentNotFoundError` | 404 | Yes (treated as transient) |\n| `SegmentServerError` | 5xx | Yes — exponential back-off |\n| `SegmentError` | All other HTTP errors | Yes |",
+      "children": [
+        {
+          "id": "retry",
+          "title": "Retry Policy",
+          "content": "- Max attempts: 3\n- Base delay: 1.0 s\n- Backoff factor: 2× per attempt\n- Jitter: ±0.5 s random\n- Max delay: 30 s\n- Auth errors are never retried"
+        },
+        {
+          "id": "circuit-breaker",
+          "title": "Circuit Breaker",
+          "content": "- Opens after 5 consecutive failures\n- Recovery timeout: 60 s\n- Half-open: single probe request after timeout\n- Reflected in `health_check()` as `ConnectorHealth.DEGRADED` or `OFFLINE`"
+        }
+      ]
+    },
+    {
+      "id": "api-reference",
+      "title": "API Reference",
+      "content": "All methods are async and return typed dataclasses or raw API dicts.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the access token by calling `GET /workspaces`.\n\n**Returns:** `InstallResult`\n- `health`: `HEALTHY` on success, `OFFLINE` on failure\n- `auth_status`: `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED`\n- `message`: workspace name on success, error description on failure\n- `connector_id`: populated on success"
+        },
+        {
+          "id": "health_check",
+          "title": "health_check()",
+          "content": "Calls `GET /workspaces` and returns the current connectivity state.\n\n**Returns:** `HealthCheckResult`\n- `health`: `HEALTHY`, `DEGRADED`, or `OFFLINE`\n- `message`: `\"Connected to Segment — {workspace_name}\"` on success"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full=False, since=None, kb_id='')",
+          "content": "Full sync across sources, spaces, and functions.\n\n**Returns:** `SyncResult`\n- `status`: `COMPLETED`, `PARTIAL`, or `FAILED`\n- `documents_found`: total resources discovered\n- `documents_synced`: successfully normalized\n- `documents_failed`: failed to normalize"
+        },
+        {
+          "id": "list-sources",
+          "title": "list_sources(pagination_cursor=None)",
+          "content": "Returns one page of sources. Pass `pagination_cursor` from the previous response's `data.pagination.next` to fetch the next page.\n\n**Returns:** raw Segment API dict"
+        },
+        {
+          "id": "get-source",
+          "title": "get_source(source_id)",
+          "content": "Retrieves a single source by ID.\n\n**Returns:** raw Segment API dict with `data.source` key"
+        },
+        {
+          "id": "list-destinations",
+          "title": "list_destinations(source_id)",
+          "content": "Returns all destinations connected to a specific source.\n\n**Returns:** raw Segment API dict with `data.destinations` list"
+        },
+        {
+          "id": "list-spaces",
+          "title": "list_spaces()",
+          "content": "Returns all Profiles AI spaces in the workspace.\n\n**Returns:** raw Segment API dict with `data.spaces` list"
+        },
+        {
+          "id": "list-functions",
+          "title": "list_functions(pagination_cursor=None)",
+          "content": "Returns one page of functions. Supports cursor pagination.\n\n**Returns:** raw Segment API dict with `data.functions` list and `data.pagination`"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `access_token is required` | No token provided | Enter the Public API token in the install form |\n| `401 Unauthorized` | Invalid or revoked token | Re-generate at Segment → Settings → Access Management → Tokens |\n| `403 Forbidden` | Insufficient token scope | Ensure Workspace Member role or higher |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically; wait and retry if all attempts exhaust |\n| No sources returned | Empty workspace or wrong token | Verify the workspace has sources and token belongs to correct workspace |"
+    }
+  ]
+}
