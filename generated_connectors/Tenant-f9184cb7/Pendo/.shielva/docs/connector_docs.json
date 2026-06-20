@@ -1,0 +1,173 @@
+{
+  "title": "Pendo Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Pendo connector** integrates with the Pendo product analytics platform via the Pendo Aggregation API. It enables Shielva to sync guides, features, pages, accounts, and visitors from your Pendo subscription into the knowledge base.\n\nThis connector uses the **x-pendo-integration-key** header for authentication on every request.\n\n**Key capabilities:**\n- Validate credentials via `GET /api/v1/app` on install and health check\n- Sync in-app guides and tagged features for all apps\n- Direct access to pages, accounts, and visitors via the aggregation pipeline\n- Stable document IDs via `SHA-256(type:id)[:16]` for deduplication across syncs\n- Automatic retry with exponential back-off and circuit breaker protection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`pendo` — registered in ACP as **Pendo**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Pendo (Pendo Aggregation API — `https://app.pendo.io/api/v1/...`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates integration_key via GET /api/v1/app; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Same call; returns app count in message |\n| `sync()` | Fetches guides + features for all apps; normalizes to ConnectorDocuments |\n| `list_apps()` | GET /api/v1/app — all Pendo applications |\n| `list_guides(app_id)` | GET /api/v1/guide — in-app guides for an app |\n| `list_features(app_id)` | GET /api/v1/feature — tagged features for an app |\n| `list_pages(app_id)` | GET /api/v1/page — pages for an app |\n| `list_accounts()` | POST /api/v1/aggregation — account pipeline |\n| `list_visitors()` | POST /api/v1/aggregation — visitor pipeline |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector authenticates using the **x-pendo-integration-key** header on every request. The integration key is sent as a custom header — not as HTTP Basic Auth.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — Integration Key found in Pendo → Settings → Integrations → Integration Keys."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Integration Key | `integration_key` | password | Yes | Pendo Integration Key for the subscription |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Credential Validation",
+          "content": "The connector validates the key by calling `GET /api/v1/app`. A 401 or 403 response returns `INVALID_CREDENTIALS`. A network error returns `FAILED`. Success returns `HEALTHY/CONNECTED` with the app count."
+        },
+        {
+          "id": "credential-security",
+          "title": "Credential Security",
+          "content": "Integration Keys do not expire unless manually revoked in Pendo. Shielva stores the key AES-256-GCM encrypted at rest via the vault. The key never appears in log output."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `integration_key` | Pendo Integration Key |"
+        },
+        {
+          "id": "headers",
+          "title": "Request Headers",
+          "content": "Every request includes:\n```\nx-pendo-integration-key: <integration_key>\nContent-Type: application/json\nAccept: application/json\n```"
+        },
+        {
+          "id": "aggregation-api",
+          "title": "Aggregation API",
+          "content": "Accounts and visitors are fetched via the Pendo Aggregation API (`POST /api/v1/aggregation`). The request body uses a pipeline structure:\n```json\n{\n  \"response\": {\"mimeType\": \"application/json\"},\n  \"request\": {\n    \"pipeline\": [\n      {\"source\": {\"accounts\": null}},\n      {\"limit\": 100}\n    ]\n  }\n}\n```"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `PendoHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the integration key and establishes the connector.\n\n**Steps:**\n1. Check `integration_key` is non-empty → MISSING_CREDENTIALS if not.\n2. Call `GET /api/v1/app` via `with_retry`.\n3. On success, create a fresh http_client for subsequent use.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Pendo')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` — missing key\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` — network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `GET /api/v1/app` and returns health with app count in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Pendo (2 app(s))')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error (circuit breaker not open)\n- `HealthCheckResult(health=OFFLINE, auth_status=FAILED)` on network error (circuit breaker open)"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across all Pendo apps:\n1. Fetch all apps via `GET /api/v1/app`.\n2. For each app: fetch guides (`GET /api/v1/guide`) and features (`GET /api/v1/feature`).\n3. Normalize each guide/feature to a ConnectorDocument.\n4. Optionally ingest into the knowledge base when `kb_id` is provided.\n\nPer-app failures are non-fatal — only a total app-fetch failure causes FAILED status.\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some fail; `FAILED` if apps cannot be fetched."
+        },
+        {
+          "id": "list-apps",
+          "title": "list_apps()",
+          "content": "**Signature:** `async def list_apps(self) -> list[dict]`\n\nFetches all Pendo applications in the subscription via `GET /api/v1/app`.\n\n**Returns:** List of app dicts (id, name, displayName, etc.)."
+        },
+        {
+          "id": "list-guides",
+          "title": "list_guides()",
+          "content": "**Signature:** `async def list_guides(self, app_id: str = '') -> list[dict]`\n\nFetches in-app guides for a given app via `GET /api/v1/guide`.\n\n**Returns:** List of guide dicts (id, name, state, kind, lastUpdatedAt, etc.)."
+        },
+        {
+          "id": "list-features",
+          "title": "list_features()",
+          "content": "**Signature:** `async def list_features(self, app_id: str = '') -> list[dict]`\n\nFetches tagged features for a given app via `GET /api/v1/feature`.\n\n**Returns:** List of feature dicts (id, name, kind, color, etc.)."
+        },
+        {
+          "id": "list-pages",
+          "title": "list_pages()",
+          "content": "**Signature:** `async def list_pages(self, app_id: str = '') -> list[dict]`\n\nFetches pages for a given app via `GET /api/v1/page`.\n\n**Returns:** List of page dicts (id, name, kind, etc.)."
+        },
+        {
+          "id": "list-accounts",
+          "title": "list_accounts()",
+          "content": "**Signature:** `async def list_accounts(self, per_page: int = 100, page_number: int = 0) -> dict`\n\nFetches accounts via the Pendo Aggregation API (`POST /api/v1/aggregation`).\n\n**Returns:** Aggregation response dict with `results` list."
+        },
+        {
+          "id": "list-visitors",
+          "title": "list_visitors()",
+          "content": "**Signature:** `async def list_visitors(self, per_page: int = 100) -> dict`\n\nFetches visitors via the Pendo Aggregation API (`POST /api/v1/aggregation`).\n\n**Returns:** Aggregation response dict with `results` list."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by normalizer functions in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "guide-document",
+          "title": "Guide ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('guide:' + guide_id)[:16]>\",\n  \"title\": \"Pendo guide: Onboarding Tour\",\n  \"content\": \"Guide ID: guide_aaa\\nName: Onboarding Tour\\nState: public\\nKind: lightbox\",\n  \"source_url\": \"https://app.pendo.io/guides\",\n  \"metadata\": {\n    \"type\": \"guide\",\n    \"guide_id\": \"guide_aaa\",\n    \"name\": \"Onboarding Tour\",\n    \"state\": \"public\",\n    \"kind\": \"lightbox\"\n  }\n}\n```"
+        },
+        {
+          "id": "feature-document",
+          "title": "Feature ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('feature:' + feature_id)[:16]>\",\n  \"title\": \"Pendo feature: Export Button\",\n  \"content\": \"Feature ID: feat_111\\nName: Export Button\\nKind: click\",\n  \"source_url\": \"https://app.pendo.io/features\",\n  \"metadata\": {\n    \"type\": \"feature\",\n    \"feature_id\": \"feat_111\",\n    \"name\": \"Export Button\",\n    \"kind\": \"click\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "All documents use `SHA-256(type + ':' + resource_id)[:16]` as the stable `source_id`. This is deterministic across syncs — the same Pendo resource always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists.\n\n| Resource | ID formula |\n|----------|------------|\n| Guide | `SHA-256('guide:' + guide_id)[:16]` |\n| Feature | `SHA-256('feature:' + feature_id)[:16]` |\n| Page | `SHA-256('page:' + page_id)[:16]` |\n| Account | `SHA-256('account:' + accountId)[:16]` |"
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `PendoError` (base) in `exceptions.py`:\n\n```\nPendoError (base)\n├── PendoAuthError            — 401, 403 responses\n├── PendoNetworkError         — connectivity failures, timeouts\n├── PendoRateLimitError       — 429 Too Many Requests (has retry_after attr)\n├── PendoNotFoundError        — 404 Not Found\n└── PendoServerError          — 5xx responses\n```\n\nCallers can catch the base `PendoError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `integration_key is required` | No key provided | Enter the Integration Key in the install form |\n| `401 Unauthorized` | Invalid or revoked key | Generate a new Integration Key in Pendo → Settings → Integrations |\n| `403 Forbidden` | Insufficient subscription access | Verify your Pendo plan includes API access |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| No data synced | No apps or no guides/features | Verify your Pendo subscription has at least one app with data |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/pendo_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
