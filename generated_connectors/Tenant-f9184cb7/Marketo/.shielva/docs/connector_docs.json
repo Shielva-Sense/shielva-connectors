@@ -1,0 +1,186 @@
+{
+  "connector": "marketo",
+  "display_name": "Marketo",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Marketo connector syncs leads, static lists, campaigns, and programs from Marketo (Adobe) into the Shielva knowledge base using the Marketo REST API. Authentication uses OAuth 2.0 Client Credentials via a LaunchPoint Custom service — no user login required. The connector implements nextPageToken-based pagination for leads/lists/campaigns, offset-based pagination for programs, automatic token refresh, exponential backoff retry, and Marketo-specific success:false error body handling."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2_client_credentials",
+          "title": "OAuth 2.0 Client Credentials",
+          "content": "Marketo uses OAuth 2.0 Client Credentials (not Authorization Code). The connector exchanges client_id + client_secret for a Bearer token at https://{munchkin_id}.mktorest.com/identity/oauth/token. Tokens expire in 3600 seconds and are refreshed automatically with a 60-second buffer before expiry.",
+          "token_url": "https://{munchkin_id}.mktorest.com/identity/oauth/token?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
+          "steps": [
+            "Log in to Marketo Admin → LaunchPoint → New Service (Custom).",
+            "Assign an API-only user with Access API role permissions.",
+            "Copy Client ID and Client Secret from View Details.",
+            "Find your Munchkin ID at Admin → Munchkin.",
+            "Enter all three values in the Shielva connector install form."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "Client ID",
+          "type": "string",
+          "required": true,
+          "description": "The Client ID from your Marketo LaunchPoint Custom service (Admin → LaunchPoint → View Details)."
+        },
+        {
+          "key": "client_secret",
+          "label": "Client Secret",
+          "type": "password",
+          "required": true,
+          "description": "The Client Secret from your Marketo LaunchPoint Custom service."
+        },
+        {
+          "key": "munchkin_id",
+          "label": "Munchkin ID",
+          "type": "string",
+          "required": true,
+          "description": "Your Marketo instance identifier (Admin → Munchkin). Format: abc-123-xyz."
+        }
+      ]
+    },
+    {
+      "id": "synced_resources",
+      "title": "Synced Resources",
+      "resources": [
+        {
+          "id": "leads",
+          "title": "Leads",
+          "endpoint": "GET /rest/v1/leads.json",
+          "pagination": "nextPageToken cursor",
+          "fields": ["id", "firstName", "lastName", "email", "company", "title", "phone", "createdAt", "updatedAt"],
+          "description": "Marketo leads (contacts/prospects). Paginated via nextPageToken. Source URL: https://app.marketo.com/#/lead/{id}."
+        },
+        {
+          "id": "lists",
+          "title": "Static Lists",
+          "endpoint": "GET /rest/v1/lists.json",
+          "pagination": "nextPageToken cursor",
+          "fields": ["id", "name", "description", "workspaceName", "createdAt", "updatedAt"],
+          "description": "Marketo static lists — groupings of leads. Paginated via nextPageToken."
+        },
+        {
+          "id": "campaigns",
+          "title": "Campaigns",
+          "endpoint": "GET /rest/v1/campaigns.json",
+          "pagination": "nextPageToken cursor",
+          "fields": ["id", "name", "description", "type", "active", "workspaceName", "createdAt", "updatedAt"],
+          "description": "Marketo smart and batch campaigns. Types include batch and trigger. Paginated via nextPageToken."
+        },
+        {
+          "id": "programs",
+          "title": "Programs",
+          "endpoint": "GET /rest/v1/programs.json",
+          "pagination": "offset + maxReturn (200)",
+          "fields": ["id", "name", "description", "type", "channel", "status", "workspace", "createdAt", "updatedAt"],
+          "description": "Marketo programs (email, event, webinar, engagement, etc.). Paginated via offset."
+        }
+      ]
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "content": "Marketo always returns HTTP 200 even for errors — real errors are in the body as {\"success\": false, \"errors\": [{\"code\": \"601\", \"message\": \"...\"}]}. The connector checks the success field on every response. Error codes 600/601/602/603 map to MarketoAuthError; 606 maps to MarketoRateLimitError; 702 maps to MarketoNotFoundError. HTTP 429 also triggers MarketoRateLimitError with the Retry-After header honored. All non-auth errors are retried up to 3 times with exponential backoff."
+    },
+    {
+      "id": "rate_limits",
+      "title": "Rate Limits",
+      "content": "Marketo REST API has a default limit of 10,000 API calls per day. Burst limits apply. The connector retries on error code 606 with exponential backoff. For high-volume accounts, request a daily limit increase from Marketo support."
+    },
+    {
+      "id": "methods",
+      "title": "Available Methods",
+      "methods": [
+        {
+          "id": "install",
+          "name": "Install",
+          "description": "Validates client_id, client_secret, and munchkin_id by obtaining an access token and probing the leads endpoint.",
+          "returns": "InstallResult with health and auth_status"
+        },
+        {
+          "id": "health_check",
+          "name": "Health Check",
+          "description": "Probes the Marketo leads endpoint and returns HEALTHY, DEGRADED, or OFFLINE.",
+          "returns": "HealthCheckResult"
+        },
+        {
+          "id": "sync",
+          "name": "Sync",
+          "description": "Full paginated sync of leads, lists, campaigns, and programs into the knowledge base.",
+          "returns": "SyncResult with documents_found, documents_synced, documents_failed"
+        },
+        {
+          "id": "list_leads",
+          "name": "List Leads",
+          "description": "Returns all leads as a list of raw dicts.",
+          "returns": "list[dict]"
+        },
+        {
+          "id": "list_lists",
+          "name": "List Static Lists",
+          "description": "Returns all static lists.",
+          "returns": "list[dict]"
+        },
+        {
+          "id": "list_campaigns",
+          "name": "List Campaigns",
+          "description": "Returns all campaigns.",
+          "returns": "list[dict]"
+        },
+        {
+          "id": "list_programs",
+          "name": "List Programs",
+          "description": "Returns all programs.",
+          "returns": "list[dict]"
+        },
+        {
+          "id": "get_lead",
+          "name": "Get Lead",
+          "description": "Retrieves a single lead by integer ID.",
+          "returns": "dict (raw Marketo response)"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "symptom": "Install fails with INVALID_CREDENTIALS",
+          "cause": "Wrong client_id, client_secret, or munchkin_id",
+          "fix": "Re-copy all three values from Marketo Admin. Ensure the LaunchPoint service is active."
+        },
+        {
+          "symptom": "Error code 601 Unauthorized",
+          "cause": "API-only user lacks Access API role permission",
+          "fix": "Add Access API permission to the user's role in Admin → Users & Roles."
+        },
+        {
+          "symptom": "Error code 606 Rate limit exceeded",
+          "cause": "Exceeded 10,000 daily API calls",
+          "fix": "Reduce sync frequency. Request a daily limit increase from Marketo support."
+        },
+        {
+          "symptom": "Health check returns DEGRADED",
+          "cause": "Transient network error or Marketo service disruption",
+          "fix": "Check https://status.adobe.com for Marketo service status. Retry after a few minutes."
+        }
+      ]
+    }
+  ]
+}
