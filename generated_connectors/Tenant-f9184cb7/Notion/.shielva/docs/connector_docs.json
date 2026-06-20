@@ -1,0 +1,205 @@
+{
+  "title": "Notion Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Notion connector** integrates with Notion workspaces via the Notion API v1. It enables Shielva to sync pages, databases, and rich block content in real-time.\n\nThis connector uses Internal Integration Token authentication (`secret_...`), granting access only to pages explicitly shared with the integration.\n\n**Key capabilities:**\n- Search all accessible pages and databases via `POST /search` with cursor-based pagination\n- Fetch individual pages with full metadata\n- Recursively fetch block content (paragraphs, headings, lists, code, callouts, etc.)\n- Retrieve database schemas and query database rows\n- Stable document IDs via SHA-256(page_id) for deduplication across syncs\n- Incremental sync via cursor pagination",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`notion` — registered in ACP as **Notion**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Notion Labs Inc. (Notion API v1 — `https://api.notion.com/v1/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates integration_token presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls `GET /users/me` to verify token; returns bot name in message |\n| `sync()` | Searches all pages + databases, fetches block content, normalizes to ConnectorDocuments |\n| `search(query, filter_type)` | Paginated `POST /search` returning pages and/or databases |\n| `get_page(page_id)` | `GET /pages/{page_id}` for a single page |\n| `get_page_content(page_id)` | `GET /blocks/{page_id}/children` recursive — full block tree |\n| `get_database(database_id)` | `GET /databases/{database_id}` for a database schema |\n| `query_database(database_id, filter)` | Paginated `POST /databases/{database_id}/query` |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Internal Integration Token** authentication — a single `secret_...` token granted when you create a Notion integration.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — create an integration at [notion.so/my-integrations](https://www.notion.so/my-integrations), then copy the Internal Integration Token."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Integration Token | `integration_token` | password | Yes | Notion Internal Integration Token (secret_...) |"
+        },
+        {
+          "id": "required-capabilities",
+          "title": "Required Integration Capabilities",
+          "content": "| Capability | Purpose |\n|------------|---------|\n| Read content | Access pages and databases shared with the integration |\n| Read user information | Optional — retrieve user metadata |"
+        },
+        {
+          "id": "page-sharing",
+          "title": "Page Sharing",
+          "content": "Notion integrations only access pages explicitly shared with them. For each page or database to sync:\n1. Open the page in Notion\n2. Click **···** → **Add connections**\n3. Select your integration\n\nTo sync an entire workspace, share the workspace root page."
+        },
+        {
+          "id": "token-security",
+          "title": "Token Security",
+          "content": "Integration tokens do not expire unless regenerated or the integration is deleted. Shielva stores the token AES-256-GCM encrypted at rest via the vault. Tokens can be regenerated at any time from the Notion integration settings."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `integration_token` | Notion Internal Integration Token (secret_...) |"
+        },
+        {
+          "id": "api-version",
+          "title": "API Version",
+          "content": "All requests include the `Notion-Version: 2022-06-28` header as required by the Notion API."
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `NotionHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `integration_token` is present in config. Does not make network calls — token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when integration_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when integration_token is absent or empty"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `GET https://api.notion.com/v1/users/me` to verify the token. Returns the bot name in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected — bot: My Bot')`\n- `HealthCheckResult(health=DEGRADED, auth_status=INVALID_CREDENTIALS)` on 401/403 errors\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nSearches all accessible pages and databases via `POST /search`, then for each page fetches block children for content enrichment. Normalizes all objects to ConnectorDocuments.\n\n**Parameters:**\n- `full` — reserved for future incremental sync support\n- `since` — reserved for future timestamp-filtered sync\n- `kb_id` — knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures occur, `PARTIAL` when some objects fail normalization, `FAILED` when the search API call fails entirely."
+        },
+        {
+          "id": "search",
+          "title": "search()",
+          "content": "**Signature:** `async def search(self, query='', filter_type=None) -> list[dict]`\n\nPaginated `POST /search`. Follows `has_more` + `next_cursor` until exhausted.\n\n**Parameters:**\n- `query` — text search string (empty = all accessible objects)\n- `filter_type` — `'page'` or `'database'` to restrict result types, or `None` for both\n\n**Returns:** List of Notion page and database objects."
+        },
+        {
+          "id": "get-page",
+          "title": "get_page()",
+          "content": "**Signature:** `async def get_page(self, page_id: str) -> dict`\n\nFetches a single page via `GET /pages/{page_id}`.\n\n**Returns:** Notion page object with properties.\n\n**Raises:** `NotionNotFoundError` if the page does not exist or is not shared with the integration."
+        },
+        {
+          "id": "get-page-content",
+          "title": "get_page_content()",
+          "content": "**Signature:** `async def get_page_content(self, page_id: str) -> list[dict]`\n\nRecursively fetches all block children via `GET /blocks/{page_id}/children`. Follows `has_more` + `next_cursor` at each nesting level.\n\n**Returns:** Flat list of all block objects from the page tree, including nested children.\n\nBlocks with `has_children=True` are automatically traversed."
+        },
+        {
+          "id": "get-database",
+          "title": "get_database()",
+          "content": "**Signature:** `async def get_database(self, database_id: str) -> dict`\n\nFetches a database schema via `GET /databases/{database_id}`.\n\n**Returns:** Notion database object with property schema.\n\n**Raises:** `NotionNotFoundError` if the database does not exist or is not shared."
+        },
+        {
+          "id": "query-database",
+          "title": "query_database()",
+          "content": "**Signature:** `async def query_database(self, database_id: str, filter=None) -> list[dict]`\n\nPaginated `POST /databases/{database_id}/query`. Returns all rows (pages) matching the filter.\n\n**Parameters:**\n- `database_id` — Notion database ID\n- `filter` — optional Notion filter object (see [Notion Filter docs](https://developers.notion.com/reference/post-database-query-filter))\n\n**Returns:** List of page objects (database rows) matching the filter."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `NotionHTTPClient` (`client/http_client.py`) using `aiohttp`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Notion API Call | Description |\n|--------|----------------|-------------|\n| `get_user_me(token)` | `GET /users/me` | Verify token, returns bot user object |\n| `search(token, query, filter_type, start_cursor, page_size)` | `POST /search` | Search pages and databases with cursor pagination |\n| `get_page(token, page_id)` | `GET /pages/{page_id}` | Single page with properties |\n| `get_block_children(token, block_id, start_cursor, page_size)` | `GET /blocks/{block_id}/children` | Child blocks of a page or block |\n| `get_database(token, database_id)` | `GET /databases/{database_id}` | Database schema |\n| `query_database(token, database_id, filter_obj, start_cursor, page_size)` | `POST /databases/{database_id}/query` | Query database rows |"
+        },
+        {
+          "id": "request-headers",
+          "title": "Request Headers",
+          "content": "Every request includes:\n```\nAuthorization: Bearer {integration_token}\nNotion-Version: 2022-06-28\nContent-Type: application/json\n```"
+        },
+        {
+          "id": "pagination",
+          "title": "Pagination",
+          "content": "The Notion API uses cursor-based pagination. All list endpoints return:\n```json\n{\n  \"results\": [...],\n  \"has_more\": true,\n  \"next_cursor\": \"cursor-string\"\n}\n```\nThe connector follows `has_more` + `next_cursor` until `has_more` is false or `next_cursor` is null."
+        },
+        {
+          "id": "error-mapping",
+          "title": "Error Mapping",
+          "content": "HTTP status codes are mapped to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `NotionAuthError` |\n| 403 | `NotionAuthError` |\n| 404 | `NotionNotFoundError` |\n| 429 | `NotionRateLimitError` |\n| Connection/timeout | `NotionNetworkError` |\n| 5xx / other | `NotionError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` by default\n- Back-off: 1s, 2s (doubles each attempt)\n- Skips retry on `NotionAuthError` — re-installing with a valid token is required\n- Skips retry on `NotionNotFoundError` — the resource does not exist\n- Retries on `NotionError`, `NotionNetworkError`, `NotionRateLimitError`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_page()` and `normalize_database()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "page-document",
+          "title": "Page ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(page_id)[:16]>\",\n  \"type\": \"notion_page\",\n  \"title\": \"My Test Page\",\n  \"content\": \"Title: My Test Page\\nURL: https://www.notion.so/my-test-page\\nCreated: 2024-01-01T00:00:00.000Z\\nLast edited: 2024-06-01T00:00:00.000Z\\nParent type: workspace\\n--- Content ---\\nSome paragraph text\",\n  \"metadata\": {\n    \"page_id\": \"page-1234-abcd-5678-efgh\",\n    \"url\": \"https://www.notion.so/my-test-page\",\n    \"created_time\": \"2024-01-01T00:00:00.000Z\",\n    \"last_edited_time\": \"2024-06-01T00:00:00.000Z\",\n    \"archived\": false,\n    \"parent_type\": \"workspace\",\n    \"object_type\": \"page\",\n    \"connector_id\": \"notion_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"notion\"\n  }\n}\n```"
+        },
+        {
+          "id": "database-document",
+          "title": "Database ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(database_id)[:16]>\",\n  \"type\": \"notion_database\",\n  \"title\": \"My Test Database\",\n  \"content\": \"Database: My Test Database\\nURL: https://www.notion.so/my-test-db\\nCreated: 2024-01-01T00:00:00.000Z\\nProperties: Name, Status, Due\",\n  \"metadata\": {\n    \"database_id\": \"db-1234-abcd-5678-efgh\",\n    \"url\": \"https://www.notion.so/my-test-db\",\n    \"created_time\": \"2024-01-01T00:00:00.000Z\",\n    \"last_edited_time\": \"2024-06-01T00:00:00.000Z\",\n    \"archived\": false,\n    \"property_names\": [\"Name\", \"Status\", \"Due\"],\n    \"object_type\": \"database\",\n    \"connector_id\": \"notion_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"notion\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `id` field is `SHA-256(notion_object_id)` truncated to 16 hex characters. This is stable across syncs — the same Notion page or database always produces the same Shielva document ID, enabling upsert deduplication without storing seen-id lists."
+        },
+        {
+          "id": "block-rendering",
+          "title": "Block Content Rendering",
+          "content": "Block content is flattened to plain text in `_block_to_text()`:\n\n| Block Type | Rendered As |\n|------------|-------------|\n| `paragraph` | Plain text |\n| `heading_1` | `# Heading` |\n| `heading_2` | `## Heading` |\n| `heading_3` | `### Heading` |\n| `bulleted_list_item` | `- item` |\n| `numbered_list_item` | `1. item` |\n| `to_do` | `[ ] task` or `[x] done` |\n| `quote` | `> quote` |\n| `callout` | `> callout` |\n| `code` | ` ```lang\\ncode\\n``` ` |\n| `divider` | `---` |\n| `equation` | LaTeX expression |"
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `NotionError` (base) in `exceptions.py`:\n\n```\nNotionError (base)\n├── NotionAuthError         — 401, 403 responses\n├── NotionNetworkError      — connectivity failures, aiohttp.ClientError\n├── NotionRateLimitError    — 429 Too Many Requests\n└── NotionNotFoundError     — 404 Not Found\n```\n\nCallers can catch the base `NotionError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `401 Unauthorized` | Invalid or expired token | Re-copy the Integration Token from notion.so/my-integrations |\n| `403 Forbidden` | Integration not shared with the page | Open the page → **···** → **Add connections** → select your integration |\n| `404 Not Found` | Page or database does not exist | Verify the ID and that the page is shared with the integration |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| No pages returned | No pages shared with integration | Share at least one page or workspace root with the integration |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (112 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/notion_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 112 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
