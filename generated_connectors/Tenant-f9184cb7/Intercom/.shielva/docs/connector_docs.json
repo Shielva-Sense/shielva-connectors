@@ -1,0 +1,83 @@
+{
+  "title": "Intercom Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Intercom** connector integrates Shielva with the [Intercom REST API v2.11](https://developers.intercom.com/docs/references/rest-api/errors/http-responses/) to sync contacts (leads and users), conversations, and companies into Shielva's knowledge base.\n\nIntercom is the world's leading customer messaging platform. This connector exposes **7 API methods** across 3 resource domains — Contacts, Conversations, and Companies — and implements a full paginated sync engine that normalizes all contact records into canonical `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /me`\n- Full paginated contact sync (leads + users)\n- Paginated listing of contacts, conversations, and companies\n- Single-resource retrieval for contacts and conversations\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All contacts normalized to canonical `ConnectorDocument` with stable 16-char source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Intercom connector running in under 5 minutes.\n\n### 1. Create an Access Token\n\n1. Log in to [app.intercom.com](https://app.intercom.com)\n2. Go to **Settings → Integrations → Developer Hub**\n3. Select or create an app, go to the **Authentication** tab\n4. Copy the **Access Token**\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Intercom**\n2. Enter your **Access Token**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with IntercomConnector(config={\"access_token\": \"your_token\"}) as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} contacts\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Intercom connector uses **Bearer token authentication** — Intercom's standard method for API access.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Access Token | `access_token` | password | Yes | Intercom Access Token from Settings → Integrations → Developer Hub |\n\n### How it works\n\nEvery request uses Bearer authentication:\n```\nAuthorization: Bearer {access_token}\nIntercom-Version: 2.11\nAccept: application/json\n```\n\nThe connector builds these headers automatically. No manual header management is needed.\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /me`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- The access token is stored encrypted in the Shielva vault and never logged\n- Requests go over HTTPS to `https://api.intercom.io`\n- Rotate tokens at Settings → Integrations → Developer Hub"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Intercom connector requires a single install field and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"access_token\": \"YOUR_INTERCOM_ACCESS_TOKEN\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `API_BASE` | `https://api.intercom.io` | Intercom API base URL |\n| `INTERCOM_VERSION` | `2.11` | API version header |\n| `SYNC_PAGE_SIZE` | `50` | Contacts per page for sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 7 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the access token by calling `GET /me`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Intercom as Test Admin')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing token → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /me` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Intercom API reachable. Admin: ...')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, kb_id)",
+          "content": "Syncs all Intercom contacts into the knowledge base.\n\n```python\n# Full sync — all contacts\nresult = await connector.sync(full=True, kb_id=\"kb_intercom\")\n\nprint(result.documents_found)   # total contacts found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), `documents_found`, `documents_synced`, `documents_failed`, `message`\n\n**How it works:**\n1. Paginates through `GET /contacts` (50 per page)\n2. Normalizes each contact to `ConnectorDocument` via `normalize_contact()`\n3. Calls `_ingest_document(doc, kb_id)` for each document (wired by Shielva runtime)\n4. Follows `pages.next` cursor until `total_pages` is reached"
+        },
+        {
+          "id": "list-contacts",
+          "title": "list_contacts(page, per_page)",
+          "content": "Returns a paginated list of contacts.\n\n```python\npage = await connector.list_contacts(page=1, per_page=50)\n# {\"data\": [...], \"pages\": {\"total_pages\": 3, ...}}\n```\n\n**Intercom endpoint:** `GET /contacts`"
+        },
+        {
+          "id": "get-contact",
+          "title": "get_contact(contact_id)",
+          "content": "Returns a single contact by ID.\n\n```python\ncontact = await connector.get_contact(\"contact_abc123\")\n# {\"type\": \"contact\", \"id\": \"contact_abc123\", \"email\": \"jane@example.com\", ...}\n```\n\n**Intercom endpoint:** `GET /contacts/{id}`"
+        },
+        {
+          "id": "list-conversations",
+          "title": "list_conversations(page, per_page)",
+          "content": "Returns a paginated list of conversations.\n\n```python\nresult = await connector.list_conversations(page=1, per_page=50)\n# {\"conversations\": [...], \"pages\": {...}}\n```\n\n**Intercom endpoint:** `GET /conversations`"
+        },
+        {
+          "id": "get-conversation",
+          "title": "get_conversation(conversation_id)",
+          "content": "Returns a single conversation with all reply parts.\n\n```python\nconv = await connector.get_conversation(\"conv_888\")\n# {\"id\": \"conv_888\", \"state\": \"open\", \"conversation_parts\": {...}, ...}\n```\n\n**Intercom endpoint:** `GET /conversations/{id}`"
+        },
+        {
+          "id": "list-companies",
+          "title": "list_companies()",
+          "content": "Returns all companies in the workspace.\n\n```python\nresult = await connector.list_companies()\n# {\"data\": [{\"id\": \"company_xyz\", \"name\": \"Acme Corp\", ...}]}\n```\n\n**Intercom endpoint:** `GET /companies`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "All synced resources are normalized into `ConnectorDocument` objects.\n\n### Contact Document\n\n```python\nConnectorDocument(\n    source_id=\"a1b2c3d4e5f6a7b8\",  # SHA-256[:16] of contact_id\n    title=\"Contact: Jane Doe\",\n    content=\"Name: Jane Doe\\nEmail: jane@example.com\\nRole: user\\nCountry: United States\",\n    connector_id=\"conn_intercom_001\",\n    tenant_id=\"Tenant-f9184cb7\",\n    source_url=\"https://app.intercom.com/contacts/contact_abc123\",\n    metadata={\n        \"contact_id\": \"contact_abc123\",\n        \"role\": \"user\",\n        \"name\": \"Jane Doe\",\n        \"email\": \"jane@example.com\",\n        \"phone\": \"+1-555-0100\",\n        \"external_id\": \"ext_001\",\n        \"created_at\": 1717200000,\n        \"updated_at\": 1717286400,\n        \"company_name\": \"company_xyz\",\n    }\n)\n```\n\n### Source ID Stability\n\nThe `source_id` is `SHA-256(contact_id)[:16]` — deterministic for any given contact, collision-resistant at scale, and always 16 hex characters."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector uses a typed exception hierarchy:\n\n| Exception | Trigger | Retried? |\n|-----------|---------|----------|\n| `IntercomAuthError` | 401 / 403 | Never — requires new token |\n| `IntercomRateLimitError` | 429 | Yes, up to 3× with `X-RateLimit-Reset` delay |\n| `IntercomNotFoundError` | 404 | Yes (up to 3×) |\n| `IntercomNetworkError` | 5xx / timeout | Yes, up to 3× with exponential backoff |\n| `IntercomError` | Other 4xx | Yes, up to 3× |\n\nAll exceptions inherit from `IntercomError` which carries `message`, `status_code`, and `code` attributes."
+    }
+  ]
+}
