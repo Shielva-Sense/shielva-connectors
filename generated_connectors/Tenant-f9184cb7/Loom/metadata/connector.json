@@ -1,0 +1,25 @@
+{
+  "connector_type": "loom",
+  "display_name": "Loom",
+  "provider": "loom",
+  "service": "loom",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Your Loom API key. Found in Loom → Account Settings → Integrations → API."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["videos", "folders", "workspaces"],
+  "api_base": "https://www.loom.com/v1/",
+  "auth_header": "Authorization: Bearer {api_key}",
+  "pagination": "cursor",
+  "pagination_param": "next_page",
+  "description": "Sync Loom videos (with transcripts), folders, and workspaces into Shielva Knowledge Base.",
+  "docs_url": "https://support.loom.com/hc/en-us/articles/360002197917-Loom-API"
+}
