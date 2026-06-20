@@ -1,0 +1,105 @@
+{
+  "title": "Workday Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Workday** connector integrates Shielva with the [Workday REST API v1](https://community.workday.com/articles/608049) to sync HR and workforce data into Shielva's knowledge base.\n\nWorkday HCM (Human Capital Management) is an enterprise cloud platform for HR, finance, and planning. This connector targets **4 core resource domains** — Workers, Organizations, Job Profiles, and Locations — and implements OAuth 2.0 Client Credentials for secure, non-interactive service-account authentication.\n\n**Key capabilities:**\n- OAuth 2.0 Client Credentials flow with automatic token refresh\n- Full sync of workers, organizations, job profiles, and locations\n- Offset/limit pagination handles tenants with thousands of records\n- Typed exception hierarchy (Auth / RateLimit / NotFound / Network)\n- Exponential backoff retry (3 attempts; auth errors never retried)\n- Stable 16-char SHA-256 source IDs for deduplication\n- Per-resource failure isolation — one failed resource does not abort others\n- All data normalized to canonical `ConnectorDocument` objects"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Workday connector uses **OAuth 2.0 Client Credentials** grant type for service-account (machine-to-machine) authentication. `auth_type` is `api_key` because no user redirect is involved.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | OAuth2 Client ID from Workday API Client configuration |\n| Client Secret | `client_secret` | password | Yes | OAuth2 Client Secret (shown once at creation) |\n| Hostname | `hostname` | string | Yes | Workday API hostname (e.g. `wd2-impl-services1.workday.com`) |\n| Tenant Name | `tenant` | string | Yes | Workday tenant name (the subdomain of your Workday URL) |\n\n### OAuth2 Flow\n\nThe connector POSTs to the Workday token endpoint:\n\n```\nPOST https://{hostname}/ccx/oauth2/{tenant}/token\nContent-Type: application/x-www-form-urlencoded\n\ngrant_type=client_credentials&client_id={id}&client_secret={secret}\n```\n\nThe returned `access_token` (Bearer) is cached and injected into every subsequent API request as:\n```\nAuthorization: Bearer <access_token>\n```\n\nOn receiving a 401 during normal API calls, the client automatically discards the cached token and re-authenticates once before propagating the error.\n\n### Security\n\n- Client Secret is stored encrypted in Shielva's vault and never logged\n- The ISU account must have `Do Not Allow UI Sessions` checked\n- Rotate Client Secrets periodically in Workday: Register API Client → Client Secret → Rotate"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"client_id\": \"your_workday_client_id\",\n  \"client_secret\": \"your_workday_client_secret\",\n  \"hostname\": \"wd2-impl-services1.workday.com\",\n  \"tenant\": \"mycompany\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `API_VERSION` | `v1` | Workday REST API version |\n| `TOKEN_URL` | `https://{hostname}/ccx/oauth2/{tenant}/token` | OAuth2 token endpoint |\n| `API_BASE` | `https://{hostname}/ccx/api/v1/{tenant}` | Resource endpoint prefix |\n| `PAGE_SIZE` | `100` | Records per paginated request |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by obtaining an OAuth2 token and calling `GET /workers`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#               message='Connected to Workday tenant: mycompany (42 workers found)')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing fields → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 on token → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Verifies connectivity by re-authenticating and listing workers.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#                  message='Workday API reachable. Tenant: mycompany (42 workers)')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`\n\nOn auth failure: `DEGRADED / INVALID_CREDENTIALS`\nOn network failure: `DEGRADED / FAILED`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Workday resources into the Shielva knowledge base.\n\n```python\nresult = await connector.sync(full=True, kb_id=\"kb_hr\")\nprint(result.documents_found)   # total records across all resource types\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # normalization failures\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), counts, `message`\n\n**Sync order:**\n1. `GET /workers` — all worker records\n2. `GET /organizations` — all org records\n3. `GET /jobProfiles` — all job profile records\n4. `GET /locations` — all location records\n\nEach resource is synced independently. A failure on one resource (e.g. organizations) does not abort the others. `status=PARTIAL` when any normalization fails; `status=FAILED` only if the initial auth fails."
+        },
+        {
+          "id": "list-workers",
+          "title": "list_workers()",
+          "content": "Returns all Workday workers as raw API records.\n\n```python\nworkers = await connector.list_workers()\n# [{'id': 'W001', 'descriptor': 'Jane Smith', 'jobTitle': '...', ...}, ...]\n```\n\n**Workday endpoint:** `GET /ccx/api/v1/{tenant}/workers?limit=100&offset=N`\nPaginated automatically — returns all pages concatenated."
+        },
+        {
+          "id": "list-organizations",
+          "title": "list_organizations()",
+          "content": "Returns all Workday organizations as raw API records.\n\n```python\norgs = await connector.list_organizations()\n# [{'id': 'ORG001', 'descriptor': 'Engineering', 'orgType': {...}, ...}, ...]\n```\n\n**Workday endpoint:** `GET /ccx/api/v1/{tenant}/organizations?limit=100&offset=N`"
+        },
+        {
+          "id": "list-job-profiles",
+          "title": "list_job_profiles()",
+          "content": "Returns all Workday job profiles as raw API records.\n\n```python\nprofiles = await connector.list_job_profiles()\n# [{'id': 'JP001', 'descriptor': 'Software Engineer II', 'jobFamily': {...}, ...}, ...]\n```\n\n**Workday endpoint:** `GET /ccx/api/v1/{tenant}/jobProfiles?limit=100&offset=N`"
+        },
+        {
+          "id": "list-locations",
+          "title": "list_locations()",
+          "content": "Returns all Workday locations as raw API records.\n\n```python\nlocs = await connector.list_locations()\n# [{'id': 'LOC001', 'descriptor': 'San Francisco HQ', 'locationType': {...}, ...}, ...]\n```\n\n**Workday endpoint:** `GET /ccx/api/v1/{tenant}/locations?limit=100&offset=N`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "All resources are normalized to `ConnectorDocument`.",
+      "children": [
+        {
+          "id": "connector-document",
+          "title": "ConnectorDocument",
+          "content": "```python\n@dataclass\nclass ConnectorDocument:\n    source_id: str       # SHA-256(\"<type>:<id>\")[:16] — stable 16-char hex\n    title: str           # Human-readable display title\n    content: str         # Newline-delimited key: value pairs for search\n    connector_id: str    # Shielva connector instance ID\n    tenant_id: str       # Shielva tenant ID\n    source_url: str      # Deep link into Workday UI (optional)\n    metadata: dict       # Structured fields for filtering / faceting\n```"
+        },
+        {
+          "id": "worker-document",
+          "title": "Worker Document",
+          "content": "**Source ID:** `sha256(\"worker:{id}\")[:16]`\n\n**Title:** `Worker: {full_name}`\n\n**Content fields:**\n```\nWorker: Jane Smith\nJob Title: Software Engineer\nWorker Type: Regular\nDepartment: Engineering\nLocation: San Francisco, CA\nEmail: jane.smith@mycompany.com\nHire Date: 2023-03-15\nStatus: true\n```\n\n**Metadata keys:** `worker_id`, `full_name`, `job_title`, `employee_type`, `department`, `location`, `email`, `hire_date`, `status`"
+        },
+        {
+          "id": "organization-document",
+          "title": "Organization Document",
+          "content": "**Source ID:** `sha256(\"organization:{id}\")[:16]`\n\n**Title:** `Organization: {name}`\n\n**Content fields:**\n```\nOrganization: Engineering Department\nType: Supervisory\nManager: Alice Manager\nTop-Level Org: Acme Corp\nMember Count: 42\n```\n\n**Metadata keys:** `org_id`, `org_name`, `org_type`, `manager`, `top_level_org`, `member_count`, `location`"
+        },
+        {
+          "id": "job-profile-document",
+          "title": "Job Profile Document",
+          "content": "**Source ID:** `sha256(\"job_profile:{id}\")[:16]`\n\n**Title:** `Job Profile: {name}`\n\n**Content fields:**\n```\nJob Profile: Software Engineer II\nJob Family: Technology\nManagement Level: Individual Contributor\nJob Level: Level 4\nPay Rate Type: Salary\nActive: true\nSummary: Designs and develops software systems.\n```\n\n**Metadata keys:** `profile_id`, `profile_name`, `job_family`, `management_level`, `job_level`, `pay_rate_type`, `active`, `summary`"
+        },
+        {
+          "id": "location-document",
+          "title": "Location Document",
+          "content": "**Source ID:** `sha256(\"location:{id}\")[:16]`\n\n**Title:** `Location: {name}`\n\n**Content fields:**\n```\nLocation: San Francisco HQ\nType: Office\nAddress: 123 Market Street\nCity: San Francisco\nCountry: United States of America\nTimezone: America/Los_Angeles\nActive: true\n```\n\n**Metadata keys:** `location_id`, `location_name`, `location_type`, `address`, `city`, `country`, `timezone`, `active`"
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Reference",
+      "content": "All exceptions inherit from `WorkdayError`.\n\n| Exception | Trigger | `status_code` | `code` |\n|-----------|---------|--------------|--------|\n| `WorkdayError` | Base class / generic API errors | varies | `\"\"` |\n| `WorkdayAuthError` | 401/403 on token or API calls | 401 or 403 | `\"auth_error\"` |\n| `WorkdayRateLimitError` | 429 Too Many Requests | 429 | `\"rate_limit\"` |\n| `WorkdayNotFoundError` | 404 resource missing | 404 | `\"resource_missing\"` |\n| `WorkdayNetworkError` | 5xx / timeout / connection refused | 5xx or 0 | `\"\"` |\n\n### Retry behaviour\n\n- `WorkdayAuthError` → **never retried** (human intervention required)\n- `WorkdayRateLimitError` → retried with `retry_after` delay (from response body) or exponential backoff\n- `WorkdayNetworkError` → retried up to `max_attempts=3` with exponential backoff\n- `WorkdayError` (generic) → retried up to `max_attempts=3`\n\n```python\nfrom exceptions import WorkdayError, WorkdayAuthError\n\ntry:\n    workers = await connector.list_workers()\nexcept WorkdayAuthError as e:\n    print(f\"Auth failed: {e.message} (HTTP {e.status_code})\")\nexcept WorkdayError as e:\n    print(f\"API error: {e.message}\")\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized — Token Request\n\nCause: Client ID or Client Secret is wrong, or the ISU is not authorized on the API Client.\n\nFix:\n1. Verify **Client ID** and **Client Secret** in Workday: Menu → Register API Client\n2. Confirm **Grant Type: Client Credentials** is checked\n3. Confirm the ISU appears under **API Client Authorizations**\n4. Re-copy the Client Secret (it can only be viewed at creation; rotate to get a new one)\n\n---\n\n### 403 Forbidden — Resource Endpoints\n\nCause: ISU security group lacks the required domain permissions.\n\nFix:\n1. Search **Maintain Permissions for Security Group** for your group\n2. Add View/Get access to the required domains (see setup.md Step 4)\n3. Run **Activate Pending Security Policy Changes**\n\n---\n\n### Empty Results (zero workers/orgs)\n\nCause: ISU has token access but no view permissions on the data.\n\nFix: Grant **Worker Data: All Positions** and **Workers: Public Information** domain policies.\n\n---\n\n### `WorkdayNetworkError: Network error: ...`\n\nCause: Base URL is incorrect, or there is a network connectivity issue.\n\nFix:\n- Confirm `base_url` format: `https://mycompany.workday.com` (no trailing slash, no path)\n- Confirm the Shielva service can reach the Workday tenant (firewall/VPN if applicable)\n\n---\n\n### Rate Limiting (429)\n\nThe connector retries up to 3 times with backoff. If sustained:\n- Contact Workday support to raise the API rate limit for the ISU\n- Consider reducing sync frequency if polling is aggressive\n\n---\n\n### Source ID Collisions\n\nUnlikely but possible if Workday returns empty IDs. The stable ID is:\n```python\nsha256(\"worker:\")[:16]  # all empty-ID workers would collide\n```\n\nWorkday always populates `id` on real records — if IDs are missing, the API scope is insufficient."
+    }
+  ]
+}
