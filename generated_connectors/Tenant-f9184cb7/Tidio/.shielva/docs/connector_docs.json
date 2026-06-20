@@ -1,0 +1,78 @@
+{
+  "title": "Tidio Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Tidio** connector integrates Shielva with the [Tidio REST API v1](https://tidio.com/api/) to sync conversations, visitors, and chatbots into Shielva's knowledge base.\n\nTidio is a live chat and chatbot platform. This connector uses **API key Bearer token** authentication and exposes **7 API methods** across 5 resource domains — Conversations, Messages, Visitors, Operators, and Chatbots — with full page-based pagination.\n\n**Key capabilities:**\n- API key Bearer token authentication\n- Health check via `GET /api/v1/project`\n- Full paginated sync of conversations, visitors, and chatbots\n- Message retrieval per conversation\n- Operator listing\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All resources normalized to canonical `ConnectorDocument` with stable 16-char SHA-256 source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Tidio connector running in under 5 minutes.\n\n### 1. Get Your API Key\n\n1. Log in to [www.tidio.com](https://www.tidio.com)\n2. Go to **Settings → Integrations → API**\n3. Copy your **API Key**\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Tidio**\n2. Enter your **API Key**\n3. Click **Install** — the connector calls `GET /api/v1/project` to validate\n4. Status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with TidioConnector(config={\"api_key\": \"your_api_key\"}) as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Tidio connector uses **API key Bearer token** authentication.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Tidio API key from Settings → Integrations → API |\n\n### How it works\n\nEvery request uses Bearer token authentication:\n```\nAuthorization: Bearer {api_key}\nAccept: application/json\n```\n\n### Security\n\n- API keys are stored encrypted in the Shielva vault and never logged\n- Requests go over HTTPS to `https://api.tidio.co`\n- Rotate tokens in Tidio → Settings → API, then re-install from the ACP Integrations page"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Tidio connector requires only an API key and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"YOUR_TIDIO_API_KEY\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `API_BASE` | `https://api.tidio.co` | Tidio API base URL |\n| `SYNC_PAGE_SIZE` | `50` | Items per page for sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 7 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the API key by calling `GET /api/v1/project`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Tidio project: Acme Support')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing key → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /api/v1/project` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Tidio API reachable. Project: Acme Support')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "Syncs all conversations, visitors, and chatbots.\n\n```python\nresult = await connector.sync()\n# SyncResult(status='completed', documents_found=150, documents_synced=150, documents_failed=0)\n```\n\n**Returns:** `SyncResult` with `status`, `documents_found`, `documents_synced`, `documents_failed`"
+        },
+        {
+          "id": "list-conversations",
+          "title": "list_conversations(status=None, page=1, page_size=50)",
+          "content": "Returns a paginated list of conversations, optionally filtered by status.\n\n```python\nconvs = await connector.list_conversations(status='open', page=1, page_size=25)\n```"
+        },
+        {
+          "id": "get-conversation",
+          "title": "get_conversation(conversation_id)",
+          "content": "Returns a single conversation by ID.\n\n```python\nconv = await connector.get_conversation('conv_abc123')\n```"
+        },
+        {
+          "id": "list-visitors",
+          "title": "list_visitors(page=1, page_size=50)",
+          "content": "Returns a paginated list of visitors.\n\n```python\nvisitors = await connector.list_visitors(page=1, page_size=50)\n```"
+        },
+        {
+          "id": "list-operators",
+          "title": "list_operators()",
+          "content": "Returns all operators in the Tidio project.\n\n```python\noperators = await connector.list_operators()\n```"
+        },
+        {
+          "id": "list-chatbots",
+          "title": "list_chatbots()",
+          "content": "Returns all chatbots in the Tidio project.\n\n```python\nbots = await connector.list_chatbots()\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-reference",
+      "title": "Error Reference",
+      "content": "| Exception | Trigger | Retried? |\n|-----------|---------|----------|\n| `TidioAuthError` | 401 / 403 response | Never |\n| `TidioRateLimitError` | 429 response | Yes (honours `retry_after`) |\n| `TidioNotFoundError` | 404 response | Yes |\n| `TidioNetworkError` | 5xx / connection error | Yes |\n| `TidioError` | Any other API error | Yes |"
+    }
+  ]
+}
