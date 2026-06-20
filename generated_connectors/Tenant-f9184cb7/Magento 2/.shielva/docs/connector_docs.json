@@ -1,0 +1,83 @@
+{
+  "title": "Magento 2 Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Magento 2** connector integrates Shielva with the [Magento 2 REST API](https://developer.adobe.com/commerce/webapi/rest/) to sync orders, products, customers, and categories from your Magento store into the Shielva knowledge base.\n\nMagento 2 (now Adobe Commerce) is a leading enterprise e-commerce platform. This connector targets the **REST API V1** and provides:\n- Full and incremental sync for orders, products, and customers\n- Offset-based pagination via Magento's `searchCriteria` model\n- Bearer token authentication via Magento Integration Access Tokens\n- Typed exception hierarchy with exponential-backoff retry logic\n- Stable SHA-256 document IDs for idempotent ingestion\n\n**Key capabilities:**\n- `sync()` — paginated sweep of orders + products + customers in one operation\n- `list_orders()` / `get_order()` — fetch orders with date filters\n- `list_products()` / `get_product()` — fetch products by SKU or page\n- `list_customers()` / `get_customer()` — fetch customers with date filters\n- `list_categories()` — full category tree in one call\n- `install()` / `health_check()` — credential validation via `/store/storeConfigs`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Magento 2 connector running in under 10 minutes.\n\n### 1. Create a Magento Integration\n\n1. Magento Admin → System → Extensions → Integrations\n2. Add New Integration → set name → API tab → grant Orders, Products, Customers, Stores read access\n3. Save → Activate → copy the **Access Token**\n\n### 2. Install the Connector\n\nIn the Shielva ACP → Integrations → Magento 2:\n- **Store URL**: `https://mystore.com` (with https://, no trailing slash)\n- **Integration Access Token**: the token from Step 1\n\n### 3. Run Your First Sync\n\n```python\nresult = await connector.sync(full=True)\nprint(f\"Synced {result.documents_synced} documents from {result.documents_found} records\")\n```\n\n### 4. Incremental Sync\n\n```python\nfrom datetime import datetime, timezone\nsince = datetime(2024, 6, 1, tzinfo=timezone.utc)\nresult = await connector.sync(full=False, since=since)\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Magento 2 connector uses **Integration Access Token** authentication — a static Bearer token generated when a Magento Integration is activated.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Store URL | `base_url` | string | Yes | Your Magento 2 store base URL, e.g. `https://mystore.com` |\n| Integration Access Token | `access_token` | password | Yes | Generated from Admin → System → Integrations |\n\n### How it works\n\nEvery request includes the token in the `Authorization` header:\n\n```\nAuthorization: Bearer {access_token}\n```\n\n### Obtaining the Token\n\n1. Magento Admin → System → Extensions → Integrations\n2. Add New Integration → configure API resource access\n3. Save → Activate → copy the Access Token (shown only once)\n\n> **Note:** The Access Token is shown only at activation time. Lose it and you must deactivate and reactivate the integration to generate a new one.\n\n### Security\n\n- Tokens are stored AES-256-GCM encrypted in the Shielva vault\n- Never logged or exposed in API responses\n- Scoped to only the resources you grant in the integration config"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"base_url\": \"https://mystore.com\",\n  \"access_token\": \"your_integration_access_token\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `PAGE_SIZE` | `100` | Records per page for sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |\n\n### API Base URL\n\n`{base_url}/rest/V1`\n\nThe connector uses the base_url exactly as provided (with https://). Do not include a trailing slash."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 public API methods across 4 resource domains plus the sync engine.",
+      "children": [
+        {
+          "id": "orders",
+          "title": "Orders",
+          "content": "Fetch order records from the Magento store.\n\n### `list_orders(page=1, page_size=100, created_after=None)`\nReturns orders for the given page.\n\n```python\n# Page 1 of orders (100 per page)\norders = await connector.list_orders()\n\n# Page 2\norders = await connector.list_orders(page=2)\n\n# Orders created after a date\norders = await connector.list_orders(created_after='2024-01-01 00:00:00')\n```\n\n**Magento endpoint:** `GET /rest/V1/orders?searchCriteria[pageSize]=100&searchCriteria[currentPage]=1`\n\n---\n\n### `get_order(order_id)`\nFetch a single order by entity_id.\n\n```python\norder = await connector.get_order(100000001)\n```\n\n**Magento endpoint:** `GET /rest/V1/orders/{id}`"
+        },
+        {
+          "id": "products",
+          "title": "Products",
+          "content": "Fetch product records from the Magento catalog.\n\n### `list_products(page=1, page_size=100, created_after=None)`\nReturns products for the given page.\n\n```python\n# All products, page 1\nproducts = await connector.list_products()\n\n# Products with page size 50\nproducts = await connector.list_products(page_size=50)\n```\n\n**Magento endpoint:** `GET /rest/V1/products?searchCriteria[pageSize]=100&searchCriteria[currentPage]=1`\n\n---\n\n### `get_product(sku)`\nFetch a single product by SKU.\n\n```python\nproduct = await connector.get_product('WIDGET-PRO-001')\n```\n\n**Magento endpoint:** `GET /rest/V1/products/{sku}`"
+        },
+        {
+          "id": "customers",
+          "title": "Customers",
+          "content": "Fetch customer records from the Magento store.\n\n### `list_customers(page=1, page_size=100, created_after=None)`\nReturns customers for the given page.\n\n```python\n# All customers, page 1\ncustomers = await connector.list_customers()\n\n# Customers created after a date\ncustomers = await connector.list_customers(created_after='2024-01-01 00:00:00')\n```\n\n**Magento endpoint:** `GET /rest/V1/customers/search?searchCriteria[pageSize]=100&searchCriteria[currentPage]=1`\n\n---\n\n### `get_customer(customer_id)`\nFetch a single customer by ID.\n\n```python\ncustomer = await connector.get_customer(5001)\n```\n\n**Magento endpoint:** `GET /rest/V1/customers/{id}`"
+        },
+        {
+          "id": "categories",
+          "title": "Categories",
+          "content": "Fetch the full Magento category tree.\n\n### `list_categories()`\nReturns the complete category tree in a single call (no pagination — Magento returns the full tree).\n\n```python\ntree = await connector.list_categories()\nprint(tree['name'])          # Root Catalog\nprint(tree['children_data']) # top-level categories\n```\n\n**Magento endpoint:** `GET /rest/V1/categories`\n\nThe returned structure is a recursive tree with `children_data` arrays at each node."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Incremental Ingestion",
+      "content": "The `sync()` method performs a full sweep of orders, products, and customers in sequence.\n\n### How sync works\n\n1. Fetches orders with offset pagination (page 1, 2, 3...) until `page * page_size >= total_count`\n2. Fetches products with the same pattern\n3. Fetches customers with the same pattern\n4. Each record is normalized to a `ConnectorDocument` with a stable SHA-256 source ID\n5. Documents are pushed to the knowledge base if `kb_id` is provided\n\n### Document IDs\n\nSource IDs are deterministic:\n- Orders: `SHA-256(str(entity_id))[:16]`\n- Products: `SHA-256(sku)[:16]`\n- Customers: `SHA-256(str(customer_id))[:16]`\n\nThis means re-syncing the same record produces the same document ID — safe for upsert operations.\n\n### Normalized document types\n\n| Resource | Title pattern | source_url pattern |\n|----------|---------------|--------------------|\n| Order | `Order #000000001: Jane Doe` | `{base_url}/admin/sales/order/view/order_id/{id}` |\n| Product | `Widget Pro (simple)` | `{base_url}/admin/catalog/product/edit/id/{id}` |\n| Customer | `Customer: Jane Doe` | `{base_url}/admin/customer/index/edit/id/{id}` |\n\n### Sync result\n\n```python\nresult = await connector.sync(full=True, kb_id='kb_abc123')\nprint(result.status)            # 'completed' or 'partial'\nprint(result.documents_found)   # total records fetched\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # normalization errors\n```\n\n### Partial failure behavior\n\n- If orders sync fails → `SyncStatus.FAILED` (products/customers not attempted)\n- If products sync fails → `SyncStatus.PARTIAL` (customers not attempted)\n- If customers sync fails → `SyncStatus.PARTIAL` (orders + products already synced)\n- Individual normalization errors increment `documents_failed` but don't stop the sync"
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Magento 2 uses **offset pagination** via `searchCriteria` query parameters.\n\n### How it works\n\n1. First request: `GET /orders?searchCriteria[pageSize]=100&searchCriteria[currentPage]=1`\n2. Response includes `total_count` and `items` array\n3. Stop when `page * page_size >= total_count`\n4. Next request: increment `currentPage` by 1\n\n### Example\n\n```\ntotal_count = 250\npage_size = 100\n\nPage 1: items[0..99]   → 1*100=100 < 250 → continue\nPage 2: items[100..199] → 2*100=200 < 250 → continue\nPage 3: items[200..249] → 3*100=300 >= 250 → stop\n```\n\n### searchCriteria example (with date filter)\n\n```\nGET /rest/V1/orders\n  ?searchCriteria[pageSize]=100\n  &searchCriteria[currentPage]=1\n  &searchCriteria[sortOrders][0][field]=created_at\n  &searchCriteria[sortOrders][0][direction]=DESC\n  &searchCriteria[filterGroups][0][filters][0][field]=created_at\n  &searchCriteria[filterGroups][0][filters][0][value]=2024-01-01T00:00:00\n  &searchCriteria[filterGroups][0][filters][0][conditionType]=gt\n```"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception Hierarchy\n\n```\nMagentoError (base)\n├── MagentoAuthError       — 401/403: invalid token or missing integration resource\n├── MagentoNetworkError    — 5xx / connection errors / timeouts\n├── MagentoRateLimitError  — 429: rate limit exceeded\n└── MagentoNotFoundError   — 404: resource not found\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `MagentoRateLimitError` (429) | Yes | Honour `Retry-After` header; fallback exponential |\n| `MagentoNetworkError` (5xx) | Yes | Exponential backoff, up to 3 attempts |\n| `MagentoAuthError` (401/403) | No | Immediate failure — fix credentials |\n| `MagentoNotFoundError` (404) | No | Immediate failure — check resource ID |"
+    },
+    {
+      "id": "data-models",
+      "title": "Data Models",
+      "content": "### `ConnectorDocument`\n\nAll normalized records become `ConnectorDocument` instances:\n\n```python\n@dataclass\nclass ConnectorDocument:\n    source_id: str       # SHA-256(id or sku)[:16] — stable, 16 hex chars\n    title: str           # Human-readable title\n    content: str         # Full text content for the knowledge base\n    connector_id: str    # Shielva connector instance ID\n    tenant_id: str       # Tenant scoping — always set from auth context\n    source_url: str      # Link back to Magento Admin for the record\n    metadata: dict       # Resource-specific structured fields\n```\n\n### Order metadata fields\n\n```json\n{\n  \"order_id\": 100000001,\n  \"increment_id\": \"000000001\",\n  \"status\": \"processing\",\n  \"grand_total\": 199.0,\n  \"customer_email\": \"jane.doe@example.com\",\n  \"items_count\": 3,\n  \"created_at\": \"2024-01-15 10:00:00\"\n}\n```\n\n### Product metadata fields\n\n```json\n{\n  \"sku\": \"WIDGET-PRO-001\",\n  \"type_id\": \"simple\",\n  \"status\": 1,\n  \"price\": 89.5,\n  \"visibility\": 4,\n  \"created_at\": \"2024-01-01 08:00:00\"\n}\n```\n\n### Customer metadata fields\n\n```json\n{\n  \"customer_id\": 5001,\n  \"email\": \"jane.doe@example.com\",\n  \"created_at\": \"2024-01-05 09:00:00\",\n  \"group_id\": 1\n}\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `health=OFFLINE` after install\n\n**Cause:** Incorrect base URL or access token.\n**Fix:** Verify the Store URL includes `https://` and has no trailing slash. Verify the token was copied from the Integration's activation dialog.\n\n---\n\n### `MagentoAuthError: 401`\n\n**Cause:** The access token is invalid or the integration was deactivated.\n**Fix:** In Magento Admin → System → Integrations, deactivate and reactivate the integration. Copy the new Access Token.\n\n---\n\n### `MagentoAuthError: 403`\n\n**Cause:** The token is valid but the integration lacks the required resource access.\n**Fix:** Edit the integration in Magento Admin, go to the API tab, enable the missing resources (Orders, Products, Customers, Stores), save, and reactivate.\n\n---\n\n### `MagentoRateLimitError: 429`\n\n**Cause:** Magento's rate limiting was hit (common on hosted/cloud environments).\n**Fix:** The connector retries automatically. For large catalogs, run sync during off-peak hours.\n\n---\n\n### Sync shows `documents_failed > 0`\n\n**Cause:** Individual records failed normalization (e.g. unexpected data shape).\n**Fix:** Check the connector logs. Failed records don't stop the sync — they increment `documents_failed` and the sync completes as `partial`.\n\n---\n\n### `ModuleNotFoundError` in tests\n\n**Fix:** Run tests from the connector root:\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/magento_connector\npytest tests/ -v\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 97 unit tests covering all methods, normalizers, exceptions, pagination, and retry logic.\n\n### Run Unit Tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/magento_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 97 passed\n```\n\nAll HTTP calls are mocked — no Magento store required.\n\n### Test Coverage\n\n- Class attributes (`CONNECTOR_TYPE`, `AUTH_TYPE`)\n- `__init__` — from kwargs, from config, config-overrides-kwargs\n- `install()` — success, missing base_url, missing access_token, missing both, invalid token, network error, creates client after success\n- `health_check()` — healthy, auth error, network error, missing credentials\n- `sync()` — empty, all objects, orders only, orders/products/customers pagination, orders/products/customers failure, with `since` param, normalize error increments failed, creates client if none, pagination stop condition\n- `list_orders()` — returns items, page/size args, created_after arg, empty\n- `get_order()` — success, 404 not found\n- `list_products()` — returns items, page args, empty\n- `get_product()` — success, 404 not found\n- `list_customers()` — returns items, page args, empty\n- `get_customer()` — success, 404 not found\n- `list_categories()` — tree, empty\n- `normalize_order()` — basic, SHA-256 ID, items in content, status, guest customer, source_url, entity_id, minimal\n- `normalize_product()` — basic, SHA-256 of SKU, sku in content, status enabled/disabled, no type_id, visibility label, minimal\n- `normalize_customer()` — basic, SHA-256 ID, email in content, email-only name, group in content, minimal\n- Exception hierarchy — all 5 types, inheritance, defaults\n- `with_retry()` — success, retry on error, auth bypass, exhaustion, rate limit\n- `_stable_id()` — determinism, different inputs, string vs int\n- Enum values, model defaults, lifecycle (`aclose`, context manager, `_ensure_client`)"
+    }
+  ]
+}
