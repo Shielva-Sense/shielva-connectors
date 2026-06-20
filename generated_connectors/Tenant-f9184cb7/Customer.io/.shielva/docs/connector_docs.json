@@ -1,0 +1,195 @@
+{
+  "title": "Customer.io Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Customer.io connector** integrates with Customer.io via the App API v1. It enables Shielva to sync customers, campaigns, and newsletters from your Customer.io workspace into the knowledge base.\n\nThis connector uses **App API Key** authentication — a Bearer token sent as `Authorization: Bearer {app_api_key}` on every request.\n\n**Key capabilities:**\n- Validate the API key via `GET /accounts` on install and health check\n- Sync all customers with cursor-based pagination (handles workspaces of any size)\n- Sync automated campaigns, newsletter sends, and segments\n- Stable document IDs via SHA-256('customer:' + id)[:16] for customers and SHA-256(id)[:16] for campaigns/newsletters\n- Automatic retry with exponential back-off for transient errors and rate limits\n- Circuit breaker (threshold: 5 failures, 60s recovery) for health degradation detection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`customerio` — registered in ACP as **Customer.io**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Customer.io (App API v1 — `https://api.customer.io/v1/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates app_api_key and calls GET /accounts; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Calls GET /accounts to verify key; returns workspace name in message |\n| `sync()` | Fetches all customers (cursor-paginated) + campaigns + newsletters; normalizes to ConnectorDocuments |\n| `list_customers(start, limit)` | Cursor-paginated POST /customers search |\n| `get_customer(customer_id)` | GET /customers/{customer_id} for a single customer |\n| `list_campaigns(page, limit)` | GET /campaigns — automated campaigns |\n| `get_campaign(campaign_id)` | GET /campaigns/{campaign_id} for a single campaign |\n| `list_newsletters(page, limit)` | GET /newsletters — one-off newsletter sends |\n| `list_segments(page, limit)` | GET /segments — audience segments |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **App API Key** authentication. The key is sent as `Authorization: Bearer {app_api_key}` on every request.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — create an App API key in Customer.io at Account Settings → API Credentials. Use the **App API key**, not the Track API key."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| App API Key | `app_api_key` | password | Yes | Customer.io App API key from Account Settings → API Credentials |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Key Validation",
+          "content": "The connector validates the key by calling `GET /accounts`. A 401/403 response returns INVALID_CREDENTIALS. Any 5xx or network error returns FAILED."
+        },
+        {
+          "id": "token-security",
+          "title": "Key Security",
+          "content": "App API keys can be revoked at any time from Customer.io → Account Settings → API Credentials. Shielva stores the key AES-256-GCM encrypted at rest via the vault."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `app_api_key` | Customer.io App API key |"
+        },
+        {
+          "id": "headers",
+          "title": "Request Headers",
+          "content": "Every request includes:\n```\nAuthorization: Bearer {app_api_key}\nContent-Type: application/json\nAccept: application/json\n```"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `CustomerIOHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the App API key and establishes the connector.\n\n**Steps:**\n1. Check `app_api_key` is non-empty → MISSING_CREDENTIALS if not.\n2. Call `GET /accounts` via `with_retry`.\n3. Extract `account.name` from response.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Customer.io — Acme Corp')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` — no key\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` — network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nPings `GET /accounts` and returns health with workspace name.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Customer.io — Acme Corp')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error (circuit breaker not open)\n- `HealthCheckResult(health=OFFLINE, auth_status=FAILED)` on network error (circuit breaker open)"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across three resource types:\n1. **Customers** — cursor-paginated via the `next` field in `POST /customers` responses, normalized via `normalize_customer()`\n2. **Campaigns** — page/limit pagination via `GET /campaigns`, normalized via `normalize_campaign()`\n3. **Newsletters** — page/limit pagination via `GET /newsletters`, normalized to ConnectorDocuments\n\nCampaign and newsletter failures are non-fatal — customer sync is the primary resource.\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some normalizations fail; `FAILED` when customer API call fails."
+        },
+        {
+          "id": "list-customers",
+          "title": "list_customers()",
+          "content": "**Signature:** `async def list_customers(self, start=None, limit=100) -> dict`\n\nSingle-page call to `POST /customers`. For multi-page iteration, call repeatedly with the cursor from the `next` field.\n\n**Parameters:**\n- `start` — opaque cursor string from previous page's `next` field\n- `limit` — records per page (default 100)\n\n**Returns:** Response with `customers` list and `next` cursor (or None)."
+        },
+        {
+          "id": "get-customer",
+          "title": "get_customer()",
+          "content": "**Signature:** `async def get_customer(self, customer_id: str) -> dict`\n\nFetches a single customer via `GET /customers/{customer_id}`.\n\n**Raises:** `CustomerIONotFoundError` if the customer does not exist."
+        },
+        {
+          "id": "list-campaigns",
+          "title": "list_campaigns()",
+          "content": "**Signature:** `async def list_campaigns(self, page=1, limit=50) -> dict`\n\nFetches automated campaigns via `GET /campaigns`.\n\n**Returns:** Response with `campaigns` list."
+        },
+        {
+          "id": "get-campaign",
+          "title": "get_campaign()",
+          "content": "**Signature:** `async def get_campaign(self, campaign_id) -> dict`\n\nFetches a single campaign via `GET /campaigns/{campaign_id}`."
+        },
+        {
+          "id": "list-newsletters",
+          "title": "list_newsletters()",
+          "content": "**Signature:** `async def list_newsletters(self, page=1, limit=50) -> dict`\n\nFetches newsletters via `GET /newsletters`.\n\n**Returns:** Response with `newsletters` list."
+        },
+        {
+          "id": "list-segments",
+          "title": "list_segments()",
+          "content": "**Signature:** `async def list_segments(self, page=1, limit=50) -> dict`\n\nFetches audience segments via `GET /segments`.\n\n**Returns:** Response with `segments` list."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `CustomerIOHTTPClient` (`client/http_client.py`) using `httpx.AsyncClient`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Customer.io API Call | Description |\n|--------|---------------------|-------------|\n| `get_account()` | `GET /accounts` | Validate key; returns account info |\n| `search_customers(start, limit)` | `POST /customers` | Customers with cursor pagination |\n| `get_customer(customer_id)` | `GET /customers/{id}` | Single customer |\n| `list_campaigns(page, limit)` | `GET /campaigns` | Automated campaigns |\n| `get_campaign(campaign_id)` | `GET /campaigns/{id}` | Single campaign |\n| `list_newsletters(page, limit)` | `GET /newsletters` | Newsletter sends |\n| `list_segments(page, limit)` | `GET /segments` | Audience segments |"
+        },
+        {
+          "id": "pagination",
+          "title": "Pagination",
+          "content": "Customer.io uses two pagination styles:\n\n**Cursor-based** (customers via POST /customers):\n```json\n{\n  \"customers\": [...],\n  \"next\": \"opaque_cursor_value\"\n}\n```\nThe connector passes `next` as `start` in the next request until `next` is null/absent.\n\n**Page-based** (campaigns, newsletters, segments):\n```\nGET /campaigns?page=1&limit=50\n```"
+        },
+        {
+          "id": "error-mapping",
+          "title": "Error Mapping",
+          "content": "HTTP status codes are mapped to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `CustomerIOAuthError` |\n| 403 | `CustomerIOAuthError` |\n| 404 | `CustomerIONotFoundError` |\n| 429 | `CustomerIORateLimitError` (with retry_after) |\n| Connection/timeout | `CustomerIONetworkError` |\n| 5xx | `CustomerIOServerError` |\n| Other 4xx | `CustomerIOError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` (configurable)\n- Back-off: base 1s × 2^attempt + random jitter (0–0.5s), capped at 30s\n- Skips retry on `CustomerIOAuthError` — re-installing with a valid key is required\n- For `CustomerIORateLimitError`: honours `Retry-After` header if > 0, otherwise uses back-off formula"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_customer()` and `normalize_campaign()` in `helpers/utils.py`, and `_normalize_newsletter()` in `connector.py`.",
+      "children": [
+        {
+          "id": "customer-document",
+          "title": "Customer ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('customer:' + customer_id)[:16]>\",\n  \"title\": \"Customer.io customer: Jane Doe <jane@example.com>\",\n  \"content\": \"Customer ID: cust_abc123\\nEmail: jane@example.com\\nName: Jane Doe\\nCreated at: 1704067200\\nplan: pro\",\n  \"source_url\": \"https://fly.customer.io/env/0/people/cust_abc123\",\n  \"metadata\": {\n    \"customer_id\": \"cust_abc123\",\n    \"email\": \"jane@example.com\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Doe\",\n    \"created_at\": 1704067200,\n    \"attributes\": {\"plan\": \"pro\"}\n  }\n}\n```"
+        },
+        {
+          "id": "campaign-document",
+          "title": "Campaign ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(campaign_id)[:16]>\",\n  \"title\": \"Customer.io campaign: Onboarding Series\",\n  \"content\": \"Campaign ID: 101\\nName: Onboarding Series\\nStatus: active\\nMessage type: email\\nTags: onboarding, automated\",\n  \"source_url\": \"https://fly.customer.io/env/0/campaigns/101\",\n  \"metadata\": {\n    \"campaign_id\": 101,\n    \"name\": \"Onboarding Series\",\n    \"status\": \"active\",\n    \"msg_type\": \"email\",\n    \"tags\": [\"onboarding\", \"automated\"]\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `source_id` field is computed as:\n- **Customers:** `SHA-256('customer:' + customer_id)[:16]` — the 'customer:' prefix ensures customer IDs don't collide with campaign/newsletter IDs in the document namespace.\n- **Campaigns/Newsletters:** `SHA-256(str(id))[:16]`\n\nThis is stable across syncs — the same Customer.io customer or campaign always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `CustomerIOError` (base) in `exceptions.py`:\n\n```\nCustomerIOError (base)\n├── CustomerIOAuthError           — 401, 403 responses\n│   └── CustomerIOInvalidKeyError — key format invalid\n├── CustomerIONetworkError        — connectivity failures, timeouts\n├── CustomerIORateLimitError      — 429 Too Many Requests (has retry_after attr)\n├── CustomerIONotFoundError       — 404 Not Found\n└── CustomerIOServerError         — 5xx responses\n```\n\nCallers can catch the base `CustomerIOError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `app_api_key is required` | No key provided | Enter the App API key in the install form |\n| `401 Unauthorized` | Invalid or revoked key | Regenerate the key in Customer.io → Account Settings → API Credentials |\n| `403 Forbidden` | Using Track API key | Use the **App** API key, not the Track API key |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| No customers returned | Empty workspace | Verify the workspace has customers and the key is correct |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (67 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/customerio_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 67 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
