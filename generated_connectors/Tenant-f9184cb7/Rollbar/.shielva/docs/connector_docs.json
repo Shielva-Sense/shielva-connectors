@@ -1,0 +1,77 @@
+{
+  "title": "Rollbar Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Rollbar connector syncs error monitoring data from [Rollbar](https://rollbar.com) into the Shielva knowledge base. It is designed for engineering and DevOps teams who want AI-powered analysis of errors, incidents, and deployment history.\n\n**What it syncs:**\n- **Items (Error Groups)** — grouped error records with level, status, environment, title, occurrence count, first/last seen timestamps, and assignee. Filterable by `level` and `status`.\n- **Occurrences** — raw individual error instances within items, including the full exception body, stack trace details, and request context\n- **Deploys** — deployment records showing what revision was deployed, when, to which environment, and by whom\n\n**Key capabilities:**\n- Access token passed as `?access_token=...` query parameter on every request (not a Bearer header)\n- Page-offset pagination with a conservative `SYNC_PAGE_LIMIT` of 5 pages per resource per sync run\n- Items support optional `level` and `status` filtering in `list_items()`\n- Deploys are non-fatal during sync — a deploy fetch failure is silently skipped\n- Typed exception hierarchy: `RollbarAuthError`, `RollbarRateLimitError`, `RollbarNotFoundError`, `RollbarNetworkError`\n- Direct item lookup via `get_item(item_id)` for single-record retrieval"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Get your Rollbar Project Access Token\n\n1. Log in to [Rollbar](https://rollbar.com).\n2. Navigate to your project's **Settings → Access Tokens**.\n3. Find or create a token with **read** scope. Copy the token value.\n4. Optionally, copy an **Account Access Token** from your account settings for account-level operations.\n\n### 2. Install the connector\n\nProvide the following fields during installation:\n\n| Field | Example value |\n|-------|---------------|\n| `access_token` | `abc123def456...` (project read token) |\n| `account_access_token` | `xyz789...` (optional) |\n\nThe connector calls `GET /api/1/project/` with the `access_token` to validate and identify the project. On success it returns `ConnectorHealth.HEALTHY` and shows the project name.\n\n### 3. Run your first sync\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rollbar-01\",\n        config={\"access_token\": \"abc123def456\"},\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(result.status, result.documents_synced, result.documents_found)\n\nasyncio.run(main())\n```\n\nThe sync fetches items first (up to 5 pages, fatal if they fail), then deploys (up to 5 pages, non-fatal if they fail)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` — query parameter\n\nRollbar authenticates API requests via a query parameter (not a header):\n\n```\nGET https://api.rollbar.com/api/1/items/?access_token={token}&page=1\n```\n\nThe token is appended as `?access_token={access_token}` to every request URL. The connector never sends credentials as an `Authorization` header.\n\n**Base URL:** `https://api.rollbar.com`\n\n**Health check endpoint:** `GET /api/1/project/`\n\nThis endpoint returns the project name and ID. It is used in both `install()` and `health_check()`.\n\n**Token types:**\n\n| Token | Field | Scope | Purpose |\n|-------|-------|-------|---------|\n| Project Access Token (read) | `access_token` | Read | Required. Used for all item, occurrence, deploy, and project reads. |\n| Account Access Token | `account_access_token` | Account-level | Optional. For account-wide operations outside this connector's current scope. |\n\n**Where to find your token:**\nRollbar → Your Project → **Settings → Access Tokens** → find or create a read token."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `access_token` | password | Yes | Your Rollbar project-level **read** access token. Found at **Project Settings → Access Tokens**. Passed as `?access_token=` query parameter on every request. |\n| `account_access_token` | password | No | Optional account-level access token for account-wide operations. Not currently used in sync or health check flows. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `RollbarConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates the `access_token` by calling `GET /api/1/project/`. Returns the project name in the success message.\n\n**Returns:** `InstallResult`\n\n| Field | Value on success | Value on failure |\n|-------|-----------------|------------------|\n| `health` | `ConnectorHealth.HEALTHY` | `ConnectorHealth.OFFLINE` |\n| `auth_status` | `AuthStatus.CONNECTED` | `AuthStatus.MISSING_CREDENTIALS` or `AuthStatus.INVALID_CREDENTIALS` or `AuthStatus.FAILED` |\n| `connector_id` | Set from `self.connector_id` | Not set |\n| `message` | `\"Connected to Rollbar project: {project_name}\"` | Error description |\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rollbar-01\",\n        config={\"access_token\": \"abc123\"},\n    )\n    result = await connector.install()\n    print(result.health, result.message)\n    # ConnectorHealth.HEALTHY \"Connected to Rollbar project: my-app\"\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /api/1/project/` and returns current health. Includes the project name in the success message.\n\n**Returns:** `HealthCheckResult`\n\n| Scenario | `health` | `auth_status` |\n|----------|----------|---------------|\n| API reachable, token valid | `HEALTHY` | `CONNECTED` |\n| Token missing | `OFFLINE` | `MISSING_CREDENTIALS` |\n| 401 or 403 from Rollbar | `DEGRADED` | `INVALID_CREDENTIALS` |\n| Network timeout or 5xx | `DEGRADED` | `FAILED` |\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(config={\"access_token\": \"abc123\"})\n    result = await connector.health_check()\n    print(result.health)   # ConnectorHealth.HEALTHY\n    print(result.message)  # \"Rollbar API reachable. Project: my-app\"\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs error items and deploys. Items are fetched first (up to `SYNC_PAGE_LIMIT=5` pages, fatal on failure). Deploys are fetched second (up to 5 pages, non-fatal — a failure is silently ignored).\n\n**Signature:**\n```python\nasync def sync(self, kb_id: str = \"\", **kwargs) -> SyncResult\n```\n\n**Parameters:**\n- `kb_id` (`str`, default `\"\"`) — knowledge base ID; if empty, documents are normalized but not ingested\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (zero failures), `PARTIAL` (some normalization failures), or `FAILED` (item fetch failed) |\n| `documents_found` | int | Total records fetched |\n| `documents_synced` | int | Records successfully ingested |\n| `documents_failed` | int | Records that raised during normalization |\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rollbar-01\",\n        config={\"access_token\": \"abc123\"},\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(f\"{result.status}: {result.documents_synced}/{result.documents_found}\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-items",
+          "title": "list_items()",
+          "content": "Fetches Rollbar error items (grouped errors) up to `SYNC_PAGE_LIMIT` (5) pages. Supports optional filtering by `level` and `status`.\n\n**Signature:**\n```python\nasync def list_items(self, level: str | None = None, status: str | None = None) -> list[ConnectorDocument]\n```\n\n**Parameters:**\n- `level` — Rollbar error level filter: `\"critical\"`, `\"error\"`, `\"warning\"`, `\"info\"`, `\"debug\"`\n- `status` — Rollbar item status filter: `\"active\"`, `\"resolved\"`, `\"muted\"`, `\"archived\"`\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(config={\"access_token\": \"abc123\"})\n    # Fetch only active critical errors\n    items = await connector.list_items(level=\"critical\", status=\"active\")\n    print(f\"Found {len(items)} critical active items\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-occurrences",
+          "title": "list_occurrences()",
+          "content": "Fetches raw Rollbar error occurrences (individual instances) up to `SYNC_PAGE_LIMIT` (5) pages.\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(config={\"access_token\": \"abc123\"})\n    occurrences = await connector.list_occurrences()\n    print(f\"Found {len(occurrences)} occurrences\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-deploys",
+          "title": "list_deploys()",
+          "content": "Fetches Rollbar deploy records up to `SYNC_PAGE_LIMIT` (5) pages.\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(config={\"access_token\": \"abc123\"})\n    deploys = await connector.list_deploys()\n    print(f\"Found {len(deploys)} deploy records\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-get-item",
+          "title": "get_item()",
+          "content": "Fetches a single raw Rollbar item by its numeric or string ID. Returns the raw Rollbar API response (not a normalized `ConnectorDocument`).\n\n**Signature:**\n```python\nasync def get_item(self, item_id: int | str) -> dict[str, Any]\n```\n\n**Returns:** `dict[str, Any]` — raw Rollbar item response\n\n```python\nimport asyncio\nfrom connector import RollbarConnector\n\nasync def main():\n    connector = RollbarConnector(config={\"access_token\": \"abc123\"})\n    item = await connector.get_item(42)\n    print(item.get(\"result\", {}).get(\"title\"))\n\nasyncio.run(main())\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions inherit from `RollbarError`. The HTTP client maps Rollbar HTTP status codes to typed subclasses.\n\n| Exception class | HTTP status | When raised | Effect in connector |\n|-----------------|------------|-------------|---------------------|\n| `RollbarAuthError` | 401, 403 | Invalid or expired access token, or token lacks read scope | `install()` / `health_check()` → `OFFLINE`/`DEGRADED` with `INVALID_CREDENTIALS`. Sync → `FAILED` for items section. Not retried. |\n| `RollbarRateLimitError` | 429 | Too many requests | Carries `retry_after` seconds. `with_retry` backs off automatically. |\n| `RollbarNotFoundError` | 404 | Specific resource not found (e.g. `get_item` with invalid ID) | Raised by HTTP client; carries `resource` and `resource_id`. |\n| `RollbarNetworkError` | 5xx, timeout, connection error | Rollbar server error or network failure | `health_check()` → `DEGRADED`. Retried by `with_retry`. |\n| `RollbarError` | Other 4xx | Unexpected client errors | Base class; carries `status_code` and `code` attributes. |\n\n**Sync failure semantics:**\n- Items section raises `RollbarError` → returns `SyncStatus.FAILED` immediately with full counts\n- Deploys section raises `RollbarError` → silently passes (non-fatal); sync continues to produce `COMPLETED` or `PARTIAL`\n- Individual record normalization raises → increments `documents_failed`; other records continue\n\n**Page limit:** `SYNC_PAGE_LIMIT = 5` means at most 5 pages per resource type per sync run. Rollbar does not expose a total count — the connector stops at 5 pages or when a page returns no records."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### install() returns `AuthStatus.MISSING_CREDENTIALS`\n\n**Cause:** `access_token` is empty or not provided.\n**Fix:** Provide the project read access token from **Rollbar → Settings → Access Tokens**.\n\n### install() returns `AuthStatus.INVALID_CREDENTIALS`\n\n**Cause:** Rollbar returned 401 or 403 for `GET /api/1/project/`.\n**Fix:**\n1. Confirm you are using a **project-level** read token, not an account token (account tokens use a different namespace).\n2. Check that the token has not been deleted or expired in **Project Settings → Access Tokens**.\n3. Ensure the token's scope includes **read** access.\n\n### sync() returns `SyncStatus.FAILED`\n\n**Cause:** The items fetch (`GET /api/1/items/`) raised a `RollbarError`.\n**Fix:** Inspect `result.message`. Most common causes: invalid token (`RollbarAuthError`), transient 5xx (`RollbarNetworkError`). Run `health_check()` first to confirm connectivity.\n\n### Only 5 pages synced but there are more items\n\n**Cause:** `SYNC_PAGE_LIMIT = 5` caps the number of pages per resource at 5 per sync run. This is intentional — Rollbar does not provide a total count and large projects can have thousands of pages.\n**Fix:** This is by design for the first release. For projects with very large error histories, consider using `list_items(status=\"active\")` to filter to only active items during custom syncs.\n\n### Deploys return zero results\n\n**Cause:** No deploys have been reported to Rollbar for the project, or the access token belongs to a different project.\n**Fix:** Verify deploys exist in the Rollbar UI under **Deploys**. Confirm the `access_token` is from the correct project.\n\n### health_check() returns `ConnectorHealth.DEGRADED`\n\n**Cause:** `RollbarNetworkError` — a 5xx response or connection failure to `api.rollbar.com`.\n**Fix:** Retry after a few minutes. Check [Rollbar's status page](https://status.rollbar.com) for active incidents."
+    }
+  ]
+}
