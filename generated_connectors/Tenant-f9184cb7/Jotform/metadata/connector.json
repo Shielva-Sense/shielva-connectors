@@ -1,0 +1,28 @@
+{
+  "connector_type": "jotform",
+  "name": "Jotform",
+  "display_name": "Jotform",
+  "description": "Connect to Jotform to sync form definitions and submissions into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Jotform API Key. Find it at https://www.jotform.com/myaccount/api."
+    }
+  ],
+  "capabilities": [
+    "list_forms",
+    "get_form",
+    "list_form_questions",
+    "list_submissions",
+    "list_all_submissions",
+    "sync"
+  ],
+  "provider": "Jotform",
+  "service": "Jotform",
+  "category": "forms"
+}
