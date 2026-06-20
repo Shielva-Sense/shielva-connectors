@@ -1,299 +1,172 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import aiohttp
 
 from exceptions import (
     NewRelicAuthError,
-    NewRelicError,
     NewRelicNetworkError,
     NewRelicNotFoundError,
     NewRelicRateLimitError,
 )
 
-DEFAULT_REGION = "US"
-DEFAULT_TIMEOUT_S = 30.0
+_US_BASE_URL = "https://api.newrelic.com/v2"
+_EU_BASE_URL = "https://api.eu.newrelic.com/v2"
+_GRAPHQL_URL = "https://api.newrelic.com/graphql"
 
-# REST API base URLs
-REST_BASE_US = "https://api.newrelic.com/v2/"
-REST_BASE_EU = "https://api.eu.newrelic.com/v2/"
-
-# NerdGraph (GraphQL) endpoints
-NERDGRAPH_US = "https://api.newrelic.com/graphql"
-NERDGRAPH_EU = "https://api.eu.newrelic.com/graphql"
+_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 class NewRelicHTTPClient:
-    """Low-level async HTTP client for the New Relic REST API v2 and NerdGraph.
+    """
+    Async HTTP client for the New Relic REST v2 API and NerdGraph GraphQL API.
 
-    Sends both ``Api-Key`` and ``X-Api-Key`` headers on every request so that
-    endpoints using either convention are satisfied.
-
-    REST base URL:
-      US: https://api.newrelic.com/v2/
-      EU: https://api.eu.newrelic.com/v2/
-
-    NerdGraph:
-      US: https://api.newrelic.com/graphql
-      EU: https://api.eu.newrelic.com/graphql
+    Auth: ``Api-Key: {api_key}`` header (User API Key or License Ingest Key).
+    Region: ``"US"`` (default) or ``"EU"``.
     """
 
-    def __init__(
-        self,
-        config: dict[str, Any] | None = None,
-        timeout: float = DEFAULT_TIMEOUT_S,
-    ) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         self._api_key: str = cfg.get("api_key", "")
-        self._account_id: str = str(cfg.get("account_id", ""))
-        region_raw: str = cfg.get("region", DEFAULT_REGION) or DEFAULT_REGION
-        self._region: str = region_raw.upper()
-
-        if self._region == "EU":
-            self._rest_base: str = REST_BASE_EU
-            self._nerdgraph_url: str = NERDGRAPH_EU
-        else:
-            self._rest_base = REST_BASE_US
-            self._nerdgraph_url = NERDGRAPH_US
-
-        self._timeout = aiohttp.ClientTimeout(total=timeout)
+        region = str(cfg.get("region", "US")).upper()
+        self._base_url: str = _EU_BASE_URL if region == "EU" else _US_BASE_URL
         self._session: aiohttp.ClientSession | None = None
+
+    # ------------------------------------------------------------------
+    # Session lifecycle
+    # ------------------------------------------------------------------
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            headers = {
+                "Api-Key": self._api_key,
+                "Content-Type": "application/json",
+            }
             self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    # Both header conventions — REST v2 uses X-Api-Key, NerdGraph uses Api-Key
-                    "Api-Key": self._api_key,
-                    "X-Api-Key": self._api_key,
-                },
+                headers=headers,
+                timeout=_DEFAULT_TIMEOUT,
             )
         return self._session
 
-    def _raise_for_status(self, status: int, body: dict[str, Any]) -> None:
-        """Map non-2xx HTTP status codes to typed NewRelicError subclasses."""
-        err_msg = body.get("error", body.get("message", f"New Relic error {status}"))
-        if isinstance(err_msg, dict):
-            err_msg = err_msg.get("title", str(err_msg))
-        errors_list = body.get("errors", [])
-        if errors_list and isinstance(errors_list, list):
-            err_msg = "; ".join(
-                e.get("message", str(e)) if isinstance(e, dict) else str(e)
-                for e in errors_list
-            )
-        err_msg = str(err_msg)
+    async def close(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
 
-        if status in (401, 403):
+    # ------------------------------------------------------------------
+    # Error handling
+    # ------------------------------------------------------------------
+
+    async def _raise_for_status(self, response: aiohttp.ClientResponse) -> None:
+        if response.status == 200:
+            return
+        if response.status in (401, 403):
             raise NewRelicAuthError(
-                f"Authentication failed: {err_msg}", status_code=status, code="auth_error"
+                f"Authentication failed: HTTP {response.status}",
+                status_code=response.status,
+                code="auth_error",
             )
-        if status == 404:
-            raise NewRelicNotFoundError("resource", "unknown")
-        if status == 429:
-            raise NewRelicRateLimitError(f"Rate limited: {err_msg}")
-        if status >= 500:
+        if response.status == 404:
+            raise NewRelicNotFoundError()
+        if response.status == 429:
+            retry_after = float(response.headers.get("Retry-After", 0))
+            raise NewRelicRateLimitError(
+                "New Relic rate limit exceeded", retry_after=retry_after
+            )
+        if response.status >= 500:
             raise NewRelicNetworkError(
-                f"New Relic server error {status}: {err_msg}", status_code=status
+                f"New Relic server error: HTTP {response.status}",
+                status_code=response.status,
+                code="server_error",
             )
-        raise NewRelicError(f"New Relic error {status}: {err_msg}", status_code=status)
 
-    async def _request(
-        self,
-        method: str,
-        url: str,
-        *,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> Any:
-        """Make an authenticated request to New Relic.
+    # ------------------------------------------------------------------
+    # REST v2 helpers
+    # ------------------------------------------------------------------
 
-        Returns parsed JSON. Raises typed NewRelicError subclasses on non-2xx responses.
-        """
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         session = self._get_session()
-        try:
-            async with session.request(method, url, params=params, json=json) as response:
-                if response.status in (200, 201, 202, 204):
-                    if response.status == 204 or response.content_length == 0:
-                        return {}
-                    return await response.json(content_type=None)
+        url = f"{self._base_url}/{path.lstrip('/')}"
+        async with session.get(url, params=params) as resp:
+            await self._raise_for_status(resp)
+            return await resp.json()
 
-                body: dict[str, Any] = {}
-                try:
-                    body = await response.json(content_type=None)
-                except Exception:
-                    try:
-                        text = await response.text()
-                        body = {"message": text}
-                    except Exception:
-                        pass
+    # ------------------------------------------------------------------
+    # Public endpoints
+    # ------------------------------------------------------------------
 
-                self._raise_for_status(response.status, body)
-        except (aiohttp.ServerTimeoutError, aiohttp.ServerConnectionError) as exc:
-            raise NewRelicNetworkError(f"Request timed out: {exc}") from exc
-        except aiohttp.ClientConnectionError as exc:
-            raise NewRelicNetworkError(f"Network error: {exc}") from exc
-        except (NewRelicError, NewRelicNetworkError):
-            raise
-        except Exception as exc:
-            raise NewRelicNetworkError(f"Unexpected network error: {exc}") from exc
+    async def get_user(self) -> dict[str, Any]:
+        """Health-check call — fetches the first user for the account."""
+        data = await self._get("/users.json", params={"filter[email]": "me"})
+        users = data.get("users", [])
+        return users[0] if users else data
 
-    # ── Authentication / Health ───────────────────────────────────────────────
+    async def list_alerts_policies(
+        self, page: int | None = None
+    ) -> dict[str, Any]:
+        """GET /alerts_policies.json with optional page param."""
+        params: dict[str, Any] = {}
+        if page is not None:
+            params["page"] = page
+        return await self._get("/alerts_policies.json", params=params or None)
 
-    async def validate_api_key(self) -> dict[str, Any]:
-        """GET /v2/applications.json?filter[ids]=1 — quick validation of the API key.
+    async def list_alerts_conditions(self, policy_id: int | str) -> dict[str, Any]:
+        """GET /alerts_conditions.json?policy_id={id}"""
+        return await self._get(
+            "/alerts_conditions.json", params={"policy_id": str(policy_id)}
+        )
 
-        Returns:
-            The applications JSON envelope (even if no apps exist, a 200 means auth is valid).
-        """
-        url = f"{self._rest_base}applications.json"
-        return await self._request("GET", url, params={"filter[ids]": "1"})
+    async def list_applications(
+        self, page: int | None = None
+    ) -> dict[str, Any]:
+        """GET /applications.json with optional page param."""
+        params: dict[str, Any] = {}
+        if page is not None:
+            params["page"] = page
+        return await self._get("/applications.json", params=params or None)
 
-    # ── Alert Policies ────────────────────────────────────────────────────────
+    async def list_incidents(
+        self, page: int | None = None
+    ) -> dict[str, Any]:
+        """GET /alerts_incidents.json with optional page param."""
+        params: dict[str, Any] = {}
+        if page is not None:
+            params["page"] = page
+        return await self._get("/alerts_incidents.json", params=params or None)
 
-    async def get_alert_policies(self, page: int = 1) -> dict[str, Any]:
-        """GET /v2/alerts_policies.json — list alert policies.
-
-        Args:
-            page: Page number (1-indexed).
-
-        Returns:
-            Dict with 'policies' list and pagination metadata.
-        """
-        url = f"{self._rest_base}alerts_policies.json"
-        result = await self._request("GET", url, params={"page": page})
-        return result if isinstance(result, dict) else {}
-
-    async def get_alert_conditions(self, policy_id: int) -> dict[str, Any]:
-        """GET /v2/alerts_conditions.json?policy_id={policy_id} — list conditions for a policy.
-
-        Args:
-            policy_id: The alert policy ID to fetch conditions for.
-
-        Returns:
-            Dict with 'conditions' list.
-        """
-        url = f"{self._rest_base}alerts_conditions.json"
-        result = await self._request("GET", url, params={"policy_id": policy_id})
-        return result if isinstance(result, dict) else {}
-
-    # ── Applications ──────────────────────────────────────────────────────────
-
-    async def get_applications(self, page: int = 1) -> dict[str, Any]:
-        """GET /v2/applications.json — list APM applications.
-
-        Args:
-            page: Page number (1-indexed).
-
-        Returns:
-            Dict with 'applications' list and pagination metadata.
-        """
-        url = f"{self._rest_base}applications.json"
-        result = await self._request("GET", url, params={"page": page})
-        return result if isinstance(result, dict) else {}
-
-    # ── Incidents (NerdGraph) ──────────────────────────────────────────────────
-
-    async def get_incidents(self) -> dict[str, Any]:
-        """Query recent alert incidents via NerdGraph.
-
-        Uses a NerdGraph NRQL-based query scoped to the configured account_id.
-
-        Returns:
-            NerdGraph response dict with 'data' key.
-        """
-        query = """
-        query($accountId: Int!) {
-          actor {
-            account(id: $accountId) {
-              alerts {
-                incidents(cursor: null) {
-                  incidents {
-                    incidentId
-                    title
-                    state
-                    priority
-                    createdAt
-                    closedAt
-                    duration
-                  }
-                  nextCursor
-                }
-              }
-            }
-          }
-        }
-        """
-        variables: dict[str, Any] = {"accountId": int(self._account_id) if self._account_id else 0}
-        return await self.run_nerdgraph(query, variables)
-
-    # ── Dashboards (NerdGraph) ────────────────────────────────────────────────
-
-    async def get_dashboards(self) -> dict[str, Any]:
-        """Query dashboards via NerdGraph.
-
-        Returns:
-            NerdGraph response dict with 'data' key.
-        """
-        query = """
-        query($accountId: Int!) {
-          actor {
-            entitySearch(query: "accountId = $accountId AND type = 'DASHBOARD'") {
-              results {
-                entities {
-                  guid
-                  name
-                  accountId
-                  ... on DashboardEntityOutline {
-                    guid
-                    name
-                    createdAt
-                    updatedAt
-                    permissions
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-        variables: dict[str, Any] = {"accountId": int(self._account_id) if self._account_id else 0}
-        return await self.run_nerdgraph(query, variables)
-
-    # ── NerdGraph ─────────────────────────────────────────────────────────────
-
-    async def run_nerdgraph(
+    async def graphql_query(
         self,
         query: str,
         variables: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST to New Relic NerdGraph (GraphQL) endpoint.
-
-        Args:
-            query:     GraphQL query or mutation string.
-            variables: Optional variables dict to pass with the query.
-
-        Returns:
-            Full NerdGraph JSON response (includes 'data' and possibly 'errors').
-        """
+        """POST a NerdGraph GraphQL query to the NerdGraph endpoint."""
+        session = self._get_session()
         payload: dict[str, Any] = {"query": query}
         if variables:
             payload["variables"] = variables
-        result = await self._request("POST", self._nerdgraph_url, json=payload)
-        return result if isinstance(result, dict) else {}
+        async with session.post(_GRAPHQL_URL, json=payload) as resp:
+            await self._raise_for_status(resp)
+            return await resp.json()
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    # ------------------------------------------------------------------
+    # Pagination helper — follows next_url
+    # ------------------------------------------------------------------
 
-    async def aclose(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+    async def paginate(self, first_response: dict[str, Any], key: str) -> list[Any]:
+        """
+        Collect all items across pages for a given top-level key.
+        Follows ``next_url`` links in the response.
+        """
+        session = self._get_session()
+        items: list[Any] = list(first_response.get(key, []))
+        next_url: str | None = first_response.get("next_url")
 
-    async def __aenter__(self) -> NewRelicHTTPClient:
-        return self
+        while next_url:
+            async with session.get(next_url) as resp:
+                await self._raise_for_status(resp)
+                data = await resp.json()
+            items.extend(data.get(key, []))
+            next_url = data.get("next_url")
 
-    async def __aexit__(self, *args: object) -> None:
-        await self.aclose()
+        return items
