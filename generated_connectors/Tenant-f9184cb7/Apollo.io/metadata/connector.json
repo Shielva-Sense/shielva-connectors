@@ -1,0 +1,98 @@
+{
+  "connector_type": "apollo",
+  "connector_id": "apollo",
+  "name": "Apollo.io",
+  "provider": "Apollo",
+  "service": "Apollo.io",
+  "version": "1.0.0",
+  "description": "Sync Apollo.io people, contacts, accounts, and sequences into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Apollo.io API key",
+      "help": "From Apollo.io → Settings → Integrations → API → API Key."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate API key by calling POST /v1/auth/health.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping POST /v1/auth/health and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Apollo.io contacts and accounts into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "Paginated list of people from the Apollo database.",
+      "category": "people",
+      "endpoint": "POST /v1/mixed_people/search"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of CRM contacts.",
+      "category": "contacts",
+      "endpoint": "POST /v1/contacts/search"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Retrieve a single contact by ID.",
+      "category": "contacts",
+      "endpoint": "GET /v1/contacts/:id"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Paginated list of CRM accounts (companies).",
+      "category": "accounts",
+      "endpoint": "POST /v1/accounts/search"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "Retrieve a single account by ID.",
+      "category": "accounts",
+      "endpoint": "GET /v1/accounts/:id"
+    },
+    {
+      "id": "list_sequences",
+      "name": "List Sequences",
+      "description": "List email sequences (campaigns).",
+      "category": "sequences",
+      "endpoint": "GET /v1/emailer_campaigns"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "people",
+    "contacts",
+    "accounts",
+    "sequences"
+  ]
+}
