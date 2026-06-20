@@ -1,0 +1,93 @@
+{
+  "title": "Trello Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Trello** connector integrates Shielva with the [Trello REST API v1](https://developer.atlassian.com/cloud/trello/rest/) (base URL: `https://api.trello.com/1/`) to sync boards and cards from your Trello account into your Shielva knowledge base.\n\nTrello is a Kanban-style project management tool by Atlassian, used by teams worldwide to organise work on boards, lists, and cards.\n\n**Key capabilities:**\n- Sync all open boards and their cards in a single `sync()` call\n- Boards normalized with `type='board'`, cards with `type='card'` — both with `source='trello'`\n- Stable 16-character document IDs: `sha256('board:' + board_id)[:16]` and `sha256('card:' + card_id)[:16]`\n- Direct access to board lists, members, and labels via dedicated methods\n- API key + token query-parameter authentication — no Authorization header\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid or revoked credentials"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Trello connector running in under 5 minutes.\n\n### 1. Obtain your API Key and Token\n\n1. Visit [https://trello.com/app-key](https://trello.com/app-key) while logged in.\n2. Copy your **API Key** (32 characters) from the top of the page.\n3. Click the **Token** link, click **Allow**, and copy the 64-character token.\n\n### 2. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Trello**.\n2. Paste your **API Key** and **Token** into the respective fields.\n3. Click **Install**.\n\nThe connector calls `GET /members/me` to validate credentials and returns the connected user's username on success.\n\n### 3. Run a sync\n\n```python\nasync with TrelloConnector(config={\"api_key\": \"YOUR_KEY\", \"token\": \"YOUR_TOKEN\"}) as conn:\n    result = await conn.sync(kb_id=\"kb_trello_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Trello connector uses **query-parameter authentication** — credentials are appended to every URL, not sent in an Authorization header.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | string | Yes | 32-character key from trello.com/app-key |\n| Token | `token` | password | Yes | 64-character OAuth token from trello.com/app-key |\n\n### How it works\n\nEvery HTTP request appends:\n\n```\n?key={api_key}&token={token}\n```\n\nThe `TrelloHTTPClient._auth_params()` method returns this dict, which is merged into every request via `_merge_params()`. **No Authorization header is set.**\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /members/me`. A `401` or `403` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network failure sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged.\n- Tokens can be revoked at any time from [https://trello.com/your-profile/account](https://trello.com/your-profile/account) under **Applications**."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Trello connector requires two install fields.\n\n```json\n{\n  \"api_key\": \"your_32_char_api_key\",\n  \"token\": \"your_64_char_oauth_token\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_ATTEMPTS` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |\n| `board filter` | `open` | Syncs open boards only |\n| `card filter` | `open` | Syncs open cards only (via path: `/cards/open`) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 API methods across 5 resource domains.",
+      "children": [
+        {
+          "id": "get_member",
+          "title": "get_member(member_id='me')",
+          "content": "Fetch a Trello member by ID. Defaults to the authenticated user.\n\n**Endpoint:** `GET /members/{member_id}?fields=id,username,fullName,email&key=...&token=...`\n\n**Returns:** `dict` with keys `id`, `username`, `fullName`, `email`.\n\n**Used by:** `install()`, `health_check()`."
+        },
+        {
+          "id": "list_boards",
+          "title": "list_boards(filter='open')",
+          "content": "List all boards for the authenticated member.\n\n**Endpoint:** `GET /members/me/boards?filter={filter}&fields=id,name,desc,closed,dateLastActivity,prefs&key=...&token=...`\n\n**Returns:** `list[dict]`. Each dict has `id`, `name`, `desc`, `closed`, `dateLastActivity`, `prefs`.\n\nNote: Trello returns all boards in a single response — no pagination."
+        },
+        {
+          "id": "get_board",
+          "title": "get_board(board_id, fields='id,name,desc,closed')",
+          "content": "Fetch a single Trello board by ID.\n\n**Endpoint:** `GET /boards/{board_id}?fields={fields}&key=...&token=...`\n\n**Returns:** `dict` with the requested fields."
+        },
+        {
+          "id": "list_board_lists",
+          "title": "list_board_lists(board_id, filter='open')",
+          "content": "Fetch all lists (columns) on a board.\n\n**Endpoint:** `GET /boards/{board_id}/lists?filter={filter}&fields=id,name,closed,pos&key=...&token=...`\n\n**Returns:** `list[dict]`. Each dict has `id`, `name`, `closed`, `pos`."
+        },
+        {
+          "id": "list_board_cards",
+          "title": "list_board_cards(board_id, filter='open')",
+          "content": "Fetch all cards on a board.\n\n**Endpoint:** `GET /boards/{board_id}/cards/{filter}?fields=id,name,idList,desc,due,labels,members&key=...&token=...`\n\n**Returns:** `list[dict]`. Each dict has `id`, `name`, `idList`, `desc`, `due`, `labels`, `members`.\n\nNote: `filter` is a path segment (e.g., `/cards/open`, `/cards/all`), not a query parameter."
+        },
+        {
+          "id": "get_card",
+          "title": "get_card(card_id)",
+          "content": "Fetch a single Trello card by ID with all fields.\n\n**Endpoint:** `GET /cards/{card_id}?fields=all&key=...&token=...`\n\n**Returns:** `dict` with all card fields."
+        },
+        {
+          "id": "list_board_members",
+          "title": "list_board_members(board_id)",
+          "content": "Fetch all members of a board.\n\n**Endpoint:** `GET /boards/{board_id}/members?fields=id,username,fullName&key=...&token=...`\n\n**Returns:** `list[dict]`. Each dict has `id`, `username`, `fullName`."
+        },
+        {
+          "id": "list_board_labels",
+          "title": "list_board_labels(board_id)",
+          "content": "Fetch all labels defined on a board.\n\n**Endpoint:** `GET /boards/{board_id}/labels&key=...&token=...`\n\n**Returns:** `list[dict]`. Each dict has `id`, `name`, `color`, `idBoard`."
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Document Normalizers",
+      "content": "The connector produces two document types.\n\n### normalize_card(card, board_id)\n\nConverts a raw Trello card into a `ConnectorDocument`:\n- `id = sha256('card:' + card['id'])[:16]`\n- `source = 'trello'`\n- `type = 'card'`\n- `title = card['name']`\n- `content` — multiline string with name, description, list ID, board ID, due date, closed status, labels, members, and URL\n- `source_url = card['url']`\n- `metadata` — `card_id`, `board_id`, `list_id`, `due`, `closed`, `labels`, `member_names`\n\n### normalize_board(board)\n\nConverts a raw Trello board into a `ConnectorDocument`:\n- `id = sha256('board:' + board['id'])[:16]`\n- `source = 'trello'`\n- `type = 'board'`\n- `title = board['name']`\n- `content` — multiline string with name, description, closed status, last activity date, and URL\n- `source_url = 'https://trello.com/b/{board_id}'`\n- `metadata` — `board_id`, `closed`, `date_last_activity`"
+    },
+    {
+      "id": "sync",
+      "title": "Sync Behaviour",
+      "content": "The `sync(**kwargs)` method:\n\n1. Fetches all open boards via `GET /members/me/boards?filter=open`\n2. For each board:\n   a. Normalizes the board into a `ConnectorDocument` (`type='board'`)\n   b. Fetches all open cards via `GET /boards/{id}/cards/open`\n   c. Normalizes each card into a `ConnectorDocument` (`type='card'`)\n   d. If `kb_id` is provided via kwargs, ingests each document via `_ingest_document()`\n3. Returns a `SyncResult` with `documents_found`, `documents_synced`, `documents_failed`\n\n`documents_found` counts boards + cards. `SyncStatus.COMPLETED` if zero failures; `SyncStatus.PARTIAL` if any normalization fails; `SyncStatus.FAILED` if the boards or cards API call fails entirely.\n\n**kwargs supported:**\n- `kb_id` (str) — knowledge base ID to ingest into; if empty, documents are normalized but not ingested"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception hierarchy\n\n```\nTrelloError (base)            — all connector errors; has .message, .status_code, .code\n├── TrelloAuthError           — 401 / 403: invalid or revoked credentials\n├── TrelloNetworkError        — timeouts, connection failures, 5xx server errors\n├── TrelloNotFoundError       — 404: resource does not exist\n└── TrelloRateLimitError      — 429: too many requests; has .retry_after (seconds)\n```\n\n### Status code mapping (_raise_for_status)\n\n| HTTP status | Exception |\n|-------------|----------|\n| 401, 403 | `TrelloAuthError` |\n| 404 | `TrelloNotFoundError` |\n| 429 | `TrelloRateLimitError` (retry_after from Retry-After header) |\n| 5xx | `TrelloNetworkError` |\n| other 4xx | `TrelloError` |\n\n### Retry policy (with_retry)\n\n- Max 3 attempts with exponential backoff (1s, 2s, 4s) plus ±0.5s jitter\n- `TrelloAuthError` — never retried (requires human intervention)\n- `TrelloRateLimitError` — honours `Retry-After` header when present\n- All other `TrelloError` subclasses — retried up to 3 times"
+    },
+    {
+      "id": "rate-limits",
+      "title": "Rate Limits",
+      "content": "Trello enforces a rate limit of **300 requests per 10 seconds** per token. The connector retries automatically on 429 responses. For large workspaces (many boards with many cards), consider spacing out sync jobs to avoid sustained rate-limit pressure."
+    }
+  ]
+}
