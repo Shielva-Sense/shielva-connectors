@@ -1,0 +1,94 @@
+{
+  "title": "Tableau Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Tableau connector syncs Workbooks, Views, and Datasources from your Tableau Server or Tableau Cloud instance into the Shielva knowledge base using the Tableau REST API v3.21. It supports Personal Access Token (PAT) authentication, full sync with auto-pagination, health checks, and exposes direct list methods for all major Tableau content types."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication (Personal Access Token)",
+      "content": "The connector authenticates using Tableau Personal Access Tokens (PAT). You must provide a pat_name (token name) and pat_secret (token secret) obtained from Tableau → My Account Settings → Personal Access Tokens, along with the server_url (base URL of your Tableau instance) and optionally a site_name (the contentUrl of the target site). On sign_in(), the connector exchanges the PAT for a session token and site_id that are used for all subsequent API calls. Auth errors (401/403) are raised as TableauAuthError and are not retried — they require re-authorization.",
+      "auth_type": "api_key"
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "content": "The following fields are required or optional when installing the connector.",
+      "fields": [
+        {
+          "key": "server_url",
+          "label": "Server URL",
+          "type": "string",
+          "required": true,
+          "description": "The base URL of your Tableau Server or Tableau Cloud instance (e.g. https://10ax.online.tableau.com). No trailing slash."
+        },
+        {
+          "key": "pat_name",
+          "label": "Personal Access Token Name",
+          "type": "string",
+          "required": true,
+          "description": "The name of the PAT created in Tableau → My Account Settings → Personal Access Tokens."
+        },
+        {
+          "key": "pat_secret",
+          "label": "Personal Access Token Secret",
+          "type": "password",
+          "required": true,
+          "description": "The secret value of the PAT. Only shown once at token creation time."
+        },
+        {
+          "key": "site_name",
+          "label": "Site Name",
+          "type": "string",
+          "required": false,
+          "description": "The contentUrl of the Tableau site (e.g. 'mycompany'). Leave blank for the default site on Tableau Server."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine (REST API + Pagination)",
+      "content": "The sync() method authenticates via sign_in(), then fetches Workbooks, Views, and Datasources in order using get_workbooks(), get_views(), and get_datasources() respectively. Each resource type is fetched with pageSize=100 and auto-paginated using the totalAvailable field from the pagination envelope. Each item is normalized to a ConnectorDocument via the appropriate normalizer (normalize_workbook, normalize_view, normalize_datasource) and optionally pushed to the knowledge base via _ingest_document(). The with_retry wrapper provides exponential backoff (base 1s, max 30s, max 3 attempts) for transient errors. TableauAuthError is never retried."
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Each Tableau resource type has a dedicated normalizer function in helpers/utils.py. All normalizers produce a stable 16-character source_id by computing SHA-256 of '<prefix>:<tableau_id>' and taking the first 16 hex characters. This guarantees idempotent IDs across sync runs. Metadata includes the resource type, original Tableau ID, project name, owner name, content URL, and timestamps.",
+      "normalizers": [
+        {"function": "normalize_workbook", "prefix": "workbook", "type": "workbook"},
+        {"function": "normalize_view", "prefix": "view", "type": "view"},
+        {"function": "normalize_datasource", "prefix": "datasource", "type": "datasource"}
+      ]
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "content": "The connector defines a hierarchy of exceptions rooted at TableauError. TableauAuthError (401/403) is never retried. TableauRateLimitError (429) honours the Retry-After header. TableauNetworkError wraps aiohttp timeout and connection errors. TableauNotFoundError (404) is raised for missing resources. All errors bubble up through with_retry with exponential backoff.",
+      "exception_hierarchy": [
+        "TableauError (base)",
+        "  TableauAuthError — 401/403",
+        "  TableauRateLimitError — 429, has retry_after",
+        "  TableauNotFoundError — 404",
+        "  TableauNetworkError — timeout/connection"
+      ]
+    },
+    {
+      "id": "api_reference",
+      "title": "API Reference (Tableau REST API v3.21)",
+      "content": "All HTTP calls go to https://{server_url}/api/3.21/... with X-Tableau-Auth header after sign-in. Responses use JSON (Accept: application/json).",
+      "endpoints": [
+        {"method": "POST", "path": "/api/3.21/auth/signin", "description": "PAT sign-in — returns token + site_id"},
+        {"method": "POST", "path": "/api/3.21/auth/signout", "description": "Invalidate current session token"},
+        {"method": "GET", "path": "/api/3.21/sites", "description": "List all accessible sites"},
+        {"method": "GET", "path": "/api/3.21/sites/{site_id}/workbooks", "description": "List workbooks (paginated)"},
+        {"method": "GET", "path": "/api/3.21/sites/{site_id}/views", "description": "List views (paginated)"},
+        {"method": "GET", "path": "/api/3.21/sites/{site_id}/datasources", "description": "List datasources (paginated)"},
+        {"method": "GET", "path": "/api/3.21/sites/{site_id}/users", "description": "List users (paginated)"},
+        {"method": "GET", "path": "/api/3.21/sites/{site_id}/projects", "description": "List all projects"}
+      ]
+    }
+  ]
+}
