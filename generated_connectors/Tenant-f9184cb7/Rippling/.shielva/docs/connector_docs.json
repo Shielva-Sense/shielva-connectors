@@ -1,0 +1,82 @@
+{
+  "title": "Rippling Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Rippling connector syncs HR, payroll, and organizational data from [Rippling](https://rippling.com) into the Shielva knowledge base. It is designed for HR teams, People Ops managers, and IT administrators who need AI-powered search over workforce data.\n\n**What it syncs:**\n- **Employees** — full employee profiles including name, work email, job title, department, start date, employment type, status, and manager (cursor-paginated, 100 per page)\n- **Departments** — organizational units with name, description, and headcount\n- **Teams** — team definitions within the organization\n- **Roles** — job role catalog\n- **Leave Requests** — employee leave records with type, dates, and approval status (cursor-paginated)\n\n**Key capabilities:**\n- Bearer token authentication using a Rippling Platform API key\n- Health check by calling `GET /companies` — validates the key and returns the company name\n- Cursor-based pagination for employees and leaves (`next_cursor` field), simple fetch for departments, teams, and roles\n- Department sync is non-fatal — if it fails, the sync returns `PARTIAL` rather than `FAILED` and the employee sync count is preserved\n- Automatic retry with `with_retry` on transient network errors"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Rippling API Key\n\n1. Log in to your [Rippling account](https://app.rippling.com).\n2. Navigate to **Settings → API → Create API Key**.\n3. Give the key a name (e.g. `Shielva Integration`) and copy the generated value (begins with `rpl_...`).\n\n### 2. Install the connector\n\nProvide the following field during installation:\n\n| Field | Example value |\n|-------|---------------|\n| `api_key` | `rpl_your_api_key_here` |\n\nThe connector calls `GET /companies` to validate the key. On success it returns `ConnectorHealth.HEALTHY` and displays your company name in the message.\n\n### 3. Run your first sync\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rippling-01\",\n        config={\"api_key\": \"rpl_your_api_key_here\"},\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(result.status, result.documents_synced, result.documents_found)\n\nasyncio.run(main())\n```\n\nThe sync processes employees first (fatal if they fail), then departments (non-fatal — failure is silently skipped)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` — Bearer token\n\nRippling authenticates all requests with a Bearer token in the `Authorization` header:\n\n```\nAuthorization: Bearer {api_key}\n```\n\n**Base URL:** `https://api.rippling.com/platform/api`\n\n**Health check endpoint:** `GET /companies`\n\nThe connector calls `GET /companies` during both `install()` and `health_check()` to verify the key and identify the company. A `401` or `403` response raises `RipplingAuthError` and sets `auth_status=AuthStatus.INVALID_CREDENTIALS`. Network errors or `5xx` raise `RipplingNetworkError` and result in `ConnectorHealth.DEGRADED`.\n\n**Where to find your API key:**\nRippling dashboard → **Settings → API → Create API Key**. Keys begin with `rpl_`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `api_key` | password | Yes | Your Rippling Platform API Key. Generated from **Settings → API → Create API Key** in the Rippling dashboard. Begins with `rpl_`. This single key authenticates all API calls. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `RipplingConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates the `api_key` by calling `GET /companies`. Returns an `InstallResult` indicating connector readiness.\n\n**Returns:** `InstallResult`\n\n| Field | Value on success | Value on failure |\n|-------|-----------------|------------------|\n| `health` | `ConnectorHealth.HEALTHY` | `ConnectorHealth.OFFLINE` |\n| `auth_status` | `AuthStatus.CONNECTED` | `AuthStatus.MISSING_CREDENTIALS` or `AuthStatus.INVALID_CREDENTIALS` or `AuthStatus.FAILED` |\n| `connector_id` | Set from `self.connector_id` | Not set |\n| `message` | `\"Connected to Rippling successfully\"` | Error description |\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rippling-01\",\n        config={\"api_key\": \"rpl_abc123\"},\n    )\n    result = await connector.install()\n    print(result.health, result.auth_status, result.message)\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /companies` and returns the current connector health. On success, includes the company name in the message.\n\n**Returns:** `HealthCheckResult`\n\n| Scenario | `health` | `auth_status` |\n|----------|----------|---------------|\n| API reachable, key valid | `HEALTHY` | `CONNECTED` |\n| Key missing | `OFFLINE` | `MISSING_CREDENTIALS` |\n| 401 or 403 | `DEGRADED` | `INVALID_CREDENTIALS` |\n| Network timeout or 5xx | `DEGRADED` | `FAILED` |\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    result = await connector.health_check()\n    print(result.health)\n    print(result.message)  # \"Rippling API reachable. Company: Acme Corp\"\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs employees and departments into the knowledge base. Employees are fetched first (cursor-paginated, 100/page) and are fatal if they fail. Departments are fetched next and are non-fatal — a department fetch error is silently ignored.\n\n**Signature:**\n```python\nasync def sync(self, **kwargs) -> SyncResult\n```\n\n**Keyword arguments:**\n- `kb_id` (`str`, default `\"\"`) — knowledge base ID to ingest documents into; if empty, normalization runs but ingestion is skipped\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (zero failures), `PARTIAL` (some normalizations failed), or `FAILED` (employee fetch failed) |\n| `documents_found` | int | Total records fetched from Rippling |\n| `documents_synced` | int | Records successfully normalized and ingested |\n| `documents_failed` | int | Records that raised an exception during normalization |\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(\n        tenant_id=\"tenant-abc\",\n        connector_id=\"conn-rippling-01\",\n        config={\"api_key\": \"rpl_abc123\"},\n    )\n    async with connector:\n        result = await connector.sync(kb_id=\"kb-123\")\n        print(f\"{result.status}: {result.documents_synced}/{result.documents_found}\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-employees",
+          "title": "list_employees()",
+          "content": "Returns all Rippling employees by exhausting cursor-based pagination (100 records per page). Uses `next_cursor` from each response to advance pages.\n\n**Returns:** `list[dict[str, Any]]` — raw Rippling employee objects\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    employees = await connector.list_employees()\n    print(f\"Found {len(employees)} employees\")\n    for emp in employees[:3]:\n        print(emp.get(\"firstName\"), emp.get(\"workEmail\"))\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-departments",
+          "title": "list_departments()",
+          "content": "Returns all Rippling departments in a single non-paginated request.\n\n**Returns:** `list[dict[str, Any]]` — raw Rippling department objects\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    depts = await connector.list_departments()\n    for dept in depts:\n        print(dept.get(\"name\"), dept.get(\"headCount\"))\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-teams",
+          "title": "list_teams()",
+          "content": "Returns all Rippling teams in a single non-paginated request.\n\n**Returns:** `list[dict[str, Any]]` — raw Rippling team objects\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    teams = await connector.list_teams()\n    print(f\"Found {len(teams)} teams\")\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-roles",
+          "title": "list_roles()",
+          "content": "Returns all Rippling roles (job role catalog) in a single non-paginated request.\n\n**Returns:** `list[dict[str, Any]]` — raw Rippling role objects\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    roles = await connector.list_roles()\n    for role in roles:\n        print(role.get(\"name\"))\n\nasyncio.run(main())\n```"
+        },
+        {
+          "id": "method-list-leaves",
+          "title": "list_leaves()",
+          "content": "Returns all Rippling leave requests by exhausting cursor-based pagination (100 per page).\n\n**Returns:** `list[dict[str, Any]]` — raw Rippling leave request objects\n\n```python\nimport asyncio\nfrom connector import RipplingConnector\n\nasync def main():\n    connector = RipplingConnector(config={\"api_key\": \"rpl_abc123\"})\n    leaves = await connector.list_leaves()\n    print(f\"Found {len(leaves)} leave requests\")\n\nasyncio.run(main())\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions inherit from `RipplingError`. HTTP status codes are mapped to typed subclasses by the HTTP client.\n\n| Exception class | HTTP status | When raised | Effect in connector |\n|-----------------|------------|-------------|---------------------|\n| `RipplingAuthError` | 401, 403 | Invalid or expired API key, or insufficient permissions | `install()` / `health_check()` → `OFFLINE`/`DEGRADED` with `INVALID_CREDENTIALS`. Sync → `FAILED` for employee section. Not retried. |\n| `RipplingRateLimitError` | 429 | Too many requests | Carries `retry_after` seconds. `with_retry` backs off automatically. |\n| `RipplingNotFoundError` | 404 | Specific resource or ID not found | Raised by HTTP client; carries `resource` and `resource_id` strings. |\n| `RipplingNetworkError` | 5xx, timeout, connection error | Rippling server error or network failure | `health_check()` → `DEGRADED`. Retried by `with_retry`. |\n| `RipplingError` | Other 4xx | Unexpected client errors | Base class; carries `status_code` and `code` string. |\n\n**Retry policy:** `with_retry` wraps all HTTP calls. Retries on `RipplingNetworkError` and `RipplingRateLimitError`. `RipplingAuthError` propagates immediately.\n\n**Sync failure semantics:**\n- Employee fetch raises `RipplingError` → returns `SyncStatus.FAILED` immediately\n- Department fetch raises any exception → silently skipped (non-fatal)\n- Individual record normalization fails → increments `documents_failed`; sync continues"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### install() returns `AuthStatus.MISSING_CREDENTIALS`\n\n**Cause:** The `api_key` field is empty or not present in the config.\n**Fix:** Generate an API key from **Rippling → Settings → API → Create API Key** and provide it in the `api_key` field.\n\n### install() or health_check() returns `AuthStatus.INVALID_CREDENTIALS`\n\n**Cause:** The API key was rejected by Rippling with 401 or 403.\n**Fix:**\n1. Confirm the key has not been revoked. Go to **Settings → API** and check if the key is still active.\n2. Ensure the key has the necessary scopes for employees, departments, and leave reads.\n3. Rippling API keys are workspace-specific — confirm the key belongs to the correct Rippling workspace.\n\n### sync() returns `SyncStatus.FAILED`\n\n**Cause:** The employee fetch (`GET /employees`) raised a `RipplingError`.\n**Fix:** Inspect `result.message` for the underlying error. The most common causes are an invalid/expired API key (`RipplingAuthError`) or a transient 5xx response (`RipplingNetworkError`). Run `health_check()` first to confirm connectivity.\n\n### Employees return zero results despite active workforce\n\n**Cause:** The API key may lack permission to read employee records, or the cursor pagination returned empty data on the first page.\n**Fix:** Verify the API key's scopes in the Rippling portal include employee read access. Call `list_employees()` directly and inspect the raw response.\n\n### health_check() returns `ConnectorHealth.DEGRADED`\n\n**Cause:** `RipplingNetworkError` — typically a Rippling 5xx, timeout, or DNS failure.\n**Fix:** This is usually transient. Retry after a few minutes. Check [Rippling's status page](https://status.rippling.com) for active incidents."
+    }
+  ]
+}
