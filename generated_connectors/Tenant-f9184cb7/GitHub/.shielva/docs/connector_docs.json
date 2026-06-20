@@ -1,0 +1,267 @@
+{
+  "connector": "github",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The GitHub connector syncs repositories, issues, and pull requests from GitHub into the Shielva knowledge base using the GitHub REST API v3. It supports Personal Access Tokens (classic or fine-grained) and GitHub App tokens via Bearer authentication. The connector implements Link-header pagination, X-RateLimit-Remaining checks, exponential backoff retry, and a circuit breaker for reliable, throttle-safe data ingestion."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "personal_access_token",
+          "title": "Personal Access Token (Classic)",
+          "content": "The simplest authentication method. Create a PAT under GitHub Settings → Developer settings → Personal access tokens → Tokens (classic). Grant the repo scope (and read:org for organization access). The token begins with ghp_.",
+          "steps": [
+            "Log in to GitHub and go to Settings → Developer settings → Personal access tokens → Tokens (classic).",
+            "Click Generate new token (classic).",
+            "Select scopes: repo (full repository access) and read:org (if syncing org repos).",
+            "Click Generate token and copy it — GitHub shows it only once.",
+            "Paste the token into the access_token field in Shielva."
+          ]
+        },
+        {
+          "id": "fine_grained_pat",
+          "title": "Fine-grained PAT (Enhanced Security)",
+          "content": "For least-privilege access. Create under Developer settings → Fine-grained tokens. Grant read-only permissions for Metadata, Contents, Issues, and Pull requests.",
+          "steps": [
+            "Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens.",
+            "Click Generate new token.",
+            "Under Repository access choose All repositories or specific repos.",
+            "Under Permissions grant: Metadata (read), Contents (read), Issues (read), Pull requests (read).",
+            "Generate and copy the token.",
+            "Paste the token into the access_token field in Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "access_token",
+          "label": "Personal Access Token",
+          "type": "password",
+          "required": true,
+          "placeholder": "ghp_...",
+          "description": "GitHub Personal Access Token (classic) or fine-grained PAT. Required for all API calls."
+        },
+        {
+          "key": "org",
+          "label": "Organization Name",
+          "type": "string",
+          "required": false,
+          "placeholder": "my-org",
+          "description": "Optional GitHub organization slug. When set, repositories are fetched from GET /orgs/{org}/repos instead of GET /user/repos."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full sync in three phases: (1) fetch all repositories (user-level or org-level); (2) for each repository, fetch open issues (excluding PRs returned by the /issues endpoint); (3) for each repository, fetch open pull requests. Each raw API record is normalized into a ConnectorDocument with a stable SHA-256[:16] source_id and optionally ingested into the Shielva knowledge base.",
+      "pagination": {
+        "mechanism": "Link header (rel=next)",
+        "page_size": 100,
+        "endpoint_pattern": "GET /user/repos?per_page=100 → follow Link: <url>; rel=\"next\""
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      },
+      "rate_limit": {
+        "header_checked": "X-RateLimit-Remaining",
+        "behaviour": "Raises GitHubRateLimitError immediately when remaining == 0"
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials by calling GET /user. Returns HEALTHY + CONNECTED on success, OFFLINE + MISSING_CREDENTIALS when access_token is absent, OFFLINE + INVALID_CREDENTIALS on 401/403.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /user and returns HEALTHY (with username), DEGRADED (transient network error), or OFFLINE (auth failure or circuit open). Updates the circuit breaker state.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Full paginated sync of repos, issues, and PRs. Returns documents_found, documents_synced, documents_failed, and SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_repos",
+          "signature": "async def list_repos(org: str | None = None) -> list[dict]",
+          "description": "List all repositories. Uses GET /orgs/{org}/repos when org is provided, otherwise GET /user/repos.",
+          "endpoint": "GET /user/repos or GET /orgs/{org}/repos",
+          "category": "repos"
+        },
+        {
+          "id": "list_issues",
+          "signature": "async def list_issues(owner: str, repo: str, state: str = 'open') -> list[dict]",
+          "description": "List issues for a repository filtered by state. Paginates via Link header.",
+          "endpoint": "GET /repos/{owner}/{repo}/issues",
+          "category": "issues"
+        },
+        {
+          "id": "get_issue",
+          "signature": "async def get_issue(owner: str, repo: str, number: int) -> dict",
+          "description": "Retrieve a single issue by number.",
+          "endpoint": "GET /repos/{owner}/{repo}/issues/{number}",
+          "category": "issues"
+        },
+        {
+          "id": "list_pull_requests",
+          "signature": "async def list_pull_requests(owner: str, repo: str, state: str = 'open') -> list[dict]",
+          "description": "List pull requests for a repository filtered by state. Paginates via Link header.",
+          "endpoint": "GET /repos/{owner}/{repo}/pulls",
+          "category": "pull_requests"
+        },
+        {
+          "id": "get_pull_request",
+          "signature": "async def get_pull_request(owner: str, repo: str, number: int) -> dict",
+          "description": "Retrieve a single pull request by number.",
+          "endpoint": "GET /repos/{owner}/{repo}/pulls/{number}",
+          "category": "pull_requests"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every GitHub entity is normalized into a ConnectorDocument. The source_id is a stable 16-character hex prefix of SHA-256(entity_type + ':' + html_url).",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "SHA-256(entity_type:html_url)[:16] — stable across re-syncs" },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format: 'GitHub {type}: {name/title}'" },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the entity's properties. Issue/PR body appended." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "github.com permalink to the entity." },
+          { "name": "metadata", "type": "dict", "description": "Entity-type-specific properties. Always includes entity_type key." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_repo(record, connector_id, tenant_id)",
+          "entity_type": "repo",
+          "title_format": "GitHub repo: {full_name}",
+          "source_id": "SHA-256('repo:{html_url}')[:16]",
+          "metadata_keys": ["entity_type", "full_name", "description", "language", "default_branch", "stars", "forks", "open_issues", "visibility", "topics", "created_at", "updated_at"]
+        },
+        {
+          "function": "normalize_issue(record, connector_id, tenant_id)",
+          "entity_type": "issue",
+          "title_format": "GitHub issue #{number}: {title}",
+          "source_id": "SHA-256('issue:{html_url}')[:16]",
+          "metadata_keys": ["entity_type", "number", "state", "author", "labels", "comments", "created_at", "updated_at", "closed_at", "repo"]
+        },
+        {
+          "function": "normalize_pr(record, connector_id, tenant_id)",
+          "entity_type": "pr",
+          "title_format": "GitHub PR #{number}: {title}",
+          "source_id": "SHA-256('pr:{html_url}')[:16]",
+          "metadata_keys": ["entity_type", "number", "state", "merged", "author", "head_ref", "base_ref", "draft", "commits", "additions", "deletions", "changed_files", "labels", "created_at", "updated_at", "merged_at", "closed_at", "repo"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "GitHubError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "GitHubAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "GitHubRateLimitError",
+          "description": "Raised on 429 Too Many Requests or when X-RateLimit-Remaining reaches 0. Carries retry_after (seconds). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "GitHubNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
+          "http_status": 404
+        },
+        {
+          "name": "GitHubNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "GitHubServerError",
+          "description": "Raised on 5xx responses from GitHub. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "Personal Access Token is invalid, expired, or was revoked.",
+          "solution": "Go to GitHub Settings → Developer settings → Personal access tokens, regenerate the token, and update the connector's access_token."
+        },
+        {
+          "problem": "403 Forbidden — insufficient scope",
+          "cause": "The PAT is missing the repo or read:org scope.",
+          "solution": "Edit the token in GitHub, add the required scopes (repo for repositories/issues/PRs; read:org for organization repos), and regenerate."
+        },
+        {
+          "problem": "404 Not Found — organization",
+          "cause": "The org field is set to a slug that does not exist or the token lacks read:org permission.",
+          "solution": "Verify the organization slug (lowercase, hyphenated) and that the token has read:org scope."
+        },
+        {
+          "problem": "429 / GitHubRateLimitError",
+          "cause": "GitHub rate limit exhausted (5,000 req/hr for PATs).",
+          "solution": "The connector retries automatically. For large organizations consider running syncs during off-peak hours or using a GitHub App token (15,000 req/hr)."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have tripped the circuit breaker (5 consecutive failures).",
+          "solution": "Resolve the underlying network or auth issue, then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more API records returned unexpected data causing normalization to fail.",
+          "solution": "Check connector logs for which html_url values failed. Inspect those records on GitHub for corrupted or null property values."
+        }
+      ]
+    }
+  ]
+}
