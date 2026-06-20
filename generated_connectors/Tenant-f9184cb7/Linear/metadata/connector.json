@@ -1,0 +1,27 @@
+{
+  "connector_type": "linear",
+  "name": "Linear",
+  "display_name": "Linear",
+  "description": "Connect to Linear to sync issues from all teams into Shielva's knowledge base.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Linear Personal API key from Settings → API → Personal API keys."
+    }
+  ],
+  "capabilities": [
+    "list_teams",
+    "list_issues",
+    "get_issue",
+    "list_projects",
+    "sync"
+  ],
+  "provider": "linear",
+  "service": "linear",
+  "category": "project_management"
+}
