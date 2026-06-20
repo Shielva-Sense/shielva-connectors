@@ -1,0 +1,87 @@
+{
+  "title": "Shopify Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Shopify connector syncs **orders**, **products**, and **customers** from a Shopify store into the Shielva knowledge base using the **Shopify Admin REST API 2024-01**.\n\nKey capabilities:\n- Full sync of all orders, products, and customers with cursor-based pagination (100 records per page)\n- Incremental sync filtered by `created_at_min` (ISO 8601) for orders and customers\n- Direct access methods for listing and fetching individual orders, products, and customers\n- Automatic retry with exponential back-off on transient failures\n- API key authentication — no OAuth flow required\n\nTypical users: e-commerce teams, support agents, and data analysts who need to query store data, customer history, and order status from within Shielva."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create a Shopify Admin API access token\n\n1. In your Shopify Admin, go to **Settings → Apps and sales channels → Develop apps**.\n2. Click **Create an app**, give it a name, then click **Configure Admin API scopes**.\n3. Enable at minimum: `read_orders`, `read_products`, `read_customers`.\n4. Click **Install app**, then copy the **Admin API access token** (shown once).\n\n### 2. Find your shop domain\n\nYour shop domain is the `.myshopify.com` subdomain, e.g. `mystore.myshopify.com`.\n\n### 3. Install the connector\n\n```python\nimport asyncio\nfrom connector import ShopifyConnector\n\nasync def main():\n    connector = ShopifyConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"shopify-main\",\n        config={\n            \"shop_domain\": \"mystore.myshopify.com\",\n            \"access_token\": \"shpat_xxxxxxxxxxxxxxxxxxxx\",\n        },\n    )\n    result = await connector.install()\n    print(result)  # InstallResult(health=HEALTHY, auth_status=CONNECTED, ...)\n\nasyncio.run(main())\n```\n\n### 4. Run your first sync\n\n```python\nasync with ShopifyConnector(config={\"shop_domain\": \"...\", \"access_token\": \"...\"}) as connector:\n    result = await connector.sync(full=True, kb_id=\"my-kb\")\n    print(f\"Synced {result.documents_synced}/{result.documents_found} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key`\n\nThe connector uses a **Shopify Admin API access token** sent as the `X-Shopify-Access-Token` header on every request.\n\n### Token injection\n\n```\nX-Shopify-Access-Token: {access_token}\n```\n\nThe `shop_domain` is used to construct the base URL:\n```\nhttps://{shop_domain}/admin/api/2024-01/\n```\n\n### Validation endpoint\n\n`GET https://{shop_domain}/admin/api/2024-01/shop.json`\n\nBoth `install()` and `health_check()` call this endpoint. A successful response confirms the token is valid and the store is reachable.\n\n### Auth errors\n\n| HTTP Status | Error class | Meaning |\n|---|---|---|\n| 401 | `ShopifyAuthError` | Invalid or revoked access token |\n| 403 | `ShopifyAuthError` | Token exists but lacks required API scopes |\n\n### Required API scopes\n\n| Scope | Required for |\n|---|---|\n| `read_orders` | `list_orders`, `get_order`, sync orders |\n| `read_products` | `list_products`, `get_product`, sync products |\n| `read_customers` | `list_customers`, `get_customer`, sync customers |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is provided via the `config` dict passed to the constructor or via the install fields in `metadata/connector.json`.\n\n| Field | Type | Required | Description |\n|---|---|---|---|\n| `shop_domain` | string | Yes | Your Shopify store's `.myshopify.com` domain, e.g. `mystore.myshopify.com`. Do not include `https://` or a trailing slash. |\n| `access_token` | password | Yes | The Admin API access token generated in your Shopify app settings (prefix `shpat_`). |\n\n**Note:** The constructor also accepts `shop_url` as a legacy alias for `shop_domain`."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. The connector implements the Shielva `BaseConnector` interface.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /shop.json`. Returns an `InstallResult` indicating whether the token is valid and the store is reachable.\n\n**Returns:** `InstallResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `OFFLINE` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `connector_id` | str | The Shopify store numeric ID (from `/shop.json`) |\n| `message` | str | Human-readable status, e.g. `\"Connected to Shopify store: My Store\"` |\n\n```python\nfrom connector import ShopifyConnector\n\nasync def example():\n    connector = ShopifyConnector(\n        tenant_id=\"t1\",\n        config={\n            \"shop_domain\": \"mystore.myshopify.com\",\n            \"access_token\": \"shpat_xxx\",\n        },\n    )\n    result = await connector.install()\n    if result.auth_status.value == \"connected\":\n        print(\"Connector is ready:\", result.message)\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /shop.json` and returns the current health state. Use this for periodic monitoring without re-installing.\n\n**Returns:** `HealthCheckResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `DEGRADED` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `message` | str | Store name or error description |\n\n```python\nresult = await connector.health_check()\nprint(result.health, result.message)\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all orders, products, and customers into the Shielva knowledge base. Follows cursor pagination automatically (100 records per page). Processes in order: orders first, then products, then customers.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `full` | bool | `False` | If `True`, fetches all records. If `False`, uses `since` to filter. |\n| `since` | `datetime \\| None` | `None` | Fetch orders and customers created after this timestamp (ISO 8601). Products always do a full fetch. |\n| `kb_id` | str | `\"\"` | Knowledge base ID for document ingestion. If empty, normalization runs but ingestion is skipped. |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED`, `PARTIAL`, or `FAILED` |\n| `documents_found` | int | Total records fetched across all resource types |\n| `documents_synced` | int | Records successfully normalized and ingested |\n| `documents_failed` | int | Records that raised an exception during normalization |\n| `message` | str | Set only if orders sync fails fatally |\n\n```python\nfrom datetime import datetime, timezone\n\nasync def incremental_sync():\n    since = datetime(2024, 6, 1, tzinfo=timezone.utc)\n    result = await connector.sync(since=since, kb_id=\"kb-abc\")\n    print(result.status, result.documents_synced, result.documents_failed)\n```"
+        },
+        {
+          "id": "method-list-orders",
+          "title": "list_orders()",
+          "content": "Returns all orders, following cursor pagination automatically.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `limit` | int | 100 | Page size (max 250 per Shopify API) |\n| `status` | str | `\"any\"` | Order status filter: `\"open\"`, `\"closed\"`, `\"cancelled\"`, `\"any\"` |\n| `created_at_min` | `str \\| None` | `None` | ISO 8601 timestamp; returns only orders created after this time |\n\n**Returns:** `list[dict[str, Any]]` — raw Shopify order objects\n\n```python\norders = await connector.list_orders(status=\"open\")\nfor order in orders:\n    print(order[\"id\"], order[\"total_price\"], order[\"financial_status\"])\n```"
+        },
+        {
+          "id": "method-get-order",
+          "title": "get_order()",
+          "content": "Fetches a single order by ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `order_id` | `int \\| str` | The Shopify order numeric ID |\n\n**Returns:** `dict[str, Any]` — raw Shopify order object\n\n```python\norder = await connector.get_order(1234567890)\nprint(order[\"name\"], order[\"financial_status\"])\n```"
+        },
+        {
+          "id": "method-list-products",
+          "title": "list_products()",
+          "content": "Returns all products, following cursor pagination automatically.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `limit` | int | 100 | Page size |\n| `published_status` | str | `\"any\"` | Filter: `\"published\"`, `\"unpublished\"`, `\"any\"` |\n\n**Returns:** `list[dict[str, Any]]` — raw Shopify product objects\n\n```python\nproducts = await connector.list_products(published_status=\"published\")\nfor p in products:\n    print(p[\"title\"], p[\"variants\"][0][\"price\"])\n```"
+        },
+        {
+          "id": "method-get-product",
+          "title": "get_product()",
+          "content": "Fetches a single product by ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `product_id` | `int \\| str` | The Shopify product numeric ID |\n\n**Returns:** `dict[str, Any]` — raw Shopify product object\n\n```python\nproduct = await connector.get_product(7654321098)\nprint(product[\"title\"], product[\"status\"])\n```"
+        },
+        {
+          "id": "method-list-customers",
+          "title": "list_customers()",
+          "content": "Returns all customers, following cursor pagination automatically.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `limit` | int | 100 | Page size |\n| `created_at_min` | `str \\| None` | `None` | ISO 8601 timestamp; returns only customers created after this time |\n\n**Returns:** `list[dict[str, Any]]` — raw Shopify customer objects\n\n```python\ncustomers = await connector.list_customers()\nfor c in customers:\n    print(c[\"email\"], c[\"orders_count\"])\n```"
+        },
+        {
+          "id": "method-get-customer",
+          "title": "get_customer()",
+          "content": "Fetches a single customer by ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `customer_id` | `int \\| str` | The Shopify customer numeric ID |\n\n**Returns:** `dict[str, Any]` — raw Shopify customer object\n\n```python\ncustomer = await connector.get_customer(9876543210)\nprint(customer[\"first_name\"], customer[\"last_name\"], customer[\"email\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All error classes are defined in `exceptions.py` and inherit from `ShopifyError`.\n\n| Exception class | HTTP Status | When raised |\n|---|---|---|\n| `ShopifyError` | any | Base class; carries `message`, `status_code`, `code` |\n| `ShopifyAuthError` | 401, 403 | Token is invalid, revoked, or lacks required scopes |\n| `ShopifyNetworkError` | 5xx / timeout | Transient connection failure or server error |\n| `ShopifyRateLimitError` | 429 | Rate limit exceeded; `retry_after` float (seconds) is set |\n| `ShopifyNotFoundError` | 404 | Requested resource (order/product/customer) does not exist |\n\n### Behavior in sync()\n\n- If the **orders** fetch raises `ShopifyError`, sync returns `SyncStatus.FAILED` immediately with the error in `message`.\n- If **products** or **customers** fetch fails, sync returns `SyncStatus.PARTIAL` with whatever was already synced.\n- Individual record normalization failures increment `documents_failed` but do not abort the sync."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `auth_status: MISSING_CREDENTIALS`\n\nEither `shop_domain` or `access_token` is absent from the config. Ensure both fields are provided.\n\n### `auth_status: INVALID_CREDENTIALS` (401/403)\n\n- **401**: The access token is invalid or has been revoked. Regenerate it in Shopify Admin → Settings → Apps → your app → API credentials.\n- **403**: The token is valid but the app is missing required API scopes. Add `read_orders`, `read_products`, `read_customers`, then reinstall the app.\n\n### `sync()` returns `SyncStatus.PARTIAL`\n\nProducts or customers failed after orders succeeded. Check the `message` field on `SyncResult`. Individual record failures (normalization errors) are counted in `documents_failed` without aborting the entire sync.\n\n### `ShopifyNetworkError` on install\n\n- Verify `shop_domain` is correct and the store is active (not paused or frozen).\n- Confirm network connectivity to `https://{shop_domain}/admin/api/2024-01/`.\n- Shopify Cloud stores may enforce IP allowlists — ensure the Shielva sync IP is permitted.\n\n### Rate limits (429 `ShopifyRateLimitError`)\n\nShopify REST enforces ~2 req/s for standard apps and 40 req/s for Shopify Plus. The retry helper respects `retry_after`. If you see sustained 429s, reduce the number of concurrent syncs."
+    }
+  ]
+}
