@@ -1,0 +1,39 @@
+{
+  "connector_type": "google_sheets",
+  "name": "Google Sheets",
+  "display_name": "Google Sheets",
+  "description": "Connect to Google Sheets to sync spreadsheet data into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "description": "Google OAuth 2.0 client ID from Google Cloud Console."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "Google OAuth 2.0 client secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "description": "OAuth redirect URI. Must match Google Cloud Console configuration."
+    }
+  ],
+  "capabilities": [
+    "list_spreadsheets",
+    "get_spreadsheet",
+    "get_sheet_values",
+    "sync"
+  ],
+  "provider": "google",
+  "category": "productivity"
+}
