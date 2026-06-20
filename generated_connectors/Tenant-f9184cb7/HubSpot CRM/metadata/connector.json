@@ -1,0 +1,27 @@
+{
+  "connector_type": "hubspot",
+  "name": "HubSpot",
+  "provider": "HubSpot",
+  "service": "CRM",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "HubSpot CRM connector for contacts, companies, deals, and tickets",
+  "install_fields": [
+    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false},
+    {"key": "portal_id", "label": "Portal ID", "type": "string", "required": false}
+  ],
+  "capabilities": ["contacts", "companies", "deals", "tickets", "sync"],
+  "oauth": {
+    "auth_url": "https://app.hubspot.com/oauth/authorize",
+    "token_url": "https://api.hubapi.com/oauth/v1/token",
+    "scopes": [
+      "crm.objects.contacts.read",
+      "crm.objects.companies.read",
+      "crm.objects.deals.read",
+      "tickets",
+      "offline_access"
+    ]
+  }
+}
