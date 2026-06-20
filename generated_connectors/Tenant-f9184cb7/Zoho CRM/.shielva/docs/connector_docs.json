@@ -1,0 +1,238 @@
+{
+  "title": "Zoho CRM Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Zoho CRM connector syncs Leads, Contacts, and Deals from your Zoho CRM account into the Shielva knowledge base using the Zoho CRM REST API v6. It supports full paginated sync, direct record retrieval, criteria-based search, and exposes list methods for any Zoho CRM module. Authentication is handled via OAuth 2.0 through the Zoho API Console. The connector is data-center aware — it automatically routes API calls to the correct regional endpoint (US, EU, IN, AU, JP, CN)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication (OAuth 2.0)",
+      "content": "The connector uses OAuth 2.0 via a Zoho API Console client app (Server-based Application type). You must provide a client_id and client_secret. The authorize() method returns the Zoho OAuth2 consent URL. After the user approves, Zoho sends an authorization code to the redirect_uri; the platform exchanges it for access_token and refresh_token. The connector pings GET /users?type=CurrentUser on install() to validate credentials. Auth errors (401/403) are raised as ZohoCRMAuthError and are not retried — they require re-authorization.",
+      "auth_type": "oauth2",
+      "oauth_scopes": ["ZohoCRM.modules.ALL"],
+      "oauth_auth_url": "https://accounts.zoho.com/oauth/v2/auth",
+      "oauth_token_url": "https://accounts.zoho.com/oauth/v2/token",
+      "data_center_urls": {
+        "com": "https://accounts.zoho.com/oauth/v2/auth",
+        "eu": "https://accounts.zoho.eu/oauth/v2/auth",
+        "in": "https://accounts.zoho.in/oauth/v2/auth",
+        "com.au": "https://accounts.zoho.com.au/oauth/v2/auth",
+        "jp": "https://accounts.zoho.jp/oauth/v2/auth",
+        "com.cn": "https://accounts.zoho.com.cn/oauth/v2/auth"
+      }
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "content": "The following fields are presented when installing the connector.",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "Client ID",
+          "type": "text",
+          "required": true,
+          "description": "From Zoho API Console → Your Client → Client ID. Starts with 1000."
+        },
+        {
+          "key": "client_secret",
+          "label": "Client Secret",
+          "type": "secret",
+          "required": true,
+          "description": "From Zoho API Console → Your Client → Client Secret."
+        },
+        {
+          "key": "redirect_uri",
+          "label": "Redirect URI",
+          "type": "text",
+          "required": false,
+          "description": "OAuth callback URI. Must match one of the Authorized Redirect URIs in your Zoho client app. Defaults to https://app.shielva.ai/oauth/callback/zoho_crm."
+        },
+        {
+          "key": "data_center",
+          "label": "Data Center",
+          "type": "text",
+          "required": false,
+          "description": "Zoho data center suffix: com (US, default), eu (Europe), in (India), com.au (Australia), jp (Japan), com.cn (China)."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine (Paginated, Multi-Module)",
+      "content": "The sync() method fetches Leads, Contacts, and Deals using the Zoho CRM REST API v6 list endpoint. Each module is fetched page by page (per_page=200). Pagination is driven by the info.more_records boolean in the Zoho response. Each record is normalized to a ConnectorDocument via normalize_record() and optionally pushed to the knowledge base via _ingest_document(). The with_retry wrapper provides exponential backoff (base 1s, factor 2.0, max 30s, max 3 attempts) for transient errors. ZohoCRMAuthError is never retried.",
+      "zoho_response_shape": {
+        "data": "[list of record objects]",
+        "info": {
+          "page": 1,
+          "count": 200,
+          "more_records": true,
+          "per_page": 200
+        }
+      },
+      "sync_modules": ["Leads", "Contacts", "Deals"]
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "content": "All methods are async and return typed results.",
+      "methods": [
+        {
+          "name": "authorize()",
+          "signature": "def authorize() -> str",
+          "description": "Returns the Zoho OAuth2 authorization URL for the configured data center. Includes client_id, scope (ZohoCRM.modules.ALL), access_type=offline, and redirect_uri if set."
+        },
+        {
+          "name": "install()",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates client_id, client_secret, and access_token by calling GET /users?type=CurrentUser. Returns ConnectorHealth.HEALTHY + AuthStatus.CONNECTED on success."
+        },
+        {
+          "name": "health_check()",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings Zoho CRM via GET /users?type=CurrentUser. Returns HEALTHY, DEGRADED (network issue, circuit closed), or OFFLINE (auth failure or circuit open)."
+        },
+        {
+          "name": "sync(kb_id)",
+          "signature": "async def sync(kb_id: str = '') -> SyncResult",
+          "description": "Full paginated sync of Leads, Contacts, and Deals. Follows more_records pagination. Normalizes each record to ConnectorDocument. Pushes to knowledge base if kb_id is provided."
+        },
+        {
+          "name": "list_records(module, page, per_page)",
+          "signature": "async def list_records(module: str, page: int = 1, per_page: int = 200) -> dict[str, Any]",
+          "description": "Lists records from any Zoho CRM module. Endpoint: GET /crm/v6/{module}?page={page}&per_page={per_page}."
+        },
+        {
+          "name": "get_record(module, record_id)",
+          "signature": "async def get_record(module: str, record_id: str) -> dict[str, Any]",
+          "description": "Fetches a single record. Endpoint: GET /crm/v6/{module}/{record_id}."
+        },
+        {
+          "name": "search_records(module, criteria)",
+          "signature": "async def search_records(module: str, criteria: str) -> dict[str, Any]",
+          "description": "Searches records using Zoho CRM criteria syntax. Endpoint: GET /crm/v6/{module}/search?criteria={criteria}. Example: (Last_Name:equals:Smith)."
+        },
+        {
+          "name": "aclose()",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient. Safe to call multiple times. Also used as the async context manager exit."
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model (ConnectorDocument shape per module)",
+      "content": "Each Zoho CRM record is normalized to a ConnectorDocument.",
+      "source_id_note": "source_id = SHA-256(module + ':' + record_id)[:16] — stable 16-char hex, deterministic across syncs.",
+      "shapes": [
+        {
+          "module": "Leads",
+          "source_id": "SHA-256('Leads:<id>')[:16]",
+          "title": "Zoho Lead: <First_Name Last_Name> — <Company>",
+          "content": "Record ID: ...\nModule: Leads\n<all scalar fields>",
+          "source_url": "https://crm.zoho.<dc>/crm/org/tab/Leads/<id>",
+          "metadata_keys": ["module", "zoho_record_id", "data_center"]
+        },
+        {
+          "module": "Contacts",
+          "source_id": "SHA-256('Contacts:<id>')[:16]",
+          "title": "Zoho Contact: <First_Name Last_Name> — <Account_Name.name>",
+          "content": "Record ID: ...\nModule: Contacts\n<all scalar fields>",
+          "source_url": "https://crm.zoho.<dc>/crm/org/tab/Contacts/<id>",
+          "metadata_keys": ["module", "zoho_record_id", "data_center"]
+        },
+        {
+          "module": "Deals",
+          "source_id": "SHA-256('Deals:<id>')[:16]",
+          "title": "Zoho Deal: <Deal_Name> — <Stage>",
+          "content": "Record ID: ...\nModule: Deals\n<all scalar fields>",
+          "source_url": "https://crm.zoho.<dc>/crm/org/tab/Deals/<id>",
+          "metadata_keys": ["module", "zoho_record_id", "data_center"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "All exceptions inherit from ZohoCRMError which carries message, status_code, and code attributes.",
+      "exceptions": [
+        {
+          "name": "ZohoCRMError",
+          "description": "Base exception. Attributes: message (str), status_code (int), code (str)."
+        },
+        {
+          "name": "ZohoCRMAuthError",
+          "description": "Raised on 401 or 403 responses. Not retried by with_retry."
+        },
+        {
+          "name": "ZohoCRMRateLimitError",
+          "description": "Raised on 429. Carries retry_after (float seconds). with_retry honours this delay when > 0."
+        },
+        {
+          "name": "ZohoCRMNotFoundError",
+          "description": "Raised on 404. Message is '<resource> <resource_id> not found'."
+        },
+        {
+          "name": "ZohoCRMNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError."
+        },
+        {
+          "name": "ZohoCRMServerError",
+          "description": "Raised on 5xx responses from Zoho."
+        }
+      ]
+    },
+    {
+      "id": "data_center_routing",
+      "title": "Data Center Routing",
+      "content": "Zoho operates distinct API clusters per geography. The connector derives both the REST API base URL and the OAuth URLs from the data_center config field.",
+      "api_base_urls": {
+        "com": "https://www.zohoapis.com/crm/v6/",
+        "eu": "https://www.zohoapis.eu/crm/v6/",
+        "in": "https://www.zohoapis.in/crm/v6/",
+        "com.au": "https://www.zohoapis.com.au/crm/v6/",
+        "jp": "https://www.zohoapis.jp/crm/v6/",
+        "com.cn": "https://www.zohoapis.com.cn/crm/v6/"
+      }
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "entries": [
+        {
+          "error": "INVALID_OAUTHTOKEN (401)",
+          "cause": "access_token expired or revoked",
+          "fix": "Re-authorize the connector in the Shielva dashboard to obtain a fresh access_token"
+        },
+        {
+          "error": "ACCESS_DENIED (403)",
+          "cause": "Zoho user lacks CRM module permissions or scope was not granted",
+          "fix": "Ensure the authorizing user has CRM read access and that ZohoCRM.modules.ALL was accepted during OAuth"
+        },
+        {
+          "error": "Data center mismatch",
+          "cause": "Wrong data_center suffix configured",
+          "fix": "Verify your Zoho account's data center in Zoho CRM settings and update the data_center field"
+        },
+        {
+          "error": "redirect_uri_mismatch",
+          "cause": "Redirect URI not listed in Authorized Redirect URIs in Zoho API Console",
+          "fix": "Add the exact redirect_uri to your client app's Authorized Redirect URIs"
+        },
+        {
+          "error": "Rate limits (429)",
+          "cause": "Exceeding Zoho CRM API call limits",
+          "fix": "The connector retries with exponential backoff honouring Retry-After; reduce sync frequency if persistent"
+        },
+        {
+          "error": "Empty sync results",
+          "cause": "Module has no records or API user has restricted visibility",
+          "fix": "Confirm data exists in the module and the user profile allows data visibility"
+        }
+      ]
+    }
+  ]
+}
