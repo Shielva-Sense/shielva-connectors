@@ -1,0 +1,98 @@
+{
+  "title": "ServiceNow Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **ServiceNow** connector integrates Shielva with the [ServiceNow Table REST API](https://developer.servicenow.com/dev.do#!/reference/api/tokyo/rest/c_TableAPI) to sync incidents, change requests, users, and CMDB configuration items into Shielva's knowledge base.\n\nServiceNow is the leading enterprise IT Service Management (ITSM) platform. This connector exposes **8 API methods** across 4 resource domains — Incidents, Change Requests, Users, and CMDB — and implements a full paginated sync engine that ingests all incident and change content as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /api/now/table/sys_user?sysparm_limit=1`\n- Full paginated sync of incidents and change requests\n- Query-filtered incident listing via `sysparm_query`\n- Single-record fetch for incidents and changes by `sys_id`\n- CMDB CI listing by configurable class name\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- Stable 16-char source IDs: `sha256('incident:'+sys_id)[:16]` and `sha256('change:'+sys_id)[:16]`\n- Handles both plain-string and `{value, display_value}` field formats from the Table API"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the ServiceNow connector running in under 5 minutes.\n\n### 1. Identify your instance name\n\nYour ServiceNow URL looks like: `https://<instance>.service-now.com`\nThe **instance name** is just the `<instance>` part (e.g. `dev12345`).\n\n### 2. Ensure the user has read access\n\nThe service account needs the **itil** role for incidents and change requests.\n\n### 3. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → ServiceNow**\n2. Enter your **Instance Name**, **Username**, and **Password**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 4. Run Your First Sync\n\n```python\nasync with ServiceNowConnector(instance=\"dev12345\", username=\"svc_user\", password=\"pass\") as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The ServiceNow connector uses **HTTP Basic authentication** — username and password sent as a Base64-encoded `Authorization` header on every request.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Instance Name | `instance` | string | Yes | Your ServiceNow instance identifier (e.g. `dev12345` from `dev12345.service-now.com`) |\n| Username | `username` | string | Yes | ServiceNow username with read access to incidents and change requests |\n| Password | `password` | password | Yes | Password for the ServiceNow user account |\n\n### How it works\n\nEvery request uses `aiohttp.BasicAuth(username, password)` which sends:\n```\nAuthorization: Basic base64(\"{username}:{password}\")\n```\nwith `Accept: application/json` to receive JSON responses.\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /api/now/table/sys_user?sysparm_limit=1`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged\n- Use a dedicated service account with minimum required permissions (itil role)\n- Rotate passwords through ServiceNow User Administration when needed"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The ServiceNow connector requires three install fields and has sensible internal defaults.\n\n### Install Fields\n\n```json\n{\n  \"instance\": \"dev12345\",\n  \"username\": \"svc_shielva\",\n  \"password\": \"YOUR_PASSWORD_HERE\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://{instance}.service-now.com` | ServiceNow base URL |\n| `TABLE_API` | `/api/now/table` | Table API path prefix |\n| `SYNC_PAGE_SIZE` | `100` | Records per page for sync (ServiceNow default max) |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 public async methods plus `install()` and `health_check()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates all three install credentials by calling `GET /api/now/table/sys_user?sysparm_limit=1`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#               message=\"Connected to ServiceNow instance 'dev12345' as Jane Doe\")\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing fields → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /api/now/table/sys_user?sysparm_limit=1` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED,\n#                   message=\"ServiceNow instance 'dev12345' reachable. User: Jane Doe\")\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, kb_id)",
+          "content": "Syncs all ServiceNow incidents and change requests into the knowledge base.\n\n```python\n# Full sync — all incidents + change requests\nresult = await connector.sync(full=True, kb_id=\"kb_itsm\")\n\nprint(result.documents_found)   # total records found across both tables\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), `documents_found`, `documents_synced`, `documents_failed`, `message`\n\n**How it works:**\n1. Paginates through `GET /api/now/table/incident` (100 per page, offset-based)\n2. Normalizes each incident to `ConnectorDocument` via `normalize_incident()`\n3. Paginates through `GET /api/now/table/change_request` (100 per page)\n4. Normalizes each change request to `ConnectorDocument` via `normalize_change()`\n5. Calls `_ingest_document(doc, kb_id)` for each document (wired by Shielva runtime)\n6. Stops pagination when a page returns fewer records than the page size"
+        },
+        {
+          "id": "list-incidents",
+          "title": "list_incidents(limit, offset, query)",
+          "content": "Returns a paginated list of ServiceNow incidents.\n\n```python\n# All open high-priority incidents\npage = await connector.list_incidents(\n    limit=50,\n    offset=0,\n    query=\"state=1^priority=2\"\n)\n# {\"result\": [...]}\n```\n\n**Parameters:**\n- `limit` (int, default 100) — records per page\n- `offset` (int, default 0) — starting offset for pagination\n- `query` (str, optional) — ServiceNow encoded query string (`sysparm_query`)\n\n**ServiceNow endpoint:** `GET /api/now/table/incident`"
+        },
+        {
+          "id": "get-incident",
+          "title": "get_incident(sys_id)",
+          "content": "Returns a single incident by its ServiceNow `sys_id`.\n\n```python\nresult = await connector.get_incident(\"abc123def456abc1\")\n# {\"result\": {\"sys_id\": \"abc123def456abc1\", \"number\": \"INC0010001\", ...}}\n```\n\n**ServiceNow endpoint:** `GET /api/now/table/incident/{sys_id}`\n\nRaises `ServiceNowNotFoundError` if the incident does not exist (404)."
+        },
+        {
+          "id": "list-changes",
+          "title": "list_changes(limit, offset)",
+          "content": "Returns a paginated list of ServiceNow change requests.\n\n```python\npage = await connector.list_changes(limit=100, offset=0)\n# {\"result\": [...]}\n```\n\n**ServiceNow endpoint:** `GET /api/now/table/change_request`"
+        },
+        {
+          "id": "get-change",
+          "title": "get_change(sys_id)",
+          "content": "Returns a single change request by its ServiceNow `sys_id`.\n\n```python\nresult = await connector.get_change(\"chg000001sys0001\")\n# {\"result\": {\"sys_id\": \"chg000001sys0001\", \"number\": \"CHG0020001\", ...}}\n```\n\n**ServiceNow endpoint:** `GET /api/now/table/change_request/{sys_id}`\n\nRaises `ServiceNowNotFoundError` if the change does not exist (404)."
+        },
+        {
+          "id": "list-users",
+          "title": "list_users(limit, offset)",
+          "content": "Returns a paginated list of ServiceNow users.\n\n```python\nresult = await connector.list_users(limit=100, offset=0)\n# {\"result\": [{\"sys_id\": \"...\", \"name\": \"Jane Doe\", \"user_name\": \"jane.doe\", ...}]}\n```\n\n**ServiceNow endpoint:** `GET /api/now/table/sys_user`\n\n> Requires admin role or a custom ACL granting read on `sys_user`."
+        },
+        {
+          "id": "list-cmdb-items",
+          "title": "list_cmdb_items(class_name, limit)",
+          "content": "Returns CMDB configuration items for the given CI class.\n\n```python\n# Default: all cmdb_ci records\nresult = await connector.list_cmdb_items()\n\n# Specific class: Linux servers only\nresult = await connector.list_cmdb_items(class_name=\"cmdb_ci_linux_server\", limit=50)\n# {\"result\": [{\"sys_id\": \"...\", \"name\": \"Web Server 1\", ...}]}\n```\n\n**ServiceNow endpoint:** `GET /api/now/table/{class_name}`\n\nCommon CI classes: `cmdb_ci`, `cmdb_ci_server`, `cmdb_ci_linux_server`, `cmdb_ci_win_server`, `cmdb_ci_database`, `cmdb_ci_application`"
+        }
+      ]
+    },
+    {
+      "id": "sync-details",
+      "title": "Sync & Document Schema",
+      "content": "### Incident Document Schema\n\nEach ServiceNow incident is normalized to a `ConnectorDocument`:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('incident:' + sys_id)[:16]` — stable 16-char hex ID |\n| `title` | `Incident {number}: {short_description}` |\n| `content` | `short_description` + `description` concatenated |\n| `source_url` | `https://{instance}.service-now.com/incident.do?sys_id={sys_id}` |\n| `metadata.sys_id` | ServiceNow sys_id |\n| `metadata.number` | Incident number (e.g. INC0010001) |\n| `metadata.state` | Incident state code |\n| `metadata.priority` | Priority code (1=Critical, 2=High, 3=Moderate, 4=Low) |\n| `metadata.urgency` | Urgency code |\n| `metadata.impact` | Impact code |\n| `metadata.category` | Incident category |\n| `metadata.assigned_to` | Assigned user sys_id |\n| `metadata.caller_id` | Caller user sys_id |\n| `metadata.opened_at` | ISO 8601 creation timestamp |\n| `metadata.resolved_at` | ISO 8601 resolution timestamp (empty if open) |\n| `metadata.closed_at` | ISO 8601 closure timestamp (empty if open) |\n| `metadata.sys_updated_on` | ISO 8601 last-update timestamp |\n| `metadata.record_type` | `\"incident\"` |\n\n### Change Request Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('change:' + sys_id)[:16]` — stable 16-char hex ID |\n| `title` | `Change Request {number}: {short_description}` |\n| `content` | `short_description` + `description` concatenated |\n| `source_url` | `https://{instance}.service-now.com/change_request.do?sys_id={sys_id}` |\n| `metadata.sys_id` | ServiceNow sys_id |\n| `metadata.number` | Change number (e.g. CHG0020001) |\n| `metadata.state` | Change state code |\n| `metadata.priority` | Priority code |\n| `metadata.risk` | Risk level |\n| `metadata.change_type` | Change type (normal/standard/emergency) |\n| `metadata.assigned_to` | Assigned user sys_id |\n| `metadata.requested_by` | Requestor user sys_id |\n| `metadata.start_date` | Planned start date |\n| `metadata.end_date` | Planned end date |\n| `metadata.sys_updated_on` | ISO 8601 last-update timestamp |\n| `metadata.record_type` | `\"change_request\"` |\n\n### Field Format Handling\n\nServiceNow Table API returns fields in two formats depending on the `sysparm_display_value` parameter:\n- **Plain string:** `\"state\": \"1\"`\n- **Object:** `\"assigned_to\": {\"value\": \"sys_id_here\", \"display_value\": \"Jane Doe\"}`\n\nThe `_extract_value()` helper normalizes both — for object fields it returns the `value` (sys_id). This ensures `metadata.assigned_to` always contains the sys_id, not the display name.\n\n### Pagination\n\nServiceNow uses offset-based pagination via `sysparm_offset` and `sysparm_limit`. The connector stops when a page returns fewer records than the requested limit.\n\n### Recommended schedule\n\nFor near-real-time ITSM data, run sync every 5–15 minutes. For high-volume instances, hourly sync is recommended."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nServiceNowError (base)\n├── ServiceNowAuthError      — 401/403: invalid credentials or insufficient permissions\n├── ServiceNowRateLimitError — 429: too many requests (stores retry_after seconds)\n├── ServiceNowNotFoundError  — 404: resource does not exist\n└── ServiceNowNetworkError   — 5xx / connection error / timeout\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `ServiceNowNetworkError` | Yes | Exponential backoff: 1s, 2s, 4s + jitter, max 30s |\n| `ServiceNowRateLimitError` | Yes | Respects `Retry-After` header; falls back to backoff |\n| `ServiceNowAuthError` | **No** | Immediate failure — fix credentials |\n| `ServiceNowNotFoundError` | **No** | Immediate failure — resource is gone |\n\n### Handling in code\n\n```python\nfrom exceptions import ServiceNowAuthError, ServiceNowRateLimitError, ServiceNowNotFoundError\ntry:\n    result = await connector.get_incident(\"abc123\")\nexcept ServiceNowNotFoundError:\n    # incident was deleted from ServiceNow\nexcept ServiceNowAuthError:\n    # credentials expired — prompt user to reconnect\nexcept ServiceNowRateLimitError as e:\n    # e.retry_after gives seconds to wait\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\n**Cause:** Incorrect username or password, or the account is locked.\n\n**Fix:** Verify credentials in ServiceNow User Administration. Unlock the account if needed (multiple failed logins trigger lockout).\n\n---\n\n### 403 Forbidden\n\n**Cause:** The user account lacks permission to read the requested table.\n\n**Fix:** Assign the **itil** role for incident/change access. For `sys_user` table, grant admin role or a custom ACL.\n\n---\n\n### 404 Not Found\n\n**Cause:** The instance name is incorrect, or the specific `sys_id` no longer exists.\n\n**Fix:** Verify the instance name matches your ServiceNow URL. Confirm the record exists in ServiceNow.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** ServiceNow rate limit reached.\n\n**Fix:** The connector retries automatically with exponential backoff. Reduce sync frequency if persistent.\n\n---\n\n### Sync returns 0 documents\n\n**Cause:** The service account has no read access to incidents or change requests, or the tables are empty.\n\n**Fix:** Log in directly with service account credentials to verify access. Check that the itil role is assigned.\n\n---\n\n### `ModuleNotFoundError: No module named 'aiohttp'`\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install aiohttp>=3.9.0\n```\n\n---\n\n### Tests fail: `asyncio_mode` warning\n\n**Fix:** Ensure `pytest.ini` contains:\n```ini\n[pytest]\nasyncio_mode = auto\n```\nThis is already configured in the connector root."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 69 unit tests — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/servicenow_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 69 passed\n```\n\n### Coverage\n\n- `install()` — success (with username shown), 3 individual missing-field cases, all-missing, invalid creds, network error, unexpected error\n- `health_check()` — healthy (with user info), auth error, network error, missing credentials, generic error\n- `sync()` — empty (both tables), incidents+changes sync, incident pagination (2 pages), partial failure, incident API error → FAILED, change API error → FAILED\n- `list_incidents()` — returns page, default params, with query\n- `get_incident()` — returns record, passes sys_id, raises NotFoundError on 404\n- `list_changes()` — returns page, pagination params\n- `get_change()` — returns record, raises NotFoundError on 404\n- `list_users()` — returns page, pagination params\n- `list_cmdb_items()` — returns page, custom class name + limit\n- `normalize_incident()` — title, source_id (16 chars, hex, deterministic, sha256 prefix), different sys_ids → different source_ids, source_url, all metadata fields, display_value extraction, content includes short_description + description, connector/tenant IDs, empty number fallback\n- `normalize_change()` — title, source_id (sha256 prefix), incident vs change have different source_ids for same sys_id, source_url, all metadata fields, content\n- `with_retry()` — success first attempt, retries on network error, never retries auth error, raises after max attempts, rate limit reraises\n- Exception hierarchy — all 4 subclasses are ServiceNowError, rate_limit stores retry_after, error stores status_code + code\n- HTTP client — base URL construction, BasicAuth construction\n- Connector config — config dict loading, kwarg fallback, config precedence, `_missing_credentials()` all/partial/none\n- Lifecycle — context manager, `aclose()` clears client, `_ensure_client()` creates + reuses, CONNECTOR_TYPE/AUTH_TYPE constants"
+    }
+  ]
+}
