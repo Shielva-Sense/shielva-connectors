@@ -1,0 +1,111 @@
+{
+  "connector_type": "klaviyo",
+  "connector_id": "klaviyo",
+  "name": "Klaviyo",
+  "provider": "klaviyo",
+  "service": "klaviyo",
+  "version": "1.0.0",
+  "description": "Connects to Klaviyo via the REST API v2024-02-15 to sync profiles, campaigns, lists, and segments into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Private API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "pk_...",
+      "help": "Your Klaviyo Private API key starting with 'pk_'. Found in Klaviyo → Account → Settings → API Keys."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "cursor_pagination"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the Private API key via GET /accounts. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /accounts and return HEALTHY, DEGRADED, or OFFLINE with the Klaviyo account name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches all profiles (cursor-paginated), campaigns, and lists. Normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_profiles",
+      "name": "List Profiles",
+      "description": "Cursor-based paginated list of Klaviyo profiles.",
+      "category": "profiles",
+      "endpoint": "GET /profiles"
+    },
+    {
+      "id": "get_profile",
+      "name": "Get Profile",
+      "description": "Retrieve a single profile by ID.",
+      "category": "profiles",
+      "endpoint": "GET /profiles/{profile_id}"
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Paginated list of Klaviyo lists.",
+      "category": "lists",
+      "endpoint": "GET /lists"
+    },
+    {
+      "id": "get_list",
+      "name": "Get List",
+      "description": "Retrieve a single list by ID.",
+      "category": "lists",
+      "endpoint": "GET /lists/{list_id}"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Paginated list of Klaviyo email campaigns.",
+      "category": "campaigns",
+      "endpoint": "GET /campaigns"
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "Paginated list of Klaviyo segments.",
+      "category": "segments",
+      "endpoint": "GET /segments"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "profiles",
+    "lists",
+    "campaigns",
+    "segments"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync", "id": "sync", "category": "sync"},
+    {"name": "List Profiles", "id": "list_profiles", "category": "profiles"},
+    {"name": "Get Profile", "id": "get_profile", "category": "profiles"},
+    {"name": "List Lists", "id": "list_lists", "category": "lists"},
+    {"name": "Get List", "id": "get_list", "category": "lists"},
+    {"name": "List Campaigns", "id": "list_campaigns", "category": "campaigns"},
+    {"name": "List Segments", "id": "list_segments", "category": "segments"}
+  ]
+}
