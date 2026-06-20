@@ -1,0 +1,22 @@
+{
+  "connector_type": "lever",
+  "name": "Lever",
+  "display_name": "Lever ATS",
+  "provider": "Lever",
+  "service": "lever",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Lever API key from Settings → Integrations → API Credentials."
+    }
+  ],
+  "capabilities": ["sync", "health_check", "list_opportunities", "list_postings"],
+  "resources": ["opportunities", "postings", "users", "interviews", "offers", "stages"],
+  "category": "ats",
+  "description": "Sync candidates, job postings, and pipeline data from Lever ATS."
+}
