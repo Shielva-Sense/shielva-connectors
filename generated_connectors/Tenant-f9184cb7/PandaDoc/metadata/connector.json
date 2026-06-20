@@ -1,0 +1,111 @@
+{
+  "connector_type": "pandadoc",
+  "display_name": "PandaDoc",
+  "provider": "pandadoc",
+  "service": "pandadoc",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connects to the PandaDoc API v1 to sync documents, templates, contacts, forms, and workspace members into the Shielva knowledge base.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your PandaDoc API Key",
+      "help": "Generate an API key from PandaDoc Settings → Integrations → API. The key is used in the Authorization: API-Key header."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "features": [
+    "api_key_auth",
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate API Key",
+      "description": "Validate that api_key is present and verify it against GET /workspaces/.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /workspaces/ and return HEALTHY, DEGRADED, or OFFLINE with workspace name.",
+      "category": "health",
+      "endpoint": "GET /workspaces/"
+    },
+    {
+      "id": "sync",
+      "name": "Sync All Resources",
+      "description": "Sync documents, templates, contacts, and forms into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_documents",
+      "name": "List Documents",
+      "description": "Paginated list of all PandaDoc documents.",
+      "category": "documents",
+      "endpoint": "GET /documents"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "Paginated list of all PandaDoc templates.",
+      "category": "templates",
+      "endpoint": "GET /templates"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of all PandaDoc contacts.",
+      "category": "contacts",
+      "endpoint": "GET /contacts"
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "Paginated list of all PandaDoc forms.",
+      "category": "forms",
+      "endpoint": "GET /forms"
+    },
+    {
+      "id": "get_document",
+      "name": "Get Document",
+      "description": "Retrieve a single document by ID.",
+      "category": "documents",
+      "endpoint": "GET /documents/{id}"
+    },
+    {
+      "id": "get_document_details",
+      "name": "Get Document Details",
+      "description": "Retrieve detailed information for a document including fields and tokens.",
+      "category": "documents",
+      "endpoint": "GET /documents/{id}/details"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "documents",
+    "templates",
+    "contacts",
+    "forms"
+  ],
+  "apis": [
+    { "name": "Install / Validate API Key", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync All Resources", "id": "sync", "category": "sync" },
+    { "name": "List Documents", "id": "list_documents", "category": "documents" },
+    { "name": "List Templates", "id": "list_templates", "category": "templates" },
+    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
+    { "name": "List Forms", "id": "list_forms", "category": "forms" },
+    { "name": "Get Document", "id": "get_document", "category": "documents" },
+    { "name": "Get Document Details", "id": "get_document_details", "category": "documents" }
+  ]
+}
