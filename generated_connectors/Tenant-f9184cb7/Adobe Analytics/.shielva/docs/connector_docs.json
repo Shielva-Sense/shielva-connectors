@@ -1,0 +1,190 @@
+{
+  "title": "Adobe Analytics Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Adobe Analytics connector** integrates with the Adobe Analytics 2.0 API. It enables Shielva to sync report suites, segments, and calculated metrics from your Adobe Analytics organization into the knowledge base.\n\nThis connector uses **OAuth2 client_credentials grant** via Adobe IMS. The access token is acquired automatically and refreshed before expiry.\n\n**Key capabilities:**\n- Authenticate via OAuth2 client_credentials (Adobe IMS)\n- Sync all report suites for the company\n- Sync segments and calculated metrics\n- Run custom reports (ranked, trended) via POST /reports\n- List dimensions and metrics per report suite\n- Stable document IDs via `SHA-256('report_suite:'+rsid)[:16]` for deduplication\n- Automatic token refresh (24h TTL, 30s pre-expiry buffer)\n- Automatic retry with exponential back-off on transient failures",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`adobe_analytics` — registered in ACP as **Adobe Analytics**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Adobe Inc. (Adobe Analytics 2.0 API — `https://analytics.adobe.io/api/{company_id}/...`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates credentials + acquires OAuth2 token; returns HEALTHY/CONNECTED or OFFLINE |\n| `health_check()` | Token + report suite list; returns suite count in message |\n| `sync()` | Fetches report suites + segments + calculated metrics; normalizes to ConnectorDocuments |\n| `list_report_suites()` | GET /reportsuites — all report suites for the company |\n| `list_dimensions(rsid)` | GET /dimensions?rsid= — all dimensions for a report suite |\n| `list_metrics(rsid)` | GET /metrics?rsid= — all metrics for a report suite |\n| `list_segments(rsid)` | GET /segments?rsid= — all segments for a report suite |\n| `run_report(rsid, metrics, dimensions)` | POST /reports — run a ranked report |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **OAuth2 client_credentials grant** via Adobe IMS. On first use (or when the cached token expires), it POSTs to `https://ims-na1.adobelogin.com/ims/token/v3` with the client_id and client_secret to obtain a Bearer token. All subsequent Analytics API calls include:\n```\nAuthorization: Bearer {access_token}\nx-api-key: {client_id}\nContent-Type: application/json\n```",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`oauth2` (server-to-server client_credentials grant). Credentials are created in Adobe Developer Console → Projects → OAuth Server-to-Server."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID (API Key) | `client_id` | string | Yes | OAuth2 Client ID from Adobe Developer Console |\n| Client Secret | `client_secret` | password | Yes | OAuth2 Client Secret |\n| Global Company ID | `company_id` | string | Yes | Short alphanumeric slug used in all API URLs |\n| Organization ID | `organization_id` | string | No | IMS Org ID (format: {hex}@AdobeOrg) |"
+        },
+        {
+          "id": "token-details",
+          "title": "Token Details",
+          "content": "| Parameter | Value |\n|-----------|-------|\n| Token URL | `https://ims-na1.adobelogin.com/ims/token/v3` |\n| Grant type | `client_credentials` |\n| Scopes | `openid,AdobeID,read_organizations,additional_info.projectedProductContext,additional_info.job_function` |\n| TTL | 24 hours (86399s from Adobe) |\n| Refresh buffer | 30 seconds before expiry |\n\nTokens are stored in process memory only — never written to disk or logs."
+        },
+        {
+          "id": "credential-security",
+          "title": "Credential Security",
+          "content": "Client secrets are stored AES-256-GCM encrypted at rest by the Shielva vault. Neither `client_secret` nor `access_token` values ever appear in log output. The connector uses read-only API scopes — it cannot modify Adobe Analytics data."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `client_id` | Adobe Analytics OAuth2 Client ID (API Key) |\n| `client_secret` | Adobe Analytics OAuth2 Client Secret |\n| `company_id` | Global Company ID — used in all API URL paths |\n| `organization_id` | IMS Org ID (optional, informational) |"
+        },
+        {
+          "id": "api-base-url",
+          "title": "API Base URL",
+          "content": "All Analytics 2.0 API calls use:\n```\nhttps://analytics.adobe.io/api/{company_id}/{resource}\n```\nThe `company_id` is filled from the connector config. Token requests always go to:\n```\nhttps://ims-na1.adobelogin.com/ims/token/v3\n```"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `AdobeAnalyticsHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates credentials and establishes the connector.\n\n**Steps:**\n1. Check `client_id` non-empty → MISSING_CREDENTIALS if not.\n2. Check `client_secret` non-empty → MISSING_CREDENTIALS if not.\n3. Check `company_id` non-empty → MISSING_CREDENTIALS if not.\n4. Call `get_token()` via `with_retry`.\n5. On success, create fresh http_client.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Adobe Analytics')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` — missing field\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` — network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nAcquires token and lists report suites to verify connectivity.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Adobe Analytics (2 report suite(s))')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across three data categories:\n1. **Report suites** — `GET /reportsuites` → all suites normalized to ConnectorDocuments\n2. **Segments** — `GET /segments?rsid={first_rsid}` → segments for first report suite\n3. **Calculated metrics** — `GET /calculatedmetrics` → all calculated metrics\n\nSegment and calculated metric failures are non-fatal.\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some fail or zero docs found."
+        },
+        {
+          "id": "list-report-suites",
+          "title": "list_report_suites()",
+          "content": "**Signature:** `async def list_report_suites(self) -> list[dict]`\n\nReturns all report suites for the company.\n\n**Returns:** List of report suite dicts with rsid, name, currency, timezoneZoneinfo, status."
+        },
+        {
+          "id": "list-dimensions",
+          "title": "list_dimensions(report_suite_id)",
+          "content": "**Signature:** `async def list_dimensions(self, report_suite_id: str) -> list[dict]`\n\nReturns all dimensions for a report suite.\n\n**Parameters:**\n- `report_suite_id` — RSID string (e.g. 'mycompany.prod')\n\n**Returns:** List of dimension dicts with id, name, type."
+        },
+        {
+          "id": "list-metrics",
+          "title": "list_metrics(report_suite_id)",
+          "content": "**Signature:** `async def list_metrics(self, report_suite_id: str) -> list[dict]`\n\nReturns all metrics for a report suite.\n\n**Parameters:**\n- `report_suite_id` — RSID string\n\n**Returns:** List of metric dicts with id, name, type."
+        },
+        {
+          "id": "list-segments",
+          "title": "list_segments(report_suite_id)",
+          "content": "**Signature:** `async def list_segments(self, report_suite_id: str) -> list[dict]`\n\nReturns all segments for a report suite.\n\n**Parameters:**\n- `report_suite_id` — RSID string\n\n**Returns:** List of segment dicts with id, name, description, owner, tags."
+        },
+        {
+          "id": "run-report",
+          "title": "run_report(report_suite_id, metrics, dimensions, date_range)",
+          "content": "**Signature:** `async def run_report(self, report_suite_id: str, metrics: list[str], dimensions: list[str], date_range: str = '') -> dict`\n\nRuns a ranked Adobe Analytics report.\n\n**Parameters:**\n- `report_suite_id` — RSID string\n- `metrics` — list of metric IDs (e.g. `['metrics/visits', 'metrics/pageviews']`)\n- `dimensions` — list of dimension IDs (e.g. `['variables/page']`); first one used\n- `date_range` — optional ISO-8601 date range string\n\n**Returns:** Raw JSON report response with `rows` and `columns`."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `AdobeAnalyticsHTTPClient` (`client/http_client.py`) using `aiohttp.ClientSession`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Adobe Analytics API Call | Description |\n|--------|------------------------|-------------|\n| `get_token()` | `POST https://ims-na1.adobelogin.com/ims/token/v3` | Acquire OAuth2 access token |\n| `get_report_suites()` | `GET /api/{company_id}/reportsuites` | All report suites |\n| `get_dimensions(rsid)` | `GET /api/{company_id}/dimensions?rsid=` | Dimensions for a report suite |\n| `get_metrics(rsid)` | `GET /api/{company_id}/metrics?rsid=` | Metrics for a report suite |\n| `run_report(rsid, body)` | `POST /api/{company_id}/reports` | Run a ranked report |\n| `get_segments(rsid)` | `GET /api/{company_id}/segments?rsid=` | Segments for a report suite |\n| `get_calculated_metrics()` | `GET /api/{company_id}/calculatedmetrics` | All calculated metrics |"
+        },
+        {
+          "id": "error-mapping",
+          "title": "Error Mapping",
+          "content": "HTTP status codes are mapped to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 400 (token) | `AdobeAnalyticsAuthError` |\n| 401 | `AdobeAnalyticsAuthError` |\n| 403 | `AdobeAnalyticsAuthError` |\n| 404 | `AdobeAnalyticsNotFoundError` |\n| 429 | `AdobeAnalyticsRateLimitError` (with retry_after) |\n| Connection/timeout | `AdobeAnalyticsNetworkError` |\n| 5xx | `AdobeAnalyticsError` |\n| Other 4xx | `AdobeAnalyticsError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` (configurable)\n- Back-off: base 1s × 2^attempt + random jitter (0–0.5s), capped at 30s\n- Skips retry on `AdobeAnalyticsAuthError` — re-installing is required\n- For `AdobeAnalyticsRateLimitError`: honours `retry_after` if > 0, otherwise back-off formula\n- Retries on all other `AdobeAnalyticsError` and `AdobeAnalyticsNetworkError` subclasses"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by the helper functions in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "report-suite-document",
+          "title": "Report Suite ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('report_suite:mycompany.prod')[:16]>\",\n  \"title\": \"Adobe Analytics report suite: Production Site\",\n  \"content\": \"Report Suite ID: mycompany.prod\\nName: Production Site\\nCurrency: USD\\nTimezone: America/New_York\\nStatus: active\",\n  \"source_url\": \"https://analytics.adobe.com\",\n  \"metadata\": {\n    \"rsid\": \"mycompany.prod\",\n    \"name\": \"Production Site\",\n    \"currency\": \"USD\",\n    \"timezone\": \"America/New_York\",\n    \"status\": \"active\",\n    \"type\": \"report_suite\"\n  }\n}\n```"
+        },
+        {
+          "id": "segment-document",
+          "title": "Segment ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('segment:s300012345_5f123abc')[:16]>\",\n  \"title\": \"Adobe Analytics segment: Mobile Users\",\n  \"content\": \"Segment ID: s300012345_5f123abc\\nName: Mobile Users\\nDescription: All visits from mobile devices\\nOwner: John Doe\\nTags: mobile, devices\",\n  \"source_url\": \"https://analytics.adobe.com\",\n  \"metadata\": {\n    \"id\": \"s300012345_5f123abc\",\n    \"name\": \"Mobile Users\",\n    \"description\": \"All visits from mobile devices\",\n    \"owner\": \"John Doe\",\n    \"tags\": [\"mobile\", \"devices\"],\n    \"type\": \"segment\"\n  }\n}\n```"
+        },
+        {
+          "id": "calculated-metric-document",
+          "title": "Calculated Metric ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('calculated_metric:cm300012345_5fabc123')[:16]>\",\n  \"title\": \"Adobe Analytics calculated metric: Bounce Rate\",\n  \"content\": \"Calculated Metric ID: cm300012345_5fabc123\\nName: Bounce Rate\\nDescription: Percentage of single-page visits\\nFormula: metric('bounces')/metric('entries')\\nOwner: Analytics Team\\nPolarity: negative\\nPrecision: 1\",\n  \"source_url\": \"https://analytics.adobe.com\",\n  \"metadata\": {\n    \"id\": \"cm300012345_5fabc123\",\n    \"name\": \"Bounce Rate\",\n    \"formula\": \"metric('bounces')/metric('entries')\",\n    \"owner\": \"Analytics Team\",\n    \"type\": \"calculated_metric\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "Document IDs are stable across syncs:\n- Report suite: `SHA-256('report_suite:' + rsid)[:16]`\n- Segment: `SHA-256('segment:' + id)[:16]`\n- Calculated metric: `SHA-256('calculated_metric:' + id)[:16]`\n\nThe same Adobe Analytics data always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `AdobeAnalyticsError` (base) in `exceptions.py`:\n\n```\nAdobeAnalyticsError (base)\n├── AdobeAnalyticsAuthError         — 400/401/403 responses (token or API)\n├── AdobeAnalyticsNetworkError      — connectivity failures, timeouts\n├── AdobeAnalyticsNotFoundError     — 404 Not Found\n└── AdobeAnalyticsRateLimitError    — 429 Too Many Requests (has retry_after attr)\n```\n\nCallers can catch the base `AdobeAnalyticsError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `client_id is required` | Missing field | Enter the Client ID in the install form |\n| `client_secret is required` | Missing field | Enter the Client Secret |\n| `company_id is required` | Missing field | Enter the Global Company ID |\n| `Authentication failed: invalid_client` | Wrong client_id or secret | Re-copy from Adobe Developer Console |\n| `401 Unauthorized` | Token rejected | Verify credentials in Developer Console |\n| `403 Forbidden` | No product profile access | Add product profile in Adobe Admin Console |\n| `404 Not Found` | Wrong company_id | Verify via discovery API |\n| `429 Too Many Requests` | Rate limit hit | Connector retries automatically |\n| `500 Server Error` | Adobe API outage | Check status.adobe.com |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (60+ tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/adobe_analytics_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
