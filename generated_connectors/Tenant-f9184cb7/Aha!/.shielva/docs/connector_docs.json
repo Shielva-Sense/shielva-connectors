@@ -1,0 +1,78 @@
+{
+  "title": "Aha! Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Aha!** connector integrates Shielva with the [Aha! REST API v1](https://www.aha.io/api) to sync features, releases, ideas, and goals from your product roadmaps into your Shielva knowledge base.\n\nAha! is a leading product roadmap and strategy platform used by product teams worldwide to plan and prioritize work. This connector exposes **7 API methods** across 5 resource domains — Products, Features, Releases, Ideas, and Goals — and normalises all data to Shielva's `ConnectorDocument` schema for downstream search and AI workflows.\n\n**Key capabilities:**\n- Full sync across all products, features, releases, and ideas with automatic page-number pagination (`pagination.total_pages`)\n- Features normalised with name, description, workflow status, and release reference\n- Releases normalised with name, reference number, and release date\n- Ideas normalised with name, description, status, and vote count\n- Goals normalised with name and description\n- Bearer token auth (Aha! API key) — no OAuth round-trip required\n- Base URL is per-subdomain: `https://{subdomain}.aha.io/api/v1`\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid or revoked tokens"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Aha! connector running in under 5 minutes.\n\n### 1. Generate an API Key\n\n1. Log in to Aha! at `https://{yoursubdomain}.aha.io`.\n2. Go to **Settings** → **Security** → **API Key**.\n3. Click **Generate API key** and copy it immediately.\n\n### 2. Find your subdomain\n\nYour subdomain is the part before `.aha.io` in your Aha! URL.\nFor `https://mycompany.aha.io`, the subdomain is `mycompany`.\n\n### 3. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Aha!**.\n2. Enter your **API Key** in the `api_key` field.\n3. Enter your **subdomain** in the `subdomain` field.\n4. Click **Install**.\n\nThe connector calls `GET /api/v1/me` to validate credentials and returns the connected user's name on success.\n\n### 4. Run a sync\n\n```python\nasync with AhaConnector(config={\"api_key\": \"YOUR_KEY\", \"subdomain\": \"mycompany\"}) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_roadmap_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Aha! connector uses **Bearer token authentication** with an Aha! API key.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | From Settings → Security → API Key |\n| Subdomain | `subdomain` | string | Yes | Part before `.aha.io` in your account URL |\n\n### How it works\n\nThe API key is sent as a Bearer token in the `Authorization` header on every request:\n\n```\nAuthorization: Bearer {api_key}\n```\n\nThe `AhaHTTPClient` injects this via `_headers()` automatically.\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /api/v1/me`. A `401` or `403` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network failure sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- The API key is stored encrypted in the Shielva vault and never logged.\n- API keys can be regenerated at any time from **Settings → Security → API Key**.\n- The key grants the same read permissions as your Aha! user account."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Aha! connector requires two install fields.\n\n### Install fields\n\n```json\n{\n  \"api_key\": \"your-aha-api-key\",\n  \"subdomain\": \"mycompany\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `per_page` | `200` | Results per page for list operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 listing methods plus health_check and sync.",
+      "children": [
+        {
+          "id": "products",
+          "title": "Products",
+          "content": "List all Aha! products/workspaces the authenticated user has access to.\n\n### `list_products()`\nReturns all products across all pages.\n\n```python\nproducts = await connector.list_products()\n# Returns: [{\"id\": \"...\", \"name\": \"My Product\", ...}, ...]\n```\n\n**Aha! endpoint:** `GET /api/v1/products`"
+        },
+        {
+          "id": "features",
+          "title": "Features",
+          "content": "Fetch features within a product.\n\n### `list_features(product_id)`\nReturns all features across all pages for a product.\n\n```python\nfeatures = await connector.list_features(\"PROD_001\")\n```\n\n**Aha! endpoint:** `GET /api/v1/products/{product_id}/features`"
+        },
+        {
+          "id": "releases",
+          "title": "Releases",
+          "content": "Fetch releases within a product.\n\n### `list_releases(product_id)`\nReturns all releases across all pages for a product.\n\n```python\nreleases = await connector.list_releases(\"PROD_001\")\n```\n\n**Aha! endpoint:** `GET /api/v1/products/{product_id}/releases`"
+        },
+        {
+          "id": "ideas",
+          "title": "Ideas",
+          "content": "Fetch ideas within a product.\n\n### `list_ideas(product_id)`\nReturns all ideas across all pages for a product.\n\n```python\nideas = await connector.list_ideas(\"PROD_001\")\n```\n\n**Aha! endpoint:** `GET /api/v1/products/{product_id}/ideas`"
+        },
+        {
+          "id": "goals",
+          "title": "Goals",
+          "content": "Fetch goals within a product.\n\n### `list_goals(product_id)`\nReturns all goals for a product (single request, no pagination needed).\n\n```python\ngoals = await connector.list_goals(\"PROD_001\")\n```\n\n**Aha! endpoint:** `GET /api/v1/products/{product_id}/goals`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Ingestion",
+      "content": "The `sync()` method traverses all products → features + releases + ideas with full page-number pagination.\n\n### How sync works\n\n1. **Products:** pages through `GET /api/v1/products` using `page` param until `pagination.total_pages` is reached.\n2. **Features per product:** pages through `GET /api/v1/products/{id}/features`. Each feature is normalised via `normalize_feature()` into a `ConnectorDocument`.\n3. **Releases per product:** pages through `GET /api/v1/products/{id}/releases`. Each release is normalised via `normalize_release()`.\n4. **Ideas per product:** pages through `GET /api/v1/products/{id}/ideas`. Each idea is normalised via `normalize_idea()`.\n5. All documents call `_ingest_document(doc, kb_id)` when `kb_id` is provided (wired by Shielva runtime).\n\n### Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | `False` | Accepted for API compatibility; all data is always fetched |\n| `since` | `datetime\\|None` | `None` | Accepted for API compatibility |\n| `kb_id` | str | `\"\"` | Knowledge base ID to ingest into; skipped if empty |\n\n### Normalized document schema\n\n**Feature:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"feature:\"+id)[:16] |\n| `title` | feature.name |\n| `content` | name + reference + description + status + release |\n| `metadata.type` | \"feature\" |\n| `metadata.feature_id` | feature.id |\n| `metadata.reference_num` | feature.reference_num |\n| `metadata.status` | feature.workflow_status.name |\n\n**Release:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"release:\"+id)[:16] |\n| `title` | release.name |\n| `content` | name + reference + release_date |\n| `metadata.type` | \"release\" |\n\n**Idea:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"idea:\"+id)[:16] |\n| `title` | idea.name |\n| `content` | name + reference + description + status + votes |\n| `metadata.type` | \"idea\" |\n\n**Goal:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"goal:\"+id)[:16] |\n| `title` | goal.name |\n| `content` | name + reference + description |\n| `metadata.type` | \"goal\" |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception hierarchy\n\n```\nAhaError (base)\n├── AhaAuthError       — 401 / 403: invalid or revoked API key\n├── AhaRateLimitError  — 429: too many requests (includes retry_after)\n├── AhaNotFoundError   — 404: resource not found\n└── AhaNetworkError    — 5xx / connection errors / timeouts\n```\n\n### Retry behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `AhaRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts |\n| `AhaNetworkError` (5xx / timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `AhaAuthError` (401 / 403) | No | Fail-fast — check API key |\n| `AhaNotFoundError` (404) | No | Fail-fast — check resource ID |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their fixes.\n\n### `health=OFFLINE` after install\n\n**Cause:** Invalid or revoked API key, or incorrect subdomain.\n\n**Fix:**\n- Go to **Settings → Security → API Key** in Aha! and regenerate.\n- Verify the subdomain is correct (e.g. `mycompany` for `mycompany.aha.io`).\n- Update the connector credentials in Shielva ACP → Integrations → Aha! → Edit credentials.\n\n---\n\n### `AhaAuthError: 401 Unauthorized`\n\n**Cause:** The stored API key was revoked or is incorrect.\n\n**Fix:** Regenerate the API key in Aha! → Settings → Security and update the connector.\n\n---\n\n### `AhaNetworkError: Connection error`\n\n**Cause:** Incorrect subdomain — the URL `https://{subdomain}.aha.io` does not resolve.\n\n**Fix:** Confirm your Aha! account URL and extract the correct subdomain.\n\n---\n\n### Sync returns 0 documents\n\n**Cause:** No products, features, releases, or ideas accessible to the API key owner.\n\n**Fix:** Verify the account has at least one product with content. Run `health_check()` to confirm connectivity."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a full unit test suite — no live Aha! account required.\n\n### Run unit tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/aha_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 60+ passed\n```\n\nAll HTTP calls are mocked via `AsyncMock` and `MagicMock`.\n\n### Coverage\n\n- Exception classes — hierarchy, message, status_code, retry_after\n- Model enums — ConnectorHealth, AuthStatus, SyncStatus\n- Model dataclasses — InstallResult, HealthCheckResult, SyncResult, ConnectorDocument\n- Normalizers — normalize_feature, normalize_release, normalize_idea, normalize_goal (stable IDs, metadata, content)\n- `with_retry()` — success, retry on network, no retry on auth, exhausted attempts\n- `AhaHTTPClient` — Bearer header, subdomain URL, all 7 endpoints, _raise_for_status 401/403/404/429/500\n- `install()` — success, missing api_key, missing subdomain, auth error, network error\n- `health_check()` — healthy with user name, auth error, network error, missing creds\n- `sync()` — returns SyncResult, counts features + releases + ideas, partial on failure\n- `list_products`, `list_features`, `list_releases`, `list_ideas`, `list_goals` — return types, pagination, empty\n- Lifecycle — aclose clears client, context manager"
+    }
+  ]
+}
