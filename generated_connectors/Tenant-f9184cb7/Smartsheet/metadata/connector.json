@@ -1,0 +1,19 @@
+{
+  "connector_type": "smartsheet",
+  "name": "Smartsheet",
+  "provider": "Smartsheet",
+  "service": "Project Management",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Smartsheet connector for sheets, folders, workspaces, and reports",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Smartsheet API access token. Go to Account → Apps & Integrations → API Access → Generate new access token."
+    }
+  ],
+  "capabilities": ["sheets", "folders", "workspaces", "reports", "sync"]
+}
