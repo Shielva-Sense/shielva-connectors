@@ -1,0 +1,36 @@
+{
+  "connector_type": "magento",
+  "name": "Magento",
+  "display_name": "Magento 2",
+  "description": "Connect to your Magento 2 store to sync orders, products, customers, and categories.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Store URL",
+      "type": "string",
+      "required": true,
+      "description": "Your Magento 2 store base URL (e.g. https://mystore.com)."
+    },
+    {
+      "key": "access_token",
+      "label": "Integration Access Token",
+      "type": "password",
+      "required": true,
+      "description": "Magento Integration access token. From Admin → System → Integrations → Create Integration."
+    }
+  ],
+  "capabilities": [
+    "list_orders",
+    "get_order",
+    "list_products",
+    "get_product",
+    "list_customers",
+    "get_customer",
+    "list_categories",
+    "sync"
+  ],
+  "provider": "magento",
+  "category": "ecommerce"
+}
