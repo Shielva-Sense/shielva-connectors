@@ -1,0 +1,154 @@
+{
+  "connector_type": "dropbox",
+  "connector_id": "dropbox",
+  "display_name": "Dropbox",
+  "name": "Dropbox",
+  "provider": "Dropbox",
+  "service": "Dropbox",
+  "version": "1.0.0",
+  "description": "Sync Dropbox files and folders into the Shielva knowledge base via the Dropbox API v2.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "App Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "your_dropbox_app_key",
+      "help": "Dropbox App Key from the Dropbox App Console (https://www.dropbox.com/developers/apps)."
+    },
+    {
+      "key": "client_secret",
+      "label": "App Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "your_dropbox_app_secret",
+      "help": "Dropbox App Secret from the Dropbox App Console."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://yourapp.com/oauth/callback",
+      "help": "OAuth2 redirect URI. Must match a URI registered in the Dropbox App Console."
+    }
+  ],
+  "oauth_scopes": [
+    "files.metadata.read",
+    "sharing.read",
+    "account_info.read"
+  ],
+  "oauth_auth_url": "https://www.dropbox.com/oauth2/authorize",
+  "oauth_token_url": "https://api.dropboxapi.com/oauth2/token",
+  "features": [
+    "oauth2",
+    "retry",
+    "cursor_pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "recursive_listing",
+    "shared_links",
+    "space_usage",
+    "team_members"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate app_key/app_secret and optionally verify access_token via POST /users/get_current_account.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return the Dropbox OAuth2 authorization URL for the user to grant access.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "POST /users/get_current_account and return HEALTHY, DEGRADED, or OFFLINE with display name and email.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Files",
+      "description": "Recursively list all Dropbox files and folders and sync into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_folder",
+      "name": "List Folder",
+      "description": "List contents of a Dropbox folder.",
+      "category": "files",
+      "endpoint": "POST /files/list_folder"
+    },
+    {
+      "id": "list_folder_continue",
+      "name": "List Folder (Continue)",
+      "description": "Continue a folder listing using a cursor.",
+      "category": "files",
+      "endpoint": "POST /files/list_folder/continue"
+    },
+    {
+      "id": "get_metadata",
+      "name": "Get Metadata",
+      "description": "Retrieve metadata for a file or folder by path.",
+      "category": "files",
+      "endpoint": "POST /files/get_metadata"
+    },
+    {
+      "id": "search_files",
+      "name": "Search Files",
+      "description": "Full-text search over Dropbox files.",
+      "category": "files",
+      "endpoint": "POST /files/search_v2"
+    },
+    {
+      "id": "list_shared_links",
+      "name": "List Shared Links",
+      "description": "List shared links for a given path or the entire account.",
+      "category": "sharing",
+      "endpoint": "POST /sharing/list_shared_links"
+    },
+    {
+      "id": "get_space_usage",
+      "name": "Get Space Usage",
+      "description": "Return allocation and used bytes for the account.",
+      "category": "account",
+      "endpoint": "POST /users/get_space_usage"
+    },
+    {
+      "id": "list_team_members",
+      "name": "List Team Members",
+      "description": "List members of the team (team apps only).",
+      "category": "team",
+      "endpoint": "POST /team/members/list_v2"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "files",
+    "sharing",
+    "account",
+    "team"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Authorize", "id": "authorize", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync Files", "id": "sync", "category": "sync"},
+    {"name": "List Folder", "id": "list_folder", "category": "files"},
+    {"name": "List Folder Continue", "id": "list_folder_continue", "category": "files"},
+    {"name": "Get Metadata", "id": "get_metadata", "category": "files"},
+    {"name": "Search Files", "id": "search_files", "category": "files"},
+    {"name": "List Shared Links", "id": "list_shared_links", "category": "sharing"},
+    {"name": "Get Space Usage", "id": "get_space_usage", "category": "account"},
+    {"name": "List Team Members", "id": "list_team_members", "category": "team"}
+  ]
+}
