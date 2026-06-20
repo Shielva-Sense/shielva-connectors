@@ -9,6 +9,7 @@ import json
 import structlog
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pathlib import Path
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,7 @@ from datetime import datetime
 
 from integration.db.database import sessions_collection
 from integration.services.docs_builder_service import (
+    _output_dir,
     export_docs_html,
     generate_docs,
     update_docs_with_prompt,
@@ -24,6 +26,28 @@ from integration.services.docs_builder_service import (
 from integration.services import r2_service
 
 logger = structlog.get_logger(__name__)
+
+_SHIELVA_DOCS_REL = Path(".shielva") / "docs" / "connector_docs.json"
+
+
+def _read_local_docs(tenant_id: str, service_slug: str) -> Optional[dict]:
+    """Read connector_docs.json from generated_connectors/ (local fallback when R2 not configured).
+
+    Path: {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector/.shielva/docs/connector_docs.json
+    This file is pushed to git via the sync request alongside the connector source.
+    """
+    if not tenant_id or not service_slug:
+        return None
+    try:
+        p = _output_dir(tenant_id, service_slug) / _SHIELVA_DOCS_REL
+        if p.exists():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if data.get("sections"):
+                return data
+    except Exception:
+        pass
+    return None
+
 
 docs_router = APIRouter(prefix="/sessions", tags=["docs"])
 
@@ -49,13 +73,7 @@ async def save_session_docs(
     body: SaveDocsRequest,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
-    """Persist client-supplied docs JSON (e.g. regenerated locally in SAD) to BOTH
-    Mongo ``session.docs_json`` AND R2 ``CONNECTOR_DOCS``.
-
-    The docs reader (``GET /{id}/docs``) prefers R2 and falls back to Mongo, so
-    writing both makes a SAD-side regenerate show up immediately in ACP — the
-    previously-missing bridge between local docs and the store ACP reads.
-    """
+    """Persist client-supplied docs JSON to R2 (primary store, no MongoDB)."""
     docs_json = body.docs
     if not isinstance(docs_json, dict) or not docs_json.get("sections"):
         raise HTTPException(status_code=400, detail="docs must be a JSON object with a non-empty 'sections' array")
@@ -64,30 +82,20 @@ async def save_session_docs(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
-    now = datetime.utcnow()
-    result = await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": x_tenant_id},
-        {"$set": {"docs_json": docs_json, "docs_updated_at": now}},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    # Also persist to R2 (the reader prefers R2 when it has sections).
     session_meta = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"provider": 1, "service_slug": 1},
+        {"provider": 1, "service_slug": 1, "output_dir": 1},
     )
-    if session_meta and session_meta.get("provider") and session_meta.get("service_slug"):
-        try:
-            await r2_service.save_connector_docs(
-                tenant_id=x_tenant_id,
-                provider=session_meta.get("provider", ""),
-                service_slug=session_meta.get("service_slug", ""),
-                docs=docs_json,
-            )
-        except Exception as exc:
-            # Mongo is updated regardless; R2 is best-effort (and the reader falls back to Mongo).
-            logger.warning("docs_routes.save_r2_failed", session_id=session_id, error=str(exc)[:200])
+    if not session_meta:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    now = datetime.utcnow()
+    await r2_service.save_connector_docs(
+        tenant_id=x_tenant_id,
+        provider=session_meta.get("provider", ""),
+        service_slug=session_meta.get("service_slug", ""),
+        docs=docs_json,
+    )
 
     logger.info("docs_routes.saved", session_id=session_id, tenant_id=x_tenant_id, sections=len(docs_json.get("sections", [])))
     return {"saved": True, "updated_at": str(now)}
@@ -215,10 +223,9 @@ async def update_session_docs(
             prompt=body.prompt,
             current_json=body.current_json,
         )
-        # Update R2 with the new version after every prompt-driven update
         session_meta = await sessions_collection().find_one(
             {"_id": ObjectId(session_id), "tenant_id": x_tenant_id},
-            {"provider": 1, "service_slug": 1},
+            {"provider": 1, "service_slug": 1, "output_dir": 1},
         )
         if session_meta:
             await r2_service.save_connector_docs(
@@ -277,10 +284,11 @@ async def get_session_docs(
     session_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
-    """Return the stored docs_json from the session.
+    """Return connector docs.
 
-    Returns the most recently generated/updated documentation JSON,
-    or 404 if documentation has not been generated yet.
+    Source priority (R2 is source of truth; no MongoDB docs_json):
+    1. R2 ``CONNECTOR_DOCS/{provider}/{service_slug}/docs.json``
+    2. Local ``.shielva/docs/connector_docs.json`` (dev fallback when R2 not configured)
     """
     logger.info("docs_routes.get", session_id=session_id, tenant_id=x_tenant_id)
 
@@ -291,21 +299,25 @@ async def get_session_docs(
 
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"docs_json": 1, "docs_generated_at": 1, "docs_updated_at": 1, "doc_prompts": 1,
+        {"docs_generated_at": 1, "docs_updated_at": 1, "doc_prompts": 1,
          "provider": 1, "service_slug": 1},
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    docs_json = session.get("docs_json")
-
-    # Try R2 first — it may have a newer version (e.g. from regenerate)
+    docs_json = None
     provider = session.get("provider", "")
     service_slug = session.get("service_slug", "")
+
+    # 1. R2 — primary store
     if provider and service_slug:
-        r2_docs = await r2_service.get_connector_docs(x_tenant_id, provider, service_slug)
-        if r2_docs and r2_docs.get("sections"):
-            docs_json = r2_docs  # R2 is source of truth
+        docs_json = await r2_service.get_connector_docs(x_tenant_id, provider, service_slug)
+        if docs_json and not docs_json.get("sections"):
+            docs_json = None
+
+    # 2. generated_connectors/ local fallback — file is git-tracked via sync request
+    if not docs_json:
+        docs_json = _read_local_docs(x_tenant_id, service_slug)
 
     if not docs_json:
         raise HTTPException(status_code=404, detail="No documentation found for this session. Generate docs first.")

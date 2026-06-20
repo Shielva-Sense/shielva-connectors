@@ -436,11 +436,6 @@ async def generate_docs(
                 logger.info("docs_builder.agentic_success", session_id=session_id,
                             iterations=agentic_result["iterations"],
                             sections=len(docs_json.get("sections", [])))
-                # Save to session and return (skip prompt-based path)
-                await sessions_collection().update_one(
-                    {"_id": ObjectId(session_id)},
-                    {"$set": {"docs_json": docs_json, "docs_generated_at": datetime.now(timezone.utc)}},
-                )
                 return docs_json
             except (json.JSONDecodeError, Exception) as _e:
                 logger.warning("docs_builder.agentic_json_invalid_fallback", session_id=session_id, error=str(_e))
@@ -522,19 +517,7 @@ async def generate_docs(
         logger.warning("docs_builder.coverage_gaps", gaps=coverage_gaps, session_id=session_id)
         docs_json["_coverage_gaps"] = coverage_gaps
 
-    # 6. Save docs JSON to session in MongoDB (tenant_id for multi-tenant isolation)
-    await sessions_collection().update_one(
-        {"_id": oid, "tenant_id": tenant_id},
-        {
-            "$set": {
-                "docs_json": docs_json,
-                "docs_generated_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }
-        },
-    )
-
-    logger.info("docs_builder.saved_to_session", session_id=session_id)
+    logger.info("docs_builder.generated", session_id=session_id, sections=len(docs_json.get("sections", [])))
     return docs_json
 
 

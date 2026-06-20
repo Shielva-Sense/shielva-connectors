@@ -43,6 +43,10 @@ from integration.db.database import get_db
 
 logger = structlog.get_logger(__name__)
 
+# Limit concurrent CI pipelines to avoid GitHub secondary rate limits when
+# many sync requests are raised or retried at the same time.
+_CI_SEMAPHORE = asyncio.Semaphore(5)
+
 sync_request_router = APIRouter(prefix="/sync-requests", tags=["sync-requests"])
 
 # ── Branch access by role ────────────────────────────────────────────────────
@@ -1610,72 +1614,68 @@ async def raise_sync_request(
         "status": "validating",
     })
 
-    # Run CI pipeline in background
+    # Run CI pipeline in background (semaphore caps concurrent GitHub API usage
+    # to avoid hitting GitHub's secondary rate limit when many requests run together)
     async def _run_pipeline():
-        try:
-            ci_results, cleaned_files = await _run_ci_pipeline(
-                sync_request_id, x_tenant_id, body.session_id, body.files,
-                branch_name=branch_name,
-                sync_settings=sync_settings,
-            )
+        async with _CI_SEMAPHORE:
+            try:
+                ci_results, cleaned_files = await _run_ci_pipeline(
+                    sync_request_id, x_tenant_id, body.session_id, body.files,
+                    branch_name=branch_name,
+                    sync_settings=sync_settings,
+                )
 
-            # Check if any gate failed
-            any_failed = any(r["status"] == "failed" for r in ci_results)
-            if any_failed:
-                # Delete the CI branch — it will never become a PR
-                await _delete_ci_branch(branch_name, sync_settings)
+                # Check if any gate failed
+                any_failed = any(r["status"] == "failed" for r in ci_results)
+                if any_failed:
+                    await _delete_ci_branch(branch_name, sync_settings)
+                    await col.update_one(
+                        {"_id": ObjectId(sync_request_id)},
+                        {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    )
+                    _broadcast(x_tenant_id, "sync:request_validation_failed", {
+                        "sync_request_id": sync_request_id,
+                        "ci_results": ci_results,
+                    })
+                    return
+
+                if not cleaned_files:
+                    await _delete_ci_branch(branch_name, sync_settings)
+                    await col.update_one(
+                        {"_id": ObjectId(sync_request_id)},
+                        {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    )
+                    return
+
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "ci_passed", "updated_at": datetime.utcnow()}},
                 )
-                _broadcast(x_tenant_id, "sync:request_validation_failed", {
+                _broadcast(x_tenant_id, "sync:ci_passed", {
                     "sync_request_id": sync_request_id,
                     "ci_results": ci_results,
                 })
-                return
 
-            if not cleaned_files:
+            except asyncio.CancelledError:
+                logger.info("sync_request.pipeline_cancelled", sync_request_id=sync_request_id)
                 await _delete_ci_branch(branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
-                return
+                _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
 
-            # All gates passed — branch stays on GitHub, user will raise PR from it
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "ci_passed", "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:ci_passed", {
-                "sync_request_id": sync_request_id,
-                "ci_results": ci_results,
-            })
-
-        except asyncio.CancelledError:
-            # User cancelled the CI run — clean up and surface as dismissed
-            logger.info("sync_request.pipeline_cancelled", sync_request_id=sync_request_id)
-            await _delete_ci_branch(branch_name, sync_settings)
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:request_cancelled", {
-                "sync_request_id": sync_request_id,
-            })
-
-        except Exception as e:
-            logger.error("sync_request.pipeline_error", error=str(e), sync_request_id=sync_request_id)
-            # Delete the CI branch on unrecoverable error
-            await _delete_ci_branch(branch_name, sync_settings)
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:request_error", {
-                "sync_request_id": sync_request_id,
-                "error": str(e)[:200],
-            })
+            except Exception as e:
+                logger.error("sync_request.pipeline_error", error=str(e), sync_request_id=sync_request_id)
+                await _delete_ci_branch(branch_name, sync_settings)
+                await col.update_one(
+                    {"_id": ObjectId(sync_request_id)},
+                    {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                )
+                _broadcast(x_tenant_id, "sync:request_error", {
+                    "sync_request_id": sync_request_id,
+                    "error": str(e)[:200],
+                })
 
     _task = asyncio.create_task(_run_pipeline())
     _ci_tasks[sync_request_id] = _task
@@ -1692,7 +1692,7 @@ async def raise_sync_request(
 async def list_sync_requests(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     status: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=1000),
 ):
     """List sync requests for a tenant (newest first)."""
     col = _sync_requests_col()
@@ -2244,58 +2244,56 @@ async def rerun_sync_request(
     _rerun_branch_name = doc.get("branch_name", "")
 
     async def _rerun():
-        try:
-            ci_results, cleaned_files = await _run_ci_pipeline(
-                sync_request_id, x_tenant_id, doc["session_id"], files, run_all=body.run_all,
-                branch_name=_rerun_branch_name,
-                sync_settings=sync_settings,
-            )
-            any_failed = any(r["status"] == "failed" for r in ci_results)
-            if any_failed:
-                await _delete_ci_branch(_rerun_branch_name, sync_settings)
+        async with _CI_SEMAPHORE:
+            try:
+                ci_results, cleaned_files = await _run_ci_pipeline(
+                    sync_request_id, x_tenant_id, doc["session_id"], files, run_all=body.run_all,
+                    branch_name=_rerun_branch_name,
+                    sync_settings=sync_settings,
+                )
+                any_failed = any(r["status"] == "failed" for r in ci_results)
+                if any_failed:
+                    await _delete_ci_branch(_rerun_branch_name, sync_settings)
+                    await col.update_one(
+                        {"_id": ObjectId(sync_request_id)},
+                        {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    )
+                    _broadcast(x_tenant_id, "sync:request_validation_failed", {
+                        "sync_request_id": sync_request_id,
+                        "ci_results": ci_results,
+                    })
+                    return
+                if not cleaned_files:
+                    await _delete_ci_branch(_rerun_branch_name, sync_settings)
+                    await col.update_one(
+                        {"_id": ObjectId(sync_request_id)},
+                        {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    )
+                    return
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "ci_passed", "pr_number": None, "pr_url": None, "diff": None, "updated_at": datetime.utcnow()}},
                 )
-                _broadcast(x_tenant_id, "sync:request_validation_failed", {
+                _broadcast(x_tenant_id, "sync:ci_passed", {
                     "sync_request_id": sync_request_id,
                     "ci_results": ci_results,
                 })
-                return
-            if not cleaned_files:
+            except asyncio.CancelledError:
+                logger.info("sync_request.rerun_cancelled", sync_request_id=sync_request_id)
                 await _delete_ci_branch(_rerun_branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
                 )
-                return
-
-            # CI passed — branch stays on GitHub, user will raise PR from it
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "ci_passed", "pr_number": None, "pr_url": None, "diff": None, "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:ci_passed", {
-                "sync_request_id": sync_request_id,
-                "ci_results": ci_results,
-            })
-        except asyncio.CancelledError:
-            logger.info("sync_request.rerun_cancelled", sync_request_id=sync_request_id)
-            await _delete_ci_branch(_rerun_branch_name, sync_settings)
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
-
-        except Exception as e:
-            logger.error("sync_request.rerun_error", error=str(e), sync_request_id=sync_request_id)
-            await _delete_ci_branch(_rerun_branch_name, sync_settings)
-            await col.update_one(
-                {"_id": ObjectId(sync_request_id)},
-                {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
-            )
-            _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
+                _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
+            except Exception as e:
+                logger.error("sync_request.rerun_error", error=str(e), sync_request_id=sync_request_id)
+                await _delete_ci_branch(_rerun_branch_name, sync_settings)
+                await col.update_one(
+                    {"_id": ObjectId(sync_request_id)},
+                    {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                )
+                _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
 
     _rerun_task = asyncio.create_task(_rerun())
     _ci_tasks[sync_request_id] = _rerun_task
