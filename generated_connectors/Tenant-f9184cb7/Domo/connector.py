@@ -24,7 +24,7 @@ try:
     _HAS_SDK = True
 except ImportError:
     try:
-        from shielva_connectors.base import BaseConnector  # type: ignore[no-redef]
+        from shared.base_connector import BaseConnector  # type: ignore[no-redef]
         _BASE = BaseConnector  # type: ignore[misc]
         _HAS_SDK = False
     except ImportError:
