@@ -1,0 +1,62 @@
+{
+  "title": "ConvertKit Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **ConvertKit connector** integrates with ConvertKit via the REST API v3. It enables Shielva to sync subscribers, sequences, forms, tags, and broadcasts from your ConvertKit account into the knowledge base.\n\nThis connector uses **API Key** authentication — the key is sent as `?api_key=` query param on all GET requests. An optional API Secret is required for listing subscribers.\n\n**Key capabilities:**\n- Validate the API key via `GET /v3/account` on install and health check\n- Sync all subscribers with page-based pagination (handles audiences of any size)\n- Sync email sequences and opt-in forms\n- Stable document IDs via SHA-256(prefix+resource_id)[:16] for deduplication across syncs\n- Automatic retry with exponential back-off for transient errors and rate limits\n- Circuit breaker (threshold: 5 failures, 60s recovery) for health degradation detection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`convertkit` — registered in ACP as **ConvertKit**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "ConvertKit (REST API v3 — `https://api.convertkit.com/v3/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key via GET /v3/account; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Calls GET /v3/account to verify key; returns account name in message |\n| `sync()` | Fetches all subscribers (page-paginated) + sequences + forms; normalizes to ConnectorDocuments |\n| `list_subscribers(page, per_page)` | Page-based GET /v3/subscribers |\n| `get_subscriber(id)` | GET /v3/subscribers/{id} for a single subscriber |\n| `list_tags(page)` | GET /v3/tags — all tags |\n| `list_sequences(page)` | GET /v3/sequences — email sequences |\n| `list_forms(page)` | GET /v3/forms — opt-in forms |\n| `list_broadcasts(page)` | GET /v3/broadcasts — one-off emails sent |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **API Key** authentication.\n\n- **Read endpoints (GET):** `?api_key={api_key}` query parameter\n- **Subscriber listing:** `?api_secret={api_secret}` query parameter (elevated access required)\n\nBoth credentials are obtained from ConvertKit → Settings → Advanced → API.",
+      "children": [
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Required | Description |\n|-------|-----|----------|-------------|\n| API Key | `api_key` | Yes | Used for all read operations including health check |\n| API Secret | `api_secret` | No | Required for listing subscribers |"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync Engine",
+      "content": "The `sync()` method fetches three resource types in order:\n\n1. **Subscribers** — page-based pagination via `?page=` + `per_page=1000`. Terminates when `total_subscribers` is reached.\n2. **Sequences** — single request to `GET /v3/sequences`. Non-fatal if it fails.\n3. **Forms** — single request to `GET /v3/forms`. Non-fatal if it fails.\n\nEach resource is normalized to a `ConnectorDocument` with stable IDs before being pushed to the knowledge base.",
+      "children": [
+        {
+          "id": "normalizers",
+          "title": "Normalizers",
+          "content": "| Normalizer | Input | Stable ID formula | Document type |\n|------------|-------|-------------------|---------------|\n| `normalize_subscriber` | ConvertKit subscriber dict | `SHA-256(\"subscriber:\" + str(id))[:16]` | subscriber |\n| `normalize_sequence` | ConvertKit sequence dict | `SHA-256(\"sequence:\" + str(id))[:16]` | sequence |\n| `normalize_form` | ConvertKit form dict | `SHA-256(\"form:\" + str(id))[:16]` | form |"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors inherit from `ConvertKitError`. The exception hierarchy:\n\n| Exception | HTTP Status | Description |\n|-----------|-------------|-------------|\n| `ConvertKitAuthError` | 401, 403 | Invalid or revoked API key |\n| `ConvertKitNotFoundError` | 404 | Resource does not exist |\n| `ConvertKitRateLimitError` | 429 | Rate limit exceeded; has `retry_after` attribute |\n| `ConvertKitServerError` | 5xx | ConvertKit server-side error |\n| `ConvertKitNetworkError` | — | Timeout or connection failure |"
+    },
+    {
+      "id": "retry",
+      "title": "Retry & Circuit Breaker",
+      "content": "**Retry policy** (`with_retry`):\n- Max 3 attempts\n- Exponential back-off: `base_delay * 2^attempt + jitter(0–0.5s)`\n- Max delay: 30s\n- Auth errors are NOT retried\n- Rate-limit errors honour the `Retry-After` header\n\n**Circuit breaker**:\n- Opens after 5 consecutive failures\n- Recovery timeout: 60s\n- State: closed → open → half-open → closed"
+    }
+  ]
+}
