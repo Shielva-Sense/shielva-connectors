@@ -1,0 +1,20 @@
+{
+  "connector_type": "gusto",
+  "name": "Gusto",
+  "provider": "Gusto",
+  "service": "Payroll & HR",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Gusto payroll and HR connector for employees, payrolls, and departments",
+  "install_fields": [
+    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false}
+  ],
+  "capabilities": ["employees", "payrolls", "departments", "companies", "sync"],
+  "oauth": {
+    "auth_url": "https://api.gusto.com/oauth/authorize",
+    "token_url": "https://api.gusto.com/oauth/token",
+    "scopes": []
+  }
+}
