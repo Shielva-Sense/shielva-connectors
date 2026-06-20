@@ -1,0 +1,175 @@
+{
+  "title": "Outlook Calendar Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Outlook Calendar connector** integrates with Microsoft Outlook Calendar via the Microsoft Graph API. It enables Shielva to sync calendar events, meetings, and scheduling data in real-time.\n\nThis connector uses OAuth 2.0 authorization code flow with delegated permissions, allowing users to grant access to their calendar data without sharing credentials.\n\n**Key capabilities:**\n- List all calendars for the authenticated user\n- Sync events from any calendar within a configurable time window\n- Incremental sync using delta tokens (future)\n- Stable document IDs via SHA-256 hashing for deduplication\n- Automatic token refresh with exponential back-off retry",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`outlook_calendar` — registered in ACP as **Outlook Calendar**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Microsoft (Azure Active Directory / Microsoft Graph API v1.0)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates credentials and stores config |\n| `authorize()` | Returns OAuth 2.0 authorization URL |\n| `health_check()` | Calls `/me` to verify token validity |\n| `sync()` | Fetches events from `/me/calendarView` for the next 30 days |\n| `list_calendars()` | Returns all calendars via `/me/calendars` |\n| `list_events()` | Lists events from a specific calendar |\n| `get_event()` | Fetches a single event by ID |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **OAuth 2.0 Authorization Code Flow** via Microsoft Identity Platform.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`oauth2` — users are redirected to Microsoft's consent screen and grant delegated `Calendars.Read` + `offline_access` permissions."
+        },
+        {
+          "id": "oauth-endpoints",
+          "title": "OAuth Endpoints",
+          "content": "| Field | Value |\n|-------|-------|\n| **Authorization URI** | `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` |\n| **Token URI** | `https://login.microsoftonline.com/common/oauth2/v2.0/token` |\n| **Scopes** | `https://graph.microsoft.com/Calendars.Read`, `offline_access` |"
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Application (client) ID | `client_id` | string | Yes | Azure AD app client ID |\n| Client Secret | `client_secret` | password | Yes | Azure AD client secret value |\n| Azure AD Tenant | `tenant_hint` | string | No | Tenant ID for single-tenant apps; blank = multi-tenant |\n| Redirect URI | `redirect_uri` | string | No | Must match exactly what's registered in Azure Portal |"
+        },
+        {
+          "id": "token-refresh",
+          "title": "Token Refresh",
+          "content": "Access tokens expire after 1 hour. The connector stores the `refresh_token` (provided when `offline_access` scope is granted) and calls the token endpoint automatically before each API call when the access token is expired.\n\nIf the refresh token is also expired or revoked, the connector returns `OutlookCalendarAuthError` and the user must re-authorize."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `client_id` | Azure AD application (client) ID |\n| `client_secret` | Azure AD client secret |\n| `tenant_hint` | Optional tenant ID or domain (default: `common`) |\n| `redirect_uri` | OAuth redirect URI |\n| `access_token` | Current access token (set post-auth) |\n| `refresh_token` | Refresh token for background token renewal |\n| `token_expires_at` | Unix timestamp when access token expires |"
+        },
+        {
+          "id": "azure-portal-setup",
+          "title": "Azure Portal Setup",
+          "content": "1. Register an application in **Azure Active Directory → App registrations**.\n2. Note the **Application (client) ID** and **Directory (tenant) ID**.\n3. Create a **client secret** under Certificates & secrets.\n4. Add redirect URI: your Shielva instance's `/connectors/oauth/callback`.\n5. Grant API permissions: **Microsoft Graph → Delegated → Calendars.Read** + **offline_access**."
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `OutlookCalendarHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates that `client_id` and `client_secret` are present in config. Does not make network calls — full validation happens at `authorize()` and `health_check()`.\n\n**Returns:** `InstallResult(success=True, message='...', connector_type='outlook_calendar')`\n\n**Raises:** `OutlookCalendarAuthError` if required fields are missing."
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "**Signature:** `async def authorize(self) -> str`\n\nBuilds and returns the Microsoft OAuth 2.0 authorization URL. The user is redirected to this URL to grant consent.\n\nThe `tenant_hint` config value is used as the tenant segment in the URL (defaults to `common` for multi-tenant / personal accounts).\n\n**Returns:** Authorization URL string."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `GET https://graph.microsoft.com/v1.0/me` to verify the access token. Returns the authenticated user's display name and email.\n\n**Returns:** `HealthCheckResult(healthy=True, message='Authenticated as <name>', details={...})`\n\n**Raises:** `OutlookCalendarAuthError` on 401, `OutlookCalendarNetworkError` on connectivity issues."
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, **kwargs) -> SyncResult`\n\nFetches calendar events from `/me/calendarView` for the next 30 days. Handles `@odata.nextLink` pagination automatically.\n\n**Query parameters:**\n- `startDateTime`: current UTC time\n- `endDateTime`: 30 days from now\n- `$select`: subject, start, end, location, organizer, attendees, body, isAllDay, isCancelled, onlineMeeting\n- `$top`: 100\n\n**Returns:** `SyncResult` with list of `ConnectorDocument` objects and sync metadata.\n\nEach document has a stable `id` derived from `SHA-256(calendar_id + event_id)`."
+        },
+        {
+          "id": "list-calendars",
+          "title": "list_calendars()",
+          "content": "**Signature:** `async def list_calendars(self) -> list[dict]`\n\nCalls `GET https://graph.microsoft.com/v1.0/me/calendars` and returns all calendars for the user.\n\n**Returns:** List of calendar dicts with `id`, `name`, `color`, `isDefaultCalendar`, `canEdit`."
+        },
+        {
+          "id": "list-events",
+          "title": "list_events()",
+          "content": "**Signature:** `async def list_events(self, calendar_id: str = 'primary', start: str = None, end: str = None) -> list[dict]`\n\nFetches events from a specific calendar using `calendarView` with the given start/end window (defaults to next 30 days).\n\n**Returns:** List of raw Graph API event objects."
+        },
+        {
+          "id": "get-event",
+          "title": "get_event()",
+          "content": "**Signature:** `async def get_event(self, event_id: str, calendar_id: str = None) -> dict`\n\nFetches a single event by ID via `GET /me/events/{event_id}` or `GET /me/calendars/{calendar_id}/events/{event_id}`.\n\n**Returns:** Raw Graph API event object.\n\n**Raises:** `OutlookCalendarNotFoundError` if event does not exist (404)."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `OutlookCalendarHTTPClient` (`client/http_client.py`). The connector.py never calls `aiohttp` or `requests` directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Graph API Call | Description |\n|--------|---------------|-------------|\n| `get_me()` | `GET /me` | Fetch authenticated user profile |\n| `get_calendars()` | `GET /me/calendars` | List all user calendars |\n| `get_events(calendar_id, start, end)` | `GET /me/calendarView` | Fetch events in date range, follows `@odata.nextLink` |\n| `get_event(event_id)` | `GET /me/events/{id}` | Single event by ID |\n| `post_form_data(url, data)` | POST with form encoding | Used for OAuth token exchange |"
+        },
+        {
+          "id": "error-handling",
+          "title": "Error Handling",
+          "content": "Every response passes through `_raise_for_status()` which maps HTTP status codes to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `OutlookCalendarAuthError` |\n| 403 | `OutlookCalendarAuthError` |\n| 404 | `OutlookCalendarNotFoundError` |\n| 429 | `OutlookCalendarRateLimitError` |\n| 5xx | `OutlookCalendarNetworkError` |\n| Other 4xx | `OutlookCalendarError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- Max 3 attempts\n- Back-off: 1s, 2s, 4s\n- Skips retry on auth errors (`OutlookCalendarAuthError`) — re-authorizing is required\n- Retries on network errors, rate limits, and 5xx responses"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_event()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "connector-document",
+          "title": "ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(calendar_id + event_id)>\",\n  \"source\": \"outlook_calendar\",\n  \"type\": \"calendar_event\",\n  \"title\": \"<event subject>\",\n  \"content\": \"<body preview>\",\n  \"metadata\": {\n    \"event_id\": \"<graph event ID>\",\n    \"calendar_id\": \"<calendar ID>\",\n    \"start\": \"2026-06-19T10:00:00\",\n    \"end\": \"2026-06-19T11:00:00\",\n    \"timezone\": \"UTC\",\n    \"is_all_day\": false,\n    \"is_cancelled\": false,\n    \"location\": \"<location>\",\n    \"organizer\": \"organizer@example.com\",\n    \"attendees\": [\"attendee@example.com\"],\n    \"online_meeting_url\": \"https://teams.microsoft.com/...\"\n  },\n  \"synced_at\": \"2026-06-19T00:00:00Z\"\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `id` field is computed as `SHA-256(calendar_id + ':' + event_id)` truncated to 16 hex characters. This is stable across syncs — the same event always produces the same Shielva document ID, enabling upsert deduplication."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `OutlookCalendarError` (base) in `exceptions.py`:\n\n```\nOutlookCalendarError (base)\n├── OutlookCalendarAuthError      — 401/403, token expired, missing credentials\n├── OutlookCalendarNetworkError   — connectivity failures, 5xx\n├── OutlookCalendarNotFoundError  — 404, resource not found\n└── OutlookCalendarRateLimitError — 429, Graph API throttling\n```\n\nCallers can catch the base `OutlookCalendarError` or specific subclasses for finer control."
+      },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `401 Unauthorized` | Access token expired | Re-authorize the connector in ACP |\n| `403 Forbidden` | `Calendars.Read` permission not granted | Add permission in Azure Portal → API permissions |\n| `invalid_client` on token exchange | Wrong `client_id` or `client_secret` | Verify credentials in Azure Portal |\n| `redirect_uri_mismatch` | Redirect URI mismatch | Ensure Redirect URI in ACP matches Azure Portal exactly |\n| `429 Too Many Requests` | Graph API rate limit | Connector retries automatically with exponential back-off |\n| Events not appearing | Sync window is next 30 days only | Events outside this window are not fetched in the current sync |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (64 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/outlook_calendar_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 64 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
