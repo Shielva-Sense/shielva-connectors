@@ -1,0 +1,175 @@
+{
+  "title": "Slack Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Slack connector** integrates with Slack workspaces via the Slack Web API. It enables Shielva to sync messages, channels, and users in real-time.\n\nThis connector uses Bot Token authentication (xoxb-...), granting the bot access to the channels it is invited to — without requiring user-level OAuth flows.\n\n**Key capabilities:**\n- List all channels (public, private, DMs) in the workspace\n- Sync message history from channels with cursor-based pagination\n- List workspace members\n- Fetch individual user profiles\n- Incremental sync using the `oldest` timestamp parameter\n- Stable document IDs via SHA-256(channel_id + ts) for deduplication",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`slack` — registered in ACP as **Slack**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Slack Technologies (Slack Web API — `https://slack.com/api/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates bot_token presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls `auth.test` to verify token; returns workspace name in message |\n| `sync()` | Lists all public channels, fetches message history (30-day window), normalizes to ConnectorDocuments |\n| `list_channels()` | Paginated `conversations.list` with configurable channel types |\n| `list_messages()` | Paginated `conversations.history` for a channel with optional `oldest` cursor |\n| `list_users()` | Paginated `users.list` returning all workspace members |\n| `get_user()` | `users.info` for a single user by ID |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Bot Token authentication** — a single `xoxb-...` token that grants the bot access to the Slack workspace.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`oauth2` (Bot Token) — install the Slack App in your workspace, then copy the Bot User OAuth Token from **OAuth & Permissions**."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Bot Token | `bot_token` | password | Yes | Slack Bot User OAuth Token (xoxb-...) |\n| Channel Types | `channel_types` | string | No | Comma-separated types: public_channel, private_channel, mpim, im. Default: public_channel |"
+        },
+        {
+          "id": "required-scopes",
+          "title": "Required Bot Token Scopes",
+          "content": "| Scope | Purpose |\n|-------|---------|\n| `channels:read` | List public channels |\n| `channels:history` | Read public channel message history |\n| `users:read` | List workspace members |\n| `groups:read` | List private channels (optional) |\n| `groups:history` | Read private channel history (optional) |"
+        },
+        {
+          "id": "token-security",
+          "title": "Token Security",
+          "content": "Bot tokens do not expire unless revoked. Shielva stores the token AES-256-GCM encrypted at rest via the vault. The token can be revoked at any time from the Slack App settings under OAuth & Permissions → Revoke Tokens."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `bot_token` | Slack Bot User OAuth Token (xoxb-...) |\n| `channel_types` | Comma-separated channel types to sync (default: public_channel) |"
+        },
+        {
+          "id": "channel-types-reference",
+          "title": "Channel Types Reference",
+          "content": "| Value | Description |\n|-------|-------------|\n| `public_channel` | All public channels in the workspace |\n| `private_channel` | Private channels the bot is a member of |\n| `mpim` | Group direct messages |\n| `im` | Direct messages with individual users |"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `SlackHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `bot_token` is present in config. Does not make network calls — token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when bot_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when bot_token is absent or empty"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `POST https://slack.com/api/auth.test` to verify the token. Returns the workspace name in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to workspace: Acme Corp')`\n- `HealthCheckResult(health=DEGRADED, auth_status=INVALID_CREDENTIALS)` on auth errors\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFetches all channels via `conversations.list`, then for each channel fetches message history via `conversations.history` (default: last 30 days).\n\n**Parameters:**\n- `full` — if True and since is None, fetches all history (no `oldest` filter)\n- `since` — datetime; only fetch messages newer than this timestamp\n- `kb_id` — knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures occur, `PARTIAL` when some messages fail normalization, `FAILED` when the channel list or auth fails entirely."
+        },
+        {
+          "id": "list-channels",
+          "title": "list_channels()",
+          "content": "**Signature:** `async def list_channels(self, types='public_channel') -> list[dict]`\n\nPaginated `conversations.list`. Follows `response_metadata.next_cursor` until exhausted.\n\n**Returns:** List of Slack channel objects with `id`, `name`, `is_private`, `is_archived`."
+        },
+        {
+          "id": "list-messages",
+          "title": "list_messages()",
+          "content": "**Signature:** `async def list_messages(self, channel_id, oldest=None, limit=100) -> list[dict]`\n\nPaginated `conversations.history` for a specific channel. Follows cursor pagination.\n\n**Parameters:**\n- `channel_id` — Slack channel ID (e.g. C0123ABC)\n- `oldest` — Unix timestamp string; only fetch messages after this time\n- `limit` — number of messages per page (max 200)\n\n**Returns:** List of Slack message objects."
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "**Signature:** `async def list_users(self) -> list[dict]`\n\nPaginated `users.list`. Returns all workspace members including bots.\n\n**Returns:** List of Slack user objects with `id`, `name`, `real_name`, `profile`, `is_bot`."
+        },
+        {
+          "id": "get-user",
+          "title": "get_user()",
+          "content": "**Signature:** `async def get_user(self, user_id: str) -> dict`\n\nFetches a single user via `users.info`.\n\n**Returns:** Slack user object.\n\n**Raises:** `SlackNotFoundError` if user does not exist."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `SlackHTTPClient` (`client/http_client.py`) using `aiohttp`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Slack API Call | Description |\n|--------|---------------|-------------|\n| `get_auth_test(token)` | `POST /api/auth.test` | Verify token, returns workspace info |\n| `get_conversations_list(token, types, cursor, limit)` | `POST /api/conversations.list` | List channels/DMs with cursor pagination |\n| `get_conversations_history(token, channel_id, cursor, limit, oldest)` | `POST /api/conversations.history` | Messages in a channel |\n| `get_users_list(token, cursor, limit)` | `POST /api/users.list` | List workspace members |\n| `get_user_info(token, user_id)` | `POST /api/users.info` | Single user by ID |"
+        },
+        {
+          "id": "response-envelope",
+          "title": "Response Envelope",
+          "content": "All Slack API responses follow the pattern `{\"ok\": true/false, ...}`. The `_check_slack_response()` method inspects the `ok` field and maps the `error` string to typed exceptions:\n\n| Slack Error | Exception |\n|-------------|----------|\n| `invalid_auth`, `not_authed`, `token_revoked`, etc. | `SlackAuthError` |\n| `ratelimited` | `SlackRateLimitError` |\n| `channel_not_found`, `user_not_found` | `SlackNotFoundError` |\n| Connection/timeout | `SlackNetworkError` |\n| Other API errors | `SlackError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` by default\n- Back-off: 1s, 2s (doubles each attempt)\n- Skips retry on `SlackAuthError` — re-installing with a valid token is required\n- Retries on `SlackError`, `SlackNetworkError`, `SlackRateLimitError`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_message()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "connector-document",
+          "title": "ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(channel_id + ts)[:16]>\",\n  \"type\": \"slack_message\",\n  \"title\": \"#general — @alice\",\n  \"content\": \"Channel: #general\\nUser: U0123ABC\\nTimestamp: 1718784000.000100\\nMessage: Hello team!\",\n  \"metadata\": {\n    \"channel_id\": \"C0123ABC\",\n    \"channel_name\": \"general\",\n    \"ts\": \"1718784000.000100\",\n    \"user\": \"U0123ABC\",\n    \"thread_ts\": null,\n    \"subtype\": \"\",\n    \"connector_id\": \"slack_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"slack\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `id` field is `SHA-256(channel_id + message_ts)` truncated to 16 hex characters. This is stable across syncs — the same message always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ts lists."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `SlackError` (base) in `exceptions.py`:\n\n```\nSlackError (base)\n├── SlackAuthError         — invalid_auth, not_authed, token_revoked, missing_scope\n├── SlackNetworkError      — connectivity failures, aiohttp.ClientError\n├── SlackRateLimitError    — ratelimited\n└── SlackNotFoundError     — channel_not_found, user_not_found\n```\n\nCallers can catch the base `SlackError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `invalid_auth` | Wrong or revoked token | Re-copy the Bot User OAuth Token from Slack App → OAuth & Permissions |\n| `missing_scope` | Required permission not added | Add the scope in Slack App → OAuth & Permissions → Bot Token Scopes, then reinstall |\n| `channel_not_found` | Bot not invited to channel | Type `/invite @YourApp` in the channel, or use only public_channel type |\n| `ratelimited` | Slack API rate limit exceeded | Connector retries automatically with exponential back-off |\n| No messages returned | Messages older than 30 days | Adjust sync window using the `since` parameter or set `full=True` |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (102 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/slack_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 102 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
