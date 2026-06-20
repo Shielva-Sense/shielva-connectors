@@ -1,0 +1,32 @@
+{
+  "connector_type": "woocommerce",
+  "name": "WooCommerce",
+  "provider": "WooCommerce",
+  "service": "E-Commerce",
+  "service_slug": "woocommerce",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "WooCommerce e-commerce connector for products, orders, and customers",
+  "install_fields": [
+    {
+      "key": "consumer_key",
+      "label": "Consumer Key",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "consumer_secret",
+      "label": "Consumer Secret",
+      "type": "password",
+      "required": true
+    },
+    {
+      "key": "site_url",
+      "label": "Site URL (e.g. mystore.com)",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "capabilities": ["products", "orders", "customers", "categories", "sync"],
+  "category": "ecommerce"
+}
