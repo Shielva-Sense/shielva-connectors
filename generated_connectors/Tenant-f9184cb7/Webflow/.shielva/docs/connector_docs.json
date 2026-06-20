@@ -1,0 +1,87 @@
+{
+  "title": "Webflow Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Webflow connector syncs **sites**, **CMS collections**, **CMS items**, and **pages** from Webflow into the Shielva knowledge base using the **Webflow REST API v2** with **OAuth 2.0 Authorization Code** authentication.\n\nKey capabilities:\n- Discovers all sites accessible by the authorized OAuth token\n- For each site: syncs site metadata, all CMS collections, all items in each collection (offset pagination), and all pages\n- Token verification via `GET /token/introspect` — returns authorized sites and user email\n- OAuth 2.0 flow with configurable scopes: `sites:read`, `cms:read`, `pages:read`, `forms:read`\n- Automatic retry (up to 3 attempts) on transient failures\n\nTypical users: marketing teams, content editors, and developers who need Webflow CMS content and site structure accessible in Shielva for content search and knowledge management."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Register a Webflow OAuth app\n\n1. Go to [developers.webflow.com](https://developers.webflow.com) and create an App.\n2. Set the **OAuth Redirect URI** (e.g. `https://yourapp.com/oauth/callback`).\n3. Note the **Client ID** and **Client Secret**.\n\n### 2. Install the connector\n\n```python\nimport asyncio\nfrom connector import WebflowConnector\n\nasync def main():\n    connector = WebflowConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"webflow-main\",\n        config={\n            \"client_id\": \"YOUR_CLIENT_ID\",\n            \"client_secret\": \"YOUR_CLIENT_SECRET\",\n            \"redirect_uri\": \"https://yourapp.com/oauth/callback\",\n        },\n    )\n    result = await connector.install()\n    print(result)  # HEALTHY with message about needing authorize() if no access_token\nasyncio.run(main())\n```\n\n### 3. Complete the OAuth flow\n\n```python\n# Get the authorization URL\nauth_url = await connector.authorize()\nprint(\"Redirect user to:\", auth_url)\n# https://webflow.com/oauth/authorize?response_type=code&client_id=...&scope=sites:read+cms:read+...\n\n# After user consents, Webflow redirects to redirect_uri?code=CODE\n# Exchange code at POST https://api.webflow.com/oauth/access_token\n# Store access_token in config[\"access_token\"]\n```\n\n### 4. Run your first sync\n\n```python\nconfig = {\n    \"client_id\": \"...\",\n    \"client_secret\": \"...\",\n    \"access_token\": \"EXCHANGED_TOKEN\",\n}\nasync with WebflowConnector(config=config) as connector:\n    result = await connector.sync(kb_id=\"my-kb\")\n    print(f\"Synced {result.documents_synced}/{result.documents_found} resources\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `oauth2`\n\nThe connector uses **OAuth 2.0 Authorization Code** flow.\n\n### Authorization URL\n\n```\nhttps://webflow.com/oauth/authorize\n```\n\nParameters: `response_type=code`, `client_id`, `scope` (space-separated), `redirect_uri` (optional), `state` (optional).\n\n### Token URL\n\n```\nhttps://api.webflow.com/oauth/access_token\n```\n\nThe token exchange is handled by the Shielva OAuth handler. The resulting `access_token` is sent as:\n\n```\nAuthorization: Bearer {access_token}\n```\n\n### Default scopes\n\n| Scope | Purpose |\n|---|---|\n| `sites:read` | Read site metadata |\n| `cms:read` | Read CMS collections and items |\n| `pages:read` | Read site pages |\n| `forms:read` | Read form definitions |\n\nCustom scopes can be set via `config[\"scopes\"]` (list of strings).\n\n### Validation endpoint\n\n`GET https://api.webflow.com/v2/token/introspect`\n\nBoth `install()` (when `access_token` is present) and `health_check()` call this endpoint. The response includes the authenticated user's email and the list of authorized site IDs.\n\n### Auth errors\n\n| HTTP Status | Error class | Meaning |\n|---|---|---|\n| 401 / 403 | `WebflowAuthError` | Token invalid, expired, or lacks required scopes |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|---|---|---|---|\n| `client_id` | string | Yes | OAuth2 Client ID from your Webflow App registration. |\n| `client_secret` | password | Yes | OAuth2 Client Secret from your Webflow App registration. |\n| `redirect_uri` | string | No | OAuth2 callback URL registered with your Webflow App. Must match exactly if provided. |\n| `access_token` | string | After OAuth | Bearer token obtained after completing the OAuth flow. Required for `health_check()` and `sync()`. |\n| `scopes` | list[str] | No | OAuth scopes to request. Defaults to `[\"sites:read\", \"cms:read\", \"pages:read\", \"forms:read\"]`. |\n| `state` | string | No | CSRF state parameter for the OAuth authorization request. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. The connector targets Webflow REST API v2 (`https://api.webflow.com/v2/`).",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present. If `access_token` is also set, verifies it via `GET /token/introspect`.\n\n**Returns:** `InstallResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY`, `DEGRADED`, or `OFFLINE` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `connector_id` | str | Passed-in connector ID |\n| `message` | str | `\"Connector installed — OAuth token verified\"` if token is valid, or `\"authorize() required\"` if no token |\n\n```python\nfrom connector import WebflowConnector\n\nasync def example():\n    connector = WebflowConnector(\n        tenant_id=\"t1\",\n        config={\n            \"client_id\": \"abc\",\n            \"client_secret\": \"secret\",\n            \"access_token\": \"TOKEN\",\n        },\n    )\n    result = await connector.install()\n    print(result.auth_status, result.message)\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Calls `GET /token/introspect` and returns current health, the authenticated user email, and the number of authorized sites.\n\n**Returns:** `HealthCheckResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `DEGRADED` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `message` | str | e.g. `\"Connected — user: alice@example.com, sites: 3\"` |\n\n```python\nresult = await connector.health_check()\nprint(result.health, result.message)\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all accessible Webflow resources. Discovers all sites, then for each site syncs: site metadata, CMS collections, all items per collection (offset pagination), and pages.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `kb_id` | str | `\"\"` | Knowledge base ID for document ingestion (passed via `**kwargs`) |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED`, `PARTIAL`, or `FAILED` |\n| `documents_found` | int | Total resources discovered (sites + collections + items + pages) |\n| `documents_synced` | int | Resources successfully normalized and ingested |\n| `documents_failed` | int | Resources that failed normalization |\n| `message` | str | Summary, e.g. `\"Synced 45/50 resources (5 failed)\"` |\n\n```python\nresult = await connector.sync(kb_id=\"kb-webflow\")\nprint(result.status, result.documents_synced, result.documents_found)\n```"
+        },
+        {
+          "id": "method-authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the OAuth 2.0 authorization URL.\n\n**Returns:** `str` — the full authorization URL.\n\n```python\nfrom connector import WebflowConnector\n\nconnector = WebflowConnector(\n    config={\n        \"client_id\": \"abc123\",\n        \"client_secret\": \"secret\",\n        \"redirect_uri\": \"https://app.example.com/callback\",\n    }\n)\nauth_url = await connector.authorize()\nprint(\"Visit:\", auth_url)\n# https://webflow.com/oauth/authorize?response_type=code&client_id=abc123&scope=sites:read+cms:read+...\n```"
+        },
+        {
+          "id": "method-list-sites",
+          "title": "list_sites()",
+          "content": "Returns all sites accessible by the current access token.\n\n**Returns:** `list[dict[str, Any]]` — raw Webflow site objects.\n\n```python\nfrom connector import WebflowConnector\n\nsites = await connector.list_sites()\nfor site in sites:\n    print(site[\"id\"], site[\"displayName\"], site.get(\"previewUrl\", \"\"))\n```"
+        },
+        {
+          "id": "method-get-site",
+          "title": "get_site()",
+          "content": "Returns a single site by ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `site_id` | str | The Webflow site ID |\n\n**Returns:** `dict[str, Any]` — raw Webflow site object.\n\n```python\nsite = await connector.get_site(\"64a1b2c3d4e5f6a7b8c9d0e1\")\nprint(site[\"displayName\"])\n```"
+        },
+        {
+          "id": "method-list-collections",
+          "title": "list_collections()",
+          "content": "Returns all CMS collections for a given site.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `site_id` | str | The Webflow site ID |\n\n**Returns:** `list[dict[str, Any]]` — raw CMS collection objects.\n\n```python\ncollections = await connector.list_collections(\"64a1b2c3d4e5f6a7b8c9d0e1\")\nfor coll in collections:\n    print(coll[\"id\"], coll[\"displayName\"])\n```"
+        },
+        {
+          "id": "method-list-items",
+          "title": "list_items()",
+          "content": "Returns all CMS items for a collection using offset pagination. Automatically follows all pages.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `collection_id` | str | required | The Webflow CMS collection ID |\n| `limit` | int | 100 | Items per page |\n\n**Returns:** `list[dict[str, Any]]` — all raw CMS item objects across all pages.\n\n```python\nitems = await connector.list_items(\"64a1b2c3d4e5f6a7b8c9d0e2\")\nfor item in items:\n    print(item[\"id\"], item.get(\"fieldData\", {}).get(\"name\", \"\"))\n```"
+        },
+        {
+          "id": "method-list-pages",
+          "title": "list_pages()",
+          "content": "Returns all pages for a given site.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `site_id` | str | The Webflow site ID |\n\n**Returns:** `list[dict[str, Any]]` — raw Webflow page objects.\n\n```python\npages = await connector.list_pages(\"64a1b2c3d4e5f6a7b8c9d0e1\")\nfor page in pages:\n    print(page[\"id\"], page.get(\"title\", \"\"), page.get(\"slug\", \"\"))\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All error classes are defined in `exceptions.py` and inherit from `WebflowError`.\n\n| Exception class | HTTP Status | When raised |\n|---|---|---|\n| `WebflowError` | any | Base class |\n| `WebflowAuthError` | 401, 403 | Token invalid, expired, or unauthorized |\n| `WebflowNetworkError` | timeout / conn error | Transient connection or network failure |\n| `WebflowNotFoundError` | 404 | Requested resource does not exist |\n| `WebflowRateLimitError` | 429 | Webflow API rate limit exceeded |\n\n### Behavior in sync()\n\n- If the top-level **site listing** fails, sync returns `SyncStatus.FAILED` immediately.\n- Per-site collection listing and page listing failures are silently skipped (`pass`) — the sync continues with the next site.\n- Individual item normalization failures increment `documents_failed` without aborting.\n- `install()` uses `max_attempts=2` for token verification; resource methods use `max_attempts=3`."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `auth_status: MISSING_CREDENTIALS`\n\n`client_id` or `client_secret` is missing. Both are required even before the OAuth flow.\n\n### `auth_status: INVALID_CREDENTIALS` (401/403)\n\n- The access token is expired or revoked. Re-authorize via `authorize()`.\n- **403**: The token lacks one or more required scopes (`sites:read`, `cms:read`, `pages:read`). Re-create the Webflow app with the correct scopes or re-authorize.\n\n### `health_check()` shows 0 sites\n\nThe authorized user has no sites, or the OAuth scope `sites:read` was not granted. Check the user's Webflow account and re-authorize with the correct scopes.\n\n### Items in a collection are truncated\n\n`list_items()` uses offset pagination and reads the `pagination.total` field from the Webflow API response. If items appear missing, verify the collection has not been modified mid-sync (Webflow does not guarantee cursor stability during offset pagination).\n\n### sync() returns `SyncStatus.PARTIAL`\n\nSome resource normalizations failed. Collection or page listing failures for a site are silently skipped. Check Webflow API permissions for those specific sites.\n\n### `WebflowRateLimitError` (429)\n\nWebflow enforces rate limits per app. The retry helper retries up to 3 times. For high-volume syncs (many collections with many items), consider rate-limiting calls at the application level."
+    }
+  ]
+}
