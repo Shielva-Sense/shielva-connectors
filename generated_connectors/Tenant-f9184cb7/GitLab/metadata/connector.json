@@ -1,0 +1,11 @@
+{
+  "connector_type": "gitlab",
+  "display_name": "GitLab",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "api_key", "label": "Personal Access Token", "type": "password", "required": true},
+    {"key": "base_url", "label": "GitLab URL (default: https://gitlab.com)", "type": "string", "required": false},
+    {"key": "group_id", "label": "Group ID or Path (optional)", "type": "string", "required": false}
+  ]
+}
