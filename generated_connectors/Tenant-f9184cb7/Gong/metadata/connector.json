@@ -1,0 +1,109 @@
+{
+  "connector_type": "gong",
+  "connector_id": "gong",
+  "name": "Gong",
+  "provider": "Gong",
+  "service": "Gong",
+  "version": "1.0.0",
+  "description": "Sync Gong calls, transcripts, and users into the Shielva knowledge base for revenue intelligence analysis.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_key",
+      "label": "Access Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Gong API Access Key",
+      "help": "From Gong Settings → API → Access Keys → Access Key"
+    },
+    {
+      "key": "access_key_secret",
+      "label": "Access Key Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Gong API Access Key Secret",
+      "help": "From Gong Settings → API → Access Keys → Access Key Secret"
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "basic_auth"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate access_key and access_key_secret are present.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probe GET /v2/users and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Gong calls and users into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Paginated list of calls with optional date filter.",
+      "category": "calls",
+      "endpoint": "POST /v2/calls"
+    },
+    {
+      "id": "get_call",
+      "name": "Get Call",
+      "description": "Retrieve extended data for a single call by ID.",
+      "category": "calls",
+      "endpoint": "GET /v2/calls/{call_id}"
+    },
+    {
+      "id": "get_call_transcript",
+      "name": "Get Call Transcript",
+      "description": "Fetch the transcript for a specific call.",
+      "category": "calls",
+      "endpoint": "POST /v2/calls/transcript"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Paginated list of Gong users.",
+      "category": "users",
+      "endpoint": "GET /v2/users"
+    },
+    {
+      "id": "list_scorecards",
+      "name": "List Scorecards",
+      "description": "Retrieve call coaching scorecards from Gong settings.",
+      "category": "settings",
+      "endpoint": "GET /v2/settings/scorecards"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "calls",
+    "users",
+    "settings"
+  ],
+  "apis": [
+    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Records", "id": "sync", "category": "sync" },
+    { "name": "List Calls", "id": "list_calls", "category": "calls" },
+    { "name": "Get Call", "id": "get_call", "category": "calls" },
+    { "name": "Get Call Transcript", "id": "get_call_transcript", "category": "calls" },
+    { "name": "List Users", "id": "list_users", "category": "users" },
+    { "name": "List Scorecards", "id": "list_scorecards", "category": "settings" }
+  ]
+}
