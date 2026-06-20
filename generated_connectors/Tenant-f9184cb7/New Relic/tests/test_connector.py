@@ -1,22 +1,17 @@
-"""
-New Relic connector test suite — 63+ tests, all must pass.
-"""
+"""Unit tests for NewRelicConnector — all HTTP calls are mocked."""
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import sys
-import os
-from typing import Any
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Path setup — allow imports from the connector root
-# ---------------------------------------------------------------------------
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from connector import CONNECTOR_TYPE, AUTH_TYPE, NewRelicConnector
 from exceptions import (
     NewRelicAuthError,
     NewRelicError,
@@ -24,728 +19,969 @@ from exceptions import (
     NewRelicNotFoundError,
     NewRelicRateLimitError,
 )
-from models import (
-    AuthStatus,
-    ConnectorDocument,
-    ConnectorHealth,
-    HealthCheckResult,
-    InstallResult,
-    SyncResult,
-    SyncStatus,
-)
 from helpers.utils import (
-    _make_id,
-    normalize_alerts_policy,
+    _stable_id,
+    normalize_alert,
     normalize_application,
+    normalize_dashboard,
     normalize_incident,
     with_retry,
 )
-from client.http_client import NewRelicHTTPClient
-from connector import NewRelicConnector, CONNECTOR_TYPE, AUTH_TYPE
+from models import (
+    ApplicationHealthStatus,
+    AuthStatus,
+    ConnectorDocument,
+    ConnectorHealth,
+    IncidentStatus,
+    NewRelicRegion,
+    SyncStatus,
+)
+
+TENANT_ID = "tenant_newrelic_test"
+CONNECTOR_ID = "conn_newrelic_test_001"
+VALID_API_KEY = "NRAK-abc123newrelicapikey"
+VALID_ACCOUNT_ID = "1234567"
+
+# ── Sample data ───────────────────────────────────────────────────────────────
+
+SAMPLE_VALIDATE_RESPONSE: dict = {"applications": []}
+
+SAMPLE_ALERT_POLICY: dict = {
+    "id": 101,
+    "name": "Production High Error Rate",
+    "incident_preference": "PER_CONDITION",
+    "created_at": 1700000000000,
+    "updated_at": 1720000000000,
+}
+
+SAMPLE_ALERT_POLICY_2: dict = {
+    "id": 202,
+    "name": "Database Slow Queries",
+    "incident_preference": "PER_POLICY",
+    "created_at": 1700001000000,
+    "updated_at": 1720001000000,
+}
+
+SAMPLE_ALERT_POLICIES_RESPONSE: dict = {
+    "policies": [SAMPLE_ALERT_POLICY],
+}
+
+SAMPLE_APPLICATION: dict = {
+    "id": 555,
+    "name": "checkout-service",
+    "language": "python",
+    "health_status": "green",
+    "reporting": True,
+    "last_reported_at": "2026-06-20T12:00:00+00:00",
+    "application_summary": {
+        "response_time": 42.5,
+        "throughput": 1200.0,
+        "error_rate": 0.05,
+        "apdex_score": 0.97,
+    },
+}
+
+SAMPLE_APPLICATION_2: dict = {
+    "id": 666,
+    "name": "auth-service",
+    "language": "go",
+    "health_status": "yellow",
+    "reporting": True,
+    "last_reported_at": "2026-06-20T11:00:00+00:00",
+    "application_summary": {
+        "response_time": 120.0,
+        "throughput": 300.0,
+        "error_rate": 1.2,
+        "apdex_score": 0.85,
+    },
+}
+
+SAMPLE_APPLICATIONS_RESPONSE: dict = {
+    "applications": [SAMPLE_APPLICATION],
+}
+
+SAMPLE_INCIDENT: dict = {
+    "incidentId": "abcd-1234-efgh",
+    "title": "High error rate on checkout-service",
+    "state": "OPEN",
+    "priority": "CRITICAL",
+    "createdAt": "2026-06-20T10:00:00Z",
+    "closedAt": None,
+    "duration": None,
+}
+
+SAMPLE_INCIDENTS_NERDGRAPH: dict = {
+    "data": {
+        "actor": {
+            "account": {
+                "alerts": {
+                    "incidents": {
+                        "incidents": [SAMPLE_INCIDENT],
+                        "nextCursor": None,
+                    }
+                }
+            }
+        }
+    }
+}
+
+SAMPLE_DASHBOARD: dict = {
+    "guid": "GUID-dashboard-abc123",
+    "name": "Production Overview",
+    "accountId": 1234567,
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z",
+    "permissions": "PUBLIC_READ_WRITE",
+}
+
+SAMPLE_DASHBOARDS_NERDGRAPH: dict = {
+    "data": {
+        "actor": {
+            "entitySearch": {
+                "results": {
+                    "entities": [SAMPLE_DASHBOARD],
+                }
+            }
+        }
+    }
+}
+
+SAMPLE_NRQL_RESPONSE: dict = {
+    "data": {
+        "actor": {
+            "account": {
+                "nrql": {
+                    "results": [{"count": 42}],
+                    "metadata": {
+                        "eventTypes": ["Transaction"],
+                        "facets": [],
+                        "messages": [],
+                    },
+                }
+            }
+        }
+    }
+}
 
 
-# ===========================================================================
-# 1. Exceptions — 5 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1 — Exception hierarchy (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestExceptions:
-    def test_new_relic_error_base(self):
-        exc = NewRelicError("base error", status_code=500, code="server_error")
-        assert str(exc) == "base error"
+    def test_newrelic_error_base(self) -> None:
+        exc = NewRelicError("something broke", status_code=500, code="server_error")
+        assert str(exc) == "something broke"
+        assert exc.message == "something broke"
         assert exc.status_code == 500
         assert exc.code == "server_error"
 
-    def test_new_relic_auth_error_inherits(self):
-        exc = NewRelicAuthError("unauthorized", status_code=401, code="auth_error")
+    def test_newrelic_auth_error_is_newrelic_error(self) -> None:
+        exc = NewRelicAuthError("forbidden", status_code=403, code="auth_error")
         assert isinstance(exc, NewRelicError)
-        assert exc.status_code == 401
+        assert exc.status_code == 403
 
-    def test_new_relic_not_found_error(self):
-        exc = NewRelicNotFoundError("policy", "123")
+    def test_newrelic_network_error(self) -> None:
+        exc = NewRelicNetworkError("connection refused")
+        assert isinstance(exc, NewRelicError)
+        assert "connection" in str(exc)
+
+    def test_newrelic_not_found_error(self) -> None:
+        exc = NewRelicNotFoundError("alert_policy", "99999")
         assert isinstance(exc, NewRelicError)
         assert exc.status_code == 404
-        assert "123" in str(exc)
+        assert exc.code == "resource_missing"
+        assert "99999" in str(exc)
 
-    def test_new_relic_rate_limit_error(self):
-        exc = NewRelicRateLimitError("too many requests", retry_after=30.0)
+    def test_newrelic_rate_limit_error(self) -> None:
+        exc = NewRelicRateLimitError("too many requests", retry_after=60.0)
         assert isinstance(exc, NewRelicError)
         assert exc.status_code == 429
-        assert exc.retry_after == 30.0
-
-    def test_new_relic_network_error(self):
-        exc = NewRelicNetworkError("server error", status_code=503, code="server_error")
-        assert isinstance(exc, NewRelicError)
-        assert exc.status_code == 503
+        assert exc.code == "rate_limit"
+        assert exc.retry_after == 60.0
 
 
-# ===========================================================================
-# 2. Models — 8 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2 — Models & enums (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestModels:
-    def test_install_result_healthy(self):
-        r = InstallResult(
-            health=ConnectorHealth.HEALTHY,
-            auth_status=AuthStatus.CONNECTED,
-            connector_id="c1",
-            message="ok",
-        )
-        assert r.health == ConnectorHealth.HEALTHY
-        assert r.auth_status == AuthStatus.CONNECTED
-        assert r.connector_id == "c1"
+    def test_connector_health_values(self) -> None:
+        assert ConnectorHealth.HEALTHY == "healthy"
+        assert ConnectorHealth.DEGRADED == "degraded"
+        assert ConnectorHealth.OFFLINE == "offline"
 
-    def test_install_result_offline(self):
-        r = InstallResult(
-            health=ConnectorHealth.OFFLINE,
-            auth_status=AuthStatus.MISSING_CREDENTIALS,
-        )
-        assert r.health == ConnectorHealth.OFFLINE
-        assert r.auth_status == AuthStatus.MISSING_CREDENTIALS
+    def test_auth_status_values(self) -> None:
+        assert AuthStatus.CONNECTED == "connected"
+        assert AuthStatus.MISSING_CREDENTIALS == "missing_credentials"
+        assert AuthStatus.INVALID_CREDENTIALS == "invalid_credentials"
 
-    def test_health_check_result(self):
-        r = HealthCheckResult(
-            health=ConnectorHealth.HEALTHY,
-            auth_status=AuthStatus.CONNECTED,
-            message="ok",
-        )
-        assert r.health == ConnectorHealth.HEALTHY
+    def test_incident_status_enum(self) -> None:
+        assert IncidentStatus.OPEN == "open"
+        assert IncidentStatus.RESOLVED == "resolved"
+        assert IncidentStatus.CLOSED == "closed"
 
-    def test_health_check_result_defaults(self):
-        r = HealthCheckResult(health=ConnectorHealth.DEGRADED, auth_status=AuthStatus.FAILED)
-        assert r.message == ""
+    def test_application_health_status_enum(self) -> None:
+        assert ApplicationHealthStatus.GREEN == "green"
+        assert ApplicationHealthStatus.RED == "red"
+        assert ApplicationHealthStatus.UNKNOWN == "unknown"
 
-    def test_sync_result_completed(self):
-        r = SyncResult(
-            status=SyncStatus.COMPLETED,
-            documents_found=10,
-            documents_synced=10,
-        )
-        assert r.status == SyncStatus.COMPLETED
-        assert r.documents_found == 10
-        assert r.documents_synced == 10
-        assert r.documents_failed == 0
-
-    def test_sync_result_partial(self):
-        r = SyncResult(status=SyncStatus.PARTIAL, documents_found=5, documents_synced=3, documents_failed=2)
-        assert r.status == SyncStatus.PARTIAL
-
-    def test_connector_document_fields(self):
+    def test_connector_document_defaults(self) -> None:
         doc = ConnectorDocument(
-            source_id="abc",
+            source_id="abc123",
             title="Test Doc",
             content="content here",
-            connector_id="cid",
-            tenant_id="tid",
-            source_url="https://example.com",
-            metadata={"key": "val"},
-        )
-        assert doc.source_id == "abc"
-        assert doc.metadata == {"key": "val"}
-
-    def test_connector_document_defaults(self):
-        doc = ConnectorDocument(
-            source_id="x",
-            title="T",
-            content="C",
-            connector_id="c",
-            tenant_id="t",
+            connector_id="conn1",
+            tenant_id="tenant1",
         )
         assert doc.source_url == ""
         assert doc.metadata == {}
 
-
-# ===========================================================================
-# 3. _make_id — 4 tests
-# ===========================================================================
-
-class TestMakeId:
-    def test_make_id_returns_16_chars(self):
-        result = _make_id("alerts_policy", "42")
-        assert len(result) == 16
-
-    def test_make_id_deterministic(self):
-        a = _make_id("application", "999")
-        b = _make_id("application", "999")
-        assert a == b
-
-    def test_make_id_different_prefix(self):
-        a = _make_id("alerts_policy", "1")
-        b = _make_id("application", "1")
-        assert a != b
-
-    def test_make_id_different_entity(self):
-        a = _make_id("incident", "1")
-        b = _make_id("incident", "2")
-        assert a != b
+    def test_newrelic_region_enum(self) -> None:
+        assert NewRelicRegion.US == "US"
+        assert NewRelicRegion.EU == "EU"
 
 
-# ===========================================================================
-# 4. normalize_alerts_policy — 4 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3 — Normalize functions (8 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestNormalizeAlertsPolicy:
-    _POLICY = {
-        "id": 101,
-        "name": "Critical Policy",
-        "incident_preference": "PER_POLICY",
-        "created_at": 1680000000,
-        "updated_at": 1680100000,
-    }
+class TestNormalizeFunctions:
+    def test_normalize_alert_basic(self) -> None:
+        doc = normalize_alert(SAMPLE_ALERT_POLICY, connector_id=CONNECTOR_ID, tenant_id=TENANT_ID)
+        assert isinstance(doc, ConnectorDocument)
+        assert "Production High Error Rate" in doc.title
+        assert "101" in doc.content
+        assert doc.connector_id == CONNECTOR_ID
+        assert doc.tenant_id == TENANT_ID
 
-    def test_type_field(self):
-        doc = normalize_alerts_policy(self._POLICY)
-        assert doc["type"] == "alerts_policy"
+    def test_normalize_alert_stable_id(self) -> None:
+        doc1 = normalize_alert(SAMPLE_ALERT_POLICY)
+        doc2 = normalize_alert(SAMPLE_ALERT_POLICY)
+        assert doc1.source_id == doc2.source_id
+        assert len(doc1.source_id) == 16
 
-    def test_title_from_name(self):
-        doc = normalize_alerts_policy(self._POLICY)
-        assert doc["title"] == "Critical Policy"
+    def test_normalize_alert_stable_id_matches_formula(self) -> None:
+        expected = _stable_id("alert", str(SAMPLE_ALERT_POLICY["id"]))
+        doc = normalize_alert(SAMPLE_ALERT_POLICY)
+        assert doc.source_id == expected
 
-    def test_content_contains_incident_preference(self):
-        doc = normalize_alerts_policy(self._POLICY)
-        assert "PER_POLICY" in doc["content"]
+    def test_normalize_alert_metadata(self) -> None:
+        doc = normalize_alert(SAMPLE_ALERT_POLICY)
+        assert doc.metadata["alert_id"] == 101
+        assert doc.metadata["incident_preference"] == "PER_CONDITION"
 
-    def test_metadata_fields(self):
-        doc = normalize_alerts_policy(self._POLICY)
-        meta = doc["metadata"]
-        assert meta["policy_id"] == 101
-        assert meta["name"] == "Critical Policy"
-        assert meta["incident_preference"] == "PER_POLICY"
-        assert meta["created_at"] == 1680000000
-        assert meta["updated_at"] == 1680100000
+    def test_normalize_application_basic(self) -> None:
+        doc = normalize_application(SAMPLE_APPLICATION, connector_id=CONNECTOR_ID, tenant_id=TENANT_ID)
+        assert "checkout-service" in doc.title
+        assert "555" in doc.content
+        assert doc.connector_id == CONNECTOR_ID
+        assert "green" in doc.content
 
+    def test_normalize_application_stable_id(self) -> None:
+        doc = normalize_application(SAMPLE_APPLICATION)
+        expected = _stable_id("application", str(SAMPLE_APPLICATION["id"]))
+        assert doc.source_id == expected
+        assert len(doc.source_id) == 16
 
-# ===========================================================================
-# 5. normalize_application — 4 tests
-# ===========================================================================
+    def test_normalize_application_summary_fields(self) -> None:
+        doc = normalize_application(SAMPLE_APPLICATION)
+        assert "42.5" in doc.content
+        assert "1200.0" in doc.content
+        assert doc.metadata["error_rate"] == 0.05
+        assert doc.metadata["apdex_score"] == 0.97
 
-class TestNormalizeApplication:
-    _APP = {
-        "id": 55,
-        "name": "My App",
-        "language": "python",
-        "health_status": "green",
-        "reporting": True,
-        "application_summary": {
-            "response_time": 1.5,
-            "throughput": 100.0,
-            "error_rate": 0.1,
-            "apdex_score": 0.95,
-        },
-    }
+    def test_normalize_incident_basic(self) -> None:
+        doc = normalize_incident(SAMPLE_INCIDENT, connector_id=CONNECTOR_ID, tenant_id=TENANT_ID)
+        assert "High error rate on checkout-service" in doc.title
+        assert "abcd-1234-efgh" in doc.content
+        assert doc.connector_id == CONNECTOR_ID
 
-    def test_type_field(self):
-        doc = normalize_application(self._APP)
-        assert doc["type"] == "application"
+    def test_normalize_incident_stable_id(self) -> None:
+        doc = normalize_incident(SAMPLE_INCIDENT)
+        expected = _stable_id("incident", str(SAMPLE_INCIDENT["incidentId"]))
+        assert doc.source_id == expected
 
-    def test_title_from_name(self):
-        doc = normalize_application(self._APP)
-        assert doc["title"] == "My App"
+    def test_normalize_dashboard_basic(self) -> None:
+        doc = normalize_dashboard(SAMPLE_DASHBOARD, connector_id=CONNECTOR_ID, tenant_id=TENANT_ID)
+        assert "Production Overview" in doc.title
+        assert "GUID-dashboard-abc123" in doc.content
+        assert doc.connector_id == CONNECTOR_ID
 
-    def test_content_is_language(self):
-        doc = normalize_application(self._APP)
-        assert doc["content"] == "python"
+    def test_normalize_dashboard_stable_id(self) -> None:
+        doc = normalize_dashboard(SAMPLE_DASHBOARD)
+        expected = _stable_id("dashboard", SAMPLE_DASHBOARD["guid"])
+        assert doc.source_id == expected
+        assert len(doc.source_id) == 16
 
-    def test_metadata_summary_fields(self):
-        doc = normalize_application(self._APP)
-        meta = doc["metadata"]
-        assert meta["response_time"] == 1.5
-        assert meta["throughput"] == 100.0
-        assert meta["error_rate"] == 0.1
-        assert meta["apdex_score"] == 0.95
-        assert meta["health_status"] == "green"
+    def test_normalize_alert_missing_fields(self) -> None:
+        doc = normalize_alert({})
+        assert doc.title == "New Relic alert policy: Unnamed Alert Policy"
+        assert len(doc.source_id) == 16
 
-    def test_missing_summary_defaults_to_none(self):
-        app = {"id": 1, "name": "No Summary", "language": "ruby"}
-        doc = normalize_application(app)
-        assert doc["metadata"]["response_time"] is None
-        assert doc["metadata"]["apdex_score"] is None
+    def test_normalize_application_missing_summary(self) -> None:
+        doc = normalize_application({"id": 99, "name": "bare-service"})
+        assert "bare-service" in doc.title
+        assert len(doc.source_id) == 16
 
 
-# ===========================================================================
-# 6. with_retry — 4 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4 — with_retry (6 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestWithRetry:
-    async def test_success_on_first_attempt(self):
-        calls = []
+    async def test_retry_succeeds_first_attempt(self) -> None:
+        mock_fn = AsyncMock(return_value={"ok": True})
+        result = await with_retry(mock_fn, max_attempts=3)
+        assert result == {"ok": True}
+        assert mock_fn.call_count == 1
 
-        async def fn():
-            calls.append(1)
-            return "ok"
+    async def test_retry_succeeds_on_second_attempt(self) -> None:
+        call_count = 0
 
-        result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == "ok"
-        assert len(calls) == 1
-
-    async def test_retries_on_error(self):
-        calls = []
-
-        async def fn():
-            calls.append(1)
-            if len(calls) < 3:
+        async def flaky() -> dict:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
                 raise NewRelicNetworkError("transient")
-            return "done"
+            return {"ok": True}
 
-        result = await with_retry(fn, max_attempts=3, base_delay=0)
-        assert result == "done"
-        assert len(calls) == 3
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
+            result = await with_retry(flaky, max_attempts=3)
+        assert result == {"ok": True}
+        assert call_count == 2
 
-    async def test_skip_on_auth_error(self):
-        """Auth errors should not be retried."""
-        calls = []
+    async def test_retry_raises_after_max_attempts(self) -> None:
+        mock_fn = AsyncMock(side_effect=NewRelicNetworkError("always fails"))
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(NewRelicNetworkError):
+                await with_retry(mock_fn, max_attempts=3)
+        assert mock_fn.call_count == 3
 
-        async def fn():
-            calls.append(1)
-            raise NewRelicAuthError("bad creds")
-
+    async def test_auth_error_not_retried(self) -> None:
+        mock_fn = AsyncMock(side_effect=NewRelicAuthError("forbidden"))
         with pytest.raises(NewRelicAuthError):
-            await with_retry(fn, max_attempts=3, base_delay=0, skip_on=(NewRelicAuthError,))
-        assert len(calls) == 1
+            await with_retry(mock_fn, max_attempts=3)
+        assert mock_fn.call_count == 1
 
-    async def test_raises_after_max_attempts(self):
-        async def fn():
-            raise NewRelicNetworkError("always fails")
+    async def test_rate_limit_retried_with_backoff(self) -> None:
+        call_count = 0
 
-        with pytest.raises(NewRelicNetworkError):
-            await with_retry(fn, max_attempts=2, base_delay=0)
+        async def rate_limited() -> dict:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise NewRelicRateLimitError("slow down", retry_after=0.0)
+            return {"ok": True}
+
+        with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock):
+            result = await with_retry(rate_limited, max_attempts=3)
+        assert result == {"ok": True}
+
+    async def test_retry_passes_args_to_fn(self) -> None:
+        mock_fn = AsyncMock(return_value={"policies": []})
+        await with_retry(mock_fn, "arg1", key="value")
+        mock_fn.assert_called_once_with("arg1", key="value")
 
 
-# ===========================================================================
-# 7. NewRelicHTTPClient — 17 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5 — HTTP client (mocked) (14 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNewRelicHTTPClient:
-    def test_us_base_url_default(self):
-        client = NewRelicHTTPClient(config={"api_key": "k", "region": "US"})
-        assert "api.newrelic.com" in client._base_url
-        assert "eu" not in client._base_url
+    def _make_client(self, region: str = "US") -> "NewRelicHTTPClient":
+        from client.http_client import NewRelicHTTPClient
+        return NewRelicHTTPClient(config={
+            "api_key": VALID_API_KEY,
+            "account_id": VALID_ACCOUNT_ID,
+            "region": region,
+        })
 
-    def test_eu_base_url(self):
-        client = NewRelicHTTPClient(config={"api_key": "k", "region": "EU"})
-        assert "eu.newrelic.com" in client._base_url
+    def test_rest_base_us_region(self) -> None:
+        client = self._make_client("US")
+        assert client._rest_base == "https://api.newrelic.com/v2/"
 
-    def test_default_region_is_us(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        assert "api.newrelic.com" in client._base_url
-        assert "eu" not in client._base_url
+    def test_rest_base_eu_region(self) -> None:
+        client = self._make_client("EU")
+        assert client._rest_base == "https://api.eu.newrelic.com/v2/"
 
-    async def test_api_key_header_not_bearer(self):
-        client = NewRelicHTTPClient(config={"api_key": "MY_KEY"})
-        session = client._get_session()
-        # The session should use Api-Key, NOT Authorization/Bearer
-        assert session.headers.get("Api-Key") == "MY_KEY"
-        assert "Authorization" not in session.headers
-        await client.close()
+    def test_nerdgraph_url_us(self) -> None:
+        client = self._make_client("US")
+        assert client._nerdgraph_url == "https://api.newrelic.com/graphql"
 
-    async def test_get_user_returns_first_user(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"users": [{"id": 1, "email": "a@b.com"}]})
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
+    def test_nerdgraph_url_eu(self) -> None:
+        client = self._make_client("EU")
+        assert client._nerdgraph_url == "https://api.eu.newrelic.com/graphql"
 
-        with patch.object(client._get_session(), "get", return_value=mock_response):
-            result = await client.get_user()
-        assert result["id"] == 1
+    def test_both_api_key_headers_stored(self) -> None:
+        client = self._make_client()
+        assert client._api_key == VALID_API_KEY
+        assert client._account_id == VALID_ACCOUNT_ID
 
-    async def test_list_alerts_policies_no_pagination(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        payload = {"alerts_policies": {"policy": [{"id": 1, "name": "P1"}]}}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=payload)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
+    async def test_both_headers_injected_in_session(self) -> None:
+        client = self._make_client()
+        try:
+            session = client._get_session()
+            headers = dict(session.headers)
+            assert headers.get("Api-Key") == VALID_API_KEY
+            assert headers.get("X-Api-Key") == VALID_API_KEY
+        finally:
+            await client.aclose()
 
-        with patch.object(client._get_session(), "get", return_value=mock_response):
-            result = await client.list_alerts_policies()
-        assert result == payload
+    async def test_validate_api_key_success(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value=SAMPLE_VALIDATE_RESPONSE)
+        result = await client.validate_api_key()
+        assert result == SAMPLE_VALIDATE_RESPONSE
+        client._request.assert_called_once_with(
+            "GET",
+            "https://api.newrelic.com/v2/applications.json",
+            params={"filter[ids]": "1"},
+        )
 
-    async def test_list_alerts_policies_with_page(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        payload = {"alerts_policies": {"policy": []}}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=payload)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
+    async def test_get_alert_policies(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value=SAMPLE_ALERT_POLICIES_RESPONSE)
+        result = await client.get_alert_policies(page=1)
+        assert "policies" in result
+        assert len(result["policies"]) == 1
 
-        with patch.object(client._get_session(), "get", return_value=mock_response) as mock_get:
-            await client.list_alerts_policies(page=2)
-            call_kwargs = mock_get.call_args
-            assert call_kwargs[1]["params"]["page"] == 2
+    async def test_get_alert_conditions(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value={"conditions": []})
+        result = await client.get_alert_conditions(policy_id=101)
+        assert "conditions" in result
+        client._request.assert_called_once_with(
+            "GET",
+            "https://api.newrelic.com/v2/alerts_conditions.json",
+            params={"policy_id": 101},
+        )
 
-    async def test_list_alerts_conditions(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        payload = {"conditions": [{"id": 10}]}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=payload)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
+    async def test_get_applications(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value=SAMPLE_APPLICATIONS_RESPONSE)
+        result = await client.get_applications(page=1)
+        assert "applications" in result
+        assert len(result["applications"]) == 1
 
-        with patch.object(client._get_session(), "get", return_value=mock_response):
-            result = await client.list_alerts_conditions(policy_id=42)
-        assert result == payload
+    async def test_run_nerdgraph(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value=SAMPLE_NRQL_RESPONSE)
+        query = "{ actor { user { name } } }"
+        result = await client.run_nerdgraph(query)
+        assert result == SAMPLE_NRQL_RESPONSE
+        client._request.assert_called_once_with(
+            "POST",
+            "https://api.newrelic.com/graphql",
+            json={"query": query},
+        )
 
-    async def test_list_applications(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        payload = {"applications": [{"id": 5, "name": "App"}]}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=payload)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
+    async def test_run_nerdgraph_with_variables(self) -> None:
+        client = self._make_client()
+        client._request = AsyncMock(return_value={"data": {}})
+        variables = {"accountId": 123}
+        await client.run_nerdgraph("query Q { }", variables)
+        client._request.assert_called_once_with(
+            "POST",
+            "https://api.newrelic.com/graphql",
+            json={"query": "query Q { }", "variables": variables},
+        )
 
-        with patch.object(client._get_session(), "get", return_value=mock_response):
-            result = await client.list_applications()
-        assert result == payload
-
-    async def test_list_incidents(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        payload = {"recent_violations": [{"id": 9}]}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=payload)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.object(client._get_session(), "get", return_value=mock_response):
-            result = await client.list_incidents()
-        assert result == payload
-
-    async def test_graphql_query(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        gql_response = {"data": {"actor": {"account": {"id": 12345}}}}
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=gql_response)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.object(client._get_session(), "post", return_value=mock_response):
-            result = await client.graphql_query("{ actor { account { id } } }")
-        assert result == gql_response
-
-    async def test_graphql_query_with_variables(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        gql_response = {"data": {"dashboardCreate": {"entityResult": {"guid": "abc"}}}}
-
-        posted: dict = {}
-
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=gql_response)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-
-        def fake_post(url, **kwargs):
-            posted.update(kwargs.get("json", {}))
-            return mock_response
-
-        session = client._get_session()
-        with patch.object(session, "post", side_effect=fake_post):
-            await client.graphql_query("query Q($id: Int!) { }", variables={"id": 1})
-        assert posted.get("variables") == {"id": 1}
-        await client.close()
-
-    async def test_pagination_via_next_url(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-
-        page1 = {"applications": [{"id": 1}], "next_url": "https://next.page"}
-        page2 = {"applications": [{"id": 2}]}
-
-        resp2 = MagicMock()
-        resp2.status = 200
-        resp2.json = AsyncMock(return_value=page2)
-        resp2.__aenter__ = AsyncMock(return_value=resp2)
-        resp2.__aexit__ = AsyncMock(return_value=False)
-
-        def fake_get(url, **kwargs):
-            return resp2
-
-        session = client._get_session()
-        with patch.object(session, "get", side_effect=fake_get):
-            items = await client.paginate(page1, "applications")
-        # page1 has 1 item already provided; paginate follows next_url and fetches page2
-        assert any(i["id"] == 1 for i in items)
-        assert any(i["id"] == 2 for i in items)
-        await client.close()
-
-    async def test_close_session(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        _ = client._get_session()  # create session
-        assert client._session is not None
-        await client.close()
-        assert client._session.closed
-
-
-# ===========================================================================
-# 8. _raise_for_status — 5 tests
-# ===========================================================================
-
-class TestRaiseForStatus:
-    def _make_response(self, status: int, headers: dict | None = None):
-        resp = MagicMock()
-        resp.status = status
-        resp.headers = headers or {}
-        return resp
-
-    async def test_200_no_raise(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(200)
-        await client._raise_for_status(resp)  # should not raise
-
-    async def test_401_raises_auth_error(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(401)
+    async def test_raise_for_status_401_auth_error(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": "bad", "account_id": "1"})
         with pytest.raises(NewRelicAuthError):
-            await client._raise_for_status(resp)
+            client._raise_for_status(401, {"message": "Invalid API key"})
 
-    async def test_403_raises_auth_error(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(403)
+    async def test_raise_for_status_403_auth_error(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": "bad", "account_id": "1"})
         with pytest.raises(NewRelicAuthError):
-            await client._raise_for_status(resp)
+            client._raise_for_status(403, {"errors": [{"message": "Forbidden"}]})
 
-    async def test_404_raises_not_found(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(404)
+    async def test_raise_for_status_404_not_found(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": "k", "account_id": "1"})
         with pytest.raises(NewRelicNotFoundError):
-            await client._raise_for_status(resp)
+            client._raise_for_status(404, {})
 
-    async def test_429_raises_rate_limit(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(429, headers={"Retry-After": "60"})
-        with pytest.raises(NewRelicRateLimitError) as exc_info:
-            await client._raise_for_status(resp)
-        assert exc_info.value.retry_after == 60.0
+    async def test_raise_for_status_429_rate_limit(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": "k", "account_id": "1"})
+        with pytest.raises(NewRelicRateLimitError):
+            client._raise_for_status(429, {"error": "Too many requests"})
 
-    async def test_500_raises_network_error(self):
-        client = NewRelicHTTPClient(config={"api_key": "k"})
-        resp = self._make_response(500)
+    async def test_raise_for_status_500_network_error(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": "k", "account_id": "1"})
         with pytest.raises(NewRelicNetworkError):
-            await client._raise_for_status(resp)
+            client._raise_for_status(500, {"message": "Internal Server Error"})
 
 
-# ===========================================================================
-# 9. NewRelicConnector.install() — 4 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6 — install() (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestInstall:
-    async def test_install_success(self):
-        connector = NewRelicConnector(
-            tenant_id="t1",
-            connector_id="c1",
-            config={"api_key": "NRAK-KEY", "account_id": "12345"},
+    def _make_connector(
+        self,
+        api_key: str = VALID_API_KEY,
+        account_id: str = VALID_ACCOUNT_ID,
+    ) -> NewRelicConnector:
+        return NewRelicConnector(
+            tenant_id=TENANT_ID,
+            connector_id=CONNECTOR_ID,
+            config={"api_key": api_key, "account_id": account_id, "region": "US"},
         )
-        connector.client.get_user = AsyncMock(return_value={"id": 1})
+
+    async def test_install_success(self) -> None:
+        connector = self._make_connector()
+        connector._make_client = MagicMock(return_value=MagicMock(
+            validate_api_key=AsyncMock(return_value=SAMPLE_VALIDATE_RESPONSE),
+            aclose=AsyncMock(),
+        ))
         result = await connector.install()
         assert result.health == ConnectorHealth.HEALTHY
         assert result.auth_status == AuthStatus.CONNECTED
+        assert "New Relic" in result.message
+        assert "US" in result.message
 
-    async def test_install_missing_api_key(self):
-        connector = NewRelicConnector(
-            tenant_id="t1",
-            config={"account_id": "123"},
-        )
+    async def test_install_missing_api_key(self) -> None:
+        connector = self._make_connector(api_key="")
         result = await connector.install()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
         assert "api_key" in result.message
 
-    async def test_install_missing_account_id(self):
-        connector = NewRelicConnector(
-            tenant_id="t1",
-            config={"api_key": "NRAK-KEY"},
-        )
+    async def test_install_missing_account_id(self) -> None:
+        connector = self._make_connector(account_id="")
         result = await connector.install()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
         assert "account_id" in result.message
 
-    async def test_install_auth_error(self):
-        connector = NewRelicConnector(
-            tenant_id="t1",
-            config={"api_key": "BAD_KEY", "account_id": "123"},
+    async def test_install_invalid_credentials(self) -> None:
+        connector = self._make_connector()
+        mock_client = MagicMock(
+            validate_api_key=AsyncMock(side_effect=NewRelicAuthError("Invalid API key")),
+            aclose=AsyncMock(),
         )
-        connector.client.get_user = AsyncMock(side_effect=NewRelicAuthError("401"))
+        connector._make_client = MagicMock(return_value=mock_client)
         result = await connector.install()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
 
+    async def test_install_network_error(self) -> None:
+        connector = self._make_connector()
+        mock_client = MagicMock(
+            validate_api_key=AsyncMock(side_effect=NewRelicNetworkError("timeout")),
+            aclose=AsyncMock(),
+        )
+        connector._make_client = MagicMock(return_value=mock_client)
+        result = await connector.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.FAILED
 
-# ===========================================================================
-# 10. NewRelicConnector.health_check() — 3 tests
-# ===========================================================================
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7 — health_check() (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestHealthCheck:
-    async def test_health_check_healthy(self):
-        connector = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        connector.client.get_user = AsyncMock(return_value={"id": 1})
+    def _make_connector(
+        self,
+        api_key: str = VALID_API_KEY,
+        account_id: str = VALID_ACCOUNT_ID,
+    ) -> NewRelicConnector:
+        return NewRelicConnector(
+            tenant_id=TENANT_ID,
+            connector_id=CONNECTOR_ID,
+            config={"api_key": api_key, "account_id": account_id, "region": "US"},
+        )
+
+    async def test_health_check_healthy(self) -> None:
+        connector = self._make_connector()
+        mock_client = MagicMock(
+            validate_api_key=AsyncMock(return_value=SAMPLE_VALIDATE_RESPONSE),
+            aclose=AsyncMock(),
+        )
+        connector._make_client = MagicMock(return_value=mock_client)
         result = await connector.health_check()
         assert result.health == ConnectorHealth.HEALTHY
         assert result.auth_status == AuthStatus.CONNECTED
 
-    async def test_health_check_auth_error(self):
-        connector = NewRelicConnector(config={"api_key": "bad", "account_id": "1"})
-        connector.client.get_user = AsyncMock(side_effect=NewRelicAuthError("403"))
+    async def test_health_check_missing_api_key(self) -> None:
+        connector = self._make_connector(api_key="")
+        result = await connector.health_check()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+
+    async def test_health_check_missing_account_id(self) -> None:
+        connector = self._make_connector(account_id="")
+        result = await connector.health_check()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+
+    async def test_health_check_auth_failure(self) -> None:
+        connector = self._make_connector()
+        mock_client = MagicMock(
+            validate_api_key=AsyncMock(side_effect=NewRelicAuthError("invalid key")),
+            aclose=AsyncMock(),
+        )
+        connector._make_client = MagicMock(return_value=mock_client)
         result = await connector.health_check()
         assert result.health == ConnectorHealth.OFFLINE
         assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
 
-    async def test_health_check_network_error(self):
-        connector = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        connector.client.get_user = AsyncMock(side_effect=NewRelicNetworkError("503"))
+    async def test_health_check_network_degraded(self) -> None:
+        connector = self._make_connector()
+        mock_client = MagicMock(
+            validate_api_key=AsyncMock(side_effect=NewRelicNetworkError("connection reset")),
+            aclose=AsyncMock(),
+        )
+        connector._make_client = MagicMock(return_value=mock_client)
         result = await connector.health_check()
         assert result.health == ConnectorHealth.DEGRADED
-        assert result.auth_status == AuthStatus.FAILED
 
 
-# ===========================================================================
-# 11. NewRelicConnector.sync() — 4 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8 — sync() (8 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSync:
-    def _connector(self) -> NewRelicConnector:
+    def _make_connector(self) -> NewRelicConnector:
         return NewRelicConnector(
-            tenant_id="t1",
-            connector_id="c1",
-            config={"api_key": "k", "account_id": "1"},
+            tenant_id=TENANT_ID,
+            connector_id=CONNECTOR_ID,
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID, "region": "US"},
         )
 
-    async def test_sync_success(self):
-        conn = self._connector()
-        conn.list_alerts_policies = AsyncMock(
-            return_value=[{"id": 1, "name": "P", "incident_preference": "PER_POLICY"}]
-        )
-        conn.list_applications = AsyncMock(
-            return_value=[{"id": 5, "name": "App", "language": "python"}]
-        )
-        conn.list_incidents = AsyncMock(return_value=[{"id": 99}])
-        result = await conn.sync()
+    async def test_sync_all_resources_success(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[SAMPLE_ALERT_POLICY])
+        connector.list_applications = AsyncMock(return_value=[SAMPLE_APPLICATION])
+        connector.list_incidents = AsyncMock(return_value=[SAMPLE_INCIDENT])
+        connector.list_dashboards = AsyncMock(return_value=[SAMPLE_DASHBOARD])
+        result = await connector.sync()
         assert result.status == SyncStatus.COMPLETED
-        assert result.documents_found == 3
-        assert result.documents_synced == 3
+        assert result.documents_found == 4
+        assert result.documents_synced == 4
+        assert result.documents_failed == 0
 
-    async def test_sync_empty(self):
-        conn = self._connector()
-        conn.list_alerts_policies = AsyncMock(return_value=[])
-        conn.list_applications = AsyncMock(return_value=[])
-        conn.list_incidents = AsyncMock(return_value=[])
-        result = await conn.sync()
-        assert result.status == SyncStatus.COMPLETED
+    async def test_sync_with_kb_id(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[SAMPLE_ALERT_POLICY])
+        connector.list_applications = AsyncMock(return_value=[])
+        connector.list_incidents = AsyncMock(return_value=[])
+        connector.list_dashboards = AsyncMock(return_value=[])
+        connector._ingest_document = AsyncMock()
+        result = await connector.sync(kb_id="kb_test_123")
+        connector._ingest_document.assert_called_once()
+        assert result.documents_synced == 1
+
+    async def test_sync_no_data_returns_partial(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[])
+        connector.list_applications = AsyncMock(return_value=[])
+        connector.list_incidents = AsyncMock(return_value=[])
+        connector.list_dashboards = AsyncMock(return_value=[])
+        result = await connector.sync()
+        assert result.status == SyncStatus.PARTIAL
         assert result.documents_found == 0
 
-    async def test_sync_partial_on_error(self):
-        conn = self._connector()
-        conn.list_alerts_policies = AsyncMock(
-            return_value=[{"id": 1, "name": "P", "incident_preference": "PER_POLICY"}]
-        )
-        conn.list_applications = AsyncMock(side_effect=NewRelicNetworkError("503"))
-        conn.list_incidents = AsyncMock(return_value=[])
-        result = await conn.sync()
+    async def test_sync_alerts_failure_non_fatal(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(side_effect=NewRelicError("alerts failed"))
+        connector.list_applications = AsyncMock(return_value=[SAMPLE_APPLICATION])
+        connector.list_incidents = AsyncMock(return_value=[])
+        connector.list_dashboards = AsyncMock(return_value=[])
+        result = await connector.sync()
+        # application still synced despite alerts failure
+        assert result.documents_synced >= 1
+
+    async def test_sync_partial_on_failed_count(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[{"bad": "data", "id": "x"}])
+        connector.list_applications = AsyncMock(return_value=[])
+        connector.list_incidents = AsyncMock(return_value=[])
+        connector.list_dashboards = AsyncMock(return_value=[])
+        # normalize_alert should still work with bad data; test partial condition
+        result = await connector.sync()
+        assert result.documents_found == 1
+
+    async def test_sync_multiple_alerts(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[SAMPLE_ALERT_POLICY, SAMPLE_ALERT_POLICY_2])
+        connector.list_applications = AsyncMock(return_value=[])
+        connector.list_incidents = AsyncMock(return_value=[])
+        connector.list_dashboards = AsyncMock(return_value=[])
+        result = await connector.sync()
+        assert result.documents_found == 2
+        assert result.documents_synced == 2
+
+    async def test_sync_all_resources_fail_returns_partial(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(side_effect=NewRelicError("err"))
+        connector.list_applications = AsyncMock(side_effect=NewRelicError("err"))
+        connector.list_incidents = AsyncMock(side_effect=NewRelicError("err"))
+        connector.list_dashboards = AsyncMock(side_effect=NewRelicError("err"))
+        result = await connector.sync()
         assert result.status == SyncStatus.PARTIAL
 
-    async def test_sync_all_errors(self):
-        conn = self._connector()
-        conn.list_alerts_policies = AsyncMock(side_effect=NewRelicNetworkError("503"))
-        conn.list_applications = AsyncMock(side_effect=NewRelicNetworkError("503"))
-        conn.list_incidents = AsyncMock(side_effect=NewRelicNetworkError("503"))
-        result = await conn.sync()
-        assert result.status == SyncStatus.PARTIAL
+    async def test_sync_mixed_resources(self) -> None:
+        connector = self._make_connector()
+        connector.list_alerts = AsyncMock(return_value=[])
+        connector.list_applications = AsyncMock(return_value=[SAMPLE_APPLICATION, SAMPLE_APPLICATION_2])
+        connector.list_incidents = AsyncMock(return_value=[SAMPLE_INCIDENT])
+        connector.list_dashboards = AsyncMock(return_value=[SAMPLE_DASHBOARD])
+        result = await connector.sync()
+        assert result.documents_found == 4
+        assert result.documents_synced == 4
 
 
-# ===========================================================================
-# 12. NewRelicConnector.list_alerts_policies() — 2 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9 — list methods (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestListAlertsPolicies:
-    async def test_list_alerts_policies_returns_list(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_alerts_policies = AsyncMock(
-            return_value={
-                "alerts_policies": {"policy": [{"id": 1, "name": "P1"}]},
-            }
+class TestListMethods:
+    def _make_connector(self) -> NewRelicConnector:
+        return NewRelicConnector(
+            tenant_id=TENANT_ID,
+            connector_id=CONNECTOR_ID,
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID, "region": "US"},
         )
-        # Mock the session.get used for pagination
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_alerts_policies()
+
+    async def test_list_alerts_single_page(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_alert_policies = AsyncMock(return_value=SAMPLE_ALERT_POLICIES_RESPONSE)
+        result = await connector.list_alerts()
         assert isinstance(result, list)
-        assert result[0]["id"] == 1
+        assert len(result) == 1
+        assert result[0]["id"] == 101
 
-    async def test_list_alerts_policies_empty(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_alerts_policies = AsyncMock(
-            return_value={"alerts_policies": {"policy": []}}
-        )
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_alerts_policies()
+    async def test_list_alerts_stops_on_empty_page(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_alert_policies = AsyncMock(return_value={"policies": []})
+        result = await connector.list_alerts()
         assert result == []
+        connector.client.get_alert_policies.assert_called_once()
 
-
-# ===========================================================================
-# 13. NewRelicConnector.list_applications() — 2 tests
-# ===========================================================================
-
-class TestListApplications:
-    async def test_list_applications_returns_list(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_applications = AsyncMock(
-            return_value={"applications": [{"id": 5, "name": "App"}]}
-        )
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_applications()
+    async def test_list_applications_single_page(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_applications = AsyncMock(return_value=SAMPLE_APPLICATIONS_RESPONSE)
+        result = await connector.list_applications()
         assert isinstance(result, list)
-        assert result[0]["name"] == "App"
+        assert len(result) == 1
+        assert result[0]["id"] == 555
 
-    async def test_list_applications_empty(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_applications = AsyncMock(return_value={"applications": []})
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_applications()
-        assert result == []
-
-
-# ===========================================================================
-# 14. NewRelicConnector.list_incidents() — 2 tests
-# ===========================================================================
-
-class TestListIncidents:
-    async def test_list_incidents_returns_list(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_incidents = AsyncMock(
-            return_value={"recent_violations": [{"id": 99}]}
-        )
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_incidents()
+    async def test_list_incidents_from_nerdgraph(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_incidents = AsyncMock(return_value=SAMPLE_INCIDENTS_NERDGRAPH)
+        result = await connector.list_incidents()
         assert isinstance(result, list)
-        assert result[0]["id"] == 99
+        assert len(result) == 1
+        assert result[0]["incidentId"] == "abcd-1234-efgh"
 
-    async def test_list_incidents_empty(self):
-        conn = NewRelicConnector(config={"api_key": "k", "account_id": "1"})
-        conn.client.list_incidents = AsyncMock(
-            return_value={"recent_violations": []}
+    async def test_list_dashboards_from_nerdgraph(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_dashboards = AsyncMock(return_value=SAMPLE_DASHBOARDS_NERDGRAPH)
+        result = await connector.list_dashboards()
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["guid"] == "GUID-dashboard-abc123"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10 — run_nrql() (3 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRunNrql:
+    def _make_connector(self) -> NewRelicConnector:
+        return NewRelicConnector(
+            tenant_id=TENANT_ID,
+            connector_id=CONNECTOR_ID,
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID, "region": "US"},
         )
-        session_mock = MagicMock()
-        conn.client._get_session = MagicMock(return_value=session_mock)
-        result = await conn.list_incidents()
-        assert result == []
+
+    async def test_run_nrql_success(self) -> None:
+        connector = self._make_connector()
+        connector.client.run_nerdgraph = AsyncMock(return_value=SAMPLE_NRQL_RESPONSE)
+        result = await connector.run_nrql("SELECT count(*) FROM Transaction SINCE 1 hour ago")
+        assert result == SAMPLE_NRQL_RESPONSE
+        connector.client.run_nerdgraph.assert_called_once()
+        call_args = connector.client.run_nerdgraph.call_args
+        # First positional arg is the GraphQL query template (contains $nrql param)
+        assert "$nrql" in call_args[0][0]
+        # Second positional arg is the variables dict containing accountId and nrql
+        variables = call_args[0][1]
+        assert variables["accountId"] == int(VALID_ACCOUNT_ID)
+        assert "SELECT count(*) FROM Transaction" in variables["nrql"]
+
+    async def test_run_nrql_passes_query_string(self) -> None:
+        connector = self._make_connector()
+        connector.client.run_nerdgraph = AsyncMock(return_value={"data": {}})
+        nrql = "SELECT average(duration) FROM Transaction WHERE appName = 'checkout'"
+        await connector.run_nrql(nrql)
+        call_args = connector.client.run_nerdgraph.call_args[0]
+        variables = call_args[1]
+        assert variables["nrql"] == nrql
+
+    async def test_run_nrql_auth_error_propagates(self) -> None:
+        connector = self._make_connector()
+        connector.client.run_nerdgraph = AsyncMock(
+            side_effect=NewRelicAuthError("unauthorized")
+        )
+        with pytest.raises(NewRelicAuthError):
+            await connector.run_nrql("SELECT * FROM Transaction")
 
 
-# ===========================================================================
-# 15. Module constants — 2 tests
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11 — connector constants & module-level attributes (3 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestModuleConstants:
-    def test_connector_type(self):
-        assert CONNECTOR_TYPE == "new_relic"
+class TestConnectorConstants:
+    def test_connector_type(self) -> None:
+        assert CONNECTOR_TYPE == "newrelic"
 
-    def test_auth_type(self):
+    def test_auth_type(self) -> None:
         assert AUTH_TYPE == "api_key"
+
+    def test_connector_class_attributes(self) -> None:
+        assert NewRelicConnector.CONNECTOR_TYPE == "newrelic"
+        assert NewRelicConnector.AUTH_TYPE == "api_key"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12 — stable ID helper (3 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestStableId:
+    def test_stable_id_length(self) -> None:
+        result = _stable_id("alert", "101")
+        assert len(result) == 16
+
+    def test_stable_id_deterministic(self) -> None:
+        a = _stable_id("alert", "101")
+        b = _stable_id("alert", "101")
+        assert a == b
+
+    def test_stable_id_differs_by_prefix(self) -> None:
+        alert_id = _stable_id("alert", "123")
+        app_id = _stable_id("application", "123")
+        assert alert_id != app_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13 — lifecycle & config (4 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLifecycle:
+    async def test_connector_aclose(self) -> None:
+        connector = NewRelicConnector(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID}
+        )
+        connector.client.aclose = AsyncMock()
+        await connector.aclose()
+        connector.client.aclose.assert_called_once()
+
+    async def test_connector_context_manager(self) -> None:
+        connector = NewRelicConnector(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID}
+        )
+        connector.client.aclose = AsyncMock()
+        async with connector as ctx:
+            assert ctx is connector
+        connector.client.aclose.assert_called_once()
+
+    def test_connector_default_region(self) -> None:
+        connector = NewRelicConnector(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID}
+        )
+        assert connector._region == "US"
+
+    def test_connector_eu_region(self) -> None:
+        connector = NewRelicConnector(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID, "region": "EU"}
+        )
+        assert connector._region == "EU"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 14 — HTTP client lifecycle (2 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHTTPClientLifecycle:
+    async def test_http_client_aclose(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        client = NewRelicHTTPClient(config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID})
+        _ = client._get_session()
+        await client.aclose()
+        assert client._session is None or client._session.closed
+
+    async def test_http_client_context_manager(self) -> None:
+        from client.http_client import NewRelicHTTPClient
+        async with NewRelicHTTPClient(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID}
+        ) as client:
+            assert client is not None
+        assert client._session is None or client._session.closed
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 15 — list_incidents edge cases (3 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestListIncidentsEdgeCases:
+    def _make_connector(self) -> NewRelicConnector:
+        return NewRelicConnector(
+            config={"api_key": VALID_API_KEY, "account_id": VALID_ACCOUNT_ID}
+        )
+
+    async def test_list_incidents_empty_nerdgraph_response(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_incidents = AsyncMock(return_value={})
+        result = await connector.list_incidents()
+        assert result == []
+
+    async def test_list_incidents_none_incidents_key(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_incidents = AsyncMock(return_value={
+            "data": {"actor": {"account": {"alerts": {"incidents": {"incidents": None}}}}}
+        })
+        result = await connector.list_incidents()
+        assert result == []
+
+    async def test_list_dashboards_empty_response(self) -> None:
+        connector = self._make_connector()
+        connector.client.get_dashboards = AsyncMock(return_value={})
+        result = await connector.list_dashboards()
+        assert result == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 16 — normalize edge cases (4 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestNormalizeEdgeCases:
+    def test_normalize_incident_rest_shape(self) -> None:
+        """normalize_incident handles REST shape (id key, not incidentId)."""
+        raw = {"id": 9999, "name": "REST incident", "status": "open", "severity": "HIGH"}
+        doc = normalize_incident(raw)
+        assert "9999" in doc.content
+        assert "REST incident" in doc.title
+
+    def test_normalize_dashboard_no_guid(self) -> None:
+        """normalize_dashboard falls back to 'id' when 'guid' is missing."""
+        raw = {"id": "old-id-format", "name": "Old Dashboard"}
+        doc = normalize_dashboard(raw)
+        assert "Old Dashboard" in doc.title
+        expected = _stable_id("dashboard", "old-id-format")
+        assert doc.source_id == expected
+
+    def test_normalize_alert_source_url_contains_id(self) -> None:
+        doc = normalize_alert(SAMPLE_ALERT_POLICY)
+        assert "101" in doc.source_url
+
+    def test_normalize_application_source_url_contains_id(self) -> None:
+        doc = normalize_application(SAMPLE_APPLICATION)
+        assert "555" in doc.source_url

@@ -1,3 +1,1 @@
-from client.http_client import NewRelicHTTPClient
-
-__all__ = ["NewRelicHTTPClient"]
+"""New Relic HTTP client package."""
