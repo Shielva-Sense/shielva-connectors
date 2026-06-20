@@ -18,17 +18,7 @@ from models import (
     SyncStatus,
 )
 
-try:
-    from shielva_connectors.base import BaseConnector
-except ImportError:
-    class BaseConnector:  # type: ignore[no-redef]
-        def __init__(self, tenant_id: str = "", connector_id: str = "", config: "Dict[str, Any] | None" = None) -> None:
-            self.tenant_id = tenant_id
-            self.connector_id = connector_id
-            self.config = config or {}
-    _BASE = BaseConnector
-else:
-    _BASE = BaseConnector
+from shared.base_connector import BaseConnector
 
 # Dropbox OAuth2 endpoints
 DROPBOX_AUTH_URL = "https://www.dropbox.com/oauth2/authorize"
