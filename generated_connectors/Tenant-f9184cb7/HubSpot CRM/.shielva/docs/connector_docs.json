@@ -1,0 +1,87 @@
+{
+  "title": "HubSpot Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The HubSpot connector integrates with the **HubSpot CRM API v3** to sync CRM data into the Shielva knowledge base. It is designed for sales and marketing teams that manage their pipeline, customer records, and support tickets in HubSpot and want that data searchable and indexed in Shielva.\n\n**What it syncs:**\n- **Contacts** — individual people in HubSpot CRM with properties like name, email, phone, company, and lifecycle stage\n- **Companies** — organization records with industry, size, revenue, and associated contacts\n- **Deals** — pipeline opportunities with stage, amount, close date, and owner\n- **Tickets** — support tickets linked to contacts and companies\n\n**Who uses it:** Sales, marketing, and customer success teams using HubSpot CRM who need to surface pipeline data, contact histories, and support ticket context inside Shielva.\n\n**Key capabilities:**\n- OAuth 2.0 with `offline_access` scope for long-lived access without re-authorization\n- Cursor-based pagination via `paging.next.after` across all CRM object types\n- Parallel-ready list methods (contacts, companies, deals, tickets all follow the same pattern)\n- Token validity verification via `GET /oauth/v1/access-tokens/{token}`\n- Automatic retry with exponential back-off (up to 3 attempts) — auth errors are not retried\n- Multi-tenant: every synced document is stamped with `connector_id` and `tenant_id`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### Prerequisites\n- A HubSpot developer account or access to a HubSpot portal\n- A **Private App** or **OAuth App** created in HubSpot Developer portal with the required scopes\n\n### Step 1 — Create a HubSpot OAuth App\n\n1. Go to https://developers.hubspot.com and sign in\n2. Create a new app under your developer account\n3. Under **Auth**, note your **Client ID** and **Client Secret**\n4. Add the Shielva redirect URI to **Redirect URLs**\n5. Add the required scopes (see Authentication section)\n\n### Step 2 — Install the connector\n\n```python\nimport asyncio\nfrom connector import HubSpotConnector\n\nconnector = HubSpotConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"hubspot-01\",\n    config={\n        \"client_id\": \"your-client-id\",\n        \"client_secret\": \"your-client-secret\",\n        \"redirect_uri\": \"https://app.shielva.ai/connectors/callback\",\n    },\n)\nresult = asyncio.run(connector.install())\nprint(result.success, result.message)\n# True  HubSpot connector installed successfully\n```\n\n### Step 3 — Authorize with HubSpot\n\n```python\nauth_url = asyncio.run(connector.authorize())\n# Redirect user's browser to auth_url\n# HubSpot redirects back with ?code=...\n```\n\n### Step 4 — Exchange the authorization code\n\nAfter the user grants access, exchange the code (this is handled by the Shielva platform gateway after the OAuth callback):\n\n```python\n# Exchange happens at the platform level; store the returned access_token and refresh_token\n# Then reinitialize the connector with tokens:\nconnector_with_token = HubSpotConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"hubspot-01\",\n    config={\n        \"client_id\": \"your-client-id\",\n        \"client_secret\": \"your-client-secret\",\n        \"access_token\": \"your-access-token\",\n    },\n)\n```\n\n### Step 5 — Verify health\n\n```python\nhealth = asyncio.run(connector_with_token.health_check())\nprint(health.healthy, health.message)\n# True  HubSpot access token is valid\n```\n\n### Step 6 — Run your first sync\n\n```python\nresult = asyncio.run(connector_with_token.sync())\nprint(f\"{result.records_synced} records synced\")\n# 4521 records synced\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The HubSpot connector uses **OAuth 2.0 Authorization Code flow** with the `offline_access` scope to obtain long-lived tokens.\n\n### Flow\n\n1. **Install** — validate `client_id` and `client_secret` are present (no network call)\n2. **Authorize** — call `authorize()` to generate the HubSpot consent URL with scopes\n3. **Exchange** — after user consent, exchange the `code` for `access_token` + `refresh_token` at the token endpoint\n4. **Use** — the `access_token` is sent as a Bearer token in every API request header\n5. **Refresh** — when the access token expires, use the `refresh_token` to obtain a new one at `https://api.hubapi.com/oauth/v1/token`\n\n### Endpoints\n\n| Step | Method | URL |\n|------|--------|-----|\n| Authorization redirect | GET (browser) | `https://app.hubspot.com/oauth/authorize` |\n| Token exchange / refresh | POST | `https://api.hubapi.com/oauth/v1/token` |\n| Token validation | GET | `https://api.hubapi.com/oauth/v1/access-tokens/{token}` |\n\n### Scopes required\n\n| Scope | Purpose |\n|-------|---------|\n| `crm.objects.contacts.read` | Read all contact records |\n| `crm.objects.companies.read` | Read all company records |\n| `crm.objects.deals.read` | Read all deal records |\n| `tickets` | Read all support ticket records |\n| `offline_access` | Obtain a refresh token for long-lived access |\n\n### Config keys\n\n| Key | Description |\n|-----|-------------|\n| `client_id` | From HubSpot Developer portal → your app → Auth tab |\n| `client_secret` | From the same location |\n| `redirect_uri` | Must match one of the Redirect URLs configured in HubSpot |\n| `portal_id` | Optional HubSpot portal/account ID; added to the auth URL if provided |\n| `access_token` | Populated after OAuth exchange; sent as Bearer token on every request |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Pass all fields in the `config` dict when constructing `HubSpotConnector`.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `client_id` | string | Yes | OAuth App Client ID from the HubSpot Developer portal → your app → Auth tab. |\n| `client_secret` | password | Yes | OAuth App Client Secret from the same location. Stored encrypted by Shielva. |\n| `redirect_uri` | string | No | OAuth redirect URI. Must match one of the Redirect URLs in the HubSpot app configuration. Defaults to `https://localhost/callback` if omitted. |\n| `portal_id` | string | No | HubSpot portal/account ID. Included as `portal_id` parameter in the authorization URL when provided. |\n| `access_token` | string | No | Populated after OAuth exchange. Required for `health_check()` and `sync()`. |\n| `refresh_token` | string | No | Populated after OAuth exchange. Used to obtain a new `access_token` when the current one expires. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. `HubSpotConnector` supports the async context manager protocol (`async with HubSpotConnector(...) as c:`). The HTTP client is lazily initialized on first use and shares a single `aiohttp.ClientSession`.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are both present. Makes **no network request**.\n\n**Returns:** `InstallResult`\n- `success`: `True` if both fields are present, `False` otherwise\n- `message`: `'HubSpot connector installed successfully'` on success, or which field is missing\n- `connector_id`: echoed from constructor\n\n```python\nconnector = HubSpotConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"hubspot-01\",\n    config={\"client_id\": \"...\", \"client_secret\": \"...\"},\n)\nresult = await connector.install()\n# InstallResult(success=True, message='HubSpot connector installed successfully')\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Verifies the access token by calling `GET /oauth/v1/access-tokens/{token}`. Returns the token info dict (hub ID, scopes, expiry) in `details` on success.\n\n**Returns:** `HealthCheckResult`\n- `healthy`: `True` or `False`\n- `message`: human-readable status\n- `details`: dict with token metadata (hub_id, user, scopes, expires_at) on success\n\n```python\nhealth = await connector.health_check()\nif health.healthy:\n    print(health.details.get(\"hub_id\"))\n    print(health.details.get(\"scopes\"))\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs contacts, companies, deals, and tickets in sequence. Each object type is fetched via its corresponding list method (which handles full cursor pagination). Individual record normalization failures are collected in `errors` and do not abort the sync for other object types.\n\n**Parameters:**\n- `**kwargs` — accepts but ignores `kb_id`, `full`, etc. (reserved for future incremental sync)\n\n**Returns:** `SyncResult`\n- `success`: `True` if zero errors, `False` otherwise\n- `records_synced`: total successfully normalized records across all object types\n- `errors`: list of error strings in format `\"{obj_type}/{record_id}: {exception}\"`\n- `message`: summary\n\n```python\nresult = await connector.sync()\nif result.success:\n    print(f\"Synced {result.records_synced} records\")\nelse:\n    print(f\"Synced {result.records_synced} with {len(result.errors)} errors\")\n    for err in result.errors:\n        print(err)\n```"
+        },
+        {
+          "id": "method-list-contacts",
+          "title": "list_contacts()",
+          "content": "Returns **all** contacts by following the `paging.next.after` cursor until exhausted. Handles arbitrarily large contact lists automatically.\n\n**Parameters:**\n- `limit` (int, default `100`) — page size for each API request\n- `after` (str, optional) — starting cursor for incremental fetches\n\n**Returns:** `List[Dict]` — flat list of all contact records\n\nEach record follows the HubSpot CRM v3 structure:\n```json\n{\n  \"id\": \"12345\",\n  \"properties\": {\n    \"firstname\": \"Jane\",\n    \"lastname\": \"Doe\",\n    \"email\": \"jane@example.com\",\n    \"phone\": \"+1-555-555-5555\",\n    \"company\": \"Acme Corp\"\n  },\n  \"createdAt\": \"2024-01-15T10:30:00.000Z\",\n  \"updatedAt\": \"2024-06-01T14:22:00.000Z\"\n}\n```\n\n```python\ncontacts = await connector.list_contacts(limit=100)\nprint(f\"Found {len(contacts)} contacts\")\n```"
+        },
+        {
+          "id": "method-list-companies",
+          "title": "list_companies()",
+          "content": "Returns all companies by following the `paging.next.after` cursor until exhausted.\n\n**Parameters:**\n- `limit` (int, default `100`)\n- `after` (str, optional)\n\n**Returns:** `List[Dict]`\n\n```python\ncompanies = await connector.list_companies()\nprint(f\"Found {len(companies)} companies\")\n```"
+        },
+        {
+          "id": "method-list-deals",
+          "title": "list_deals()",
+          "content": "Returns all deals by following the `paging.next.after` cursor until exhausted.\n\n**Parameters:**\n- `limit` (int, default `100`)\n- `after` (str, optional)\n\n**Returns:** `List[Dict]`\n\n```python\ndeals = await connector.list_deals()\nprint(f\"Found {len(deals)} deals\")\n```"
+        },
+        {
+          "id": "method-list-tickets",
+          "title": "list_tickets()",
+          "content": "Returns all support tickets by following the `paging.next.after` cursor until exhausted.\n\n**Parameters:**\n- `limit` (int, default `100`)\n- `after` (str, optional)\n\n**Returns:** `List[Dict]`\n\n```python\ntickets = await connector.list_tickets()\nprint(f\"Found {len(tickets)} tickets\")\n```"
+        },
+        {
+          "id": "method-get-contact",
+          "title": "get_contact()",
+          "content": "Fetches a single contact by ID from `GET /crm/v3/objects/contacts/{contact_id}`.\n\n**Parameters:**\n- `contact_id` (str, required)\n\n**Returns:** `Dict`\n\n```python\ncontact = await connector.get_contact(contact_id=\"12345\")\nprint(contact[\"properties\"][\"email\"])\n```"
+        },
+        {
+          "id": "method-get-deal",
+          "title": "get_deal()",
+          "content": "Fetches a single deal by ID from `GET /crm/v3/objects/deals/{deal_id}`.\n\n**Parameters:**\n- `deal_id` (str, required)\n\n**Returns:** `Dict`\n\n```python\ndeal = await connector.get_deal(deal_id=\"67890\")\nprint(deal[\"properties\"][\"dealname\"], deal[\"properties\"][\"amount\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Typed exceptions are defined in `exceptions.py`. All HTTP calls are wrapped with `with_retry()` (exponential back-off, base 1s, max 30s, up to 3 attempts).\n\n### Exception classes\n\n| Exception | HTTP status | Meaning | Connector behaviour |\n|-----------|-------------|---------|---------------------|\n| `HubSpotAuthError` | 401 | Access token expired or invalid | `health_check()` returns `healthy=False`; not retried by `with_retry()` |\n| `HubSpotError` | 4xx / 5xx | General API error (rate limit, not found, server error) | `sync()` records the failure in `errors` list; list method failures raise to the caller |\n\n### Retry behaviour\n- `with_retry()` retries on `HubSpotError` for network errors and 5xx responses\n- `HubSpotAuthError` (401) skips retry and surfaces immediately\n- Base delay: 1 second, max delay: 30 seconds, factor: 2x (exponential back-off)\n\n### Token validation failure\nIf `health_check()` is called with no `access_token`, it returns `healthy=False` with message `'access_token is not configured'`.\n\n### sync() error isolation\nRecord normalization failures append to `errors` list but do not stop fetching other records or other object types. An entire object-type fetch failure (e.g. HubSpot API down for deals) appends `'Failed to fetch deals: {error}'` and continues with the next object type."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `install()` returns `success=False` with `'client_id is required'`\n**Cause:** `client_id` was not provided in config.\n**Fix:** Add `client_id` to the config dict. Find it in the HubSpot Developer portal → your app → Auth tab.\n\n### `health_check()` returns `healthy=False` — `'access_token is not configured'`\n**Cause:** OAuth was never completed — no `access_token` is in config.\n**Fix:** Complete the OAuth flow: call `authorize()` to get the URL, redirect the user, then exchange the returned code for tokens.\n\n### `health_check()` returns `healthy=False` — `'HubSpot token expired or invalid'`\n**Cause:** The access token has expired (HubSpot access tokens expire after 30 minutes) or was revoked.\n**Fix:** Use the stored `refresh_token` to obtain a new `access_token` by POSTing to `https://api.hubapi.com/oauth/v1/token`. The Shielva platform handles this automatically.\n\n### OAuth authorization URL includes wrong scopes\n**Cause:** The scopes are hardcoded in `HUBSPOT_SCOPES` in `connector.py`. If the HubSpot app is configured with different scopes, the exchange will fail.\n**Fix:** Ensure the HubSpot app's required scopes include: `crm.objects.contacts.read`, `crm.objects.companies.read`, `crm.objects.deals.read`, `tickets`, and `offline_access`.\n\n### `sync()` shows many errors for one object type\n**Cause:** Normalization is failing for records with unexpected property shapes (e.g. custom properties not handled by the normalizer).\n**Fix:** Inspect the error strings in `result.errors`. Each entry includes the object type and record ID. Adjust the `normalize_*` functions in `helpers.py` if needed.\n\n### `list_contacts()` / `list_companies()` / etc. return an empty list\n**Cause:** HubSpot portal has no records, or the access token lacks the required scope.\n**Fix:** Verify the portal has data. Check the access token's scopes via `health_check()` — the `details` field contains the granted scopes.\n\n### `redirect_uri_mismatch` during OAuth\n**Cause:** The `redirect_uri` in config does not match any Redirect URL registered in the HubSpot app.\n**Fix:** Open the HubSpot Developer portal → your app → Auth → Redirect URLs and add the exact URI used."
+    }
+  ]
+}
