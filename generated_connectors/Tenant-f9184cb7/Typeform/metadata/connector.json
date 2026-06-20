@@ -1,0 +1,27 @@
+{
+  "connector_type": "typeform",
+  "display_name": "Typeform",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false}
+  ],
+  "capabilities": [
+    "install",
+    "authorize",
+    "health_check",
+    "sync",
+    "list_forms",
+    "get_form",
+    "get_responses",
+    "list_workspaces",
+    "get_workspace",
+    "get_insights"
+  ],
+  "provider": "Typeform",
+  "service": "Typeform",
+  "category": "forms",
+  "description": "Connect to Typeform to sync form definitions and responses into Shielva via OAuth 2.0."
+}
