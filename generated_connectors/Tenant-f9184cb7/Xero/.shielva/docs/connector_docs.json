@@ -1,0 +1,108 @@
+{
+  "title": "Xero Accounting Connector Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Xero Accounting** connector integrates Shielva with the [Xero Accounting API v2](https://developer.xero.com/documentation/api/accounting/overview) to sync invoices, contacts, and chart-of-accounts entries into the Shielva knowledge base.\n\nXero is a leading cloud accounting platform used by millions of small-to-medium businesses worldwide. This connector exposes **9 API methods** across 3 resource domains — Invoices, Contacts, and Accounts — and implements a full paginated sync engine that ingests all accounting data as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- OAuth2 PKCE flow — secure, user-delegated authorization with no password sharing\n- Organisation health check via `GET /Organisation`\n- Full and incremental sync (Invoices + Contacts support `If-Modified-Since` headers)\n- Paginated listing of invoices, contacts, and accounts\n- Direct `get_invoice` and `get_contact` by ID\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All records normalized to `ConnectorDocument` with stable 16-char SHA-256 source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Xero connector running in under 10 minutes.\n\n### 1. Create a Xero App\n\n1. Sign in to the [Xero Developer Portal](https://developer.xero.com/myapps/)\n2. Click **New app** → **Web app**\n3. Add the Shielva redirect URI under **OAuth 2.0 redirect URI**\n4. Click **Create app** — copy the **Client ID** and generate a **Client Secret**\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Xero**\n2. Enter your **Client ID** and **Client Secret**\n3. Click **Install** → **Authorize** to complete the OAuth2 flow\n4. Select your Xero organisation when prompted\n\n### 3. Run Your First Sync\n\n```python\nasync with XeroConnector(\n    tenant_id=\"tenant-001\",\n    connector_id=\"xero-001\",\n    config={\n        \"client_id\": \"YOUR_CLIENT_ID\",\n        \"client_secret\": \"YOUR_CLIENT_SECRET\",\n        \"access_token\": \"STORED_ACCESS_TOKEN\",\n        \"xero_tenant_id\": \"XERO_TENANT_ID\",\n    }\n) as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Xero connector uses **OAuth2 PKCE** (Proof Key for Code Exchange) — Xero's recommended method for web applications.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | OAuth2 Client ID from the Xero Developer Portal |\n| Client Secret | `client_secret` | password | Yes | OAuth2 Client Secret — shown once at generation |\n| Redirect URI | `redirect_uri` | string | No | Must match a URI registered in your Xero app |\n\n### OAuth2 Flow\n\n1. **install()** — validates credentials are present, returns `HEALTHY/PENDING`\n2. **authorize()** — builds a PKCE auth URL with `code_challenge` (S256). Direct the user here.\n3. Xero redirects back with `?code=...` to your redirect URI\n4. **exchange_code(code)** — exchanges the code for `access_token` + `refresh_token`, then calls `GET /connections` to store `xero_tenant_id`\n5. **refresh_token()** — renews the access token automatically using the stored refresh token\n\n### Required Scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `accounting.transactions` | Read invoices and financial transactions |\n| `accounting.contacts` | Read contacts (customers, suppliers) |\n| `offline_access` | Obtain a refresh token for unattended renewal |\n\n### Token Storage\n\nAfter `exchange_code()`, the connector stores:\n- `access_token` — short-lived (30 min), refreshed automatically\n- `refresh_token` — long-lived (60-day inactivity expiry), used for renewal\n- `xero_tenant_id` — the selected organisation's tenant ID, required on every API call\n\n### Security\n\n- Credentials are stored AES-256-GCM encrypted in the Shielva vault\n- PKCE prevents authorization code interception attacks\n- Access tokens are never logged or written to disk\n- All communication uses TLS 1.2+"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"client_id\": \"ABCDEF1234ABCDEF1234ABCDEF1234AB\",\n  \"client_secret\": \"your_client_secret_here\",\n  \"redirect_uri\": \"https://app.shielva.ai/connectors/xero/callback\"\n}\n```\n\n### Runtime Config (populated after OAuth)\n\n```json\n{\n  \"access_token\": \"eyJ...\",\n  \"refresh_token\": \"eyJ...\",\n  \"xero_tenant_id\": \"b2c3d4e5-f6a7-...\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `XERO_BASE_URL` | `https://api.xero.com/api.xro/2.0` | Xero Accounting API base URL |\n| `SYNC_PAGE_SIZE` | `100` | Records per page for sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s + jitter, max 30s |\n| `RATE_LIMIT_RETRY` | `60s` | Default wait on 429 (honours `Retry-After`) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 10 public async methods.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present.\n\n```python\nresult = await connector.install()\n# InstallResult(health=HEALTHY, auth_status=PENDING, message='Connector installed — complete OAuth2 authorization to connect')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing fields → `OFFLINE / MISSING_CREDENTIALS`"
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the Xero OAuth2 PKCE authorization URL.\n\n```python\nurl = connector.authorize()\n# 'https://login.xero.com/identity/connect/authorize?response_type=code&client_id=...&code_challenge=...'\n```\n\n**Returns:** `str` — redirect this URL to the user's browser\n\n**Side effect:** stores `_pkce_code_verifier` in `connector.config` for use in `exchange_code()`"
+        },
+        {
+          "id": "exchange-code",
+          "title": "exchange_code(code)",
+          "content": "Exchanges the authorization code for tokens and fetches `xero_tenant_id`.\n\n```python\ntokens = await connector.exchange_code(\"auth_code_from_callback\")\n# {\"access_token\": \"...\", \"refresh_token\": \"...\", \"xero_tenant_id\": \"...\"}\n```\n\n**Returns:** `dict` — full token response including `xero_tenant_id`\n\n**Side effects:** sets `connector._access_token`, `connector._xero_tenant_id`, updates `connector.config`, creates `connector.http_client`"
+        },
+        {
+          "id": "refresh-token",
+          "title": "refresh_token()",
+          "content": "Renews the access token using the stored refresh token.\n\n```python\ntokens = await connector.refresh_token()\n```\n\n**Returns:** `dict` — new token response\n\n**Raises:** `XeroAuthError` if no refresh token is stored"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /Organisation` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Xero organisation: Acme Ltd', organisation_name='Acme Ltd')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`, `organisation_name`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Xero invoices, contacts, and accounts into the knowledge base.\n\n```python\n# Full sync — all records\nresult = await connector.sync(full=True, kb_id=\"kb_accounting\")\n\n# Incremental sync — records modified after a date\nfrom datetime import datetime, timezone\nresult = await connector.sync(\n    full=False,\n    since=datetime(2026, 6, 1, tzinfo=timezone.utc),\n    kb_id=\"kb_accounting\"\n)\n\nprint(result.documents_found)   # total records found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\nprint(result.status)            # COMPLETED / PARTIAL / FAILED\n```\n\n**How it works:**\n1. Paginates through `GET /Invoices` (100 per page, `If-Modified-Since` if incremental)\n2. Paginates through `GET /Contacts` (100 per page, `If-Modified-Since` if incremental)\n3. Fetches `GET /Accounts` (full sync only)\n4. Normalizes each record to `ConnectorDocument` and ingests via `_ingest_document()`"
+        },
+        {
+          "id": "list-invoices",
+          "title": "list_invoices(modified_after)",
+          "content": "Returns a paginated list of invoices.\n\n```python\npage = await connector.list_invoices()\n# {\"Invoices\": [{\"InvoiceID\": \"...\", \"InvoiceNumber\": \"INV-001\", ...}]}\n\n# Incremental — only invoices modified since Jan 1 2024\npage = await connector.list_invoices(modified_after=\"Mon, 01 Jan 2024 00:00:00 GMT\")\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Invoices`\n**Header:** `If-Modified-Since: {modified_after}` (when provided)"
+        },
+        {
+          "id": "get-invoice",
+          "title": "get_invoice(invoice_id)",
+          "content": "Returns a single invoice by InvoiceID.\n\n```python\nresult = await connector.get_invoice(\"b2c3d4e5-f6a7-48b9-c0d1-e2f3a4b5c6d7\")\n# {\"Invoices\": [{...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Invoices/{invoice_id}`\n\n**Raises:** `XeroNotFoundError` if the invoice does not exist"
+        },
+        {
+          "id": "list-contacts",
+          "title": "list_contacts(modified_after)",
+          "content": "Returns a paginated list of contacts.\n\n```python\npage = await connector.list_contacts()\n# {\"Contacts\": [{\"ContactID\": \"...\", \"Name\": \"Acme Corp\", ...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Contacts`"
+        },
+        {
+          "id": "get-contact",
+          "title": "get_contact(contact_id)",
+          "content": "Returns a single contact by ContactID.\n\n```python\nresult = await connector.get_contact(\"a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890\")\n# {\"Contacts\": [{...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Contacts/{contact_id}`\n\n**Raises:** `XeroNotFoundError` if the contact does not exist"
+        },
+        {
+          "id": "list-accounts",
+          "title": "list_accounts()",
+          "content": "Returns all chart-of-accounts entries.\n\n```python\nresult = await connector.list_accounts()\n# {\"Accounts\": [{\"AccountID\": \"...\", \"Code\": \"200\", \"Name\": \"Sales\", \"Type\": \"REVENUE\", ...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Accounts`"
+        }
+      ]
+    },
+    {
+      "id": "sync-details",
+      "title": "Sync & Incremental Ingestion",
+      "content": "### Document Schema\n\nEach Xero record is normalized to a `ConnectorDocument`:\n\n**Invoice:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('invoice:InvoiceID')[:16]` — stable 16-char hex |\n| `title` | `Invoice INV-0001 — Acme Corp` |\n| `content` | Status, contact, total, currency, dates, line items |\n| `source_url` | `https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={id}` |\n| `metadata.entity_type` | `invoice` |\n| `metadata.status` | AUTHORISED / PAID / DRAFT / VOIDED |\n| `metadata.total` | Invoice total amount |\n\n**Contact:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('contact:ContactID')[:16]` |\n| `title` | `Contact: Acme Corp` |\n| `content` | Name, email, status, phone, address |\n| `source_url` | `https://go.xero.com/Contacts/View/{id}` |\n\n**Account:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('account:AccountID')[:16]` |\n| `title` | `Account: 200 — Sales` |\n| `content` | Code, name, type, status, currency, description |\n\n### Incremental sync\n\nInvoices and Contacts support `If-Modified-Since` header for incremental fetches:\n\n```python\nresult = await connector.sync(full=False, since=last_sync_dt)\n```\n\nAccounts do **not** support incremental sync — they are only fetched during full sync runs.\n\n### Pagination\n\nAll list endpoints use page-number pagination with page size 100. The connector stops when a response returns fewer than 100 records.\n\n### Recommended schedule\n\n- Full sync on first install\n- Incremental sync every 15–30 minutes for near-real-time accounting data\n- Weekly full sync to catch any records missed by incremental"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nXeroError (base)\n├── XeroAuthError       — 401/403: invalid or expired OAuth2 token\n├── XeroRateLimitError  — 429: rate limit exceeded (stores retry_after, default 60s)\n├── XeroNotFoundError   — 404: resource does not exist\n└── XeroNetworkError    — timeout / connection error\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `XeroNetworkError` | Yes | Exponential backoff: 1s, 2s, 4s + jitter |\n| `XeroRateLimitError` | Yes | Respects `Retry-After` header; falls back to 60s |\n| `XeroAuthError` | **No** | Immediate failure — refresh or re-authorize |\n| `XeroNotFoundError` | **No** | Immediate failure — resource is gone |\n\n### Handling in code\n\n```python\nfrom exceptions import XeroAuthError, XeroRateLimitError, XeroNotFoundError\ntry:\n    invoice = await connector.get_invoice(invoice_id)\nexcept XeroNotFoundError:\n    # invoice was deleted in Xero\nexcept XeroAuthError:\n    # token expired — call refresh_token() or re-authorize\nexcept XeroRateLimitError as e:\n    # e.retry_after gives seconds to wait\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### \"client_id and client_secret are required\"\n\n**Cause:** Connector form submitted with empty credential fields.\n**Fix:** Return to connector settings and fill in both **Client ID** and **Client Secret**.\n\n---\n\n### 401 Unauthorized\n\n**Cause:** Access token is expired or invalid.\n**Fix:** Call `refresh_token()` to renew automatically, or click **Re-authorize** in the Shielva UI to restart the OAuth2 flow.\n\n---\n\n### \"Token expired — re-authorize the connector\"\n\n**Cause:** Xero refresh tokens expire after 60 days of inactivity.\n**Fix:** Click **Re-authorize** in the connector settings. Your synced data is preserved.\n\n---\n\n### 403 Forbidden\n\n**Cause:** The Xero user who authorized the app does not have permission to the requested resource.\n**Fix:** Ensure the authorizing user has the required Xero role (e.g. Adviser for full accounting access).\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Xero enforces 60 API calls per minute per app.\n**Fix:** The connector retries automatically with a 60-second backoff. If persistent, reduce sync frequency in Shielva schedule settings.\n\n---\n\n### Sync returns 0 documents\n\n**Cause 1:** Incremental sync with `since` timestamp in the future.\n**Fix:** Run `sync(full=True)` to bypass `If-Modified-Since` filtering.\n\n**Cause 2:** `xero_tenant_id` not stored in config (OAuth not fully completed).\n**Fix:** Re-run `exchange_code()` — check that `connector.config['xero_tenant_id']` is populated.\n\n---\n\n### Connection errors to api.xero.com\n\n**Cause:** Firewall or egress rules blocking `api.xero.com:443` or `identity.xero.com:443`.\n**Fix:** Add both domains to your egress allowlist. See the Shielva vault egress allowlist documentation.\n\n---\n\n### Tests fail with import errors\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install httpx pytest pytest-asyncio pytest-mock\npython -m pytest tests/ -v\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with **67 unit tests** — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/xero_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 67 passed\n```\n\n### Coverage\n\n- `install()` — success, missing client_id, missing client_secret, missing both\n- `authorize()` — returns URL, stores PKCE verifier, raises on missing client_id, includes scopes\n- `health_check()` — healthy with org name, no token, auth error, network error, empty org\n- `list_invoices()` — returns list, with modified_after\n- `get_invoice()` — returns invoice, raises XeroNotFoundError on 404\n- `list_contacts()` — returns list, with modified_after\n- `get_contact()` — returns contact, raises XeroNotFoundError on 404\n- `list_accounts()` — returns accounts\n- `sync()` — full sync 3 resources, incremental (accounts skipped), empty results, invoice failure → FAILED, contact failure → PARTIAL, pagination (2 pages), KB ingestion callback\n- `normalize_invoice()` — all fields, optional fields, metadata\n- `normalize_contact()` — all fields, no phones, metadata\n- `normalize_account()` — all fields, metadata\n- `_stable_id()` — 16-char length, deterministic, entity-type differentiation\n- Exception classes — all 5 types, status codes, retry_after default\n- Connector lifecycle — defaults, config extraction, aclose noop, aclose closes client, async context manager, `_ensure_client` creates + reuses"
+    }
+  ]
+}
