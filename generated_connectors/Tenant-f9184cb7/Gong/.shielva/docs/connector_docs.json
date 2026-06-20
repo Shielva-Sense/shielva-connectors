@@ -1,0 +1,105 @@
+{
+  "connector": "gong",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Gong connector syncs calls, transcripts, and users from Gong (revenue intelligence platform) into the Shielva knowledge base using the Gong REST API v2. Authentication uses HTTP Basic Auth with an Access Key and Access Key Secret. The connector implements cursor-based pagination (records.cursor), exponential backoff retry, and stable SHA-256 document IDs for idempotent syncs. Gong uses POST /v2/calls for listing calls with filters — this is intentional per the Gong API spec."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "basic_auth",
+          "title": "HTTP Basic Auth (API Key)",
+          "content": "Gong uses HTTP Basic Auth where the Access Key is the username and the Access Key Secret is the password. Generate key pairs from Gong Settings → Company Settings → Ecosystem → API. The Access Key Secret is shown only once at creation time.",
+          "steps": [
+            "Log in to Gong at app.gong.io.",
+            "Go to Settings → Company Settings → Ecosystem → API.",
+            "Click Create to generate a new Access Key / Access Key Secret pair.",
+            "Copy both values immediately — the secret is shown only once.",
+            "Enter the Access Key and Access Key Secret in the Shielva connector install form."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "access_key",
+          "label": "Access Key",
+          "type": "string",
+          "required": true,
+          "placeholder": "Your Gong API Access Key",
+          "help": "From Gong Settings → Company Settings → Ecosystem → API → Access Key"
+        },
+        {
+          "key": "access_key_secret",
+          "label": "Access Key Secret",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your Gong API Access Key Secret",
+          "help": "From Gong Settings → Company Settings → Ecosystem → API → Access Key Secret. Shown only once at creation."
+        }
+      ]
+    },
+    {
+      "id": "synced_resources",
+      "title": "Synced Resources",
+      "resources": [
+        {
+          "name": "Calls",
+          "endpoint": "POST /v2/calls",
+          "doc_type": "call",
+          "id_scheme": "SHA-256('call:' + call_id)[:16]",
+          "fields": ["id", "title", "started", "duration", "url", "parties"]
+        },
+        {
+          "name": "Call Transcripts",
+          "endpoint": "POST /v2/calls/transcript",
+          "doc_type": "transcript",
+          "id_scheme": "SHA-256('transcript:' + call_id)[:16]",
+          "fields": ["callId", "transcript segments", "sentences", "speakerId"]
+        },
+        {
+          "name": "Users",
+          "endpoint": "GET /v2/users",
+          "doc_type": "user",
+          "id_scheme": "SHA-256('user:' + user_id)[:16]",
+          "fields": ["id", "name", "emailAddress", "title", "managerId"]
+        },
+        {
+          "name": "Scorecards",
+          "endpoint": "GET /v2/settings/scorecards",
+          "doc_type": "scorecard",
+          "fields": ["id", "name"]
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Gong uses cursor-based pagination. Each response includes a 'records' object with a 'cursor' field. The connector passes the cursor on the next request until cursor is null or absent. For calls (POST /v2/calls), the cursor is included in the request body under filter.cursor."
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "errors": [
+        {"code": 401, "class": "GongAuthError", "action": "Surface to user — key/secret is invalid or revoked"},
+        {"code": 403, "class": "GongAuthError", "action": "Surface to user — insufficient permissions"},
+        {"code": 404, "class": "GongNotFoundError", "action": "Resource not found — log and skip"},
+        {"code": 429, "class": "GongRateLimitError", "action": "Retry with Retry-After header + exponential backoff"},
+        {"code": "5xx", "class": "GongError", "action": "Retry up to 3 times with exponential backoff + jitter"}
+      ]
+    },
+    {
+      "id": "retry",
+      "title": "Retry Policy",
+      "content": "with_retry() retries up to 3 times with exponential backoff (base=1s, factor=2x, max=30s) plus random jitter up to 0.5s. GongAuthError (401/403) is never retried. GongRateLimitError uses the Retry-After header value when present."
+    }
+  ]
+}
