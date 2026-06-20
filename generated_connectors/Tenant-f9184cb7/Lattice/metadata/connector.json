@@ -1,0 +1,29 @@
+{
+  "connector_type": "lattice",
+  "name": "Lattice",
+  "display_name": "Lattice",
+  "description": "Connect to Lattice to sync employees, goals/OKRs, and performance reviews into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Lattice API token generated from your Lattice account settings."
+    }
+  ],
+  "capabilities": [
+    "list_users",
+    "get_user",
+    "list_departments",
+    "list_goals",
+    "list_reviews",
+    "list_feedback",
+    "sync"
+  ],
+  "provider": "Lattice",
+  "service": "Lattice",
+  "category": "hr"
+}
