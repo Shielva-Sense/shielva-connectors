@@ -1,0 +1,305 @@
+{
+  "connector": "linkedin",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The LinkedIn connector syncs profile data, member posts, and organization (company) pages from LinkedIn into the Shielva knowledge base using the LinkedIn REST API v2. It uses OAuth 2.0 for authentication and implements exponential backoff retry and a circuit breaker to ensure reliable, rate-limit-aware data ingestion. LinkedIn uses localized objects for names and URNs to identify members and organizations. Each document receives a stable SHA-256-based ID for idempotent syncs."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2",
+          "title": "OAuth 2.0",
+          "content": "The connector uses LinkedIn OAuth 2.0 with the authorization code flow. Create a LinkedIn App in the Developer Portal, request the required API products (which grant scopes), and provide the Client ID and Client Secret in Shielva. The connector generates the authorization URL via authorize(), and Shielva exchanges the authorization code for an access_token. LinkedIn access tokens last 60 days by default.",
+          "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
+          "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+          "steps": [
+            "Go to developer.linkedin.com → My apps → Create app.",
+            "Under Products, request: Sign In with LinkedIn, Share on LinkedIn, Marketing Developer Platform.",
+            "Under Auth, note your Client ID and Client Secret.",
+            "Add your Shielva OAuth callback URL to Authorized redirect URLs.",
+            "Enter the Client ID and Client Secret in Shielva.",
+            "Complete the OAuth consent flow to receive an access_token."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "OAuth Client ID",
+          "type": "text",
+          "required": true,
+          "placeholder": "Your LinkedIn App Client ID",
+          "description": "OAuth 2.0 Client ID from LinkedIn Developer Portal → Your App → Auth."
+        },
+        {
+          "key": "client_secret",
+          "label": "OAuth Client Secret",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your LinkedIn App Client Secret",
+          "description": "OAuth 2.0 Client Secret from LinkedIn Developer Portal → Your App → Auth."
+        },
+        {
+          "key": "redirect_uri",
+          "label": "Redirect URI",
+          "type": "text",
+          "required": false,
+          "placeholder": "https://your-domain.com/oauth/callback",
+          "description": "The OAuth redirect URI registered in your LinkedIn App. Optional — leave blank to use the Shielva default."
+        }
+      ]
+    },
+    {
+      "id": "request_headers",
+      "title": "Request Headers",
+      "content": "Every request to the LinkedIn REST API v2 includes the following headers.",
+      "headers": [
+        { "name": "Authorization", "value": "Bearer {access_token}" },
+        { "name": "X-Restli-Protocol-Version", "value": "2.0.0" },
+        { "name": "LinkedIn-Version", "value": "202401" },
+        { "name": "Content-Type", "value": "application/json" }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full sync of the authenticated member's profile, primary email, and recent posts. Organization pages are accessible via get_organization() and list_organization_posts() as direct API calls. The sync is non-incremental (the since parameter is accepted but ignored) because the LinkedIn Shares API does not support date-range filtering without additional API products.",
+      "resources": [
+        {
+          "name": "Profile",
+          "endpoint": "GET /me?projection=(id,firstName,lastName,profilePicture,headline)",
+          "normalizer": "normalize_profile"
+        },
+        {
+          "name": "Email",
+          "endpoint": "GET /emailAddress?q=members&projection=(elements*(handle~))",
+          "normalizer": "normalize_profile (merged into profile document)"
+        },
+        {
+          "name": "Member Posts",
+          "endpoint": "GET /shares?q=owners&owners={author_urn}&count={count}",
+          "normalizer": "normalize_post"
+        }
+      ],
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      },
+      "stable_id": {
+        "algorithm": "SHA-256",
+        "formats": [
+          "SHA-256('profile:' + person_id)[:16]",
+          "SHA-256('post:' + share_id)[:16]"
+        ],
+        "purpose": "Ensures idempotent syncs — same resource always produces the same document ID"
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates client_id and client_secret. If an access_token is already configured, probes GET /me. Returns HEALTHY + CONNECTED on success, OFFLINE + MISSING_CREDENTIALS if creds are absent, OFFLINE + INVALID_CREDENTIALS if the token is rejected. If no access_token is set, returns HEALTHY to indicate credentials are accepted pending the OAuth flow.",
+          "category": "auth"
+        },
+        {
+          "id": "authorize",
+          "signature": "def authorize() -> str",
+          "description": "Returns the LinkedIn OAuth2 authorization URL. Includes client_id, response_type=code, scope (r_liteprofile r_emailaddress w_member_social r_organization_social), and optionally redirect_uri.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /me. Returns HEALTHY (with name field populated), DEGRADED (transient network error, circuit not yet open), or OFFLINE (auth failure or circuit open). Updates the circuit breaker state on every call.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Full sync of profile, email, and member posts. Posts fetch failure is non-fatal (skipped gracefully). Returns documents_found, documents_synced, documents_failed, and SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "get_profile",
+          "signature": "async def get_profile() -> dict",
+          "description": "GET /me with projection for id, firstName, lastName, profilePicture, headline.",
+          "endpoint": "GET /me?projection=(id,firstName,lastName,profilePicture,headline)",
+          "category": "profile"
+        },
+        {
+          "id": "get_email",
+          "signature": "async def get_email() -> dict",
+          "description": "GET /emailAddress to retrieve the member's primary email address.",
+          "endpoint": "GET /emailAddress?q=members&projection=(elements*(handle~))",
+          "category": "profile"
+        },
+        {
+          "id": "list_posts",
+          "signature": "async def list_posts(author_urn: str, count: int = 50) -> dict",
+          "description": "GET /shares for the given author URN. Returns a dict with 'elements' list of share objects.",
+          "endpoint": "GET /shares?q=owners&owners={author_urn}&count={count}",
+          "category": "posts"
+        },
+        {
+          "id": "get_organization",
+          "signature": "async def get_organization(org_id: str) -> dict",
+          "description": "GET /organizations/{org_id} — retrieve organization details by numeric ID.",
+          "endpoint": "GET /organizations/{org_id}",
+          "category": "organizations"
+        },
+        {
+          "id": "list_organization_posts",
+          "signature": "async def list_organization_posts(org_urn: str, count: int = 50) -> dict",
+          "description": "GET /shares for the given organization URN (urn:li:organization:{id}). Returns a dict with 'elements' list.",
+          "endpoint": "GET /shares?q=owners&owners={org_urn}&count={count}",
+          "category": "organizations"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every LinkedIn resource is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "SHA-256('profile:' + id)[:16] or SHA-256('post:' + share_id)[:16] — stable 16-char hex ID." },
+          { "name": "title", "type": "str", "description": "Human-readable title. 'LinkedIn profile: {name}' or 'LinkedIn post: {text[:80]}'." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the resource's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "LinkedIn profile URL or post URL (urn-based share link)." },
+          { "name": "metadata", "type": "dict", "description": "Resource-type-specific properties. Always includes entity_type key." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_profile(profile, email_data, connector_id, tenant_id)",
+          "entity_type": "profile",
+          "title_format": "LinkedIn profile: {full_name}",
+          "metadata_keys": ["entity_type", "person_id", "first_name", "last_name", "full_name", "headline", "email", "author_urn"]
+        },
+        {
+          "function": "normalize_post(record, connector_id, tenant_id)",
+          "entity_type": "post",
+          "title_format": "LinkedIn post: {text[:80]}",
+          "metadata_keys": ["entity_type", "share_id", "author_urn", "text", "visibility", "created_at", "last_modified", "activity"],
+          "stable_id": "SHA-256('post:' + share_id)[:16]"
+        }
+      ]
+    },
+    {
+      "id": "linkedin_urns",
+      "title": "LinkedIn URN Format",
+      "content": "LinkedIn identifies all resources via URNs (Uniform Resource Names). The connector builds URNs from raw ID values returned by the API.",
+      "urns": [
+        { "resource": "Person / Member", "format": "urn:li:person:{id}" },
+        { "resource": "Organization / Company", "format": "urn:li:organization:{id}" },
+        { "resource": "Share / Post", "format": "urn:li:share:{id}" }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "LinkedInError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "LinkedInAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "LinkedInRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "LinkedInNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource path.",
+          "http_status": 404
+        },
+        {
+          "name": "LinkedInNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "LinkedInServerError",
+          "description": "Raised on 5xx responses from LinkedIn. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "The access_token has expired (LinkedIn tokens last ~60 days) or been revoked.",
+          "solution": "Re-authorize the connector via the OAuth flow in Shielva to obtain a fresh access_token."
+        },
+        {
+          "problem": "403 Forbidden — scope missing",
+          "cause": "The LinkedIn App is missing required API products / scopes.",
+          "solution": "Go to LinkedIn Developer Portal → Your App → Products. Request the missing product (e.g. Marketing Developer Platform for r_organization_social). After approval, re-authorize in Shielva."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "LinkedIn rate limits exceeded (typically 100 calls/day for member reads on basic tier).",
+          "solution": "The connector retries automatically with exponential backoff. Reduce sync frequency or request a higher rate limit tier from LinkedIn."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have tripped the circuit breaker (5 failures).",
+          "solution": "Resolve the underlying network or auth issue, then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "Posts not syncing (scope missing)",
+          "cause": "The w_member_social scope is not granted. This requires the 'Share on LinkedIn' API product.",
+          "solution": "Request the 'Share on LinkedIn' product in the LinkedIn Developer Portal and re-authorize."
+        },
+        {
+          "problem": "Organization posts not syncing",
+          "cause": "The r_organization_social scope requires the Marketing Developer Platform product, which requires LinkedIn approval.",
+          "solution": "Apply for Marketing Developer Platform access at developer.linkedin.com. This may take several days for approval."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more LinkedIn resources returned unexpected data that caused normalization to fail.",
+          "solution": "Check connector logs for which share IDs failed. Inspect those resources in LinkedIn for null or malformed property values."
+        }
+      ]
+    }
+  ]
+}
