@@ -1,0 +1,72 @@
+{
+  "connector_type": "braintree",
+  "display_name": "Braintree",
+  "provider": "braintree",
+  "service": "braintree",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Braintree (PayPal) to sync payment transactions, customers, subscriptions, plans, and disputes.",
+  "install_fields": [
+    {
+      "key": "merchant_id",
+      "label": "Merchant ID",
+      "type": "string",
+      "required": true,
+      "help": "Your Braintree Merchant ID, found in the Braintree Control Panel under Account > My User > API Keys."
+    },
+    {
+      "key": "public_key",
+      "label": "Public Key",
+      "type": "string",
+      "required": true,
+      "help": "Your Braintree API Public Key. Used as the username for HTTP Basic Auth."
+    },
+    {
+      "key": "private_key",
+      "label": "Private Key",
+      "type": "password",
+      "required": true,
+      "help": "Your Braintree API Private Key. Used as the password for HTTP Basic Auth. Keep this secret."
+    },
+    {
+      "key": "environment",
+      "label": "Environment",
+      "type": "string",
+      "required": true,
+      "default": "sandbox",
+      "options": ["sandbox", "production"],
+      "help": "Use 'sandbox' for testing and 'production' for live transactions."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": [
+    {
+      "name": "transactions",
+      "description": "Payment transactions including amount, status, currency, and customer info."
+    },
+    {
+      "name": "customers",
+      "description": "Customer records with contact details and payment methods."
+    },
+    {
+      "name": "subscriptions",
+      "description": "Recurring billing subscriptions linked to plans."
+    },
+    {
+      "name": "plans",
+      "description": "Billing plans defining pricing and billing frequency."
+    },
+    {
+      "name": "disputes",
+      "description": "Payment disputes and chargebacks."
+    }
+  ],
+  "auth": {
+    "type": "http_basic",
+    "username_field": "public_key",
+    "password_field": "private_key",
+    "additional_headers": {
+      "X-ApiVersion": "6"
+    }
+  }
+}
