@@ -1,0 +1,43 @@
+{
+  "connector_type": "domo",
+  "display_name": "Domo",
+  "provider": "Domo",
+  "service": "Domo",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Domo to sync datasets, dashboard pages, and users via the Domo REST API.",
+  "token_url": "https://api.domo.com/oauth/token",
+  "base_url": "https://api.domo.com/v1",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Domo client ID. Create a client at developer.domo.com under My Account → New Client."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "Your Domo client secret, provided when you create the client."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_datasets",
+    "list_pages",
+    "list_users",
+    "get_dataset",
+    "get_page"
+  ],
+  "resources": [
+    "datasets",
+    "pages",
+    "users",
+    "groups"
+  ],
+  "category": "business_intelligence"
+}
