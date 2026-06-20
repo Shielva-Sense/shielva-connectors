@@ -1,0 +1,82 @@
+{
+  "title": "Productboard Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Productboard connector syncs product management data from Productboard into the Shielva knowledge base. It is designed for product managers and teams who use Productboard to manage their roadmap, feature backlog, customer insights, and product hierarchy.\n\n**Key capabilities:**\n- Syncs **features** (feature backlog items — cursor-paginated, 100 per page)\n- Syncs **components** (product components — cursor-paginated)\n- Syncs **products** (top-level product definitions — single page)\n- Syncs **notes** (customer insights and feedback notes — cursor-paginated, 100 per page)\n- Fetches **users** (workspace members — single page, counted but not normalized to documents)\n- Provides `get_feature()` for single-feature lookup by ID\n- Authenticates via a **Bearer API token** — no OAuth flow required\n- Validates credentials at install time by calling `GET /me`\n- Pagination style: cursor-based — follows `links.next` URL until exhausted\n- Retries on transient failures via `with_retry()` with exponential backoff\n- HTTP client: `aiohttp` (async)\n- API base: `https://api.productboard.com/`\n- Auth header: `Authorization: Bearer {api_token}` + `X-Version: 1`\n- Rate limit: 200 requests/minute per token"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "**Step 1 — Generate a Productboard API Token**\n\n1. Log in to Productboard.\n2. Click your avatar (top-right) → **Account settings**.\n3. Go to **Integrations → API Access**.\n4. Click **Generate API token**.\n5. Copy the token — save it securely.\n\n**Step 2 — Install the connector**\n\nProvide the `api_token` in the Shielva connector configuration, then call `install()`:\n\n```python\nimport asyncio\nfrom connector import ProductboardConnector\n\nasync def main():\n    async with ProductboardConnector(\n        tenant_id=\"acme\",\n        connector_id=\"productboard-main\",\n        config={\"api_token\": \"YOUR_PRODUCTBOARD_API_TOKEN\"},\n    ) as connector:\n        result = await connector.install()\n        print(result.health)       # ConnectorHealth.HEALTHY\n        print(result.auth_status)  # AuthStatus.CONNECTED\n        print(result.message)      # \"Connected to Productboard as Jane Smith\"\n\nasyncio.run(main())\n```\n\n**Step 3 — Verify the connection**\n\n```python\nhealth = await connector.health_check()\nprint(health.health)   # ConnectorHealth.HEALTHY\nprint(health.message)  # \"Productboard API is reachable (user: jane@acme.com)\"\n```\n\n**Step 4 — Run your first sync**\n\n```python\nresult = await connector.sync(kb_id=\"kb-acme-roadmap\")\nprint(f\"Found: {result.documents_found}\")\nprint(f\"Synced: {result.documents_synced}\")\nprint(f\"Status: {result.status}\")\n# Status: SyncStatus.COMPLETED\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** API Key (Bearer token) (`AUTH_TYPE = \"api_key\"`)\n\nProductboard uses a static API token passed as a Bearer token in every request. No OAuth flow or token refresh is required.\n\n**Request headers sent on every API call:**\n```\nAuthorization: Bearer {api_token}\nX-Version: 1\n```\n\n**How to obtain an API token:**\n1. Log in to Productboard at `https://app.productboard.com`\n2. Click your avatar → **Account settings**\n3. Navigate to **Integrations → API Access**\n4. Click **Generate API token** — the token is displayed once; copy it immediately\n5. The token is workspace-scoped and reflects the permissions of the generating user\n\n**Key validation:**\n- `install()` calls `GET /me` to verify the token and retrieve the authenticated user's name/email, which appears in the success message\n- `health_check()` also calls `GET /me` for a lightweight probe\n- If the token is rejected, `ProductboardAuthError` is raised → `INVALID_CREDENTIALS`\n\n**Permissions:** The API token inherits the permission level of the user who generated it. For full sync, the user needs read access to features, components, products, and notes."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The following fields are accepted in the `config` dictionary passed to `ProductboardConnector(config=...)`.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `api_token` | `password` | Yes | Productboard API token. Sent as `Authorization: Bearer {api_token}`. Generate at Account settings → Integrations → API Access. |\n\n**Example config dict:**\n```python\nconfig = {\n    \"api_token\": \"your-productboard-api-token-here\"\n}\n```\n\n**Internal constants (not user-configurable):**\n\n| Constant | Value | Description |\n|----------|-------|-------------|\n| `SYNC_PAGE_SIZE` | `100` | Records per paginated API call (`page_size` parameter) |\n| `CONNECTOR_TYPE` | `\"productboard\"` | Connector type identifier |\n| `AUTH_TYPE` | `\"api_key\"` | Authentication method |\n| API base URL | `https://api.productboard.com/` | Productboard Public API base |\n| API version header | `X-Version: 1` | Required for all Productboard API v1 calls |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods on `ProductboardConnector` are async. The HTTP client is created lazily on first use. Use `async with ProductboardConnector(...) as connector:` or call `await connector.aclose()` to release the underlying `aiohttp.ClientSession`.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates `api_token` is present, then calls `GET /me` to verify the token and identify the authenticated user.\n\n**Signature:**\n```python\nasync def install(self) -> InstallResult\n```\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| Token valid | `HEALTHY` | `CONNECTED` | `GET /me` succeeds; message includes username/email |\n| Token missing | `OFFLINE` | `MISSING_CREDENTIALS` | `api_token` is empty |\n| Token rejected | `OFFLINE` | `INVALID_CREDENTIALS` | `ProductboardAuthError` (401/403) |\n| Other error | `OFFLINE` | `FAILED` | Unexpected exception |\n\n**Example:**\n```python\nresult = await connector.install()\n# result.message == \"Connected to Productboard as Jane Smith\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /me` and returns the current connector health and authenticated user identity.\n\n**Signature:**\n```python\nasync def health_check(self) -> HealthCheckResult\n```\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| API reachable | `HEALTHY` | `CONNECTED` | `GET /me` returns 200; message includes `user: {name}` |\n| Token missing | `OFFLINE` | `MISSING_CREDENTIALS` | `api_token` is empty |\n| Token rejected | `OFFLINE` | `INVALID_CREDENTIALS` | `ProductboardAuthError` |\n| Network error | `DEGRADED` | `FAILED` | `ProductboardNetworkError` |\n\n**Example:**\n```python\nhealth = await connector.health_check()\nprint(health.message)  # \"Productboard API is reachable (user: jane@acme.com)\"\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs features, components, products, notes, and users from Productboard. Uses cursor-based pagination for features, components, and notes. Products and users are fetched as single pages.\n\nIf feature sync fails with `ProductboardError`, `sync()` returns `FAILED` immediately. Failures on components, products, notes, and users are non-fatal — the sync continues.\n\n**Signature:**\n```python\nasync def sync(\n    self,\n    full: bool = False,\n    since: datetime | None = None,\n    kb_id: str = \"\",\n    **kwargs: Any,\n) -> SyncResult\n```\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | `bool` | `False` | Accepted for API compatibility. Productboard v1 API has no server-side date filter; all records are always fetched. |\n| `since` | `datetime \\| None` | `None` | Accepted for API compatibility. Not applied server-side. Callers can filter by `updatedAt` downstream. |\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When provided, each normalized document is ingested. |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (0 failures) or `PARTIAL` (some failures) |\n| `documents_found` | `int` | Total records retrieved across all resource types |\n| `documents_synced` | `int` | Successfully normalized and ingested |\n| `documents_failed` | `int` | Failed normalization or ingestion |\n\n**Example:**\n```python\nresult = await connector.sync(kb_id=\"kb-roadmap\")\nprint(result.documents_found)   # e.g. 530\nprint(result.documents_synced)  # e.g. 530\n```"
+        },
+        {
+          "id": "method-list-features",
+          "title": "list_features()",
+          "content": "Returns all features, automatically following cursor pagination by traversing `links.next` URLs until exhausted.\n\n**Signature:**\n```python\nasync def list_features(\n    self,\n    page_cursor: str | None = None,\n    page_size: int = 100,\n    **kwargs: Any,\n) -> list[dict[str, Any]]\n```\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `page_cursor` | `str \\| None` | `None` | Starting cursor URL. Pass `None` to start from the beginning. |\n| `page_size` | `int` | `100` | Records per page (passed as `page_size` query parameter). |\n\n**Returns:** `list[dict[str, Any]]` — flat list of all feature records from the `data` array.\n\n**Example:**\n```python\nfeatures = await connector.list_features()\nfor f in features:\n    print(f[\"id\"], f.get(\"name\"), f.get(\"status\", {}).get(\"name\"))\n```"
+        },
+        {
+          "id": "method-get-feature",
+          "title": "get_feature()",
+          "content": "Returns a single feature by its Productboard feature ID.\n\n**Signature:**\n```python\nasync def get_feature(self, feature_id: str) -> dict[str, Any]\n```\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|-----------|------|----------|-------------|\n| `feature_id` | `str` | Yes | Productboard feature ID (UUID). |\n\n**Returns:** `dict[str, Any]` — feature object (unwraps the `data` key from the response).\n\n**Example:**\n```python\nfeature = await connector.get_feature(\"abc123-uuid\")\nprint(feature[\"name\"], feature.get(\"status\", {}).get(\"name\"))\n```"
+        },
+        {
+          "id": "method-list-components",
+          "title": "list_components()",
+          "content": "Returns all product components, automatically following cursor pagination.\n\n**Signature:**\n```python\nasync def list_components(self) -> list[dict[str, Any]]\n```\n\n**Returns:** `list[dict[str, Any]]` — flat list of all component records.\n\n**Example:**\n```python\ncomponents = await connector.list_components()\nfor c in components:\n    print(c[\"id\"], c.get(\"name\"))\n```"
+        },
+        {
+          "id": "method-list-products",
+          "title": "list_products()",
+          "content": "Returns all top-level products in the Productboard workspace. Products are fetched in a single API call (no pagination).\n\n**Signature:**\n```python\nasync def list_products(self) -> list[dict[str, Any]]\n```\n\n**Returns:** `list[dict[str, Any]]` — list of product records from the `data` array.\n\n**Example:**\n```python\nproducts = await connector.list_products()\nfor p in products:\n    print(p[\"id\"], p.get(\"name\"))\n```"
+        },
+        {
+          "id": "method-list-notes",
+          "title": "list_notes()",
+          "content": "Returns all customer insight notes, automatically following cursor pagination.\n\n**Signature:**\n```python\nasync def list_notes(\n    self,\n    page_cursor: str | None = None,\n    page_size: int = 100,\n    **kwargs: Any,\n) -> list[dict[str, Any]]\n```\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `page_cursor` | `str \\| None` | `None` | Starting cursor URL. |\n| `page_size` | `int` | `100` | Records per page. |\n\n**Returns:** `list[dict[str, Any]]` — flat list of all note records.\n\n**Example:**\n```python\nnotes = await connector.list_notes()\nfor n in notes:\n    print(n[\"id\"], n.get(\"title\"), n.get(\"content\"))\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions are defined in `exceptions.py` and inherit from `ProductboardError`. Each carries `.message`, `.status_code`, and `.code` attributes.\n\n| Exception | HTTP Status | `code` | Description |\n|-----------|-------------|--------|-------------|\n| `ProductboardError` | Any | — | Base exception. |\n| `ProductboardAuthError` | 401, 403 | — | API token is invalid, revoked, or lacks permission. Auth errors are **not retried**. Causes `INVALID_CREDENTIALS`. |\n| `ProductboardRateLimitError` | 429 | `rate_limit` | Rate limit exceeded (200 req/min). Carries `retry_after` float. Retried automatically by `with_retry()`. |\n| `ProductboardNotFoundError` | 404 | `resource_missing` | Feature, component, or note does not exist. Message: `\"{resource} '{resource_id}' not found\"`. |\n| `ProductboardNetworkError` | 5xx / timeout | — | Transient network failure or Productboard server error. Retried with exponential backoff (max 3 attempts). |\n\n**Connector-level handling:**\n- `install()` / `health_check()` — catch `ProductboardAuthError` → `OFFLINE/INVALID_CREDENTIALS`; catch `ProductboardNetworkError` → `DEGRADED/FAILED`\n- `sync()` — a `ProductboardError` on feature sync returns `SyncResult(status=FAILED)` immediately; failures on components, products, notes, and users are non-fatal (`pass` block) — the sync continues with the next resource type\n- Individual document normalization failures inside a resource loop increment `documents_failed`"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "**`install()` returns `MISSING_CREDENTIALS`**\n- The `api_token` field is empty or absent from config.\n- Ensure `config={\"api_token\": \"...\"}` is passed to the constructor.\n\n**`install()` returns `INVALID_CREDENTIALS`**\n- The `api_token` was rejected by Productboard (`GET /me` returned 401/403).\n- Go to Productboard → Account settings → Integrations → API Access and regenerate the token.\n\n**`health_check()` returns `DEGRADED`**\n- A `ProductboardNetworkError` occurred reaching `GET /me`.\n- Verify outbound HTTPS connectivity to `https://api.productboard.com/` from the Shielva host.\n\n**`sync()` returns `FAILED` with \"Failed to sync features\"**\n- The features list call raised `ProductboardError`. Features are the primary resource; this aborts the sync.\n- Check the `message` field for the specific HTTP status and error detail.\n- Verify the API token has read access to features in the workspace.\n\n**`sync()` returns `PARTIAL` — some components, products, notes missing**\n- Non-feature resource failures are silently passed. Check that the API token has read access to the missing resource types.\n- Components, products, and notes failures are swallowed — check Productboard workspace permissions.\n\n**`sync()` shows `documents_failed > 0` but `status=PARTIAL`**\n- Individual records failed during normalization. This is usually caused by unexpected `None` fields in the Productboard response.\n- Review normalization functions (`normalize_feature`, `normalize_component`, `normalize_note`, `normalize_product`) in `helpers/`.\n\n**Cursor pagination stops prematurely**\n- If `links.next` is absent or empty in a response, pagination stops. This is correct Productboard API behavior — the last page has no `next` link.\n- If you expect more records, verify the workspace has not been filtered by the API token's permission scope."
+    }
+  ]
+}
