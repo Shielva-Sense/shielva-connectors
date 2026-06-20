@@ -1,0 +1,83 @@
+{
+  "title": "Acuity Scheduling Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Acuity Scheduling** connector integrates Shielva with the [Acuity Scheduling REST API v1](https://acuityscheduling.com/api/v1) to sync appointments, clients, and appointment types into the Shielva knowledge base.\n\nAcuity Scheduling (owned by Squarespace) is a leading appointment scheduling platform used by businesses of all sizes. This connector authenticates with **HTTP BasicAuth** — the account's numeric User ID as username and API Key as password — and exposes **6 capabilities**: account info, appointment listing, appointment type listing, calendar listing, client listing, and a combined sync operation.\n\n**Key capabilities:**\n- Verify credentials and retrieve authenticated account identity\n- Sync all appointments with optional date range filters\n- Sync all clients\n- Sync all appointment types\n- List calendars\n- Full and incremental sync with `min_date` / `max_date` filters"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Acuity Scheduling connector running in under 5 minutes.\n\n### 1. Find your credentials\n\n1. Log in to [Acuity Scheduling](https://secure.squarespace.com/user/login)\n2. Go to **Integrations → API Credentials**\n3. Copy your **User ID** (numeric) and **API Key**\n\n### 2. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Add Connector → Acuity Scheduling**\n2. Enter your **User ID** and **API Key**\n3. Click **Install**\n\nThe connector verifies the credentials against `GET /api/v1/me`. Status becomes **Connected** on success.\n\n### 3. Run a Sync\n\n```python\nresult = await connector.sync()\nprint(f\"Synced {result.documents_synced} items ({result.documents_found} found)\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Acuity Scheduling connector uses **HTTP BasicAuth** — the User ID is the username and the API Key is the password. Every request is authenticated this way.\n\n### Credentials\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| User ID | `user_id` | string | Yes | Numeric Acuity account ID from Integrations → API Credentials |\n| API Key | `api_key` | password | Yes | Secret API key from Integrations → API Credentials |\n\n### How it works\n\nEvery request uses `aiohttp.BasicAuth(user_id, api_key)` which sends:\n\n```\nAuthorization: Basic base64(user_id:api_key)\n```\n\nThe `AcuityHTTPClient` injects this auth automatically for every API call.\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged\n- Rotate the API Key in Acuity Scheduling → Integrations → API Credentials if compromised"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Acuity Scheduling connector requires only two credentials.\n\n### Install Fields\n\n```json\n{\n  \"user_id\": \"12345678\",\n  \"api_key\": \"your-api-key\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://acuityscheduling.com` | Acuity API base URL |\n| `SYNC_PAGE_SIZE` | `25` | Appointments/clients per page |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter (max 30s) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 core capabilities. All use `with_retry()` with exponential backoff (auth errors are never retried).",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by calling GET /api/v1/me.\n\n```python\nresult = await connector.install()\n# result.health       → ConnectorHealth.HEALTHY | OFFLINE\n# result.auth_status  → AuthStatus.CONNECTED | INVALID_CREDENTIALS | MISSING_CREDENTIALS | FAILED\n# result.message      → includes business name on success\n```\n\n**Acuity endpoint:** `GET /api/v1/me`\n\nReturns `HEALTHY / CONNECTED` on success. Returns `OFFLINE / MISSING_CREDENTIALS` if `user_id` or `api_key` is absent. Returns `OFFLINE / INVALID_CREDENTIALS` on 401/403."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings the Acuity API to verify connectivity and credential validity.\n\n```python\nresult = await connector.health_check()\n# result.health      → HEALTHY | DEGRADED | OFFLINE\n# result.message     → includes business name or email on success\n```\n\n**Acuity endpoint:** `GET /api/v1/me`\n\nReturns `DEGRADED` (not `OFFLINE`) on auth or network errors."
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "Performs a sync of appointments, clients, and appointment types.\n\n```python\n# Full sync — all resources\nresult = await connector.sync()\n\n# Date-filtered sync\nresult = await connector.sync(min_date='2026-06-01', max_date='2026-06-30')\n\n# With knowledge base ingestion\nresult = await connector.sync(kb_id='kb-prod-001')\n\nprint(result.documents_found)   # total items found\nprint(result.documents_synced)  # successfully normalized\nprint(result.documents_failed)  # normalization errors\nprint(result.status)            # COMPLETED | PARTIAL | FAILED\n```\n\n**Flow:**\n1. Paginates `GET /api/v1/appointments` (stops when page returns fewer than page_size)\n2. Paginates `GET /api/v1/clients`\n3. Fetches all `GET /api/v1/appointment-types` (not paginated)\n4. Normalizes each record to `ConnectorDocument`\n5. Ingests to knowledge base if `kb_id` provided\n\nReturns `COMPLETED` if zero failures, `PARTIAL` if some items failed, `FAILED` if the appointments endpoint is unreachable."
+        },
+        {
+          "id": "list-appointments",
+          "title": "list_appointments()",
+          "content": "Returns the first page of appointments, optionally filtered by date.\n\n```python\nappts = await connector.list_appointments(\n    min_date='2026-06-01',\n    max_date='2026-06-30'\n)\nfor appt in appts:\n    print(appt['id'])       # 1001\n    print(appt['type'])     # '30 Minute Consultation'\n    print(appt['email'])    # 'client@example.com'\n    print(appt['date'])     # '2026-06-25'\n    print(appt['status'])   # 'scheduled' | 'cancelled'\n```\n\n**Acuity endpoint:** `GET /api/v1/appointments`"
+        },
+        {
+          "id": "list-clients",
+          "title": "list_clients()",
+          "content": "Returns the first page of clients.\n\n```python\nclients = await connector.list_clients()\nfor client in clients:\n    print(client['id'])          # 5001\n    print(client['firstName'])   # 'Alice'\n    print(client['email'])       # 'alice@example.com'\n```\n\n**Acuity endpoint:** `GET /api/v1/clients`"
+        },
+        {
+          "id": "list-appointment-types",
+          "title": "list_appointment_types()",
+          "content": "Returns all appointment types.\n\n```python\ntypes = await connector.list_appointment_types()\nfor t in types:\n    print(t['id'])          # 101\n    print(t['name'])        # '30 Minute Consultation'\n    print(t['duration'])    # 30 (minutes)\n    print(t['price'])       # '0.00'\n    print(t['active'])      # True\n```\n\n**Acuity endpoint:** `GET /api/v1/appointment-types`"
+        },
+        {
+          "id": "list-calendars",
+          "title": "list_calendars()",
+          "content": "Returns all calendars.\n\n```python\ncalendars = await connector.list_calendars()\nfor cal in calendars:\n    print(cal['id'])          # 201\n    print(cal['name'])        # 'Main Calendar'\n    print(cal['timezone'])    # 'America/New_York'\n```\n\n**Acuity endpoint:** `GET /api/v1/calendars`"
+        }
+      ]
+    },
+    {
+      "id": "sync-schema",
+      "title": "Sync & Document Schema",
+      "content": "All synced records are normalized to `ConnectorDocument`.\n\n### Appointment Document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('appointment:{id}')[:16]` — 16-char hex digest |\n| `title` | `{type} — {full_name} on {date}` |\n| `content` | Human-readable: type, client, email, phone, date, time, calendar, status, location, notes |\n| `metadata.id` | Acuity appointment ID |\n| `metadata.type` | Appointment type name |\n| `metadata.email` | Client email |\n| `metadata.date` | Appointment date |\n| `metadata.status` | `scheduled`, `cancelled`, etc. |\n\n### Client Document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('client:{id}')[:16]` |\n| `title` | `Client: {full_name}` |\n| `content` | Name, email, phone, notes |\n\n### Appointment Type Document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('appointment_type:{id}')[:16]` |\n| `title` | `Appointment Type: {name}` |\n| `content` | Name, duration, active status, price, category, description |\n\n### Stable IDs\n\nEach resource type uses a different key prefix (`appointment:`, `client:`, `appointment_type:`) so identical numeric IDs across types produce distinct `source_id` values."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nAcuityError (base)\n├── AcuityAuthError       — 401/403: invalid credentials\n├── AcuityRateLimitError  — 429: rate limit exceeded\n├── AcuityNotFoundError   — 404: resource not found\n└── AcuityNetworkError    — 5xx or connection/timeout error\n```\n\n### Retry Behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `AcuityRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts; honours `Retry-After` header |\n| `AcuityNetworkError` (5xx) | Yes | Exponential backoff, up to 3 attempts |\n| `AcuityAuthError` (401/403) | No | Immediate failure — must re-install with correct credentials |\n| `AcuityNotFoundError` (404) | No | Immediate failure — resource does not exist |"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a comprehensive unit test suite — 98 tests, zero I/O, all mocked.\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/acuity_scheduling_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 98 passed\n```\n\n### Coverage\n\n- `exceptions` — all 5 types, inheritance, status codes, retry_after, message storage\n- `models` — all 4 enums/dataclasses\n- `normalize_appointment` — source_id (length/hex/deterministic/distinct), title, content fields, metadata, edge cases\n- `normalize_client` — source_id, title, content, metadata, fallback to email\n- `normalize_appointment_type` — source_id, title, content, metadata, prefix collision prevention\n- `with_retry` — first attempt success, retries on network error, never retries auth, max attempts, rate limit max\n- `AcuityHTTPClient` — BasicAuth verification, params passing, _raise_for_status (401/403/404/429/500)\n- `install()` — success with name, missing user_id, missing api_key, missing both, 401, network error, sets _http_client on success\n- `health_check()` — healthy, missing credentials, auth error, network error, email fallback when no name\n- `sync()` — returns SyncResult, counts all 3 resource types, empty, API error returns FAILED, partial failure, date filters passed\n- `list_appointments` — returns list, date filters, empty\n- `list_clients` — returns list, empty\n- `list_appointment_types` — returns list, empty\n- `list_calendars` — returns list, empty\n- Connector config — loading, empty config, missing/present credentials, connector_id/tenant_id stored\n- Lifecycle — ensure_client creates/reuses, context manager, aclose\n- Constants — CONNECTOR_TYPE, AUTH_TYPE"
+    }
+  ]
+}
