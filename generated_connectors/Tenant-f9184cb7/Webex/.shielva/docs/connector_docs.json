@@ -1,0 +1,76 @@
+{
+  "connector": "webex",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Webex connector syncs Cisco Webex rooms, meetings, messages, and people into the Shielva knowledge base using the Webex REST API. It uses OAuth 2.0 Authorization Code flow for authentication and implements cursor-based pagination, exponential backoff retry, and a circuit breaker to ensure reliable data ingestion. Each document receives a stable SHA-256-based ID for idempotent syncs."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2",
+          "title": "OAuth 2.0",
+          "content": "The connector uses Webex OAuth 2.0 with the Authorization Code flow. Create an Integration at developer.webex.com, configure the required scopes, and provide the Client ID and Client Secret in Shielva. The connector generates the authorization URL via authorize() and exchanges the code for access_token, refresh_token, and token_expires_at.",
+          "auth_url": "https://webexapis.com/v1/authorize",
+          "token_url": "https://webexapis.com/v1/access_token",
+          "scopes": [
+            "spark:all",
+            "spark:messages_read",
+            "spark:rooms_read",
+            "spark:memberships_read",
+            "meeting:schedules_read"
+          ],
+          "steps": [
+            "Go to developer.webex.com → Start Building Apps → Create a New App → Integration.",
+            "Note the Client ID and Client Secret from App Credentials.",
+            "Add required scopes: spark:all, spark:messages_read, spark:rooms_read, spark:memberships_read, meeting:schedules_read.",
+            "Set the Redirect URI to your Shielva OAuth callback.",
+            "Enter the Client ID and Client Secret in Shielva.",
+            "Complete the OAuth consent flow to receive an access_token."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync",
+      "content": "The sync() method fetches all rooms and meetings using cursor-based pagination. Each resource is normalized into a ConnectorDocument with a stable SHA-256-based ID. Partial failures (individual document normalization errors) result in SyncStatus.PARTIAL; full fetch failures result in SyncStatus.FAILED.",
+      "resources": [
+        {
+          "name": "Rooms",
+          "endpoint": "GET /rooms",
+          "pagination": "cursor / nextCursor",
+          "doc_type": "room"
+        },
+        {
+          "name": "Meetings",
+          "endpoint": "GET /meetings",
+          "pagination": "cursor / nextCursor",
+          "doc_type": "meeting"
+        }
+      ]
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "content": "The connector defines a typed exception hierarchy: WebexError (base), WebexAuthError (401/403), WebexRateLimitError (429 with retry_after), WebexNotFoundError (404), WebexNetworkError (timeouts/connection errors). Auth errors are never retried. Other errors use exponential backoff with jitter (3 attempts, base 1s, max 30s). Rate limit errors honour the Retry-After header.",
+      "exceptions": [
+        "WebexError",
+        "WebexAuthError",
+        "WebexRateLimitError",
+        "WebexNotFoundError",
+        "WebexNetworkError"
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "normalize_room(), normalize_meeting(), and normalize_message() convert raw API objects into ConnectorDocument instances with stable SHA-256-derived source IDs, typed metadata, and human-readable content strings.",
+      "stable_id_formula": "SHA-256(prefix + resource_id)[:16]"
+    }
+  ]
+}
