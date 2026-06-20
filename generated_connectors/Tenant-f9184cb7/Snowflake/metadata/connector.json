@@ -1,0 +1,60 @@
+{
+  "connector_type": "snowflake",
+  "display_name": "Snowflake",
+  "provider": "snowflake",
+  "service": "snowflake",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync Snowflake databases, schemas, and tables into the Shielva knowledge base via the Snowflake SQL API v2.",
+  "install_fields": [
+    {
+      "key": "account",
+      "label": "Account Identifier",
+      "type": "string",
+      "required": true,
+      "placeholder": "myorg-account123",
+      "help": "Your Snowflake account identifier. Found in your Snowflake URL: https://<account>.snowflakecomputing.com. For multi-region accounts include the region (e.g. abc12345.us-east-1)."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "SHIELVA_USER",
+      "help": "Snowflake username for the service account."
+    },
+    {
+      "key": "password",
+      "label": "Password",
+      "type": "password",
+      "required": true,
+      "help": "Password for the Snowflake service account."
+    },
+    {
+      "key": "warehouse",
+      "label": "Warehouse (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "COMPUTE_WH",
+      "help": "The virtual warehouse to use for query execution. Uses the account default if not set."
+    },
+    {
+      "key": "database",
+      "label": "Default Database (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "ANALYTICS",
+      "help": "Default database context for SQL execution. The connector will still discover all accessible databases during sync."
+    },
+    {
+      "key": "role",
+      "label": "Role (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "SYSADMIN",
+      "help": "Snowflake role to activate for the session. Uses the user's default role if not set."
+    }
+  ],
+  "capabilities": ["sync", "health_check", "query"],
+  "resources": ["databases", "schemas", "tables", "query_history"]
+}
