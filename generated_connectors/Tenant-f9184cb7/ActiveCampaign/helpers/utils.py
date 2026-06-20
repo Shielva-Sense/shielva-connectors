@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import random
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
+
+from exceptions import (
+    ActiveCampaignAuthError,
+    ActiveCampaignError,
+    ActiveCampaignRateLimitError,
+)
+
+RETRY_MAX_ATTEMPTS: int = 3
+RETRY_BACKOFF_FACTOR: float = 2.0
+RETRY_JITTER_S: float = 0.5
+RETRY_BASE_DELAY_S: float = 1.0
+RETRY_MAX_DELAY_S: float = 30.0
+
+T = TypeVar("T")
+
+
+def stable_id(prefix: str, resource_id: str) -> str:
+    """Return a 16-char stable SHA-256 hex digest for a resource.
+
+    Format: SHA-256("{prefix}:{resource_id}")[:16]
+    Example: stable_id("contact", "12345") → deterministic 16-char hex string.
+    """
+    raw = f"{prefix}:{resource_id}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+async def with_retry(
+    fn: Callable[..., Awaitable[T]],
+    *args: Any,
+    max_retries: int = RETRY_MAX_ATTEMPTS,
+    base_delay: float = RETRY_BASE_DELAY_S,
+    max_delay: float = RETRY_MAX_DELAY_S,
+    **kwargs: Any,
+) -> T:
+    """Retry an async callable with exponential backoff + jitter.
+
+    Auth errors are not retried — they require human intervention.
+    Rate-limit errors honour the Retry-After header when present.
+    """
+    last_exc: ActiveCampaignError | None = None
+    for attempt in range(max_retries):
+        try:
+            return await fn(*args, **kwargs)
+        except ActiveCampaignAuthError:
+            raise
+        except ActiveCampaignRateLimitError as exc:
+            last_exc = exc
+            if attempt + 1 == max_retries:
+                break
+            delay = exc.retry_after if exc.retry_after > 0 else min(
+                base_delay * (RETRY_BACKOFF_FACTOR ** attempt) + random.uniform(0, RETRY_JITTER_S),
+                max_delay,
+            )
+            await asyncio.sleep(delay)
+        except ActiveCampaignError as exc:
+            last_exc = exc
+            if attempt + 1 == max_retries:
+                break
+            delay = min(
+                base_delay * (RETRY_BACKOFF_FACTOR ** attempt) + random.uniform(0, RETRY_JITTER_S),
+                max_delay,
+            )
+            await asyncio.sleep(delay)
+    raise last_exc  # type: ignore[misc]
+
+
+class CircuitBreaker:
+    """Simple three-state circuit breaker (closed → open → half-open → closed)."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout_s: float = 60.0,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout_s = recovery_timeout_s
+        self._failures: int = 0
+        self._state: str = "closed"
+        self._opened_at: float = 0.0
+
+    @property
+    def state(self) -> str:
+        if self._state == "open":
+            if time.monotonic() - self._opened_at >= self.recovery_timeout_s:
+                self._state = "half-open"
+        return self._state
+
+    def on_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self.failure_threshold:
+            self._state = "open"
+            self._opened_at = time.monotonic()
+
+    def on_success(self) -> None:
+        self._failures = 0
+        self._state = "closed"
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == "open"
