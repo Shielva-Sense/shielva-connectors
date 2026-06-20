@@ -1,0 +1,88 @@
+{
+  "title": "Greenhouse ATS Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Greenhouse** connector integrates Shielva with the [Greenhouse Harvest API v1](https://developers.greenhouse.io/harvest.html) to sync ATS data — jobs, candidates, and applications — into the Shielva knowledge base.\n\nGreenhouse is a leading applicant tracking system (ATS). This connector reads all jobs, candidates, and applications from your Greenhouse account, normalizes each record into a `ConnectorDocument` with a stable SHA-256-derived ID, and makes the data available for search, analysis, and automation within Shielva.\n\n**Key capabilities:**\n- List and fetch all jobs, candidates, and applications\n- List all departments\n- Full sync with automatic pagination via Link header `rel=\"next\"`\n- HTTP Basic Auth with Harvest API key (username = api_key, password = empty)\n- Stable document IDs for deduplication across syncs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Greenhouse connector running in minutes.\n\n### 1. Generate a Harvest API Key\n\n1. Log in to Greenhouse\n2. Go to **Configure → Dev Center → API Credential Management**\n3. Click **Create New API Key** → select **Harvest**\n4. Name it (e.g. \"Shielva Integration\") and enable read access for Jobs, Candidates, Applications, Departments, and Users\n5. Copy the key — it is shown only once\n\n### 2. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Greenhouse**\n2. Click **Connect**\n3. Enter your **Harvest API Key**\n4. Click **Install** — status changes to **Connected** immediately on success\n\n### 3. Run Your First Sync\n\n```python\nresult = await connector.sync()\nprint(f\"Synced {result.documents_synced} documents\")\n# Synced 342 documents\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Greenhouse connector uses **HTTP Basic Auth** with the Harvest API key.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Harvest API Key | `api_key` | password | Yes | From Greenhouse Dev Center |\n\n### Auth Mechanism\n\nEvery request sends:\n```\nAuthorization: Basic base64(api_key + \":\")\n```\n\nIn aiohttp: `aiohttp.BasicAuth(api_key, \"\")` — the username is the API key, the password is an empty string.\n\n### Validation\n\n`install()` and `health_check()` both call `GET /v1/users?per_page=1` to verify the key. A 401/403 response indicates an invalid or insufficient key.\n\n### Required Greenhouse Permissions\n\nThe API key must have **read** access for:\n- Users (health check)\n- Jobs\n- Candidates\n- Applications\n- Departments\n\nConfigure permissions in Greenhouse → Configure → Dev Center → API Credential Management.\n\n### Security\n\n- The API key is stored encrypted in the Shielva vault — never logged\n- All requests use HTTPS to `harvest.greenhouse.io`\n- Rotate the key in Dev Center and update in Shielva ACP if compromised"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"api_key\": \"your_greenhouse_harvest_api_key\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `HARVEST_BASE_URL` | `https://harvest.greenhouse.io/v1` | Harvest API base URL |\n| `SYNC_PAGE_SIZE` | `100` | Records per page during sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 7 public API methods plus the sync engine.",
+      "children": [
+        {
+          "id": "list-jobs",
+          "title": "list_jobs(per_page, page)",
+          "content": "List jobs (single page).\n\n```python\njobs = await connector.list_jobs(per_page=100, page=1)\n# Returns: [{\"id\": 12345, \"name\": \"Senior Engineer\", \"status\": \"open\", ...}]\n```\n\n**Endpoint:** `GET /v1/jobs?per_page=100&page=1`"
+        },
+        {
+          "id": "get-job",
+          "title": "get_job(job_id)",
+          "content": "Return a single job by ID.\n\n```python\njob = await connector.get_job(12345)\n# Returns: {\"id\": 12345, \"name\": \"Senior Engineer\", \"status\": \"open\", ...}\n```\n\n**Endpoint:** `GET /v1/jobs/{id}`"
+        },
+        {
+          "id": "list-candidates",
+          "title": "list_candidates(per_page, page)",
+          "content": "List candidates (single page).\n\n```python\ncandidates = await connector.list_candidates(per_page=100, page=1)\n# Returns: [{\"id\": 67890, \"first_name\": \"Alice\", \"last_name\": \"Smith\", ...}]\n```\n\n**Endpoint:** `GET /v1/candidates?per_page=100&page=1`"
+        },
+        {
+          "id": "get-candidate",
+          "title": "get_candidate(candidate_id)",
+          "content": "Return a single candidate by ID.\n\n```python\ncandidate = await connector.get_candidate(67890)\n# Returns: {\"id\": 67890, \"first_name\": \"Alice\", \"last_name\": \"Smith\", ...}\n```\n\n**Endpoint:** `GET /v1/candidates/{id}`"
+        },
+        {
+          "id": "list-applications",
+          "title": "list_applications(per_page, page)",
+          "content": "List applications (single page).\n\n```python\napplications = await connector.list_applications(per_page=100, page=1)\n# Returns: [{\"id\": 11111, \"status\": \"active\", \"candidate_id\": 67890, ...}]\n```\n\n**Endpoint:** `GET /v1/applications?per_page=100&page=1`"
+        },
+        {
+          "id": "get-application",
+          "title": "get_application(application_id)",
+          "content": "Return a single application by ID.\n\n```python\napplication = await connector.get_application(11111)\n# Returns: {\"id\": 11111, \"status\": \"active\", \"current_stage\": {...}, ...}\n```\n\n**Endpoint:** `GET /v1/applications/{id}`"
+        },
+        {
+          "id": "list-departments",
+          "title": "list_departments()",
+          "content": "Return all departments (no pagination — Greenhouse returns full list).\n\n```python\ndepartments = await connector.list_departments()\n# Returns: [{\"id\": 1, \"name\": \"Engineering\"}, {\"id\": 2, \"name\": \"Product\"}]\n```\n\n**Endpoint:** `GET /v1/departments`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Document Schema",
+      "content": "### How sync() works\n\n1. Fetches all jobs (paginated via `Link: <...>; rel=\"next\"` header)\n2. Normalizes each job into a `ConnectorDocument`\n3. Fetches all candidates (paginated)\n4. Normalizes each candidate into a `ConnectorDocument`\n5. Fetches all applications (paginated)\n6. Normalizes each application into a `ConnectorDocument`\n7. Optionally ingests each document into the knowledge base identified by `kb_id`\n\n### Usage\n\n```python\n# Full sync of all Greenhouse records\nresult = await connector.sync(kb_id=\"my_kb\")\n\nprint(result.status)            # SyncStatus.COMPLETED\nprint(result.documents_found)   # total docs produced\nprint(result.documents_synced)  # docs successfully ingested\nprint(result.documents_failed)  # docs that failed ingestion\n```\n\n### Document ID Scheme\n\n| Resource | source_id formula |\n|----------|------------------|\n| Job | `SHA-256(\"job:\" + str(job_id))[:16]` |\n| Candidate | `SHA-256(\"candidate:\" + str(candidate_id))[:16]` |\n| Application | `SHA-256(\"application:\" + str(application_id))[:16]` |\n\n### Job Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"job:\" + str(id))[:16]` |\n| `title` | Job name |\n| `content` | Title, Status, Requisition ID, Departments, Offices, Notes |\n| `source_url` | `https://harvest.greenhouse.io/v1/jobs/{id}` |\n| `metadata.resource_type` | `\"job\"` |\n| `metadata.job_id` | Job ID as string |\n| `metadata.status` | `\"open\"` / `\"closed\"` / `\"draft\"` |\n| `metadata.departments` | List of department names |\n| `metadata.offices` | List of office names |\n\n### Candidate Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"candidate:\" + str(id))[:16]` |\n| `title` | Full name (first + last) |\n| `content` | Name, Email, Phone, Title, Company, Tags |\n| `source_url` | `https://harvest.greenhouse.io/v1/candidates/{id}` |\n| `metadata.resource_type` | `\"candidate\"` |\n| `metadata.candidate_id` | Candidate ID as string |\n| `metadata.email_addresses` | List of email strings |\n| `metadata.tags` | List of tag strings |\n\n### Application Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"application:\" + str(id))[:16]` |\n| `title` | `\"Application for {job_name}\"` or `\"Application {id}\"` |\n| `content` | Application ID, Status, Current Stage, Candidate ID, Jobs, Source, Rejection Reason |\n| `source_url` | `https://harvest.greenhouse.io/v1/applications/{id}` |\n| `metadata.resource_type` | `\"application\"` |\n| `metadata.status` | `\"active\"` / `\"rejected\"` / `\"hired\"` |\n| `metadata.stage` | Current stage name |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nGreenhouseError (base)\n├── GreenhouseAuthError      — 401/403: invalid or insufficient API key\n├── GreenhouseNetworkError   — timeouts, connection errors, 5xx\n├── GreenhouseRateLimitError — 429: too many requests\n└── GreenhouseNotFoundError  — 404: resource not found\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `GreenhouseRateLimitError` (429) | Yes | Exponential backoff; honours `Retry-After` header |\n| `GreenhouseNetworkError` (5xx, timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `GreenhouseAuthError` (401/403) | No | Immediate failure — fix the API key |\n| `GreenhouseNotFoundError` (404) | No | Immediate failure — check the resource ID |\n\n### Error Mapping\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `GreenhouseAuthError` |\n| 403 | `GreenhouseAuthError` |\n| 404 | `GreenhouseNotFoundError` |\n| 429 | `GreenhouseRateLimitError` |\n| 5xx | `GreenhouseNetworkError` |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\nThe API key is invalid, expired, or has been deleted.\n\n- Go to **Greenhouse → Configure → Dev Center → API Credential Management**\n- Verify the key exists and has not been revoked\n- Generate a new Harvest API key and update it in Shielva ACP\n\n---\n\n### 403 Forbidden\n\nThe API key does not have sufficient permissions for the requested resource.\n\n- Edit the key in Dev Center and enable read permissions for: Users, Jobs, Candidates, Applications, Departments\n- Some resources (e.g. private candidates) require explicit additional permissions\n\n---\n\n### Rate Limit (429)\n\nThe Harvest API has rate limits (typically 50 requests / 10 seconds on standard plans). The connector retries automatically. For large accounts:\n- Contact Greenhouse support to request a rate limit increase\n- The connector honours the `Retry-After` header and backs off accordingly\n\n---\n\n### Sync Finds No Candidates or Private Candidates Missing\n\nPrivate candidates (`is_private: true`) require the **See Private Notes and Candidate Private Fields** permission on the API key. Edit the key in Dev Center to add this permission.\n\n---\n\n### Health Check Passes but Sync Is Empty\n\nThe account may be new with no data. Verify in Greenhouse that jobs/candidates/applications exist and that the API key has read access to each resource type."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "### Unit Tests (60+ tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/greenhouse_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 60+ passed\n```\n\nAll HTTP calls are mocked via `AsyncMock` — no Greenhouse account required.\n\n**Coverage:**\n- `install()` — missing key, empty key, success, invalid key, network error, generic exception\n- `health_check()` — no key, healthy, auth error, network error, generic error\n- `sync()` — no key, empty, jobs+candidates+applications, job fetch failure, candidate fetch failure, application fetch failure, kb_id ingestion, pagination (jobs, candidates), ingest failure counting\n- `list_jobs()` — success, empty, auth error\n- `get_job()` — success, not found, string ID\n- `list_candidates()` — success, empty\n- `get_candidate()` — success, not found\n- `list_applications()` — success, empty\n- `get_application()` — success, not found\n- `list_departments()` — success, empty\n- `normalize_job()` — basic, stable IDs, 16-char IDs, SHA-256 prefix, different IDs, source URL, metadata, no depts/offices, None fields\n- `normalize_candidate()` — basic, stable IDs, 16-char IDs, SHA-256 prefix, no email/phone, source URL, metadata, None emails/phones\n- `normalize_application()` — basic, stable IDs, 16-char IDs, SHA-256 prefix, rejected, no stage, source URL, metadata, no jobs\n- `with_retry()` — success, transient retry, auth no-retry, exhausted, rate limit retry\n- Exception hierarchy and attributes (all 5 exception types)\n- Connector model: type, config parsing, defaults, context manager, aclose idempotent\n- `ConnectorDocument` defaults and metadata isolation\n- `_parse_next_link()` — next present, next absent, empty string, multiple rels"
+    }
+  ]
+}
