@@ -1,0 +1,252 @@
+{
+  "connector": "snowflake",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Snowflake connector syncs database metadata — databases, schemas, and tables — from your Snowflake account into the Shielva knowledge base using the Snowflake SQL API v2. It authenticates via username + password (POST /session/v1/login-request), obtains a session token cached with a 1-hour TTL, and automatically re-authenticates when the token expires. The connector implements exponential backoff retry (skipping auth errors), per-status-code exception mapping, and three-phase sync (databases → schemas → tables)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "username_password",
+          "title": "Username + Password (Session Token)",
+          "content": "The connector POSTs to POST /session/v1/login-request with the configured username and password. Snowflake returns a session token valid for up to 4 hours; the connector conservatively refreshes it after 1 hour. The token is sent as Authorization: Snowflake Token=\"{token}\" on all subsequent API calls.",
+          "steps": [
+            "In Snowflake: create a dedicated service account user (e.g. SHIELVA_USER).",
+            "Create a role (e.g. SHIELVA_CONNECTOR_ROLE) and grant USAGE on the databases and schemas you want to sync.",
+            "Grant USAGE on a virtual warehouse for query execution.",
+            "Enter the account identifier (without .snowflakecomputing.com), username, and password in the Shielva connector config.",
+            "Optionally specify a warehouse, default database, and role to activate."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "account",
+          "label": "Account Identifier",
+          "type": "string",
+          "required": true,
+          "placeholder": "myorg-account123",
+          "description": "Your Snowflake account identifier. Found in your login URL: https://<account>.snowflakecomputing.com. Do not include the .snowflakecomputing.com suffix."
+        },
+        {
+          "key": "username",
+          "label": "Username",
+          "type": "string",
+          "required": true,
+          "placeholder": "SHIELVA_USER",
+          "description": "Snowflake username for the service account."
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "password",
+          "required": true,
+          "description": "Password for the Snowflake service account. Stored encrypted at rest."
+        },
+        {
+          "key": "warehouse",
+          "label": "Warehouse (optional)",
+          "type": "string",
+          "required": false,
+          "placeholder": "COMPUTE_WH",
+          "description": "Virtual warehouse to use for query execution. Uses the user's default warehouse if not set."
+        },
+        {
+          "key": "database",
+          "label": "Default Database (optional)",
+          "type": "string",
+          "required": false,
+          "placeholder": "ANALYTICS",
+          "description": "Default database context for SQL execution. All accessible databases are still discovered during sync."
+        },
+        {
+          "key": "role",
+          "label": "Role (optional)",
+          "type": "string",
+          "required": false,
+          "placeholder": "SYSADMIN",
+          "description": "Snowflake role to activate for the session. Uses the user's default role if not set."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a three-phase sync: Phase 1 lists all accessible databases and normalizes them. Phase 2 lists schemas for each database. Phase 3 lists tables for each schema. Failures in schema or table phases are skipped (not fatal) — the connector returns COMPLETED (zero failures), PARTIAL (some failures), or FAILED (fatal database-list error). Each record is normalized into a ConnectorDocument with a stable SHA-256[:16] source_id.",
+      "normalizers": {
+        "normalize_database": "stable_id = sha256('database:' + name)[:16]",
+        "normalize_schema": "stable_id = sha256('schema:' + db_name + '.' + schema_name)[:16]",
+        "normalize_table": "stable_id = sha256('table:' + db_name + '.' + schema_name + '.' + table_name)[:16]"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials by calling POST /session/v1/login-request. Returns HEALTHY + CONNECTED on success, OFFLINE + MISSING_CREDENTIALS when required fields are absent, OFFLINE + INVALID_CREDENTIALS on auth failure.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Authenticates and executes SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_WAREHOUSE(). Returns HEALTHY (with username + account), DEGRADED (transient network error), or OFFLINE (auth failure).",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(kb_id: str = '', **kwargs) -> SyncResult",
+          "description": "Three-phase sync of databases, schemas, and tables. Returns documents_found, documents_synced, documents_failed, and SyncStatus.",
+          "category": "sync"
+        },
+        {
+          "id": "list_databases",
+          "signature": "async def list_databases() -> list[dict]",
+          "description": "GET /api/v2/databases — list all accessible Snowflake databases.",
+          "endpoint": "GET /api/v2/databases",
+          "category": "databases"
+        },
+        {
+          "id": "list_schemas",
+          "signature": "async def list_schemas(database: str) -> list[dict]",
+          "description": "GET /api/v2/databases/{database}/schemas — list schemas in a database.",
+          "endpoint": "GET /api/v2/databases/{database}/schemas",
+          "category": "schemas"
+        },
+        {
+          "id": "list_tables",
+          "signature": "async def list_tables(database: str, schema: str) -> list[dict]",
+          "description": "GET /api/v2/databases/{database}/schemas/{schema}/tables — list tables in a schema.",
+          "endpoint": "GET /api/v2/databases/{database}/schemas/{schema}/tables",
+          "category": "tables"
+        },
+        {
+          "id": "execute_query",
+          "signature": "async def execute_query(sql: str, warehouse: str | None = None, ...) -> dict",
+          "description": "POST /api/v2/statements — execute a SQL statement. Returns inline result or a statementHandle for async polling.",
+          "endpoint": "POST /api/v2/statements",
+          "category": "query"
+        },
+        {
+          "id": "get_query_result",
+          "signature": "async def get_query_result(statement_handle: str) -> dict",
+          "description": "GET /api/v2/statements/{handle} — poll for an async statement result.",
+          "endpoint": "GET /api/v2/statements/{statementHandle}",
+          "category": "query"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Snowflake entity is normalized into a ConnectorDocument. The source_id is a stable 16-character hex prefix of SHA-256(entity_type + ':' + qualified_name).",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "SHA-256(entity_type:qualified_name)[:16] — stable across re-syncs" },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format: 'Snowflake {type}: {qualified_name}'" },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the entity's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "Empty string — Snowflake web console URLs are account-specific and not universally resolvable." },
+          { "name": "metadata", "type": "dict", "description": "Entity-type-specific properties. Always includes entity_type key." }
+        ]
+      }
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "SnowflakeError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "SnowflakeAuthError",
+          "description": "Raised on 401/403 or when Snowflake returns success=false on login. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "SnowflakeNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "SnowflakeNotFoundError",
+          "description": "Raised on 404. Carries resource name and resource_id.",
+          "http_status": 404
+        },
+        {
+          "name": "SnowflakeRateLimitError",
+          "description": "Raised on 429. Carries retry_after (seconds). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "SnowflakeQueryError",
+          "description": "Raised when Snowflake returns a SQL execution error. Carries sql_state and query_id.",
+          "http_status": 422
+        },
+        {
+          "name": "SnowflakeServerError",
+          "description": "Raised on 5xx responses from Snowflake. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "SnowflakeAuthError: Incorrect username or password",
+          "cause": "Wrong username or password, or the user account is locked.",
+          "solution": "Verify credentials. Reset password with ALTER USER <username> RESET PASSWORD in Snowflake."
+        },
+        {
+          "problem": "SnowflakeAuthError: IP address not allowed",
+          "cause": "Snowflake Network Policy blocks the Shielva egress IP.",
+          "solution": "Add the Shielva egress IP range to the Snowflake Network Policy for this user."
+        },
+        {
+          "problem": "SnowflakeNotFoundError on database",
+          "cause": "The service account role lacks USAGE privilege on the database.",
+          "solution": "GRANT USAGE ON DATABASE <db> TO ROLE SHIELVA_CONNECTOR_ROLE."
+        },
+        {
+          "problem": "SnowflakeRateLimitError (429)",
+          "cause": "Too many concurrent SQL API requests.",
+          "solution": "The connector retries automatically. Consider reducing sync frequency for very large accounts."
+        },
+        {
+          "problem": "Health check returns DEGRADED",
+          "cause": "Transient network error or Snowflake service disruption.",
+          "solution": "Retry the health check. Check status.snowflake.com for outages."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more API records returned unexpected data causing normalization to fail.",
+          "solution": "Check connector logs. The connector skips inaccessible databases/schemas — grant appropriate privileges."
+        }
+      ]
+    }
+  ]
+}
