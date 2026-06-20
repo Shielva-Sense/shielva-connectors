@@ -1,0 +1,87 @@
+{
+  "title": "Databricks Connector Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Shielva Databricks connector integrates with the Databricks unified analytics platform to provide comprehensive intelligence across your workspace. It enables authentication, health checks, and a full synchronization of key Databricks resources.\n\nThis connector is designed for users who need to centralize and analyze metadata from their Databricks environment. It syncs the following data:\n\n*   **Clusters**: Information about your Databricks compute clusters.\n*   **Jobs**: Details of automated tasks and workflows.\n*   **Notebooks**: Metadata for interactive notebooks used for data science and engineering.\n*   **MLflow Experiments**: Records of MLflow machine learning experiments.\n*   **MLflow Registered Models**: Metadata for models registered in MLflow Model Registry.\n*   **SQL Warehouses**: Configuration and status of Databricks SQL endpoints."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Follow these steps to quickly set up and perform your first synchronization with the Databricks connector.\n\n### 1. Install the Connector\n\nTo install the Databricks connector, you need to provide your Databricks Workspace URL and a Personal Access Token (PAT).\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\", # Replace with your Databricks Workspace URL\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\" # Replace with your Databricks Personal Access Token\n}\n\nconnector = DatabricksConnector(tenant_id=\"your-tenant-id\", connector_id=\"your-connector-id\", config=config)\ninstall_result = await connector.install()\n\nif install_result.health == \"HEALTHY\":\n    print(f\"Databricks connector installed successfully: {install_result.message}\")\nelse:\n    print(f\"Databricks connector installation failed: {install_result.message}\")\n```\n\n### 2. Authenticate\n\nThe connector authenticates using a Databricks Personal Access Token (PAT). Ensure your PAT has the necessary permissions to access the resources you intend to sync (e.g., `clusters`, `jobs`, `notebooks`, `experiments`, `models`, `sql_warehouses`).\n\n### 3. Perform Your First Sync\n\nAfter successful installation, you can initiate a full synchronization to ingest data from your Databricks workspace.\n\n```python\nsync_result = await connector.sync(full=True, kb_id=\"your-knowledge-base-id\")\n\nprint(f\"Sync Status: {sync_result.status}\")\nprint(f\"Documents Found: {sync_result.documents_found}\")\nprint(f\"Documents Synced: {sync_result.documents_synced}\")\nprint(f\"Documents Failed: {sync_result.documents_failed}\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Databricks connector uses **API Key** authentication, specifically a Databricks Personal Access Token (PAT).\n\n### Personal Access Token (PAT)\n\nAuthentication is performed by sending the Personal Access Token in the `Authorization` header of HTTP requests in the format `Bearer {token}`.\n\n**To generate a Personal Access Token:**\n\n1.  Log in to your Databricks workspace.\n2.  Click on your username in the top right corner and select **User Settings**.\n3.  Navigate to the **Developer** tab.\n4.  Click on **Access tokens**.\n5.  Click **Generate new token**.\n6.  Provide a comment (e.g., \"Shielva Connector\") and set a lifetime for the token.\n7.  Click **Generate** and copy the token. This token will be used as the `token` configuration field.\n\nThe connector validates the provided `workspace_url` and `token` by making a `GET` request to the `/api/2.0/preview/scim/v2/Me` endpoint."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Databricks connector requires the following configuration fields:\n\n| Field         | Type     | Required | Description                                                                                                                              |\n| :------------ | :------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------- |\n| `workspace_url` | `string` | Yes      | The full URL of your Databricks workspace (e.g., `https://adb-123456.azuredatabricks.net`). Found in the browser address bar when logged in. |\n| `token`         | `password` | Yes      | Your Databricks Personal Access Token. Generate it in Databricks: User Settings \u2192 Developer \u2192 Access tokens \u2192 Generate new token.          |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `DatabricksConnector` class provides the following public methods for interaction with your Databricks workspace.",
+      "children": [
+        {
+          "id": "api-methods-install",
+          "title": "install()",
+          "content": "Validates the provided `workspace_url` and `token` by attempting to fetch the current user's information from the `/api/2.0/preview/scim/v2/Me` endpoint. If successful, it records the connector as installed and healthy.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `InstallResult`: An object indicating the health, authentication status, and a descriptive message.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nresult = await connector.install()\nprint(f\"Install Status: {result.health}, Message: {result.message}\")\n```"
+        },
+        {
+          "id": "api-methods-health-check",
+          "title": "health_check()",
+          "content": "Verifies that the connector's credentials are still valid and the Databricks workspace is reachable by pinging the `/api/2.0/preview/scim/v2/Me` endpoint. It returns the current health status of the connection.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `HealthCheckResult`: An object indicating the health, authentication status, and a descriptive message, including the authenticated user's email.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nresult = await connector.health_check()\nprint(f\"Health Status: {result.health}, Message: {result.message}, User: {result.email}\")\n```"
+        },
+        {
+          "id": "api-methods-sync",
+          "title": "sync()",
+          "content": "Initiates a synchronization process to ingest metadata for clusters, jobs, and notebooks from the Databricks workspace into the Shielva knowledge base. The `full` and `since` parameters are currently not utilized for incremental syncs.\n\n**Parameters**:\n*   `full` (`bool`, optional): Indicates if a full sync should be performed. Defaults to `False`. (Currently not used for differential sync logic).\n*   `since` (`Any`, optional): A timestamp or marker for incremental syncs. Defaults to `None`. (Currently not used).\n*   `kb_id` (`str`, optional): The ID of the knowledge base to which documents should be ingested. Defaults to `\"\"`.\n\n**Returns**:\n*   `SyncResult`: An object detailing the sync status, number of documents found, synced, and failed.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nsync_result = await connector.sync(kb_id=\"my-knowledge-base\")\nprint(f\"Sync completed with status: {sync_result.status}. Synced {sync_result.documents_synced} of {sync_result.documents_found} documents.\")\n```"
+        },
+        {
+          "id": "api-methods-list-clusters",
+          "title": "list_clusters()",
+          "content": "Fetches a list of all clusters configured within the Databricks workspace.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents a Databricks cluster.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nclusters = await connector.list_clusters()\nfor cluster in clusters:\n    print(f\"Cluster ID: {cluster.get('cluster_id')}, Name: {cluster.get('cluster_name')}\")\n```"
+        },
+        {
+          "id": "api-methods-list-jobs",
+          "title": "list_jobs()",
+          "content": "Retrieves a list of all jobs defined in the Databricks workspace, automatically handling pagination up to a safety cap of 40 pages.\n\n**Parameters**:\n*   `limit` (`int`, optional): The maximum number of jobs to return per page. Defaults to `25`.\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents a Databricks job.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\njobs = await connector.list_jobs(limit=50)\nfor job in jobs:\n    print(f\"Job ID: {job.get('job_id')}, Name: {job.get('settings', {}).get('name')}\")\n```"
+        },
+        {
+          "id": "api-methods-list-notebooks",
+          "title": "list_notebooks()",
+          "content": "Fetches a list of workspace objects (notebooks and directories) at a specified path and filters to return only notebook objects.\n\n**Parameters**:\n*   `path` (`str`, optional): The path in the Databricks workspace to list objects from. Defaults to `/` (root).\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents a Databricks notebook.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nnotebooks = await connector.list_notebooks(path=\"/Shared/ETL\")\nfor notebook in notebooks:\n    print(f\"Notebook ID: {notebook.get('object_id')}, Path: {notebook.get('path')}\")\n```"
+        },
+        {
+          "id": "api-methods-list-experiments",
+          "title": "list_experiments()",
+          "content": "Retrieves a list of all MLflow experiments recorded in the Databricks workspace.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents an MLflow experiment.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nexperiments = await connector.list_experiments()\nfor experiment in experiments:\n    print(f\"Experiment ID: {experiment.get('experiment_id')}, Name: {experiment.get('name')}\")\n```"
+        },
+        {
+          "id": "api-methods-list-models",
+          "title": "list_models()",
+          "content": "Fetches a list of all MLflow registered models within the Databricks workspace.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents an MLflow registered model.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nmodels = await connector.list_models()\nfor model in models:\n    print(f\"Model Name: {model.get('name')}, User: {model.get('user_id')}\")\n```"
+        },
+        {
+          "id": "api-methods-list-sql-warehouses",
+          "title": "list_sql_warehouses()",
+          "content": "Retrieves a list of all SQL warehouses (Databricks SQL endpoints) configured in the workspace.\n\n**Parameters**:\n*   None\n\n**Returns**:\n*   `list[dict[str, Any]]`: A list of dictionaries, where each dictionary represents a Databricks SQL warehouse.\n\n```python\nfrom connector import DatabricksConnector\n\nconfig = {\n    \"workspace_url\": \"https://adb-123456.azuredatabricks.net\",\n    \"token\": \"dapiabcdef1234567890abcdef1234567890\"\n}\nconnector = DatabricksConnector(config=config)\nwarehouses = await connector.list_sql_warehouses()\nfor warehouse in warehouses:\n    print(f\"Warehouse ID: {warehouse.get('warehouse_id')}, Name: {warehouse.get('name')}\")\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The Databricks connector is designed to handle specific error conditions during installation, health checks, and synchronization.\n\n### Authentication Errors\n\n*   **`DatabricksAuthError`**: This exception is raised when the provided Personal Access Token is invalid or lacks the necessary permissions. During `install()` and `health_check()`, this results in an `AuthStatus.INVALID_CREDENTIALS` status and `ConnectorHealth.OFFLINE`.\n\n### Network Errors\n\n*   **`DatabricksNetworkError`**: This exception indicates a problem with network connectivity to the Databricks workspace. During `health_check()`, this leads to `AuthStatus.FAILED` and `ConnectorHealth.DEGRADED`.\n\n### General API Errors\n\n*   **`DatabricksError`**: A general exception for issues encountered during API calls to Databricks. During `sync()`, if this error occurs while fetching a specific resource type (e.g., clusters, jobs, or notebooks), that resource type's synchronization will be skipped, but the overall sync will attempt to proceed with other resources. This contributes to a `SyncStatus.PARTIAL` result if any resource type fails.\n\n### Generic Exceptions\n\n*   Any other unexpected `Exception` during `install()` or `health_check()` will result in `AuthStatus.FAILED` and `ConnectorHealth.OFFLINE` or `DEGRADED`, respectively, with the exception message provided."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Here are common issues and their solutions when working with the Databricks connector.\n\n### Missing Configuration Fields\n\n*   **Issue**: The `install()` or `health_check()` methods return `AuthStatus.MISSING_CREDENTIALS` with a message like \"workspace_url is required\" or \"token is required.\"\n*   **Fix**: Ensure that both `workspace_url` and `token` are provided in the connector's configuration dictionary during initialization.\n\n### Invalid Credentials\n\n*   **Issue**: The `install()` or `health_check()` methods return `AuthStatus.INVALID_CREDENTIALS`.\n*   **Fix**: Verify that your Databricks Personal Access Token (PAT) is correct and has not expired. Regenerate a new PAT in your Databricks User Settings if necessary. Ensure the PAT has sufficient permissions to access the `/api/2.0/preview/scim/v2/Me` endpoint and to list clusters, jobs, notebooks, MLflow experiments, registered models, and SQL warehouses.\n\n### Network Connectivity Issues\n\n*   **Issue**: The `health_check()` method returns `ConnectorHealth.DEGRADED` with a `DatabricksNetworkError` message.\n*   **Fix**: Check your network connection and ensure that the Shielva platform can reach your Databricks workspace URL. Verify that the Databricks service itself is operational by checking the Databricks status page.\n\n### Partial Synchronization\n\n*   **Issue**: The `sync()` method completes with `SyncStatus.PARTIAL`, indicating that some documents failed to sync.\n*   **Fix**: This typically occurs if the connector encounters `DatabricksError` when attempting to fetch specific resource types (e.g., clusters, jobs, or notebooks). Check the Databricks API logs for more specific error messages related to the failed resource types. Ensure the Personal Access Token has the necessary permissions to list *all* desired resources (clusters, jobs, notebooks, experiments, models, SQL warehouses). For example, if `list_clusters()` fails due to permissions, only clusters will be skipped, and other resources will still attempt to sync."
+    }
+  ]
+}
