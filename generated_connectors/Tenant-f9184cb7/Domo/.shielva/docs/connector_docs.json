@@ -1,0 +1,60 @@
+{
+  "title": "Domo Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "connector_type": "domo",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Domo connector** integrates with Domo via the Domo REST API. It enables Shielva to sync datasets, dashboard pages, and users from your Domo instance.\n\nThis connector uses **OAuth2 client credentials** — your Client ID and Client Secret are exchanged for a short-lived Bearer token before every sync or health check. No user interaction is required after the initial setup.\n\n**Key capabilities:**\n- Sync all Domo datasets with row/column counts, owner, and status\n- Sync all dashboard pages (including parent hierarchy and card counts)\n- Sync users with role, department, and title\n- Stable document IDs via `sha256('<type>:<id>')[:16]` for deduplication across syncs\n- Retry with exponential backoff on transient errors (skips retry on auth/not-found)",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`domo` — registered in ACP as **Domo**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Domo, Inc. — Domo REST API (`https://api.domo.com/v1/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates client_id + client_secret; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Acquires token via `GET /oauth/token`, then calls `list_users(limit=1)` to verify connectivity |\n| `sync()` | Paginates all datasets and dashboard pages; normalizes each to ConnectorDocument |\n| `list_datasets()` | Returns all Domo datasets (auto-paginates with offset) |\n| `list_pages()` | Returns all Domo dashboard pages (auto-paginates with offset) |\n| `list_users()` | Returns all Domo users (auto-paginates with offset) |\n| `get_dataset(id)` | Returns a single dataset by ID |\n| `get_page(id)` | Returns a single dashboard page by ID |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Domo uses **OAuth2 client credentials flow** (no user redirect required).\n\n**Token endpoint:**\n```\nGET https://api.domo.com/oauth/token?grant_type=client_credentials&scope=data%20user%20dashboard\nAuthorization: Basic base64(client_id:client_secret)\n```\n\nResponse:\n```json\n{\"access_token\": \"...\", \"expires_in\": 3600, \"token_type\": \"bearer\"}\n```\n\nAll subsequent API calls include:\n```\nAuthorization: Bearer <access_token>\n```\n\nTokens expire in 1 hour. The connector re-acquires a fresh token before each `sync()` and `health_check()` call.",
+      "children": [
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `client_id` | string | Yes | Domo API client ID from developer.domo.com |\n| `client_secret` | password | Yes | Domo API client secret |"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "All list endpoints use `limit` + `offset` parameters. Responses are plain JSON arrays (not wrapped objects).\n\n- Datasets: `limit=50` per page\n- Pages: `limit=50` per page\n- Users: `limit=500` per page\n- Groups: `limit=500` per page\n\nThe connector continues paginating until a batch returns fewer items than the page size.",
+      "children": []
+    },
+    {
+      "id": "normalization",
+      "title": "Document Normalization",
+      "content": "All resources are converted to `ConnectorDocument` instances with stable IDs:\n\n| Resource | ID formula | `type` field |\n|----------|-----------|---------------|\n| Dataset | `sha256('dataset:' + str(id))[:16]` | `dataset` |\n| Page | `sha256('page:' + str(id))[:16]` | `dashboard` |\n| User | `sha256('user:' + str(id))[:16]` | `user` |\n\nStable IDs ensure the same Domo resource always maps to the same Shielva document, enabling deduplication and incremental updates.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "| Exception | HTTP Status | Behavior |\n|-----------|-------------|----------|\n| `DomoAuthError` | 401, 403 | Not retried — requires credential refresh |\n| `DomoNotFoundError` | 404 | Not retried — resource does not exist |\n| `DomoRateLimitError` | 429 | Retried up to 3 times with exponential backoff |\n| `DomoNetworkError` | (connection error) | Retried up to 3 times with exponential backoff |\n| `DomoError` | Other 4xx/5xx | Retried up to 3 times with exponential backoff |",
+      "children": []
+    }
+  ]
+}
