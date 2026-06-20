@@ -1,0 +1,32 @@
+{
+  "connector_type": "heap",
+  "display_name": "Heap Analytics",
+  "provider": "heap",
+  "service": "heap",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Heap product analytics — sync users, events, segments, funnels, and user properties via the Heap REST and Server-Side APIs.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Heap Dashboard → Account → Privacy & Security → API Key"
+    },
+    {
+      "key": "account_id",
+      "label": "App ID / Account ID",
+      "type": "string",
+      "required": true,
+      "help": "Your Heap App ID (numeric). Found in Heap Dashboard → Account → General or in your Heap tracking snippet."
+    }
+  ],
+  "capabilities": ["sync", "health_check", "track"],
+  "resources": ["users", "events", "segments", "user_properties"],
+  "api_base": "https://heapanalytics.com/api/",
+  "docs_url": "https://developers.heap.io/reference/",
+  "rate_limits": {
+    "note": "Heap enforces per-account rate limits on their REST API. Track and identify calls are generally more permissive. Respect 429 responses with Retry-After headers."
+  }
+}
