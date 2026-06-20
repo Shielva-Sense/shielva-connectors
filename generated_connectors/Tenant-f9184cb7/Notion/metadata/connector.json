@@ -1,0 +1,30 @@
+{
+  "connector_type": "notion",
+  "display_name": "Notion",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Integration Token",
+      "type": "password",
+      "required": true,
+      "description": "Notion Internal Integration Token (secret_...). From Notion → Settings → Integrations → New integration."
+    }
+  ],
+  "capabilities": [
+    "list_pages",
+    "list_databases",
+    "get_page",
+    "get_database",
+    "query_database",
+    "get_page_blocks",
+    "sync"
+  ],
+  "provider": "Notion",
+  "service": "Notion",
+  "connector_name": "Notion",
+  "category": "productivity",
+  "api_version": "2022-06-28",
+  "base_url": "https://api.notion.com/v1"
+}
