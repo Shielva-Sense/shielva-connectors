@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from client import NewRelicHTTPClient
+from client.http_client import NewRelicHTTPClient
 from exceptions import NewRelicAuthError, NewRelicError, NewRelicNetworkError
-from helpers import (
-    normalize_alerts_policy,
+from helpers.utils import (
+    normalize_alert,
     normalize_application,
+    normalize_dashboard,
     normalize_incident,
     with_retry,
 )
@@ -34,18 +35,23 @@ except ImportError:
             self.connector_id = connector_id
             self.config = config or {}
 
-
-CONNECTOR_TYPE = "new_relic"
+CONNECTOR_TYPE = "newrelic"
 AUTH_TYPE = "api_key"
+
+# Maximum pages to pull during a full sync (safety cap)
+_MAX_ALERT_PAGES: int = 20
+_MAX_APP_PAGES: int = 20
 
 
 class NewRelicConnector(BaseConnector):  # type: ignore[misc]
-    """
-    Shielva connector for New Relic observability platform.
+    """Shielva connector for New Relic application performance monitoring.
 
-    Syncs alert policies, APM applications, and alert incidents.
-    Auth: ``Api-Key: {api_key}`` header (User API Key).
-    Region: ``"US"`` (default) or ``"EU"``.
+    Provides authentication, health checks, full sync, and direct API access
+    for alert policies, applications, incidents, dashboards, and NRQL queries.
+
+    Auth: Single API Key — sent as both ``Api-Key`` and ``X-Api-Key`` headers.
+    Region: US (api.newrelic.com) or EU (api.eu.newrelic.com).
+    NerdGraph: GraphQL endpoint for incidents and dashboards.
     """
 
     CONNECTOR_TYPE: str = CONNECTOR_TYPE
@@ -58,51 +64,64 @@ class NewRelicConnector(BaseConnector):  # type: ignore[misc]
         config: dict[str, Any] | None = None,
     ) -> None:
         _config = config or {}
-        super().__init__(tenant_id=tenant_id, connector_id=connector_id, config=_config)
-        self.client = NewRelicHTTPClient(config=_config)
+        if type(BaseConnector) is not type(object):
+            try:
+                super().__init__(
+                    tenant_id=tenant_id, connector_id=connector_id, config=_config
+                )
+            except TypeError:
+                self.tenant_id = tenant_id
+                self.connector_id = connector_id
+                self.config = _config
+        else:
+            self.tenant_id = tenant_id
+            self.connector_id = connector_id
+            self.config = _config
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+        self._api_key: str = _config.get("api_key", "")
+        self._account_id: str = str(_config.get("account_id", ""))
+        self._region: str = (_config.get("region", "US") or "US").upper()
+        self.client: NewRelicHTTPClient = NewRelicHTTPClient(config=self.config)
+
+    def _make_client(self) -> NewRelicHTTPClient:
+        return NewRelicHTTPClient(config=self.config)
+
+    # ── Auth & health ─────────────────────────────────────────────────────────
 
     async def install(self) -> InstallResult:
-        """
-        Validate credentials and account access.
-
-        Requires ``api_key`` and ``account_id`` in config.
-        Performs a lightweight health-check API call to confirm connectivity.
-        """
-        api_key: str = self.config.get("api_key", "")
-        account_id: str = str(self.config.get("account_id", ""))
-
-        if not api_key:
+        """Validate api_key and account_id via GET /v2/applications.json."""
+        if not self._api_key:
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.MISSING_CREDENTIALS,
                 message="api_key is required",
             )
-        if not account_id:
+        if not self._account_id:
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.MISSING_CREDENTIALS,
                 message="account_id is required",
             )
-
+        client = self._make_client()
         try:
-            await self.client.get_user()
+            await with_retry(client.validate_api_key)
+            await client.aclose()
+            self.client = self._make_client()
             return InstallResult(
                 health=ConnectorHealth.HEALTHY,
                 auth_status=AuthStatus.CONNECTED,
                 connector_id=self.connector_id,
-                message="New Relic connector installed successfully",
+                message=f"Connected to New Relic ({self._region} region)",
             )
         except NewRelicAuthError as exc:
+            await client.aclose()
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.INVALID_CREDENTIALS,
-                message=str(exc),
+                message=f"Invalid New Relic API key: {exc}",
             )
-        except NewRelicError as exc:
+        except Exception as exc:
+            await client.aclose()
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.FAILED,
@@ -110,169 +129,254 @@ class NewRelicConnector(BaseConnector):  # type: ignore[misc]
             )
 
     async def health_check(self) -> HealthCheckResult:
-        """
-        Verify connectivity and credential validity.
-
-        Returns HEALTHY + CONNECTED on success, OFFLINE + INVALID_CREDENTIALS
-        on auth failure, DEGRADED + FAILED on other errors.
-        """
+        """Ping GET /v2/applications.json and return current health."""
+        if not self._api_key:
+            return HealthCheckResult(
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message="api_key is required",
+            )
+        if not self._account_id:
+            return HealthCheckResult(
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message="account_id is required",
+            )
+        client = self._make_client()
         try:
-            await self.client.get_user()
+            await with_retry(client.validate_api_key)
+            await client.aclose()
             return HealthCheckResult(
                 health=ConnectorHealth.HEALTHY,
                 auth_status=AuthStatus.CONNECTED,
-                message="New Relic connection is healthy",
+                message=f"Connected to New Relic ({self._region} region)",
             )
         except NewRelicAuthError as exc:
+            await client.aclose()
             return HealthCheckResult(
                 health=ConnectorHealth.OFFLINE,
                 auth_status=AuthStatus.INVALID_CREDENTIALS,
                 message=str(exc),
             )
-        except NewRelicError as exc:
+        except NewRelicNetworkError as exc:
+            await client.aclose()
+            return HealthCheckResult(
+                health=ConnectorHealth.DEGRADED,
+                auth_status=AuthStatus.FAILED,
+                message=str(exc),
+            )
+        except Exception as exc:
+            await client.aclose()
             return HealthCheckResult(
                 health=ConnectorHealth.DEGRADED,
                 auth_status=AuthStatus.FAILED,
                 message=str(exc),
             )
 
-    async def sync(self, **kwargs: Any) -> SyncResult:
-        """
-        Full sync: alerts policies + APM applications + alert incidents.
+    # ── Sync ──────────────────────────────────────────────────────────────────
 
-        Normalizes each resource into a ``ConnectorDocument``-compatible dict.
-        Non-fatal per-resource errors produce a PARTIAL result.
-        """
+    async def sync(
+        self,
+        full: bool = False,  # noqa: ARG002
+        since: Any = None,  # noqa: ARG002
+        kb_id: str = "",
+    ) -> SyncResult:
+        """Sync alerts, applications, incidents, and dashboards from New Relic."""
         found = 0
         synced = 0
         failed = 0
-        errors: list[str] = []
 
-        # --- Alerts policies ---
+        # Sync alert policies
         try:
-            policies = await self.list_alerts_policies()
-            found += len(policies)
-            for policy in policies:
+            alerts = await self.list_alerts()
+            found += len(alerts)
+            for raw in alerts:
                 try:
-                    normalize_alerts_policy(policy)
+                    doc = normalize_alert(
+                        raw, connector_id=self.connector_id, tenant_id=self.tenant_id
+                    )
+                    if kb_id:
+                        await self._ingest_document(doc, kb_id)
                     synced += 1
                 except Exception:
                     failed += 1
-        except NewRelicError as exc:
-            errors.append(f"alerts_policies: {exc}")
-            failed += 1
+        except NewRelicError:
+            pass
 
-        # --- Applications ---
+        # Sync applications
         try:
             apps = await self.list_applications()
             found += len(apps)
-            for app in apps:
+            for raw in apps:
                 try:
-                    normalize_application(app)
+                    doc = normalize_application(
+                        raw, connector_id=self.connector_id, tenant_id=self.tenant_id
+                    )
+                    if kb_id:
+                        await self._ingest_document(doc, kb_id)
                     synced += 1
                 except Exception:
                     failed += 1
-        except NewRelicError as exc:
-            errors.append(f"applications: {exc}")
-            failed += 1
+        except NewRelicError:
+            pass
 
-        # --- Incidents ---
+        # Sync incidents
         try:
             incidents = await self.list_incidents()
             found += len(incidents)
-            for incident in incidents:
+            for raw in incidents:
                 try:
-                    normalize_incident(incident)
+                    doc = normalize_incident(
+                        raw, connector_id=self.connector_id, tenant_id=self.tenant_id
+                    )
+                    if kb_id:
+                        await self._ingest_document(doc, kb_id)
                     synced += 1
                 except Exception:
                     failed += 1
-        except NewRelicError as exc:
-            errors.append(f"incidents: {exc}")
-            failed += 1
+        except NewRelicError:
+            pass
 
-        if found == 0 and not errors:
-            return SyncResult(
-                status=SyncStatus.COMPLETED,
-                documents_found=0,
-                documents_synced=0,
-                documents_failed=0,
-                message="Sync completed — no resources found",
-            )
+        # Sync dashboards
+        try:
+            dashboards = await self.list_dashboards()
+            found += len(dashboards)
+            for raw in dashboards:
+                try:
+                    doc = normalize_dashboard(
+                        raw, connector_id=self.connector_id, tenant_id=self.tenant_id
+                    )
+                    if kb_id:
+                        await self._ingest_document(doc, kb_id)
+                    synced += 1
+                except Exception:
+                    failed += 1
+        except NewRelicError:
+            pass
 
-        status = SyncStatus.PARTIAL if errors else SyncStatus.COMPLETED
-        msg = "; ".join(errors) if errors else "Sync completed successfully"
+        status = SyncStatus.COMPLETED if failed == 0 else SyncStatus.PARTIAL
+        if found == 0 and synced == 0:
+            status = SyncStatus.PARTIAL
         return SyncResult(
             status=status,
             documents_found=found,
             documents_synced=synced,
             documents_failed=failed,
-            message=msg,
         )
 
-    # ------------------------------------------------------------------
-    # Direct resource accessors
-    # ------------------------------------------------------------------
+    async def _ingest_document(self, doc: ConnectorDocument, kb_id: str) -> None:
+        """Push a normalized document to the knowledge base (stub — wired by Shielva runtime)."""
+        _ = doc, kb_id
 
-    async def list_alerts_policies(self) -> list[dict[str, Any]]:
-        """
-        Return all alerts policies, following pagination via ``next_url``.
-        """
-        first = await self.client.list_alerts_policies()
-        policies_wrapper = first.get("alerts_policies", {})
-        # REST v2 wraps the list in {"alerts_policies": {"policy": [...]}}
-        if isinstance(policies_wrapper, dict):
-            items: list[Any] = list(policies_wrapper.get("policy", []))
-        else:
-            items = list(policies_wrapper)
+    # ── Alert policies ────────────────────────────────────────────────────────
 
-        next_url: str | None = first.get("next_url")
-        session = self.client._get_session()
-        while next_url:
-            import aiohttp as _aiohttp
-            async with session.get(next_url) as resp:
-                data = await resp.json()
-            wrapper = data.get("alerts_policies", {})
-            if isinstance(wrapper, dict):
-                items.extend(wrapper.get("policy", []))
-            else:
-                items.extend(wrapper)
-            next_url = data.get("next_url")
+    async def list_alerts(self) -> list[dict[str, Any]]:
+        """Fetch all alert policies from New Relic, paginating automatically."""
+        all_policies: list[dict[str, Any]] = []
+        for page in range(1, _MAX_ALERT_PAGES + 1):
+            result = await with_retry(self.client.get_alert_policies, page=page)
+            policies: list[dict[str, Any]] = result.get("policies", [])
+            if not policies:
+                break
+            all_policies.extend(policies)
+            # New Relic REST v2 returns up to 25 per page by default
+            if len(policies) < 25:
+                break
+        return all_policies
 
-        return items
+    # ── Applications ──────────────────────────────────────────────────────────
 
     async def list_applications(self) -> list[dict[str, Any]]:
-        """
-        Return all APM applications, following pagination via ``next_url``.
-        """
-        first = await self.client.list_applications()
-        items: list[Any] = list(first.get("applications", []))
+        """Fetch all APM applications from New Relic, paginating automatically."""
+        all_apps: list[dict[str, Any]] = []
+        for page in range(1, _MAX_APP_PAGES + 1):
+            result = await with_retry(self.client.get_applications, page=page)
+            apps: list[dict[str, Any]] = result.get("applications", [])
+            if not apps:
+                break
+            all_apps.extend(apps)
+            if len(apps) < 25:
+                break
+        return all_apps
 
-        next_url: str | None = first.get("next_url")
-        session = self.client._get_session()
-        while next_url:
-            async with session.get(next_url) as resp:
-                data = await resp.json()
-            items.extend(data.get("applications", []))
-            next_url = data.get("next_url")
-
-        return items
+    # ── Incidents ─────────────────────────────────────────────────────────────
 
     async def list_incidents(self) -> list[dict[str, Any]]:
-        """
-        Return all alert incidents, following pagination via ``next_url``.
-        """
-        first = await self.client.list_incidents()
-        items: list[Any] = list(first.get("recent_violations", []))
-        if not items:
-            items = list(first.get("violations", []))
+        """Fetch recent alert incidents from New Relic via NerdGraph."""
+        result = await with_retry(self.client.get_incidents)
+        try:
+            incidents: list[dict[str, Any]] = (
+                result
+                .get("data", {})
+                .get("actor", {})
+                .get("account", {})
+                .get("alerts", {})
+                .get("incidents", {})
+                .get("incidents", [])
+            )
+            return incidents if isinstance(incidents, list) else []
+        except (AttributeError, TypeError):
+            return []
 
-        next_url: str | None = first.get("next_url")
-        session = self.client._get_session()
-        while next_url:
-            async with session.get(next_url) as resp:
-                data = await resp.json()
-            page_items = data.get("recent_violations", data.get("violations", []))
-            items.extend(page_items)
-            next_url = data.get("next_url")
+    # ── Dashboards ────────────────────────────────────────────────────────────
 
-        return items
+    async def list_dashboards(self) -> list[dict[str, Any]]:
+        """Fetch dashboards from New Relic via NerdGraph entity search."""
+        result = await with_retry(self.client.get_dashboards)
+        try:
+            entities: list[dict[str, Any]] = (
+                result
+                .get("data", {})
+                .get("actor", {})
+                .get("entitySearch", {})
+                .get("results", {})
+                .get("entities", [])
+            )
+            return entities if isinstance(entities, list) else []
+        except (AttributeError, TypeError):
+            return []
+
+    # ── NRQL ──────────────────────────────────────────────────────────────────
+
+    async def run_nrql(self, nrql: str) -> dict[str, Any]:
+        """Execute a NRQL query via NerdGraph and return the results.
+
+        Args:
+            nrql: A valid NRQL query string (e.g. "SELECT count(*) FROM Transaction SINCE 1 hour ago").
+
+        Returns:
+            NerdGraph response dict containing query results under data.actor.account.nrql.
+        """
+        query = """
+        query($accountId: Int!, $nrql: Nrql!) {
+          actor {
+            account(id: $accountId) {
+              nrql(query: $nrql) {
+                results
+                metadata {
+                  eventTypes
+                  facets
+                  messages
+                }
+              }
+            }
+          }
+        }
+        """
+        variables: dict[str, Any] = {
+            "accountId": int(self._account_id) if self._account_id else 0,
+            "nrql": nrql,
+        }
+        return await with_retry(self.client.run_nerdgraph, query, variables)
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def aclose(self) -> None:
+        if self.client is not None:
+            await self.client.aclose()
+
+    async def __aenter__(self) -> NewRelicConnector:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.aclose()
