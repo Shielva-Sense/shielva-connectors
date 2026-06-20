@@ -1,0 +1,43 @@
+{
+  "connector_type": "launchdarkly",
+  "display_name": "LaunchDarkly",
+  "provider": "launchdarkly",
+  "service": "launchdarkly",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect LaunchDarkly to sync feature flags, projects, environments, members, and audit log entries for feature flag intelligence.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in LaunchDarkly → Account Settings → Authorization → Personal access tokens"
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["projects", "feature_flags", "environments", "members", "audit_log"],
+  "auth": {
+    "type": "api_key",
+    "headers": [
+      {"name": "Authorization", "from": "api_key", "note": "Raw key — no Bearer prefix"},
+      {"name": "LD-API-Version", "value": "20220603"}
+    ],
+    "validation_endpoint": "GET /api/v2/projects"
+  },
+  "api": {
+    "base_url": "https://app.launchdarkly.com/api/v2/",
+    "version": "20220603"
+  },
+  "methods": [
+    {"name": "install", "description": "Validate API key via GET /projects and record connector as installed"},
+    {"name": "health_check", "description": "Verify API key is still valid via GET /projects"},
+    {"name": "sync", "description": "Sync projects, feature flags, environments, members, and audit log to knowledge base"},
+    {"name": "list_projects", "description": "List all LaunchDarkly projects"},
+    {"name": "list_flags", "description": "List all feature flags in a project with pagination"},
+    {"name": "get_flag", "description": "Get a single feature flag by project key and flag key"},
+    {"name": "list_environments", "description": "List all environments in a project"},
+    {"name": "list_members", "description": "List all account members with pagination"},
+    {"name": "list_audit_log", "description": "List audit log entries with cursor-based pagination"}
+  ]
+}
