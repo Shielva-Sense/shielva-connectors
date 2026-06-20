@@ -1,0 +1,58 @@
+{
+  "connector_type": "wrike",
+  "display_name": "Wrike",
+  "name": "Wrike",
+  "description": "Connect to Wrike to sync folders, tasks, users, comments, and timelogs via the Wrike REST API v4.",
+  "provider": "wrike",
+  "service": "wrike",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "category": "project_management",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "OAuth 2.0 Client ID from your Wrike app (Apps & Integrations → API → Create App)."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "OAuth 2.0 Client Secret from your Wrike app."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "description": "OAuth redirect URI registered with your Wrike app. Defaults to your Shielva callback URL."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2",
+    "list_folders",
+    "list_tasks",
+    "list_users",
+    "list_comments",
+    "get_task"
+  ],
+  "resources": [
+    "folders",
+    "tasks",
+    "users",
+    "comments",
+    "timelogs"
+  ],
+  "oauth": {
+    "authorize_url": "https://login.wrike.com/oauth2/authorize/v4",
+    "token_url": "https://login.wrike.com/oauth2/token",
+    "scopes": ["Default"],
+    "flow": "authorization_code"
+  },
+  "api_base": "https://www.wrike.com/api/v4/"
+}
