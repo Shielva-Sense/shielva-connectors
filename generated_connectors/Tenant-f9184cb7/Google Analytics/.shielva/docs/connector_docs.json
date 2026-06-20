@@ -1,0 +1,154 @@
+{
+  "connector_type": "google_analytics",
+  "connector_id": "google_analytics",
+  "name": "Google Analytics",
+  "provider": "Google",
+  "service": "Google Analytics",
+  "version": "1.0.0",
+  "description": "Connects to the Google Analytics 4 (GA4) Data API and Admin API to sync analytics report data, properties, and metadata into the Shielva knowledge base. Authenticates via OAuth 2.0 (Bearer token, analytics.readonly scope).",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. 123456789-abc.apps.googleusercontent.com",
+      "help": "Your Google OAuth 2.0 Client ID. Created in Google Cloud Console under APIs & Services → Credentials → OAuth 2.0 Client IDs."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "GOCSPX-...",
+      "help": "Your Google OAuth 2.0 Client Secret. Keep this secure — it is never logged."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://yourapp.example.com/oauth/callback",
+      "help": "The OAuth redirect URI registered in Google Cloud Console. Optional — leave blank to use the Shielva default."
+    }
+  ],
+  "config_keys": [
+    {
+      "key": "access_token",
+      "description": "OAuth 2.0 Bearer access token obtained after user authorization"
+    },
+    {
+      "key": "refresh_token",
+      "description": "OAuth 2.0 refresh token for obtaining new access tokens without re-authorization"
+    },
+    {
+      "key": "token_expires_at",
+      "description": "ISO timestamp when the access token expires"
+    },
+    {
+      "key": "property_id",
+      "description": "GA4 Property ID (numeric, e.g. 123456789) — required for report queries"
+    }
+  ],
+  "scopes": [
+    {
+      "scope": "https://www.googleapis.com/auth/analytics.readonly",
+      "description": "Read-only access to GA4 data, properties, and reports"
+    }
+  ],
+  "features": [
+    "oauth2",
+    "bearer_token",
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "pagination",
+    "accounts",
+    "properties",
+    "reports",
+    "realtime_reports",
+    "metadata"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate Credentials",
+      "description": "Validate that client_id and client_secret are present. Returns HEALTHY/CONNECTED or OFFLINE with reason. The actual Bearer token is obtained via the authorize() OAuth flow.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Generate Authorization URL",
+      "description": "Return the Google OAuth2 authorization URL for the analytics.readonly scope. The user visits this URL, grants consent, and Google redirects back with an authorization code to exchange for tokens.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Call list_accounts() to verify the Bearer token is valid. Returns HEALTHY with account count, OFFLINE on auth failure, or DEGRADED on network error.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Run sessions + users report for last 30 days on the configured property_id using default dimensions (date, sessionSource, sessionMedium) and metrics (sessions, activeUsers, screenPageViews, bounceRate). Paginates all rows via offset/limit. Normalizes each row to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return all GA accounts accessible by the authenticated user.",
+      "category": "accounts",
+      "endpoint": "GET https://analyticsadmin.googleapis.com/v1alpha/accounts"
+    },
+    {
+      "id": "list_properties",
+      "name": "List Properties",
+      "description": "Return all GA4 properties under a given account ID.",
+      "category": "properties",
+      "endpoint": "GET https://analyticsadmin.googleapis.com/v1alpha/properties?filter=parent:accounts/{account_id}"
+    },
+    {
+      "id": "run_report",
+      "name": "Run Report",
+      "description": "Run a GA4 Data API report for a property with given dimensions, metrics, and date range. Returns raw runReport response dict.",
+      "category": "reports",
+      "endpoint": "POST https://analyticsdata.googleapis.com/v1beta/properties/{property_id}:runReport"
+    },
+    {
+      "id": "get_metadata",
+      "name": "Get Property Metadata",
+      "description": "Return GA4 property metadata including all available dimensions and metrics with descriptions.",
+      "category": "metadata",
+      "endpoint": "GET https://analyticsdata.googleapis.com/v1beta/properties/{property_id}/metadata"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "accounts",
+    "properties",
+    "reports",
+    "metadata"
+  ],
+  "apis": [
+    {"name": "Install / Validate Credentials", "id": "install", "category": "auth"},
+    {"name": "Generate Authorization URL", "id": "authorize", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync", "id": "sync", "category": "sync"},
+    {"name": "List Accounts", "id": "list_accounts", "category": "accounts"},
+    {"name": "List Properties", "id": "list_properties", "category": "properties"},
+    {"name": "Run Report", "id": "run_report", "category": "reports"},
+    {"name": "Get Property Metadata", "id": "get_metadata", "category": "metadata"}
+  ],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Google Analytics connector** integrates with the Google Analytics 4 (GA4) Data API and Admin API. It enables Shielva to sync analytics report data, GA4 properties, and metadata into the knowledge base.\n\nThis connector uses **OAuth 2.0 authorization code flow** with the `analytics.readonly` scope. The access token is stored in config and used as a Bearer token for all API calls.\n\n**Key capabilities:**\n- OAuth 2.0 authorization with offline access (refresh token)\n- Sync sessions + users analytics report rows for the last 30 days\n- List GA accounts and GA4 properties\n- Run custom reports via `runReport` (dimensions, metrics, date ranges)\n- Run real-time reports via `runRealtimeReport`\n- Retrieve available dimensions/metrics via property metadata\n- Stable document IDs via SHA-256 for deduplication\n- Automatic retry with exponential backoff on transient failures\n- Offset-based pagination for large datasets"
+    }
+  ]
+}
