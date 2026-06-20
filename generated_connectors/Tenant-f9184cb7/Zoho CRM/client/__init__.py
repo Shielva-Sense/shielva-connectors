@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from client.http_client import ZohoCRMHTTPClient
+from .http_client import FreshworksCRMHTTPClient
 
-__all__ = ["ZohoCRMHTTPClient"]
+__all__ = ["FreshworksCRMHTTPClient"]
