@@ -1,0 +1,82 @@
+{
+  "title": "Bugsnag Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Bugsnag connector syncs crash reports, projects, and release data from the Bugsnag Data Access API v2 into the Shielva knowledge base. It is used by engineering teams and SREs who want AI-powered analysis of error trends, incident response context, and release impact across their Bugsnag-monitored applications.\n\n**Key capabilities:**\n- Sync all projects belonging to your Bugsnag organization\n- Fetch the top errors (crash reports) for every project, up to 25 per project (`SYNC_ERROR_LIMIT`)\n- Fetch release records per project for deployment correlation\n- List organization collaborators\n- Offset-based pagination using Bugsnag's `X-Next-Page-Link` header pattern\n- Automatic retry with `with_retry()` on transient failures\n- Distinct error classes for auth failures, rate limits, not-found, and network errors\n\n**Auth model:** API key — `Authorization: token {auth_token}` header (note: `token` prefix, not `Bearer`).\n\n**Resources synced:** `projects`, `errors`, `releases`, `collaborators`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Obtain a Bugsnag Personal Auth Token\n\n1. Log in to [bugsnag.com](https://bugsnag.com).\n2. Go to **Settings → My account → Personal auth token**.\n3. Copy the token value.\n\n### 2. Find your Organization Slug\n\n1. In Bugsnag, go to **Settings → Organization**.\n2. The slug also appears in the dashboard URL: `https://app.bugsnag.com/organizations/{organization_slug}/...`\n\n### 3. Install the connector\n\n```python\nimport asyncio\nfrom connector import BugsnagConnector\n\nasync def main():\n    connector = BugsnagConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"bugsnag-prod\",\n        config={\n            \"auth_token\": \"your_personal_auth_token\",\n            \"organization_slug\": \"your-org-slug\",\n        },\n    )\n    result = await connector.install()\n    print(result.health)       # ConnectorHealth.HEALTHY\n    print(result.auth_status)  # AuthStatus.CONNECTED\n    print(result.message)      # \"Connected to Bugsnag organization: Your Org\"\n\nasyncio.run(main())\n```\n\n### 4. Run a health check\n\n```python\nhealth = await connector.health_check()\nprint(health.health)      # ConnectorHealth.HEALTHY\nprint(health.message)     # \"Bugsnag API reachable. Organization: Your Org\"\n```\n\n### 5. Sync all data into a knowledge base\n\n```python\nsync_result = await connector.sync(kb_id=\"my-knowledge-base-id\")\nprint(f\"Found: {sync_result.documents_found}\")\nprint(f\"Synced: {sync_result.documents_synced}\")\nprint(f\"Failed: {sync_result.documents_failed}\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key`\n\nBugsnag uses a Personal Auth Token passed via the `Authorization` header with a `token` prefix — **not** the standard `Bearer` prefix:\n\n```\nAuthorization: token {auth_token}\n```\n\n### Validation flow\n\n1. The connector reads `auth_token` and `organization_slug` from the `config` dict passed to the constructor.\n2. On `install()`, it calls `GET /v2/user/organizations/{organization_slug}` to verify the token has access to the specified organization.\n3. If either field is missing, `install()` returns `AuthStatus.MISSING_CREDENTIALS` immediately — no network call is made.\n4. An HTTP 401 or 403 response raises `BugsnagAuthError`, which is caught and returned as `AuthStatus.INVALID_CREDENTIALS`.\n\n### Credentials reference\n\n| Field | Where to find it |\n|---|---|\n| `auth_token` | Bugsnag → Settings → My account → Personal auth token |\n| `organization_slug` | Bugsnag → Settings → Organization, or from the URL path after `/organizations/` |\n\n### Token scopes\n\nPersonal Auth Tokens inherit the permissions of the user account. There is no fine-grained scope selection. The token must belong to a user who is a member of the target organization."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Fields provided during connector installation (from `metadata/connector.json`):\n\n| Field | Type | Required | Description |\n|---|---|---|---|\n| `auth_token` | `password` | Yes | Bugsnag Personal Auth Token. Sent as `Authorization: token {value}` on every request. Found at Settings → My account → Personal auth token. |\n| `organization_slug` | `string` | Yes | The slug identifier of your Bugsnag organization. Visible in the URL after `/organizations/` or in Settings → Organization. |\n\n**Runtime constants (set in `connector.py`, not configurable via install fields):**\n\n| Constant | Value | Description |\n|---|---|---|\n| `SYNC_ERROR_LIMIT` | `25` | Maximum number of errors fetched per project during a sync run |\n| `CONNECTOR_TYPE` | `\"bugsnag\"` | Internal connector type identifier |\n| `AUTH_TYPE` | `\"api_key\"` | Authentication model used by this connector |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `BugsnagConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that `auth_token` and `organization_slug` are both present in `config`, then calls `GET /v2/user/organizations/{organization_slug}` to confirm the token can access the organization.\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | `message` |\n|---|---|---|---|\n| One or both fields missing | `OFFLINE` | `MISSING_CREDENTIALS` | Lists the missing field names |\n| Token rejected by Bugsnag API | `OFFLINE` | `INVALID_CREDENTIALS` | Exception message from Bugsnag |\n| Unexpected error | `OFFLINE` | `FAILED` | Exception message |\n| Success | `HEALTHY` | `CONNECTED` | `\"Connected to Bugsnag organization: {org_name}\"` |\n\n```python\nfrom connector import BugsnagConnector\n\nconnector = BugsnagConnector(\n    tenant_id=\"t1\",\n    connector_id=\"bugsnag-prod\",\n    config={\"auth_token\": \"abc123\", \"organization_slug\": \"my-org\"},\n)\nresult = await connector.install()\nprint(result.health)    # ConnectorHealth.HEALTHY\nprint(result.message)   # \"Connected to Bugsnag organization: My Org\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /v2/user/organizations/{organization_slug}` and returns the current connector health. Distinguishes between auth failures (`BugsnagAuthError`) and transient network failures (`BugsnagNetworkError`).\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` |\n|---|---|---|\n| Missing credentials | `OFFLINE` | `MISSING_CREDENTIALS` |\n| Auth rejected (401/403) | `DEGRADED` | `INVALID_CREDENTIALS` |\n| Network error | `DEGRADED` | `FAILED` |\n| Success | `HEALTHY` | `CONNECTED` |\n\n```python\nresult = await connector.health_check()\nprint(result.health)    # ConnectorHealth.HEALTHY\nprint(result.message)   # \"Bugsnag API reachable. Organization: My Org\"\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all projects for the organization, then fetches the top errors (up to `SYNC_ERROR_LIMIT = 25`) for each project. When `kb_id` is provided, each normalized `ConnectorDocument` is passed to `_ingest_document()` for ingestion into the Shielva knowledge base.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When non-empty, documents are ingested via `_ingest_document()`. |\n| `**kwargs` | `Any` | — | Additional keyword arguments (ignored). |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED` if zero failures; `PARTIAL` if some failed; `FAILED` if the projects list call itself failed |\n| `documents_found` | `int` | Total projects + errors discovered across all pages |\n| `documents_synced` | `int` | Successfully normalized and ingested |\n| `documents_failed` | `int` | Documents that raised exceptions during normalization or ingestion |\n\n```python\nresult = await connector.sync(kb_id=\"kb-abc\")\nprint(result.status)              # SyncStatus.COMPLETED\nprint(result.documents_found)     # e.g. 47 (5 projects + 42 errors)\nprint(result.documents_synced)    # e.g. 47\nprint(result.documents_failed)    # e.g. 0\n```\n\n**Sync order:** Projects are fetched first (offset-paginated, 100 per page). Then for each project's `project_id`, errors are fetched up to `SYNC_ERROR_LIMIT`. A per-project error fetch failure is non-fatal — the sync continues to the remaining projects."
+        },
+        {
+          "id": "method-list-projects",
+          "title": "list_projects()",
+          "content": "Fetches all projects for the organization using offset pagination (100 entries per page). Continues fetching until no `next_url` is returned or the page is empty.\n\n**Returns:** `list[ConnectorDocument]`\n\nEach document's `metadata` includes `project_id`, which is collected for use in subsequent error and release fetches.\n\n```python\nprojects = await connector.list_projects()\nfor p in projects:\n    print(p.metadata[\"project_id\"], p.title)\n```"
+        },
+        {
+          "id": "method-list-errors",
+          "title": "list_errors()",
+          "content": "Fetches errors for a specific project via `X-Next-Page-Link` cursor pagination.\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|---|---|---|---|\n| `project_id` | `str` | Yes | Bugsnag project ID |\n| `severity` | `str \\| None` | No | Filter by severity: `\"error\"`, `\"warning\"`, or `\"info\"` |\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nerrors = await connector.list_errors(project_id=\"abc123\", severity=\"error\")\nfor e in errors:\n    print(e.title, e.metadata.get(\"severity\"))\n```"
+        },
+        {
+          "id": "method-get-error",
+          "title": "get_error()",
+          "content": "Returns a single raw Bugsnag error dict by project ID and error ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `project_id` | `str` | Bugsnag project ID |\n| `error_id` | `str` | Bugsnag error ID |\n\n**Returns:** `dict[str, Any]` — raw Bugsnag error object\n\n```python\nerror = await connector.get_error(project_id=\"abc123\", error_id=\"err456\")\nprint(error[\"error_class\"], error[\"message\"])\n```"
+        },
+        {
+          "id": "method-list-releases",
+          "title": "list_releases()",
+          "content": "Fetches all release records for a specific project.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `project_id` | `str` | Bugsnag project ID |\n\n**Returns:** `list[ConnectorDocument]`\n\n```python\nreleases = await connector.list_releases(project_id=\"abc123\")\nfor r in releases:\n    print(r.metadata.get(\"version\"), r.metadata.get(\"released_at\"))\n```"
+        },
+        {
+          "id": "method-list-collaborators",
+          "title": "list_collaborators()",
+          "content": "Fetches all collaborators for the organization.\n\n**Returns:** `list[dict[str, Any]]` — raw Bugsnag collaborator objects\n\n```python\ncollaborators = await connector.list_collaborators()\nfor c in collaborators:\n    print(c[\"email\"], c[\"name\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector defines a dedicated exception hierarchy in `exceptions.py`. All exceptions carry `.message`, `.status_code`, and `.code` attributes.\n\n| Exception | HTTP Status | `.code` | Meaning |\n|---|---|---|---|\n| `BugsnagError` | varies | varies | Base class for all Bugsnag connector errors |\n| `BugsnagAuthError` | 401 / 403 | — | Credentials rejected — invalid or expired token, or token lacks access to the org |\n| `BugsnagRateLimitError` | 429 | `rate_limit` | Too many requests; `.retry_after` (float, seconds) indicates when to retry |\n| `BugsnagNotFoundError` | 404 | `resource_missing` | The requested project, error, or org slug does not exist |\n| `BugsnagNetworkError` | 5xx / timeout | — | Transient network failure or Bugsnag API 5xx |\n\n### How the connector handles each error\n\n- **`BugsnagAuthError`** — caught in `install()` and `health_check()`, returned as `AuthStatus.INVALID_CREDENTIALS`. In `sync()`, causes `SyncStatus.FAILED`.\n- **`BugsnagNetworkError`** — caught in `health_check()` and returned as `ConnectorHealth.DEGRADED`. In `sync()`, `with_retry()` retries transient failures before raising.\n- **`BugsnagNotFoundError`** — raised by the HTTP client on 404. Surfaced in the result `message`.\n- **`BugsnagRateLimitError`** — raised on 429. The `with_retry()` helper is expected to honour the `.retry_after` delay before re-attempting.\n- **Per-project error fetch failures in `sync()`** — caught silently with `except BugsnagError: pass`. A single bad project does not abort the entire sync run."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `AuthStatus.MISSING_CREDENTIALS` on install\n\n**Cause:** Either `auth_token` or `organization_slug` (or both) are absent from the config.\n\n**Fix:** Ensure both fields are provided:\n```python\nconfig = {\n    \"auth_token\": \"your_token_here\",       # must not be empty string\n    \"organization_slug\": \"your-org-slug\",  # must not be empty string\n}\n```\n\n### `AuthStatus.INVALID_CREDENTIALS` — 401 from Bugsnag API\n\n**Cause:** The `auth_token` is wrong, expired, or the user has been removed from the organization.\n\n**Fix:**\n1. Confirm the token value at **Bugsnag → Settings → My account → Personal auth token**.\n2. Verify the `Authorization` header uses `token` prefix, not `Bearer`.\n3. Confirm the user is still a member of the organization identified by `organization_slug`.\n\n### `BugsnagNotFoundError` on org slug\n\n**Cause:** The `organization_slug` does not match any organization the token can access.\n\n**Fix:** The slug is visible in the Bugsnag dashboard URL after `/organizations/`. Slugs are case-sensitive — confirm the exact value in **Settings → Organization**.\n\n### `SyncStatus.PARTIAL` — some documents failed\n\n**Cause:** One or more errors raised exceptions during normalization or ingestion. Per-project error fetch failures are swallowed by design.\n\n**Fix:** Check `documents_failed`. If the count equals the number of errors, the error normalization logic may have encountered unexpected data shapes from Bugsnag.\n\n### `BugsnagRateLimitError` — 429 Too Many Requests\n\n**Cause:** Bugsnag's Data Access API rate limit was hit (typically 60 requests per minute for v2).\n\n**Fix:** The `with_retry()` helper handles backoff automatically using `retry_after`. Reduce sync frequency if you manage many projects.\n\n### Network errors / timeouts\n\n**Cause:** `api.bugsnag.com` is temporarily unreachable or the connection timed out.\n\n**Fix:** `BugsnagNetworkError` is retried by `with_retry()`. If it persists, verify connectivity to `https://api.bugsnag.com` and check [status.bugsnag.com](https://status.bugsnag.com)."
+    }
+  ]
+}
