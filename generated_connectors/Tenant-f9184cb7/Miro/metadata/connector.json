@@ -1,0 +1,62 @@
+{
+  "connector_type": "miro",
+  "display_name": "Miro",
+  "provider": "miro",
+  "service": "miro",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync Miro boards, sticky notes, cards, shapes, and text items into your Shielva knowledge base.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "The Client ID from your Miro developer app (Miro Profile → Settings → Your apps → Create App)."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "The Client Secret from your Miro developer app. Keep this private."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "help": "OAuth2 redirect URI. Must match exactly what is registered in your Miro app settings."
+    }
+  ],
+  "scopes": [
+    "boards:read",
+    "organizations:read",
+    "team:read"
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "oauth": {
+    "authorization_url": "https://miro.com/oauth/authorize",
+    "token_url": "https://api.miro.com/v1/oauth/token",
+    "grant_type": "authorization_code"
+  },
+  "api": {
+    "base_url": "https://api.miro.com/v2/",
+    "version": "v2",
+    "pagination": "cursor"
+  },
+  "resources": [
+    {
+      "name": "boards",
+      "description": "Miro whiteboard boards with metadata (name, description, access policy, owner, team)."
+    },
+    {
+      "name": "board_items",
+      "description": "Items on each board: sticky notes, cards, shapes, text, frames, and images."
+    }
+  ]
+}
