@@ -1,0 +1,25 @@
+{
+  "connector_type": "shopify",
+  "name": "Shopify",
+  "provider": "Shopify",
+  "service": "shopify",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "shop_domain",
+      "label": "Shop Domain",
+      "type": "string",
+      "required": true,
+      "placeholder": "mystore.myshopify.com"
+    },
+    {
+      "key": "access_token",
+      "label": "Admin API Access Token",
+      "type": "password",
+      "required": true
+    }
+  ],
+  "capabilities": ["sync", "health_check", "list_products", "list_orders", "list_customers", "list_collections", "get_product"],
+  "description": "Sync products, orders, and customers from your Shopify store."
+}
