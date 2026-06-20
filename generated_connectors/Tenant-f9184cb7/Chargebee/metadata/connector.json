@@ -1,0 +1,36 @@
+{
+  "connector_type": "chargebee",
+  "name": "Chargebee",
+  "display_name": "Chargebee",
+  "description": "Connect to Chargebee to sync subscriptions, customers, and invoices from your billing account.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "site",
+      "label": "Site",
+      "type": "string",
+      "required": true,
+      "description": "Your Chargebee site name (e.g. 'acme' from acme.chargebee.com)."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Chargebee API key from Settings → Configure Chargebee → API Keys."
+    }
+  ],
+  "capabilities": [
+    "list_subscriptions",
+    "get_subscription",
+    "list_customers",
+    "get_customer",
+    "list_invoices",
+    "get_invoice",
+    "sync"
+  ],
+  "provider": "chargebee",
+  "service": "chargebee",
+  "category": "billing"
+}
