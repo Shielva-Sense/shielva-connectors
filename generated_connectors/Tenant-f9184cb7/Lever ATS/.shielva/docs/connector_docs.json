@@ -1,0 +1,103 @@
+{
+  "title": "Lever ATS Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Lever ATS** connector integrates Shielva with the [Lever Data API v1](https://hire.lever.co/developer/documentation) to sync recruiting data into Shielva's knowledge base.\n\nLever is a modern applicant tracking system. This connector syncs **6 resource types** — opportunities (candidates), postings (jobs), users (team members), interviews, offers, and pipeline stages — and implements cursor-based pagination to handle large hiring pipelines.\n\n**Key capabilities:**\n- Verify credentials via `GET /users?limit=1`\n- Full opportunities (candidates) sync with stage, owner, contact info, and tags\n- Job postings with department, team, location, state, and apply URLs\n- Team user directory with roles and access levels\n- Scheduled interviews with interviewer names and opportunity links\n- Per-opportunity offers\n- Pipeline stages list\n- HTTP Basic Auth: `aiohttp.BasicAuth(api_key, '')` — api_key as username, empty password\n- Lever cursor pagination: `hasNext` + `next` cursor field followed automatically\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Lever ATS connector running in under 5 minutes.\n\n### 1. Generate an API Key\n\n1. Log in to Lever at https://hire.lever.co\n2. Click your name → **Settings → Integrations → API Credentials**\n3. Click **Generate New API Key**, enter a label, click **Create**\n4. Copy the key — it is shown **only once**\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Lever ATS**\n2. Enter your **API Key**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with LeverConnector(api_key=\"your_key\") as conn:\n    result = await conn.sync(full=True)\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Lever ATS connector uses **API Key authentication** via HTTP Basic Auth.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Lever API key from Settings → Integrations → API Credentials |\n\n### How it works\n\nEvery request uses HTTP Basic authentication:\n```\nAuthorization: Basic base64(\"<api_key>:\")\n```\n\nNote: Lever uses the API key as the **username** and an **empty string** as the password. The connector implements this as:\n```python\naiohttp.BasicAuth(api_key, \"\")\n```\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /users?limit=1`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- API key is stored encrypted in the Shielva vault and never logged\n- Use a read-only Lever service account for minimum-privilege access\n- Rotate keys at Lever → Settings → Integrations → API Credentials"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Lever ATS connector requires one install field.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"LEVER_API_KEY_HERE\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `API_BASE` | `https://api.lever.co/v1` | Lever API base URL |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter, max 30s |\n| `DEFAULT_PAGE_SIZE` | `100` | Records per page in paginated calls |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 7 public async methods plus `install()`, `health_check()`, and `sync()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /users?limit=1`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Lever ATS. Users visible: 1')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing api_key → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /users?limit=1` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Lever API reachable. hasNext=False')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Lever resources into the knowledge base.\n\n```python\nresult = await connector.sync(full=True, kb_id=\"kb_recruiting\")\n\nprint(result.documents_found)   # total records across all resource types\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), counts, and `message`\n\n**Sync order:** opportunities → postings → users → interviews. Each resource failure is non-fatal — remaining types continue."
+        },
+        {
+          "id": "list-opportunities",
+          "title": "list_opportunities(**kwargs)",
+          "content": "Fetches all opportunities (candidates) across all cursor-paginated pages.\n\n```python\nopps = await connector.list_opportunities()\nfor opp in opps:\n    print(opp[\"name\"], opp[\"stage\"])\n```\n\n**Lever endpoint:** `GET /opportunities`\n\nSupports extra filter kwargs: `stage_id`, `tag`, `posting_id`, `archived_reason_id`, `owner_id`."
+        },
+        {
+          "id": "list-postings",
+          "title": "list_postings()",
+          "content": "Fetches all job postings across all cursor-paginated pages.\n\n```python\npostings = await connector.list_postings()\nfor p in postings:\n    print(p[\"text\"], p[\"state\"])\n```\n\n**Lever endpoint:** `GET /postings`"
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "Fetches all Lever users (team members) across all cursor-paginated pages.\n\n```python\nusers = await connector.list_users()\nfor u in users:\n    print(u[\"name\"], u[\"email\"], u[\"accessRole\"])\n```\n\n**Lever endpoint:** `GET /users`"
+        },
+        {
+          "id": "list-interviews",
+          "title": "list_interviews()",
+          "content": "Fetches all scheduled interviews across all cursor-paginated pages.\n\n```python\ninterviews = await connector.list_interviews()\nfor iv in interviews:\n    print(iv[\"subject\"], iv[\"location\"])\n```\n\n**Lever endpoint:** `GET /interviews`"
+        },
+        {
+          "id": "list-offers",
+          "title": "list_offers(opportunity_id)",
+          "content": "Fetches all offers for a specific opportunity.\n\n```python\noffers = await connector.list_offers(\"opp-111\")\nfor offer in offers:\n    print(offer[\"status\"])\n```\n\n**Lever endpoint:** `GET /opportunities/{id}/offers`"
+        },
+        {
+          "id": "get-opportunity",
+          "title": "get_opportunity(opportunity_id)",
+          "content": "Fetches a single opportunity (candidate) by ID.\n\n```python\nopp = await connector.get_opportunity(\"opp-111\")\nprint(opp[\"name\"], opp[\"stage\"])\n```\n\n**Lever endpoint:** `GET /opportunities/{id}`\n\nReturns the `data` field from the Lever response."
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Cursor Pagination",
+      "content": "Lever uses cursor-based pagination for all list endpoints.\n\n### Response shape\n\n```json\n{\n  \"data\": [...],\n  \"hasNext\": true,\n  \"next\": \"eyJpZCI6Im9wcC1hYmMifQ==\"\n}\n```\n\n### How the connector handles it\n\nThe `_collect_all_pages()` helper automatically follows all pages:\n\n```python\nwhile True:\n    data = await client.get_opportunities(cursor=cursor)\n    items.extend(data[\"data\"])\n    if not data[\"hasNext\"]:\n        break\n    cursor = data[\"next\"]\n```\n\nAll `list_*` methods use this helper — callers receive the full, complete list."
+    },
+    {
+      "id": "data-normalization",
+      "title": "Data Normalization",
+      "content": "### Opportunity Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('opportunity:{id}')[:16]` — stable 16-char hex |\n| `title` | `Opportunity: {name}` |\n| `content` | Name, headline, stage, owner, emails, phones, posting ID, tags, archived |\n| `source_url` | `https://hire.lever.co/candidates/{id}` |\n| `metadata.opportunity_id` | Lever opportunity UUID |\n| `metadata.stage` | Stage text name |\n| `metadata.owner` | Owner user name |\n| `metadata.emails` | List of contact emails |\n| `metadata.tags` | List of tag strings |\n| `metadata.archived` | Boolean |\n\n### Posting Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('posting:{id}')[:16]` |\n| `title` | `Job Posting: {text}` |\n| `content` | Job title, state, department, team, location, tags, apply URL |\n| `source_url` | Lever `show` URL or `https://hire.lever.co/jobs/{id}` |\n| `metadata.posting_id` | Lever posting UUID |\n| `metadata.state` | `published` / `internal` / `closed` / `draft` |\n| `metadata.department` | Department name from categories |\n| `metadata.team` | Team name from categories |\n| `metadata.location` | Office/remote location |\n\n### User Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('user:{id}')[:16]` |\n| `title` | `User: {name}` |\n| `content` | Name, email, username, role, active status |\n| `metadata.user_id` | Lever user UUID |\n| `metadata.email` | Work email |\n| `metadata.access_role` | `admin` / `interviewer` / `limited` / etc. |\n\n### Interview Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('interview:{id}')[:16]` |\n| `title` | `Interview: {subject}` |\n| `content` | Subject, location, duration, interviewers, opportunity ID, note, canceled |\n| `metadata.interviewers` | List of interviewer names |\n| `metadata.opportunity_id` | Linked opportunity UUID |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nLeverError (base)\n├── LeverAuthError      — 401/403: invalid credentials or insufficient permissions\n├── LeverRateLimitError — 429: too many requests (stores retry_after seconds)\n├── LeverNotFoundError  — 404: resource does not exist\n└── LeverNetworkError   — 5xx / connection error / timeout\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `LeverNetworkError` | Yes | Exponential backoff: 1s, 2s, 4s + jitter |\n| `LeverRateLimitError` | Yes | Respects `retryAfter` field; falls back to backoff |\n| `LeverAuthError` | **No** | Immediate failure — fix credentials |\n| `LeverNotFoundError` | **No** | Immediate failure — resource is gone |\n\n### Handling in code\n\n```python\nfrom exceptions import LeverAuthError, LeverRateLimitError\ntry:\n    opps = await connector.list_opportunities()\nexcept LeverAuthError:\n    # credentials expired — prompt user to reconnect\nexcept LeverRateLimitError as e:\n    # e.retry_after gives seconds to wait\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\n**Cause:** API key is invalid or was copied incorrectly.\n\n**Fix:** Regenerate the API key at Lever → Settings → Integrations → API Credentials.\n\n---\n\n### 403 Forbidden\n\n**Cause:** The user account that generated the key lacks permissions.\n\n**Fix:** Use an admin account's API key, or adjust the user's access level in Lever → Settings → Users.\n\n---\n\n### 404 Not Found\n\n**Cause:** A specific resource (opportunity, offer) no longer exists.\n\n**Fix:** Non-fatal for sync — remaining records continue. Check that the opportunity ID is correct when using `get_opportunity()`.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Lever API rate limit reached.\n\n**Fix:** The connector retries automatically (up to 3 attempts with backoff). If persistent, reduce your sync frequency.\n\n---\n\n### Empty opportunity list\n\n**Cause:** Wrong environment (sandbox vs. production), or the Lever account has no data.\n\n**Fix:** Verify the API key matches your intended Lever environment. Confirm data exists in Lever → Candidates.\n\n---\n\n### Tests fail: `asyncio_mode` warning\n\n**Fix:** Ensure `pytest.ini` contains:\n```ini\n[pytest]\nasyncio_mode = auto\n```\nThis is already configured in the connector root."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 95 unit tests — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/lever_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 95 passed\n```\n\n### Coverage\n\n- `exceptions` — all 5 exception classes, inheritance, attributes\n- `models` — enums, dataclass defaults\n- `normalize_opportunity` — title, source_id length/hex/determinism, different IDs, source_url, metadata fields, missing-name fallback, archived flag\n- `normalize_posting` — title, source_id, department/state/location, show_url\n- `normalize_user` — title, source_id, email, access_role, active\n- `normalize_interview` — title, source_id, interviewers, opportunity_id, location\n- `with_retry` — success, retry on error, never retries auth, max attempts, rate limit retry_after\n- `LeverHTTPClient` — BasicAuth(key, ''), all 7 API methods, cursor passing, 401/403/404/429/500 error mapping, hasNext pagination\n- `install()` — success, missing api_key, auth failure, network error, connector_id set\n- `health_check()` — healthy, missing creds, auth error, network error, generic exception\n- `sync()` — completed all resources, empty, partial normalize failure, kb_id ingest, resource error non-fatal, all errors FAILED, connector/tenant stamped on doc, PARTIAL status\n- `list_*` — pagination followed, users/postings/offers/interviews/get_opportunity returned\n- Config & lifecycle — constants, config dict, kwarg fallback, dict precedence, context manager, ensure_client reuse, missing_credentials"
+    }
+  ]
+}
