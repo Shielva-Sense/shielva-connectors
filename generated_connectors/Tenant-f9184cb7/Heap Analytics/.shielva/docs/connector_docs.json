@@ -1,0 +1,72 @@
+{
+  "connector_type": "heap",
+  "display_name": "Heap Analytics",
+  "version": "1.0.0",
+  "description": "Heap product analytics connector — syncs users, events, segments, and user properties. Supports server-side event tracking and user identification via Heap's REST and Server-Side APIs.",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "Heap is an auto-capture product analytics platform. This connector reads user lists, aggregated event counts, and segment definitions from Heap's REST API, and can push server-side events and user properties via the Heap Server-Side API."
+    },
+    {
+      "id": "auth",
+      "title": "Authentication",
+      "content": "Authentication uses a Bearer token passed in the Authorization header (Authorization: Bearer {api_key}). Server-side write operations (track, identify) additionally require the app_id in the POST body. Obtain your API key from Heap Dashboard → Account → Privacy & Security → API Keys."
+    },
+    {
+      "id": "install_fields",
+      "title": "Required Install Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "description": "Your Heap Bearer token. Found under Account → Privacy & Security → API Keys."
+        },
+        {
+          "key": "account_id",
+          "label": "App ID / Account ID",
+          "type": "string",
+          "required": true,
+          "description": "Your Heap App ID (numeric). Found in the Heap dashboard URL or under Account → General."
+        }
+      ]
+    },
+    {
+      "id": "capabilities",
+      "title": "Capabilities",
+      "items": [
+        {"name": "sync", "description": "Full sync of users, events, and segments"},
+        {"name": "health_check", "description": "Validate credentials and API reachability"},
+        {"name": "track", "description": "Server-side event tracking via POST /api/track"},
+        {"name": "identify", "description": "Server-side user identification via POST /api/identify"}
+      ]
+    },
+    {
+      "id": "resources",
+      "title": "Resources Synced",
+      "items": [
+        {"name": "users", "description": "Identified users and their custom properties"},
+        {"name": "events", "description": "Aggregated event counts over configurable time ranges"},
+        {"name": "segments", "description": "User segments defined in the Heap project"},
+        {"name": "user_properties", "description": "Per-user property sets (fetched on demand)"}
+      ]
+    },
+    {
+      "id": "rate_limits",
+      "title": "Rate Limits",
+      "content": "Heap enforces per-account rate limits. The connector automatically retries on 429 responses with exponential backoff and honours the Retry-After header. Reduce sync frequency if persistent throttling occurs."
+    },
+    {
+      "id": "api_reference",
+      "title": "API Reference",
+      "links": [
+        {"label": "Heap REST API", "url": "https://developers.heap.io/reference/"},
+        {"label": "Heap Server-Side API", "url": "https://developers.heap.io/reference/server-side-api"},
+        {"label": "Heap Privacy & Security", "url": "https://help.heap.io/privacy-and-security/"}
+      ]
+    }
+  ]
+}
