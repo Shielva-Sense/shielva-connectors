@@ -1,0 +1,28 @@
+{
+  "connector_type": "freshservice",
+  "display_name": "Freshservice",
+  "provider": "freshworks",
+  "service": "freshservice",
+  "description": "Connect to Freshservice ITSM to sync tickets, assets (CMDB), agents, groups, service catalog items, and change requests.",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Freshservice API key. Found in Profile Settings → Your API Key (or Admin → Agents → Your Agent → API Key)."
+    },
+    {
+      "key": "subdomain",
+      "label": "Subdomain (e.g. mycompany)",
+      "type": "string",
+      "required": true,
+      "description": "Your Freshservice subdomain. If your URL is https://mycompany.freshservice.com, enter mycompany."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["tickets", "assets", "agents", "groups", "service_catalog_items", "changes"],
+  "category": "itsm"
+}
