@@ -1,0 +1,20 @@
+{
+  "connector_type": "productboard",
+  "display_name": "Productboard",
+  "provider": "productboard",
+  "service": "productboard",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Productboard to sync features, components, products, notes, and users.",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Productboard API token. Generate it from Productboard → Account settings → Integrations → API Access."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "category": "product_management"
+}
