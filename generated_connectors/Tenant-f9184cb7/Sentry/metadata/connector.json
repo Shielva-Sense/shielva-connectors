@@ -1,0 +1,35 @@
+{
+  "connector_type": "sentry",
+  "display_name": "Sentry",
+  "provider": "sentry",
+  "service": "sentry",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "auth_token",
+      "label": "Auth Token",
+      "type": "password",
+      "required": true,
+      "help": "Your Sentry Auth Token with issues:read, project:read, and release:read scopes."
+    },
+    {
+      "key": "organization_slug",
+      "label": "Organization Slug",
+      "type": "string",
+      "required": true,
+      "help": "The slug of your Sentry organization (e.g. my-org). Find it in Settings > General Settings."
+    },
+    {
+      "key": "base_url",
+      "label": "Sentry URL (default: https://sentry.io)",
+      "type": "string",
+      "required": false,
+      "help": "Leave blank for Sentry Cloud. For self-hosted Sentry, enter your instance URL (e.g. https://sentry.mycompany.com)."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["issues", "projects", "releases", "events"],
+  "pagination": "link_header_cursor",
+  "description": "Syncs Sentry issues, projects, releases, and issue events into the Shielva knowledge base for AI-powered error analysis and incident response."
+}
