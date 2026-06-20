@@ -1,0 +1,87 @@
+{
+  "title": "Gorgias Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Gorgias connector integrates with the **Gorgias eCommerce helpdesk API** to sync customer support data into the Shielva knowledge base. Gorgias is a helpdesk built for eCommerce brands, centralising support from email, chat, social, SMS, and voice with native Shopify, BigCommerce, and Magento order data.\n\n**What it syncs:**\n- **Tickets** — support conversations across all channels (email, chat, phone, Instagram, Facebook, etc.), including messages, status, assignee, and channel metadata\n- **Customers** — customer profiles with contact channel data and ticket history\n- **Tags** — all workspace tags used to categorize tickets\n- **Macros** — saved response templates and automation macros (sent responses, internal notes, tagging rules)\n- **Satisfaction surveys** — CSAT responses attached to closed tickets\n\n**Who uses it:** eCommerce support teams that want to bring Gorgias ticket history, customer data, and workflow documentation into the Shielva knowledge base for AI-assisted support analysis.\n\n**Key capabilities:**\n- HTTP Basic Auth using email + API key (no OAuth flow required)\n- Cursor-based pagination via `meta.next_cursor` for tickets, customers, and macros\n- Tags fetched in a single non-paginated call\n- Configurable page size (default 100 records per page)\n- Per-resource normalization with SHA-256 stable document IDs\n- Exponential back-off retry (up to 3 attempts) with `Retry-After` header support\n- Multi-tenant: every document stamped with `connector_id` and `tenant_id`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### Prerequisites\n- A Gorgias account with **Admin** or **Agent** access\n- An API key generated at Gorgias → Settings → REST API\n\n### Step 1 — Gather your credentials\n\nYou need three values:\n- **Account subdomain** — the part before `.gorgias.com` in your workspace URL (e.g. if your workspace is `mystore.gorgias.com`, the account is `mystore`)\n- **Email** — the email address of your Gorgias account\n- **API key** — generated at Settings → REST API → Generate API Key\n\n### Step 2 — Install the connector\n\n```python\nimport asyncio\nfrom connector import GorgiasConnector\n\nconnector = GorgiasConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"gorgias-01\",\n    config={\n        \"account\": \"mystore\",\n        \"email\": \"support@mystore.com\",\n        \"api_key\": \"your-api-key-here\",\n    },\n)\nresult = asyncio.run(connector.install())\nprint(result.health, result.message)\n# ConnectorHealth.HEALTHY  Connected to Gorgias account: My Store\n```\n\n### Step 3 — Verify health\n\n```python\nhealth = asyncio.run(connector.health_check())\nprint(health.health, health.message)\n# ConnectorHealth.HEALTHY  Gorgias API reachable. Account: My Store\n```\n\n### Step 4 — Run your first sync\n\n```python\nresult = asyncio.run(connector.sync(kb_id=\"my-knowledge-base\"))\nprint(f\"{result.status}: {result.documents_synced}/{result.documents_found} records synced\")\n# SyncStatus.COMPLETED: 1247/1247 records synced\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Gorgias connector uses **HTTP Basic Authentication** — no OAuth flow. Gorgias encodes `email:api_key` in Base64 and sends it as the `Authorization: Basic <encoded>` header on every request.\n\n### Auth details\n\n| Field | Value |\n|-------|-------|\n| Auth type | HTTP Basic Auth |\n| Header | `Authorization: Basic base64(email:api_key)` |\n| Username | Your Gorgias account email address |\n| Password | Your Gorgias API key |\n\n### Generating an API key\n\n1. Log into your Gorgias workspace at `https://{account}.gorgias.com`\n2. Go to **Settings → REST API**\n3. Click **Generate API Key**\n4. Copy the key immediately — it will not be shown again\n\n### Validation\n\nOn `install()` and `health_check()`, the connector calls `GET https://{account}.gorgias.com/api/account`. A `200` response confirms the credentials are valid. A `401` response raises `GorgiasAuthError` with `INVALID_CREDENTIALS`.\n\n### Base URL pattern\n\nAll API calls target `https://{account}.gorgias.com/api/` where `account` is your subdomain. The connector builds this URL automatically from the `account` config field."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Pass all fields in the `config` dict when constructing `GorgiasConnector`. Alternatively, pass them as keyword arguments (`account=`, `email=`, `api_key=`) for standalone or test usage.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `account` | string | Yes | Your Gorgias subdomain — the part before `.gorgias.com` in your workspace URL. Example: for `mystore.gorgias.com`, enter `mystore`. |\n| `email` | string | Yes | The email address associated with your Gorgias account. Used as the Basic Auth username. |\n| `api_key` | password | Yes | Your Gorgias REST API key. Generated at Settings → REST API. Stored encrypted by Shielva. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. `GorgiasConnector` supports the async context manager protocol (`async with GorgiasConnector(...) as c:`). The HTTP client is lazily initialized on first use.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /api/account`. On success, returns the Gorgias account name in the message. On 401, returns `INVALID_CREDENTIALS`. On any other exception, returns `FAILED`.\n\n**Returns:** `InstallResult`\n- `health`: `ConnectorHealth.HEALTHY` or `OFFLINE`\n- `auth_status`: `AuthStatus.CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED`\n- `message`: includes account name on success, error details on failure\n\n```python\nconnector = GorgiasConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"gorgias-01\",\n    config={\"account\": \"mystore\", \"email\": \"support@mystore.com\", \"api_key\": \"...\"},\n)\nresult = await connector.install()\n# InstallResult(health=HEALTHY, auth_status=CONNECTED,\n#   message='Connected to Gorgias account: My Store')\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /api/account` and returns the current health status. Distinguishes between auth failures (`GorgiasAuthError`) and network failures (`GorgiasNetworkError`).\n\n**Returns:** `HealthCheckResult`\n- `health`: `ConnectorHealth.HEALTHY` or `DEGRADED`\n- `auth_status`: `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED`\n- `message`: includes account name on success\n\n```python\nhealth = await connector.health_check()\nif health.health.value == \"healthy\":\n    print(health.message)\n# Gorgias API reachable. Account: My Store\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs tickets, customers, tags, and macros in sequence. Each resource type is paginated independently. A failure on a non-ticket resource (customers, tags, macros) is logged but does not abort the sync. A failure fetching the tickets list returns `SyncStatus.FAILED` immediately.\n\n**Parameters:**\n- `full` (bool, default `False`) — reserved; currently always performs a full fetch\n- `since` (datetime, optional) — reserved for future incremental sync\n- `kb_id` (str, optional) — knowledge base ID to ingest documents into\n\n**Returns:** `SyncResult`\n- `status`: `SyncStatus.COMPLETED` (zero failures) or `PARTIAL`\n- `documents_found`: total records across all resource types\n- `documents_synced`: successfully normalized and ingested\n- `documents_failed`: records that raised an exception during normalization\n\n```python\nresult = await connector.sync(kb_id=\"support-kb\")\nprint(result.status, result.documents_synced, result.documents_found)\n# SyncStatus.COMPLETED 1247 1247\n```"
+        },
+        {
+          "id": "method-list-tickets",
+          "title": "list_tickets()",
+          "content": "Returns one page of Gorgias tickets. Supports both page-number and cursor pagination.\n\n**Parameters:**\n- `page` (int, default `0`) — page number (offset-based)\n- `limit` (int, default `100`) — records per page\n- `cursor` (str, optional) — cursor from `meta.next_cursor` of a previous response\n- `**kwargs` — additional filter params forwarded to the API (e.g. `status`, `channel`)\n\n**Returns:** `List[Dict]` — list of raw ticket dicts from the API\n\n```python\ntickets = await connector.list_tickets(limit=50)\nfor t in tickets:\n    print(t[\"id\"], t[\"subject\"], t[\"status\"])\n```"
+        },
+        {
+          "id": "method-get-ticket",
+          "title": "get_ticket()",
+          "content": "Fetches a single Gorgias ticket by its integer ID.\n\n**Parameters:**\n- `ticket_id` (int, required)\n\n**Returns:** `Dict` — full ticket resource\n\n```python\nticket = await connector.get_ticket(ticket_id=12345)\nprint(ticket[\"subject\"], ticket[\"messages\"])\n```"
+        },
+        {
+          "id": "method-list-customers",
+          "title": "list_customers()",
+          "content": "Returns one page of Gorgias customer profiles.\n\n**Parameters:**\n- `page` (int, default `0`)\n- `limit` (int, default `100`)\n- `cursor` (str, optional)\n\n**Returns:** `List[Dict]`\n\n```python\ncustomers = await connector.list_customers(limit=50)\nfor c in customers:\n    print(c[\"id\"], c[\"email\"])\n```"
+        },
+        {
+          "id": "method-get-customer",
+          "title": "get_customer()",
+          "content": "Fetches a single Gorgias customer by their integer ID.\n\n**Parameters:**\n- `customer_id` (int, required)\n\n**Returns:** `Dict`\n\n```python\ncustomer = await connector.get_customer(customer_id=67890)\nprint(customer[\"name\"], customer[\"channels\"])\n```"
+        },
+        {
+          "id": "method-list-tags",
+          "title": "list_tags()",
+          "content": "Fetches all workspace tags in a single non-paginated call.\n\n**Parameters:** none\n\n**Returns:** `List[Dict]`\n\n```python\ntags = await connector.list_tags()\nfor tag in tags:\n    print(tag[\"name\"])\n```"
+        },
+        {
+          "id": "method-list-macros",
+          "title": "list_macros()",
+          "content": "Returns one page of Gorgias macros (response templates and automation rules).\n\n**Parameters:**\n- `page` (int, default `0`)\n- `limit` (int, default `100`)\n- `cursor` (str, optional)\n\n**Returns:** `List[Dict]`\n\n```python\nmacros = await connector.list_macros(limit=50)\nfor m in macros:\n    print(m[\"name\"], m[\"actions\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Typed exceptions are defined in `exceptions.py`. All HTTP calls are wrapped with `with_retry()` which retries up to 3 times on transient failures.\n\n### Exception classes\n\n| Exception | HTTP status | Meaning | Connector behaviour |\n|-----------|-------------|---------|---------------------|\n| `GorgiasAuthError` | 401 | Invalid credentials (bad email or API key) | `install()` and `health_check()` return `INVALID_CREDENTIALS`; not retried |\n| `GorgiasError` | 4xx / 5xx | General API error (quota, not found, server error) | `sync()` returns `FAILED` if ticket fetch fails; other resource failures are swallowed and counted in `documents_failed` |\n| `GorgiasNetworkError` | Network-level | Connection timeout, DNS failure | `health_check()` returns `DEGRADED / FAILED`; retried up to 3 times |\n\n### Retry behaviour\n- `with_retry()` retries on `GorgiasNetworkError` and 5xx responses\n- The connector respects the `Retry-After` header on 429 responses\n- `GorgiasAuthError` is never retried\n- Rate limit: Gorgias allows approximately 2 requests per second\n\n### Missing credentials\nIf any of `account`, `email`, or `api_key` is missing, `install()` and `health_check()` return `OFFLINE / MISSING_CREDENTIALS` with a list of the missing field names."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `install()` returns `MISSING_CREDENTIALS`\n**Cause:** One or more of `account`, `email`, or `api_key` is empty.\n**Fix:** The error message lists which fields are missing. Fill them in. Example message: `Missing required fields: account, api_key`.\n\n### `install()` returns `INVALID_CREDENTIALS` (`GorgiasAuthError`)\n**Cause:** The email or API key is incorrect, or the API key has been revoked.\n**Fix:** Generate a new API key at Gorgias → Settings → REST API → Generate API Key, and update the connector config.\n\n### `health_check()` returns `DEGRADED` with a `GorgiasNetworkError`\n**Cause:** Gorgias is unreachable (DNS failure, timeout, or Gorgias outage).\n**Fix:** Check https://status.gorgias.com. Retry after the outage resolves.\n\n### `sync()` returns `SyncStatus.FAILED`\n**Cause:** The tickets fetch failed (the first and only fatal failure path in sync).\n**Fix:** Check the `message` field on `SyncResult` for the error. Usually a `GorgiasError` with the HTTP status and response body from Gorgias.\n\n### `sync()` shows `documents_failed > 0` but `PARTIAL` status\n**Cause:** Some records failed during normalization (e.g. unexpected field shapes).\n**Fix:** Review connector logs for the normalization exception. Customers, tags, and macros failing during normalization do not abort the sync.\n\n### Account subdomain confusion\n**Cause:** The `account` field requires only the subdomain, not the full URL.\n**Fix:** If your workspace URL is `https://mystore.gorgias.com`, use `account=mystore` — not the full URL."
+    }
+  ]
+}
