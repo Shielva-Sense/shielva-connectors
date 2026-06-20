@@ -1,0 +1,42 @@
+{
+  "connector_type": "servicenow",
+  "name": "ServiceNow",
+  "display_name": "ServiceNow",
+  "description": "Connect to ServiceNow to sync incidents, change requests, users, and CMDB items into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "instance",
+      "label": "Instance Name",
+      "type": "string",
+      "required": true,
+      "description": "Your ServiceNow instance name (e.g. 'dev12345' from dev12345.service-now.com)."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "string",
+      "required": true,
+      "description": "ServiceNow username with read access to incidents and change requests."
+    },
+    {
+      "key": "password",
+      "label": "Password",
+      "type": "password",
+      "required": true,
+      "description": "Password for the ServiceNow user account."
+    }
+  ],
+  "capabilities": [
+    "list_incidents",
+    "get_incident",
+    "list_changes",
+    "get_change",
+    "list_users",
+    "list_cmdb_items",
+    "sync"
+  ],
+  "provider": "servicenow",
+  "category": "itsm"
+}
