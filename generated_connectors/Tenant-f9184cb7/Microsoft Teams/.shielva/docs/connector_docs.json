@@ -5,34 +5,14 @@
     {
       "id": "overview",
       "title": "Overview",
-      "content": "The Microsoft Teams connector integrates with Microsoft Graph API v1.0 to sync team channel messages and conversations into the Shielva knowledge base. It uses OAuth2 via Azure Active Directory for secure, delegated access.",
-      "children": [
-        {
-          "id": "connector-type",
-          "title": "Connector Type",
-          "content": "`microsoft_teams`"
-        },
-        {
-          "id": "provider",
-          "title": "Provider",
-          "content": "`microsoft`"
-        },
-        {
-          "id": "auth-type",
-          "title": "Authentication Type",
-          "content": "`oauth2` — Azure Active Directory OAuth2 Authorization Code Flow"
-        },
-        {
-          "id": "api-base",
-          "title": "API Base URL",
-          "content": "`https://graph.microsoft.com/v1.0/`"
-        },
-        {
-          "id": "supported-operations",
-          "title": "Supported Operations",
-          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates client_id and client_secret are present |\n| `authorize()` | Returns Microsoft OAuth2 authorization URL |\n| `health_check()` | Calls GET /me to verify access token validity |\n| `sync()` | Fetches messages from all joined teams and channels |\n| `list_teams()` | Lists all joined Microsoft Teams |\n| `list_channels(team_id)` | Lists channels within a team |\n| `list_messages(team_id, channel_id)` | Lists messages in a channel with pagination |\n| `get_message(team_id, channel_id, message_id)` | Fetches a single message |"
-        }
-      ]
+      "content": "The **Microsoft Teams connector** integrates Shielva with the Microsoft platform via its public API. It is implemented as `MicrosoftTeamsConnector`, a subclass of `BaseConnector`, and is responsible for two complementary capabilities: **ingesting data** from Microsoft Teams into the Shielva knowledge base as `NormalizedDocument` records, and **exposing direct API methods** that downstream Shielva workflows can call to read or mutate live Microsoft Teams resources.\n\nSync teams, channels, and messages from Microsoft Teams.\n\n### Business problem solved\n\nTeams using Microsoft Teams typically have valuable data trapped behind an API: customer records, conversations, configuration, analytics, files. Wiring each of those into a search index, an LLM context window, or an automation by hand requires writing the same authentication, pagination, retry, and normalization code repeatedly. This connector packages all of that \u2014 authentication (OAUTH2), paginated sync, error mapping, exception hierarchy, document normalization \u2014 behind a small, stable interface so application code never touches the underlying REST endpoints directly.\n\n### Connector identity\n\n| Field | Value |\n|-------|-------|\n| Provider | `Microsoft` |\n| Service | `microsoft_teams` |\n| Connector class | `MicrosoftTeamsConnector` |\n| Connector type | `microsoft_teams` |\n| Auth type | `oauth2` |\n| Version | `1.0.0` |\n| SDK package | `requests` |",
+      "children": []
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Microsoft Teams connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import MicrosoftTeamsConnector\n\nconfig = {\n    \"client_id\": \"<string>\"\n    \"client_secret\": \"<password>\"\n    \"tenant_hint\": \"<string>\"\n    \"redirect_uri\": \"<string>\"\n}\n\nconnector = MicrosoftTeamsConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"microsoft_teams_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_teams`\n\n```python\nresult = await connector.list_teams()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Microsoft Teams data into Shielva.",
+      "children": []
     },
     {
       "id": "authentication",
@@ -57,9 +37,15 @@
         {
           "id": "azure-setup",
           "title": "Azure AD Setup Steps",
-          "content": "1. Go to Azure Portal → Azure Active Directory → App registrations\n2. Click **New registration** and name your app\n3. Set the Redirect URI to your callback URL\n4. Navigate to **Certificates & secrets** → create a Client secret\n5. Navigate to **API permissions** → Add delegated permissions for Microsoft Graph\n6. Grant admin consent for your organization"
+          "content": "1. Go to Azure Portal \u2192 Azure Active Directory \u2192 App registrations\n2. Click **New registration** and name your app\n3. Set the Redirect URI to your callback URL\n4. Navigate to **Certificates & secrets** \u2192 create a Client secret\n5. Navigate to **API permissions** \u2192 Add delegated permissions for Microsoft Graph\n6. Grant admin consent for your organization"
         }
       ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `client_id` | Application (client) ID | `string` | \u2705 |  |\n| `client_secret` | Client Secret | `password` | \u2705 |  |\n| `tenant_hint` | Azure AD Tenant (optional) | `string` | \u2014 |  |\n| `redirect_uri` | Redirect URI (optional) | `string` | \u2014 |  |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
     },
     {
       "id": "api-methods",
@@ -69,12 +55,12 @@
         {
           "id": "install",
           "title": "install()",
-          "content": "Validates that `client_id` and `client_secret` are present in the connector configuration.\n\n**Returns**: `InstallResult` with health `HEALTHY` if credentials are present, `OFFLINE` if missing.\n\n**Note**: Does not make any API calls — use `health_check()` to verify connectivity."
+          "content": "Validates that `client_id` and `client_secret` are present in the connector configuration.\n\n**Returns**: `InstallResult` with health `HEALTHY` if credentials are present, `OFFLINE` if missing.\n\n**Note**: Does not make any API calls \u2014 use `health_check()` to verify connectivity."
         },
         {
           "id": "authorize",
           "title": "authorize(state?)",
-          "content": "Generates the Microsoft OAuth2 authorization URL the user should be redirected to.\n\n**Parameters**:\n- `state` (optional): CSRF protection state parameter\n\n**Returns**: `str` — full authorization URL with scopes, client_id, and redirect_uri encoded."
+          "content": "Generates the Microsoft OAuth2 authorization URL the user should be redirected to.\n\n**Parameters**:\n- `state` (optional): CSRF protection state parameter\n\n**Returns**: `str` \u2014 full authorization URL with scopes, client_id, and redirect_uri encoded."
         },
         {
           "id": "health-check",
@@ -89,51 +75,53 @@
         {
           "id": "list-teams",
           "title": "list_teams()",
-          "content": "Calls `GET /me/joinedTeams` to list all Microsoft Teams the authorized user has joined.\n\n**Returns**: `List[Dict]` — list of team objects with `id`, `displayName`, `description`."
+          "content": "Calls `GET /me/joinedTeams` to list all Microsoft Teams the authorized user has joined.\n\n**Returns**: `List[Dict]` \u2014 list of team objects with `id`, `displayName`, `description`."
         },
         {
           "id": "list-channels",
           "title": "list_channels(team_id)",
-          "content": "Calls `GET /teams/{team_id}/channels` to list all channels within a team.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n\n**Returns**: `List[Dict]` — list of channel objects with `id`, `displayName`, `membershipType`."
+          "content": "Calls `GET /teams/{team_id}/channels` to list all channels within a team.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n\n**Returns**: `List[Dict]` \u2014 list of channel objects with `id`, `displayName`, `membershipType`."
         },
         {
           "id": "list-messages",
           "title": "list_messages(team_id, channel_id)",
-          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages` and automatically follows `@odata.nextLink` for pagination.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n\n**Returns**: `List[Dict]` — all message objects including body, sender, timestamps, and attachments."
+          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages` and automatically follows `@odata.nextLink` for pagination.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n\n**Returns**: `List[Dict]` \u2014 all message objects including body, sender, timestamps, and attachments."
         },
         {
           "id": "get-message",
           "title": "get_message(team_id, channel_id, message_id)",
-          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages/{message_id}` to fetch a single message.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n- `message_id`: The message's unique identifier\n\n**Returns**: `Dict` — single message object."
+          "content": "Calls `GET /teams/{team_id}/channels/{channel_id}/messages/{message_id}` to fetch a single message.\n\n**Parameters**:\n- `team_id`: The team's unique identifier\n- `channel_id`: The channel's unique identifier\n- `message_id`: The message's unique identifier\n\n**Returns**: `Dict` \u2014 single message object."
         },
         {
           "id": "normalize-message",
           "title": "normalize_message(msg, team_id, channel_id)",
-          "content": "Converts a Microsoft Graph message object into a `ConnectorDocument`.\n\n**Stable ID**: `SHA-256(team_id + ':' + channel_id + ':' + message_id)[:16]`\n\n**Document fields**:\n- `id`: 16-char hex SHA-256 prefix\n- `title`: Formatted `Team:{id[:8]} — Channel:{id[:8]} — @{sender}`\n- `content`: Structured text with team, channel, sender, timestamp, body, attachments\n- `type`: `teams_message`\n- `metadata`: team_id, channel_id, message_id, sender_name, sender_id, created_at, importance, reply_to_id, attachments_count, source"
+          "content": "Converts a Microsoft Graph message object into a `ConnectorDocument`.\n\n**Stable ID**: `SHA-256(team_id + ':' + channel_id + ':' + message_id)[:16]`\n\n**Document fields**:\n- `id`: 16-char hex SHA-256 prefix\n- `title`: Formatted `Team:{id[:8]} \u2014 Channel:{id[:8]} \u2014 @{sender}`\n- `content`: Structured text with team, channel, sender, timestamp, body, attachments\n- `type`: `teams_message`\n- `metadata`: team_id, channel_id, message_id, sender_name, sender_id, created_at, importance, reply_to_id, attachments_count, source"
         }
       ]
     },
     {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Every record this connector emits into the Shielva knowledge base is a `ConnectorDocument` \u2014 a normalized envelope with a stable `source_id`, a resource type discriminator, and a payload of provider-specific fields. The shape per resource is documented below; the contract is enforced by the `normalize_*` helpers in `helpers/utils.py` (or `helpers/normalizer.py`).\n\n### Envelope fields (shared)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `source_id` | `str` | SHA-256-derived 16-char ID, stable across resyncs |\n| `resource_type` | `str` | Discriminator: `message`, `contact`, `event`, etc. |\n| `payload` | `dict` | Provider-native fields, untouched JSON-safe values |\n| `created_at` | `str` | RFC 3339 timestamp from the provider |\n| `updated_at` | `str` | RFC 3339 timestamp from the provider |\n| `tenant_id` | `str` | Multi-tenant scope \u2014 never `None` for stored records |\n\n### Resource models\n\n#### `ConnectorDocument`\n\n| Field | Type |\n|-------|------|\n| `id` | `str` |\n| `title` | `str` |\n| `content` | `str` |\n| `type` | `str` |\n| `metadata` | `Dict[str, Any]` |\n\n#### `InstallResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `connector_id` | `str` |\n| `message` | `str` |\n\n#### `HealthCheckResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `message` | `str` |\n\n#### `SyncResult`\n\n| Field | Type |\n|-------|------|\n| `status` | `SyncStatus` |\n| `documents_found` | `int` |\n| `documents_synced` | `int` |\n| `documents_failed` | `int` |\n| `message` | `str` |\n| `documents` | `List[ConnectorDocument]` |\n\n\n### `source_id` determinism\n\nAll resource IDs are computed by SHA-256-hashing the provider's stable identifier (e.g. message ID, contact ID, event UUID) plus the resource type, then truncating to 16 characters. This guarantees that re-syncing the same resource produces the same Shielva document ID \u2014 enabling idempotent ingestion and incremental updates without duplicates.",
+      "children": []
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Microsoft Teams, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: _no optional feature flags set_.",
+      "children": []
+    },
+    {
       "id": "error-handling",
       "title": "Error Handling",
-      "content": "The connector uses a typed exception hierarchy for precise error handling and retry logic.",
-      "children": [
-        {
-          "id": "exception-hierarchy",
-          "title": "Exception Hierarchy",
-          "content": "```\nMicrosoftTeamsError (base)\n├── MicrosoftTeamsAuthError      — 401/403 responses; not retried\n├── MicrosoftTeamsNetworkError   — connection/timeout/5xx; retried with backoff\n├── MicrosoftTeamsNotFoundError  — 404 responses; not retried\n└── MicrosoftTeamsRateLimitError — 429 responses; retried with backoff\n```"
-        },
-        {
-          "id": "retry-policy",
-          "title": "Retry Policy",
-          "content": "The `with_retry()` utility applies exponential backoff:\n- **Max attempts**: 3 (configurable)\n- **Base delay**: 1.0 second, doubled each retry\n- **Auth errors**: NOT retried — require re-authorization\n- **Network/rate-limit errors**: Retried up to max_attempts"
-        },
-        {
-          "id": "http-status-mapping",
-          "title": "HTTP Status Code Mapping",
-          "content": "| Status | Exception |\n|--------|----------|\n| 401 | `MicrosoftTeamsAuthError` |\n| 403 | `MicrosoftTeamsAuthError` |\n| 404 | `MicrosoftTeamsNotFoundError` |\n| 429 | `MicrosoftTeamsRateLimitError` |\n| 5xx | `MicrosoftTeamsNetworkError` |\n| Network failure | `MicrosoftTeamsNetworkError` |"
-        }
-      ]
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `MicrosoftTeamsError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nMicrosoftTeamsError(Exception)\n  MicrosoftTeamsAuthError(MicrosoftTeamsError)\n  MicrosoftTeamsNetworkError(MicrosoftTeamsError)\n  MicrosoftTeamsNotFoundError(MicrosoftTeamsError)\n  MicrosoftTeamsRateLimitError(MicrosoftTeamsError)\n```\n\n### When each is raised\n\n- **`MicrosoftTeamsError`** \u2014 Base exception for all Microsoft Teams connector errors.\n- **`MicrosoftTeamsAuthError`** \u2014 Raised on authentication failures \u2014 invalid token, expired token, insufficient permissions.\n- **`MicrosoftTeamsNetworkError`** \u2014 Raised on connection / timeout failures.\n- **`MicrosoftTeamsNotFoundError`** \u2014 Raised when a requested resource does not exist (team not found, channel not found).\n- **`MicrosoftTeamsRateLimitError`** \u2014 Raised when Microsoft Graph API returns 429 Too Many Requests.\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd microsoft_teams_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **122** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `MICROSOFT_TEAMS_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
     },
     {
       "id": "troubleshooting",
@@ -158,9 +146,21 @@
         {
           "id": "scope-consent",
           "title": "Admin Consent for ChannelMessage.Read.All",
-          "content": "`ChannelMessage.Read.All` is a highly privileged scope that requires admin consent:\n1. Navigate to Azure Portal → Azure Active Directory → App registrations → Your App → API permissions\n2. Click **Grant admin consent for [Your Organization]**\n3. A Global Administrator must approve this consent\n4. Without this consent, `list_messages()` will return 403"
+          "content": "`ChannelMessage.Read.All` is a highly privileged scope that requires admin consent:\n1. Navigate to Azure Portal \u2192 Azure Active Directory \u2192 App registrations \u2192 Your App \u2192 API permissions\n2. Click **Grant admin consent for [Your Organization]**\n3. A Global Administrator must approve this consent\n4. Without this consent, `list_messages()` will return 403"
         }
       ]
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Microsoft Teams account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Microsoft Teams against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Microsoft Teams propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `MicrosoftTeamsConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Microsoft Teams connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Microsoft Teams connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
     }
   ]
 }
