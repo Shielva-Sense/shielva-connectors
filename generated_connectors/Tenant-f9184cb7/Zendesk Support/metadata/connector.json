@@ -1,0 +1,11 @@
+{
+  "connector_type": "zendesk",
+  "display_name": "Zendesk",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "email", "label": "Agent Email", "type": "string", "required": true},
+    {"key": "api_token", "label": "API Token", "type": "password", "required": true},
+    {"key": "subdomain", "label": "Zendesk Subdomain", "type": "string", "required": true}
+  ]
+}
