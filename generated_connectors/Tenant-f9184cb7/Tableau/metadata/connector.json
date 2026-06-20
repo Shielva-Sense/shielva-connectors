@@ -1,0 +1,127 @@
+{
+  "connector_type": "tableau",
+  "connector_id": "tableau",
+  "name": "Tableau",
+  "provider": "Tableau",
+  "service": "Tableau",
+  "version": "1.0.0",
+  "description": "Sync Tableau workbooks, views, and datasources from Tableau Server or Tableau Cloud into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "server_url",
+      "label": "Server URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://tableau.example.com",
+      "help": "The base URL of your Tableau Server or Tableau Cloud instance (e.g. https://10ax.online.tableau.com)."
+    },
+    {
+      "key": "pat_name",
+      "label": "Personal Access Token Name",
+      "type": "string",
+      "required": true,
+      "placeholder": "my-token-name",
+      "help": "The name of the Personal Access Token created in your Tableau account settings."
+    },
+    {
+      "key": "pat_secret",
+      "label": "Personal Access Token Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "••••••••••••••••",
+      "help": "The secret value of the Personal Access Token. This is only shown once at creation time."
+    },
+    {
+      "key": "site_name",
+      "label": "Site Name",
+      "type": "string",
+      "required": false,
+      "placeholder": "mysite",
+      "help": "The content URL of the Tableau site (leave blank for the default site on Tableau Server)."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate PAT credentials by signing in to the Tableau REST API.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Sign in and retrieve current site info, returning HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Content",
+      "description": "Sign in then fetch workbooks, views, and datasources; normalize each to ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_workbooks",
+      "name": "List Workbooks",
+      "description": "Return all workbooks for the current site (auto-paginated).",
+      "category": "workbooks",
+      "endpoint": "GET /api/3.21/sites/{site_id}/workbooks"
+    },
+    {
+      "id": "list_views",
+      "name": "List Views",
+      "description": "Return all views for the current site (auto-paginated).",
+      "category": "views",
+      "endpoint": "GET /api/3.21/sites/{site_id}/views"
+    },
+    {
+      "id": "list_datasources",
+      "name": "List Datasources",
+      "description": "Return all datasources for the current site (auto-paginated).",
+      "category": "datasources",
+      "endpoint": "GET /api/3.21/sites/{site_id}/datasources"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all users for the current site (auto-paginated).",
+      "category": "users",
+      "endpoint": "GET /api/3.21/sites/{site_id}/users"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return all projects for the current site.",
+      "category": "projects",
+      "endpoint": "GET /api/3.21/sites/{site_id}/projects"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "workbooks",
+    "views",
+    "datasources",
+    "users",
+    "projects"
+  ],
+  "apis": [
+    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Content", "id": "sync", "category": "sync" },
+    { "name": "List Workbooks", "id": "list_workbooks", "category": "workbooks" },
+    { "name": "List Views", "id": "list_views", "category": "views" },
+    { "name": "List Datasources", "id": "list_datasources", "category": "datasources" },
+    { "name": "List Users", "id": "list_users", "category": "users" },
+    { "name": "List Projects", "id": "list_projects", "category": "projects" }
+  ]
+}
