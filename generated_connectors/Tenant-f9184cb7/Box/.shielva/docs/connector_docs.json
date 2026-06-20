@@ -1,0 +1,185 @@
+{
+  "title": "Box Connector Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "1. Overview",
+      "content": "The Box connector syncs files from a Box account into the Shielva knowledge base. It uses the Box Content API v2 with OAuth 2.0 Authorization Code flow. Files are normalized into ConnectorDocument objects and ingested with stable, SHA-256 content-addressable IDs. The connector supports recursive folder traversal from root, individual file and folder fetches, full-text search, and paginated listing.",
+      "children": [
+        {
+          "id": "what-this-connector-does",
+          "title": "1.1 What This Connector Does",
+          "content": "The `BoxConnector` class connects to the Box Content API v2 via OAuth 2.0 to read files from the user's Box account. It performs a breadth-first search (BFS) traversal starting from the root folder (folder_id='0'), collecting all files recursively. Each file is normalized into a `ConnectorDocument` and ingested into the Shielva knowledge base.\n\nIt supports full recursive sync with offset-based pagination, per-file error isolation (individual failed normalizations are logged and counted without aborting the batch), exponential-backoff retry on 429 and network errors via `with_retry()`, and multi-tenant ID namespacing via SHA-256 stable IDs (`SHA-256('file:{file_id}')[:16]`).",
+          "children": []
+        },
+        {
+          "id": "connector-identity",
+          "title": "1.2 Connector Identity",
+          "content": "| Field | Value |\n|-------|-------|\n| Provider | Box |\n| Service | Box |\n| Connector Class | `BoxConnector` |\n| Auth Type | OAuth 2.0 (`oauth2`) |\n| Sync Type | Recursive BFS folder traversal |\n| Current Version | 1.0.0 |\n| `CONNECTOR_TYPE` | `\"box\"` |\n| `CONNECTOR_NAME` | `\"Box\"` |\n| `AUTH_URI` | `\"https://account.box.com/api/oauth2/authorize\"` |\n| `TOKEN_URI` | `\"https://api.box.com/api/oauth2/token\"` |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "2. Authentication",
+      "content": "Authentication uses OAuth 2.0 Authorization Code flow. The connector requires a `client_id` and `client_secret` from a Box Developer app with the `root_readonly` scope.",
+      "children": [
+        {
+          "id": "oauth-flow",
+          "title": "2.1 OAuth Flow",
+          "content": "The OAuth flow issues an access token and refresh token scoped to `root_readonly`. The access token is automatically refreshed using the stored refresh token when it expires via `on_token_refresh()`.\n\n- Required scope: `root_readonly`\n- Auth URI: `https://account.box.com/api/oauth2/authorize`\n- Token URI: `https://api.box.com/api/oauth2/token`\n\nThe `authorize()` method, when called with no `auth_code`, returns the authorization URL string. When called with an `auth_code` (SDK only), it exchanges the code for tokens.",
+          "children": []
+        },
+        {
+          "id": "install-fields",
+          "title": "2.2 Install Fields",
+          "content": "| Field | Required | Type | Description |\n|-------|----------|------|-------------|\n| `client_id` | Yes | text | Box App Client ID from the Box Developer Console |\n| `client_secret` | Yes | secret | Box App Client Secret from the Box Developer Console |\n| `redirect_uri` | No | text | Must match the authorized redirect URI registered in the Box app |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "sync-engine",
+      "title": "3. Sync Engine",
+      "content": "The sync engine performs a breadth-first folder traversal from the root (folder_id='0') using offset-based pagination.",
+      "children": [
+        {
+          "id": "sync-algorithm",
+          "title": "3.1 Sync Algorithm",
+          "content": "1. Start with a queue containing only the root folder (id='0').\n2. For each folder in the queue, call `GET /folders/{folder_id}/items` with `limit=100`, `offset=0`.\n3. For each entry in `entries`:\n   - If `type == 'folder'`: add the folder_id to the queue for later traversal.\n   - If `type == 'file'`: call `normalize_file()` to produce a `ConnectorDocument`, then ingest it.\n4. Advance offset if `offset < total_count` to fetch the next page.\n5. Repeat until all folders in the queue are exhausted.\n6. Return `SyncResult` with status `COMPLETED` (0 failures), `PARTIAL` (some failures), or `FAILED` (outer exception).",
+          "children": []
+        },
+        {
+          "id": "retry-policy",
+          "title": "3.2 Retry Policy",
+          "content": "All API calls pass through `with_retry()` with the following parameters:\n- `max_retries=3` for sync folder fetches\n- `max_retries=2` for health checks\n- `max_retries=3` for list_folder, get_file, get_folder, search\n- Base delay: 1.0 s, backoff factor: 2.0x, max delay: 32 s\n- `BoxRateLimitError` and `BoxNetworkError` are retried\n- `BoxAuthError` is NOT retried (re-authorize required)",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "4. API Methods",
+      "content": "The connector exposes the following methods:",
+      "children": [
+        {
+          "id": "install",
+          "title": "4.1 install()",
+          "content": "Validates `client_id` and `client_secret` are present in config.\n\n- Returns `HEALTHY/PENDING` on success (credentials present, OAuth not yet completed)\n- Returns `OFFLINE/MISSING_CREDENTIALS` if either credential is absent\n- When SDK is present, saves config via `save_config()`",
+          "children": []
+        },
+        {
+          "id": "authorize",
+          "title": "4.2 authorize(auth_code, state)",
+          "content": "When called with no `auth_code`: returns the Box OAuth2 authorization URL string.\n\nWhen called with `auth_code` (SDK only): exchanges the authorization code for access and refresh tokens, stores them via `set_token()`, and returns a `TokenInfo` object.\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `auth_code` | str | None | OAuth2 authorization code from redirect callback |\n| `state` | str | None | CSRF state token — included in URL if provided |",
+          "children": []
+        },
+        {
+          "id": "health-check",
+          "title": "4.3 health_check()",
+          "content": "Fetches `GET /users/me` to verify token validity and API connectivity.\n\n- Returns `HEALTHY/CONNECTED` on success — includes `user_name` and `user_login` in standalone mode\n- Returns `DEGRADED/TOKEN_EXPIRED` on `BoxAuthError`\n- Returns `DEGRADED/FAILED` on other `BoxError`",
+          "children": []
+        },
+        {
+          "id": "sync",
+          "title": "4.4 sync(full, since, kb_id, webhook_url)",
+          "content": "Recursive BFS file sync from the Box root folder.\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | False | Reserved for future full-history sync |\n| `since` | datetime | None | Reserved for incremental sync |\n| `kb_id` | str | '' | Knowledge base ID to ingest into |\n| `webhook_url` | str | None | Webhook to notify on ingestion |",
+          "children": []
+        },
+        {
+          "id": "list-folder",
+          "title": "4.5 list_folder(folder_id, limit, offset)",
+          "content": "Returns the raw folder items API response: `{total_count, entries, offset, limit}`. Defaults to root folder (`folder_id='0'`), `limit=100`, `offset=0`.",
+          "children": []
+        },
+        {
+          "id": "get-file",
+          "title": "4.6 get_file(file_id)",
+          "content": "Returns a single raw Box API file metadata object by file ID. Fields include: `id`, `type`, `name`, `size`, `modified_at`, `created_at`, `parent`, `sha1`, `description`, `file_version`, `owned_by`, `shared_link`.",
+          "children": []
+        },
+        {
+          "id": "get-folder",
+          "title": "4.7 get_folder(folder_id)",
+          "content": "Returns a single raw Box API folder metadata object by folder ID. Fields include: `id`, `type`, `name`, `size`, `modified_at`, `created_at`, `parent`, `description`, `owned_by`.",
+          "children": []
+        },
+        {
+          "id": "search",
+          "title": "4.8 search(query, limit, offset)",
+          "content": "Searches Box content using `GET /search`. Returns `{total_count, entries, offset, limit}`. Defaults to `limit=100`, `offset=0`.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "5. Data Model (ConnectorDocument)",
+      "content": "Each synced file is normalized into a `ConnectorDocument` with the following shape:",
+      "children": [
+        {
+          "id": "document-fields",
+          "title": "5.1 File Document Fields",
+          "content": "| Field | Type | Description |\n|-------|------|-------------|\n| `id` | string | `SHA-256('file:{file_id}')[:16]` — stable, content-addressable |\n| `source` | string | Always `'box'` |\n| `title` | string | File name |\n| `content` | string | Human-readable: description, name, size, modified_at, owner, folder |\n| `connector_id` | string | The connector instance ID |\n| `tenant_id` | string | The tenant this document belongs to |\n| `metadata` | dict | See below |",
+          "children": []
+        },
+        {
+          "id": "file-metadata-fields",
+          "title": "5.2 File Metadata Fields",
+          "content": "| Key | Description |\n|-----|-------------|\n| `type` | Always `'file'` |\n| `file_id` | Box file ID |\n| `name` | File name |\n| `size` | File size in bytes |\n| `modified_at` | Last modification timestamp |\n| `created_at` | Creation timestamp |\n| `sha1` | SHA-1 hash of file content (from Box) |\n| `parent_id` | Parent folder ID |\n| `parent_name` | Parent folder name |\n| `owned_by` | Owner display name or login |\n| `owned_by_login` | Owner login/email |\n| `shared_url` | Shared link URL if available |\n| `description` | File description |",
+          "children": []
+        },
+        {
+          "id": "folder-metadata-fields",
+          "title": "5.3 Folder Metadata Fields",
+          "content": "| Key | Description |\n|-----|-------------|\n| `type` | Always `'folder'` |\n| `folder_id` | Box folder ID |\n| `name` | Folder name |\n| `modified_at` | Last modification timestamp |\n| `created_at` | Creation timestamp |\n| `parent_id` | Parent folder ID |\n| `parent_name` | Parent folder name |\n| `owned_by` | Owner display name or login |\n| `owned_by_login` | Owner login/email |\n| `description` | Folder description |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "6. Exceptions",
+      "content": "| Exception | HTTP Status | Retried | Description |\n|-----------|-------------|---------|-------------|\n| `BoxError` | — | No | Base exception for all connector errors |\n| `BoxAuthError` | 401 | No | Authentication failure — invalid or expired token |\n| `BoxRateLimitError` | 429 | Yes | Too Many Requests — quota exceeded |\n| `BoxNetworkError` | 4xx/5xx/network | Yes | Network or unexpected HTTP error |\n| `BoxNotFoundError` | 404 | No | Requested file or folder does not exist |",
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "7. Troubleshooting",
+      "content": "Common issues and resolutions:",
+      "children": [
+        {
+          "id": "401-token-expired",
+          "title": "7.1 401 Token Expired",
+          "content": "The access token has expired and the refresh token could not renew it. Re-authorize the connector by clicking **Reconnect**. `health_check()` returns `DEGRADED/TOKEN_EXPIRED`.",
+          "children": []
+        },
+        {
+          "id": "403-forbidden",
+          "title": "7.2 403 Forbidden",
+          "content": "The authenticated user does not have permission to access the requested resource. Verify the Box account has access to the files being synced and that the app has the `root_readonly` scope approved.",
+          "children": []
+        },
+        {
+          "id": "redirect-uri-mismatch",
+          "title": "7.3 redirect_uri_mismatch",
+          "content": "The redirect URI in Shielva config does not match what is registered in the Box Developer Console. They must be byte-for-byte identical. Check for trailing slashes or `http` vs `https` differences.",
+          "children": []
+        },
+        {
+          "id": "429-rate-limit",
+          "title": "7.4 429 Rate Limit",
+          "content": "The connector retries automatically up to 3 times with exponential backoff (1 s base, 2x factor, 32 s max). Persistent 429s indicate sustained quota exhaustion — reduce sync frequency or contact Box support.",
+          "children": []
+        },
+        {
+          "id": "files-not-syncing",
+          "title": "7.5 Files Not Syncing",
+          "content": "Verify that: (1) the connector health is `HEALTHY/CONNECTED`, (2) the connected Box account has files in its storage, and (3) the correct knowledge base is selected in the sync settings. Also confirm the Box app is not pending review.",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
