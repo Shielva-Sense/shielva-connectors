@@ -1,0 +1,92 @@
+{
+  "title": "WordPress Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The WordPress connector syncs **posts**, **pages**, **users**, **media**, **categories**, and **tags** from a self-hosted or WordPress.com site into the Shielva knowledge base using the **WordPress REST API v2** with **Application Password** authentication (HTTP Basic Auth).\n\nKey capabilities:\n- Incremental sync of posts and pages filtered by `modified_after` timestamp\n- Full sync of users, media, categories, and tags\n- HTTP header-based pagination using `X-WP-TotalPages` for posts/pages/users/media\n- Direct access to individual posts, pages, users, media items, categories, and tags\n- Requires WordPress 5.6+ for Application Password support\n\nTypical users: content teams, SEO analysts, and developers who need WordPress site content — blog posts, documentation pages, media metadata — searchable from within Shielva."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create an Application Password in WordPress\n\n1. Log in to your WordPress Admin panel.\n2. Go to **Users → Profile** (or **Users → All Users → Edit** for a specific user).\n3. Scroll down to the **Application Passwords** section.\n4. Enter an application name (e.g. `Shielva Connector`) and click **Add New Application Password**.\n5. Copy the generated password (shown once, formatted as `xxxx xxxx xxxx xxxx xxxx xxxx`).\n\nRequires **WordPress 5.6 or later**.\n\n### 2. Install the connector\n\n```python\nimport asyncio\nfrom connector import WordPressConnector\n\nasync def main():\n    connector = WordPressConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"wp-myblog\",\n        config={\n            \"site_url\": \"https://myblog.com\",\n            \"username\": \"admin\",\n            \"app_password\": \"xxxx xxxx xxxx xxxx xxxx xxxx\",\n        },\n    )\n    result = await connector.install()\n    print(result)  # InstallResult(health=HEALTHY, auth_status=CONNECTED, ...)\nasyncio.run(main())\n```\n\n### 3. Run your first sync\n\n```python\nasync with WordPressConnector(config={...}) as connector:\n    result = await connector.sync(full=True, kb_id=\"my-kb\")\n    print(f\"Synced {result.documents_synced}/{result.documents_found} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` (Application Password via HTTP Basic Auth)\n\nThe connector uses WordPress **Application Passwords** — a WordPress 5.6+ feature that generates per-application credentials without exposing the user's main password.\n\n### Request header\n\n```\nAuthorization: Basic base64(username:app_password)\n```\n\nThe base URL for all API calls is:\n```\nhttps://{site_url}/wp-json/wp/v2/\n```\n\nTrailing slashes are stripped from `site_url` before constructing URLs.\n\n### Validation endpoint\n\n`GET https://{site_url}/wp-json/wp/v2/users/me`\n\nBoth `install()` and `health_check()` call this endpoint. A successful response confirms the credentials are valid.\n\n### Auth errors\n\n| HTTP Status | Error class | Meaning |\n|---|---|---|\n| 401 | `WordPressAuthError` | Username or application password is incorrect |\n| 403 | `WordPressAuthError` | User exists but lacks permission (role restrictions) |\n\n### WordPress.com note\n\nFor WordPress.com hosted sites, Application Passwords work differently — you may need to use the WordPress.com OAuth flow instead. This connector targets self-hosted WordPress via the REST API."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "| Field | Type | Required | Description |\n|---|---|---|---|\n| `site_url` | string | Yes | Full URL of your WordPress site, e.g. `https://myblog.com`. No trailing slash. |\n| `username` | string | Yes | Your WordPress login username. |\n| `app_password` | password | Yes | Application Password generated in WordPress Admin → Users → Profile → Application Passwords. Format: `xxxx xxxx xxxx xxxx xxxx xxxx`. Requires WordPress 5.6+. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. Sync page size is 100 records per request.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /wp-json/wp/v2/users/me`.\n\n**Returns:** `InstallResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY` or `OFFLINE` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `connector_id` | str | Passed-in connector ID |\n| `message` | str | e.g. `\"Connected to WordPress as 'admin' at https://myblog.com\"` |\n\n```python\nfrom connector import WordPressConnector\n\nasync def example():\n    connector = WordPressConnector(\n        tenant_id=\"t1\",\n        config={\n            \"site_url\": \"https://myblog.com\",\n            \"username\": \"admin\",\n            \"app_password\": \"xxxx xxxx xxxx xxxx xxxx xxxx\",\n        },\n    )\n    result = await connector.install()\n    print(result.auth_status, result.message)\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /wp-json/wp/v2/users/me` and returns the current health state.\n\n**Returns:** `HealthCheckResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `health` | `ConnectorHealth` | `HEALTHY`, `OFFLINE`, or `DEGRADED` |\n| `auth_status` | `AuthStatus` | `CONNECTED`, `MISSING_CREDENTIALS`, `INVALID_CREDENTIALS`, or `FAILED` |\n| `message` | str | e.g. `\"WordPress site https://myblog.com is reachable\"` |\n\n```python\nresult = await connector.health_check()\nprint(result.health, result.message)\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs posts, pages, users, media, categories, and tags into the Shielva knowledge base. Processes each resource type sequentially. Posts and pages respect `since` for incremental sync.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `full` | bool | `False` | If `True`, fetches all records ignoring `since`. |\n| `since` | `datetime \\| None` | `None` | Only fetch posts/pages modified after this timestamp (ISO 8601). Ignored for users, media, categories, tags. |\n| `kb_id` | str | `\"\"` | Knowledge base ID for document ingestion. |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED`, `PARTIAL`, or `FAILED` |\n| `documents_found` | int | Total records fetched across all resource types |\n| `documents_synced` | int | Records successfully normalized and ingested |\n| `documents_failed` | int | Records that failed normalization |\n| `message` | str | Set to the first error if a resource type fails |\n\n```python\nfrom datetime import datetime, timezone\n\nasync def incremental_sync():\n    since = datetime(2024, 6, 1, tzinfo=timezone.utc)\n    result = await connector.sync(since=since, kb_id=\"kb-wordpress\")\n    print(result.status, result.documents_synced)\n```"
+        },
+        {
+          "id": "method-list-posts",
+          "title": "list_posts()",
+          "content": "Returns a list of raw post objects for a single page.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number (1-indexed) |\n| `per_page` | int | 100 | Posts per page (max 100 per WP REST API) |\n| `status` | str | `\"any\"` | Filter by status: `\"publish\"`, `\"draft\"`, `\"private\"`, `\"any\"` |\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress post objects.\n\n```python\nposts = await connector.list_posts(page=1, status=\"publish\")\nfor post in posts:\n    print(post[\"id\"], post[\"title\"][\"rendered\"], post[\"status\"])\n```"
+        },
+        {
+          "id": "method-list-pages",
+          "title": "list_pages()",
+          "content": "Returns a list of raw page objects for a single page of results.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number |\n| `per_page` | int | 100 | Pages per request |\n| `status` | str | `\"any\"` | Page status filter |\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress page objects.\n\n```python\npages = await connector.list_pages(page=1, status=\"publish\")\nfor p in pages:\n    print(p[\"id\"], p[\"title\"][\"rendered\"], p[\"link\"])\n```"
+        },
+        {
+          "id": "method-list-users",
+          "title": "list_users()",
+          "content": "Returns all WordPress users in a single call.\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress user objects.\n\n```python\nusers = await connector.list_users()\nfor user in users:\n    print(user[\"id\"], user[\"name\"], user[\"slug\"])\n```"
+        },
+        {
+          "id": "method-list-media",
+          "title": "list_media()",
+          "content": "Returns a list of raw media items for a single page.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `page` | int | 1 | Page number |\n| `per_page` | int | 100 | Items per page |\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress media objects.\n\n```python\nmedia = await connector.list_media()\nfor item in media:\n    print(item[\"id\"], item[\"media_type\"], item[\"source_url\"])\n```"
+        },
+        {
+          "id": "method-list-categories",
+          "title": "list_categories()",
+          "content": "Returns all WordPress categories in a single call (up to 100).\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress category objects.\n\n```python\ncategories = await connector.list_categories()\nfor cat in categories:\n    print(cat[\"id\"], cat[\"name\"], cat[\"count\"])\n```"
+        },
+        {
+          "id": "method-list-tags",
+          "title": "list_tags()",
+          "content": "Returns all WordPress tags in a single call (up to 100).\n\n**Returns:** `list[dict[str, Any]]` — raw WordPress tag objects.\n\n```python\ntags = await connector.list_tags()\nfor tag in tags:\n    print(tag[\"id\"], tag[\"name\"], tag[\"count\"])\n```"
+        },
+        {
+          "id": "method-get-post",
+          "title": "get_post()",
+          "content": "Fetches a single WordPress post by ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `post_id` | int | The WordPress post ID |\n\n**Returns:** `dict[str, Any]` — raw WordPress post object.\n\n```python\npost = await connector.get_post(42)\nprint(post[\"title\"][\"rendered\"], post[\"content\"][\"rendered\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All error classes are defined in `exceptions.py` and inherit from `WordPressError`.\n\n| Exception class | HTTP Status | When raised |\n|---|---|---|\n| `WordPressError` | any | Base class; carries `message`, `status_code`, `code` |\n| `WordPressAuthError` | 401, 403 | Credentials invalid or user lacks permissions |\n| `WordPressNetworkError` | timeout / 5xx | Transient network or server failure |\n| `WordPressRateLimitError` | 429 | Rate limit exceeded; `retry_after` float is set |\n| `WordPressNotFoundError` | 404 | Resource (post/page/user/media) does not exist |\n\n### Behavior in sync()\n\n- Each resource type (posts, pages, users, media, categories, tags) is synced independently.\n- If a resource type raises `WordPressError`, the error is captured in `overall_error` and the remaining types continue.\n- If all resources fail (found=0 and error set), sync returns `SyncStatus.FAILED`.\n- Individual record normalization failures increment `documents_failed`.\n\n### Pagination detection\n\nFor posts, pages, users, and media: the sync reads `X-WP-TotalPages` from response headers to determine how many pages to fetch. If the header is absent, it stops when a page returns fewer than 100 items. Categories and tags are fetched in a single request."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `auth_status: MISSING_CREDENTIALS`\n\nOne or more of `site_url`, `username`, `app_password` is missing from the config.\n\n### `auth_status: INVALID_CREDENTIALS` (401)\n\n- The application password was copied incorrectly. Re-copy it from WordPress Admin → Users → Profile → Application Passwords.\n- The application password was revoked. Generate a new one.\n- The user account has been deleted or deactivated.\n\n### 403 on install\n\n- The WordPress user does not have sufficient role to access the REST API. Ensure the user has at least the **Author** role.\n- The WordPress site has a security plugin (e.g. Wordfence, iThemes Security) blocking REST API access. Whitelist the Shielva connector IP or disable the restriction.\n\n### WordPress version below 5.6\n\nApplication Passwords were introduced in WordPress 5.6. Older sites must upgrade before the connector will work.\n\n### `WordPressNetworkError` on install\n\n- Verify `site_url` is correct and the site is publicly reachable (or accessible from the Shielva network).\n- Ensure the WordPress REST API is not disabled. Test by visiting `https://yourblog.com/wp-json/wp/v2/posts` in a browser.\n\n### Categories or tags return 0 results\n\nCategories and tags are fetched in a single request with `per_page=100`. If your site has more than 100, consider using the API directly to paginate. The sync will only capture up to 100 per call."
+    }
+  ]
+}
