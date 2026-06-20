@@ -1,0 +1,43 @@
+{
+  "title": "Typeform Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "connector_type": "typeform",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Typeform connector integrates Shielva with your Typeform account. It syncs form definitions and form responses into the Shielva knowledge base using the Typeform API v1 (https://api.typeform.com). Each form is normalized into a ConnectorDocument of type 'form', and each response becomes a ConnectorDocument of type 'form_response'. Workspaces and insights are also accessible via dedicated methods."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector supports OAuth 2.0 (recommended) and Personal Access Token (PAT) as a fallback. All API requests use a Bearer token in the Authorization header: 'Authorization: Bearer {access_token}'.\n\nOAuth 2.0 flow:\n1. Register an OAuth application in Typeform Developer Apps.\n2. Provide client_id and client_secret during connector install.\n3. Call authorize() to obtain the Typeform authorization URL.\n4. Redirect the user to that URL; Typeform returns an authorization code to your redirect_uri.\n5. Exchange the code for an access_token (handled by Shielva runtime).\n6. The access_token is stored in connector config and used for all subsequent API calls.\n\nOAuth scopes required: forms:read, responses:read, workspaces:read.\n\nPAT alternative: generate a token at https://admin.typeform.com/account#/section/tokens and store it as access_token in config."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Install fields:\n- client_id (string, required): Typeform OAuth App Client ID\n- client_secret (password, required): Typeform OAuth App Client Secret\n- redirect_uri (string, optional): OAuth redirect URI\n\nPost-OAuth config field:\n- access_token (string): Bearer token set after OAuth flow completes\n\nAll fields are loaded from the connector config dict. Keyword arguments to TypeformConnector.__init__ serve as fallbacks for standalone/test usage."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "Connector methods (all async):\n\ninstall() -> InstallResult\n  Validates that client_id and client_secret are present. Returns HEALTHY if credentials exist.\n\nauthorize() -> str\n  Returns the Typeform OAuth authorization URL. Scopes: forms:read responses:read workspaces:read. Appends redirect_uri if set.\n\nhealth_check() -> HealthCheckResult\n  Calls GET /me to verify the access_token. Returns alias and email on success.\n\nsync(**kwargs) -> SyncResult\n  Full sync: lists all forms (page-based), normalizes each form as a document, then for each form fetches all responses via before-cursor pagination and normalizes each response. Accepts kb_id keyword argument.\n\nlist_forms(workspace_id=None, page_size=200) -> list[dict]\n  Returns all forms, auto-paginating via page_count.\n\nget_form(form_id) -> dict\n  Returns a single form definition.\n\nget_responses(form_id, page_size=1000) -> list[dict]\n  Returns all responses for a form, auto-paginating via before cursor.\n\nlist_workspaces(page_size=200) -> list[dict]\n  Returns all workspaces, auto-paginating via page_count.\n\nget_workspace(workspace_id) -> dict\n  Returns a single workspace.\n\nget_insights(form_id) -> dict\n  Returns the insights summary for a form (GET /insights/{form_id}/summary).\n\nHTTP client methods (TypeformHTTPClient):\n  get_me(access_token) -> GET /me\n  list_forms(access_token, workspace_id, page, page_size, search) -> GET /forms\n  get_form(access_token, form_id) -> GET /forms/{form_id}\n  get_responses(access_token, form_id, page_size, before, after, since, until) -> GET /forms/{form_id}/responses\n  list_workspaces(access_token, page, page_size) -> GET /workspaces\n  get_workspace(access_token, workspace_id) -> GET /workspaces/{workspace_id}\n  get_insights(access_token, form_id) -> GET /insights/{form_id}/summary"
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "ConnectorDocument fields:\n  source_id (str): 16-char SHA-256 hex prefix. Form: SHA-256('form:' + form_id)[:16]. Response: SHA-256('response:' + response_token)[:16].\n  title (str): Form title or 'Form {id} — Response {token[:8]}'.\n  content (str): Human-readable text of form fields or answer key-value pairs.\n  connector_id (str): Set by Shielva runtime.\n  tenant_id (str): Set by Shielva runtime.\n  source_url (str): Typeform admin link for the form or response.\n  metadata (dict): Type-specific fields.\n\nForm metadata keys: type='form', form_id, form_type, created_at, last_updated_at, field_count.\nResponse metadata keys: type='form_response', form_id, response_token, submitted_at, landed_at, answer_count.\n\nAnswer type extraction (_extract_answer_value):\n  text -> answer.text\n  email -> answer.email\n  url -> answer.url\n  number -> str(answer.number)\n  boolean -> str(answer.boolean)\n  date -> answer.date\n  choice -> choice.label or choice.other\n  choices -> ', '.join(labels + [other])\n  file_url -> answer.file_url\n  payment -> '{amount} {currency}'\n  unknown -> fallback scan of text/email/url/number/boolean/date keys"
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "Exception hierarchy:\n  TypeformError (base)\n    TypeformAuthError — 401/403 authentication failures\n    TypeformNetworkError — 5xx server errors, connection errors, timeouts\n    TypeformNotFoundError — 404 resource not found\n    TypeformRateLimitError — 429 rate limit exceeded (carries retry_after float)\n\nwith_retry() behavior:\n  - TypeformAuthError: never retried (requires human intervention)\n  - TypeformRateLimitError: retried up to max_attempts; uses retry_after if > 0, else exponential backoff\n  - TypeformError / TypeformNetworkError: retried with exponential backoff + jitter\n  - Default: 3 attempts, 1.0s base delay, 30s max delay, 2.0x backoff factor"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "401 Unauthorized: access_token is invalid or expired. Re-run OAuth flow or generate a new PAT.\n\n403 Forbidden: Missing required scopes (forms:read, responses:read, workspaces:read). Re-authorize the OAuth app.\n\n404 Not Found: Resource does not exist. Verify form/workspace IDs in the Typeform admin.\n\n429 Rate Limited: The connector retries automatically. If persistent, reduce sync frequency or upgrade Typeform plan.\n\n5xx Server Error: Typeform service issue. The connector retries up to 3 times. If persistent, check Typeform status page.\n\nSync returns 0 documents: No forms or no responses exist. Confirm via https://admin.typeform.com/forms.\n\nModuleNotFoundError aiohttp: Run: pip install aiohttp>=3.9.0"
+    }
+  ]
+}
