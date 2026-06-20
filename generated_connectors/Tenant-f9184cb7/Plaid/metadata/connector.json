@@ -1,0 +1,47 @@
+{
+  "connector_type": "plaid",
+  "name": "Plaid",
+  "display_name": "Plaid",
+  "description": "Connect to Plaid to sync bank transactions, account balances, and financial data.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Plaid client_id from Plaid Dashboard → Team Settings → Keys."
+    },
+    {
+      "key": "secret",
+      "label": "Secret",
+      "type": "password",
+      "required": true,
+      "description": "Your Plaid secret for the target environment (sandbox/development/production)."
+    },
+    {
+      "key": "access_token",
+      "label": "Access Token",
+      "type": "password",
+      "required": true,
+      "description": "Plaid Item access token obtained through Link flow (access-sandbox-... / access-production-...)."
+    },
+    {
+      "key": "environment",
+      "label": "Environment",
+      "type": "string",
+      "required": false,
+      "description": "Plaid environment: sandbox, development, or production. Default: production."
+    }
+  ],
+  "capabilities": [
+    "get_accounts",
+    "get_balance",
+    "get_transactions",
+    "get_institution",
+    "sync"
+  ],
+  "provider": "plaid",
+  "category": "finance"
+}
