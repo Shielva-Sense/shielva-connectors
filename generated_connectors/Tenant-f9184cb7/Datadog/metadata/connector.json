@@ -1,0 +1,60 @@
+{
+  "connector_type": "datadog",
+  "display_name": "Datadog",
+  "provider": "datadog",
+  "service": "datadog",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect Datadog to sync monitors, dashboards, incidents, hosts, and events for observability intelligence.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Datadog → Organization Settings → API Keys"
+    },
+    {
+      "key": "app_key",
+      "label": "Application Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Datadog → Organization Settings → Application Keys"
+    },
+    {
+      "key": "site",
+      "label": "Datadog Site (default: datadoghq.com)",
+      "type": "string",
+      "required": false,
+      "help": "Use datadoghq.eu for EU, us3.datadoghq.com for US3, or leave blank for US (datadoghq.com)",
+      "options": [
+        {"label": "US (datadoghq.com)", "value": "datadoghq.com"},
+        {"label": "EU (datadoghq.eu)", "value": "datadoghq.eu"},
+        {"label": "US3 (us3.datadoghq.com)", "value": "us3.datadoghq.com"}
+      ]
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["monitors", "dashboards", "incidents", "hosts", "events"],
+  "auth": {
+    "headers": [
+      {"name": "DD-API-KEY", "from": "api_key"},
+      {"name": "DD-APPLICATION-KEY", "from": "app_key"}
+    ],
+    "validation_endpoint": "GET /api/v1/validate"
+  },
+  "api": {
+    "base_url_template": "https://api.{site}/api/",
+    "versions": ["v1", "v2"]
+  },
+  "methods": [
+    {"name": "install", "description": "Validate credentials and record connector as installed"},
+    {"name": "health_check", "description": "Verify credentials are still valid via GET /v1/validate"},
+    {"name": "sync", "description": "Sync monitors, dashboards, hosts, and events to knowledge base"},
+    {"name": "list_monitors", "description": "List all Datadog monitors with pagination"},
+    {"name": "get_monitor", "description": "Get a single Datadog monitor by ID"},
+    {"name": "list_dashboards", "description": "List all Datadog dashboards"},
+    {"name": "list_hosts", "description": "List all Datadog hosts with pagination"},
+    {"name": "list_events", "description": "List Datadog events for a time window (last 24h default)"}
+  ]
+}
