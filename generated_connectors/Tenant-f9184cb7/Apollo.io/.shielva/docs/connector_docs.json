@@ -1,0 +1,223 @@
+{
+  "connector": "apollo",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Apollo.io connector syncs people, contacts, accounts, and email sequences from Apollo.io into the Shielva knowledge base using the Apollo REST API v1. Authentication uses an API key passed via the X-Api-Key header. The connector implements page-based pagination, exponential backoff retry, and typed error handling for reliable data ingestion."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_key",
+          "title": "API Key",
+          "content": "Apollo.io uses API key authentication. The key is passed as the X-Api-Key header on every request. For the auth/health endpoint, the key is also included in the request body as required by Apollo.",
+          "steps": [
+            "Log in to Apollo.io at https://app.apollo.io.",
+            "Click your profile icon then navigate to Settings.",
+            "Go to Integrations → API.",
+            "Copy your existing API Key, or click Create API Key to generate one.",
+            "Paste the key into the api_key field in Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your Apollo.io API key",
+          "description": "Your Apollo.io API key from Settings → Integrations → API. Required for all API calls."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of Apollo.io contacts and accounts. For each object type, it fetches all pages using the Apollo page-based pagination pattern (page + per_page parameters). Each raw API record is normalized into a ConnectorDocument and optionally ingested into the Shielva knowledge base.",
+      "pagination": {
+        "mechanism": "page-based (page + per_page parameters in POST body)",
+        "page_size": 50,
+        "total_pages_field": "pagination.total_pages"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates the API key by calling POST /v1/auth/health. Returns HEALTHY + CONNECTED on success, OFFLINE + appropriate AuthStatus on failure.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings POST /v1/auth/health. Returns HEALTHY, DEGRADED (transient network error), or OFFLINE (auth failure).",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(**kwargs) -> SyncResult",
+          "description": "Full paginated sync of contacts and accounts. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_people",
+          "signature": "async def list_people(page: int = 1) -> dict",
+          "description": "Returns one page of people from the Apollo database via POST /v1/mixed_people/search.",
+          "endpoint": "POST /v1/mixed_people/search",
+          "category": "people"
+        },
+        {
+          "id": "list_contacts",
+          "signature": "async def list_contacts(page: int = 1) -> dict",
+          "description": "Returns one page of CRM contacts via POST /v1/contacts/search.",
+          "endpoint": "POST /v1/contacts/search",
+          "category": "contacts"
+        },
+        {
+          "id": "get_contact",
+          "signature": "async def get_contact(contact_id: str) -> dict",
+          "description": "Returns a single Apollo CRM contact by ID.",
+          "endpoint": "GET /v1/contacts/{id}",
+          "category": "contacts"
+        },
+        {
+          "id": "list_accounts",
+          "signature": "async def list_accounts(page: int = 1) -> dict",
+          "description": "Returns one page of CRM accounts (companies) via POST /v1/accounts/search.",
+          "endpoint": "POST /v1/accounts/search",
+          "category": "accounts"
+        },
+        {
+          "id": "get_account",
+          "signature": "async def get_account(account_id: str) -> dict",
+          "description": "Returns a single Apollo CRM account by ID.",
+          "endpoint": "GET /v1/accounts/{id}",
+          "category": "accounts"
+        },
+        {
+          "id": "list_sequences",
+          "signature": "async def list_sequences() -> dict",
+          "description": "Returns the list of email sequences (campaigns) via GET /v1/emailer_campaigns.",
+          "endpoint": "GET /v1/emailer_campaigns",
+          "category": "sequences"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Apollo.io record is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "SHA-256('{type}:{apollo_id}')[:16] — stable deduplication key" },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format: '{Type}: {name}'" },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the record's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "LinkedIn URL or website URL when available." },
+          { "name": "metadata", "type": "dict", "description": "Type-specific properties map. Always includes type, id, name, email, title, company." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_person(record, connector_id, tenant_id)",
+          "object_type": "person",
+          "stable_id": "SHA-256('person:{apollo_id}')[:16]",
+          "title_format": "Person: {name}",
+          "metadata_keys": ["type", "id", "name", "email", "title", "company", "location", "phone", "linkedin_url"]
+        },
+        {
+          "function": "normalize_contact(record, connector_id, tenant_id)",
+          "object_type": "contact",
+          "stable_id": "SHA-256('contact:{apollo_id}')[:16]",
+          "title_format": "Contact: {name}",
+          "metadata_keys": ["type", "id", "name", "email", "title", "company", "location", "phone", "linkedin_url", "label_names"]
+        },
+        {
+          "function": "normalize_account(record, connector_id, tenant_id)",
+          "object_type": "account",
+          "stable_id": "SHA-256('account:{apollo_id}')[:16]",
+          "title_format": "Account: {name}",
+          "metadata_keys": ["type", "id", "name", "domain", "industry", "location", "employee_count", "phone", "description", "linkedin_url", "account_stage"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "ApolloError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "ApolloAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "ApolloRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "ApolloNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and identifier.",
+          "http_status": 404
+        },
+        {
+          "name": "ApolloNetworkError",
+          "description": "Raised on aiohttp timeout or connection errors. Retried with exponential backoff.",
+          "http_status": null
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 or 403 on install",
+          "cause": "The API key is invalid, expired, or does not have the required permissions.",
+          "solution": "Regenerate the API key in Apollo.io Settings → Integrations → API, and update the connector."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Apollo.io rate limit reached.",
+          "solution": "The connector retries automatically with exponential backoff. For large databases, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Health check returns DEGRADED",
+          "cause": "Transient network connectivity issue.",
+          "solution": "Wait a few minutes and re-run the health check. If the issue persists, check your network and Apollo.io status page."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more records returned unexpected null or malformed data during normalization.",
+          "solution": "Check the connector logs for which record IDs failed. Inspect those records in Apollo.io for corrupted property values."
+        }
+      ]
+    }
+  ]
+}
