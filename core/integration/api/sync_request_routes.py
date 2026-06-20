@@ -26,7 +26,7 @@ import re
 import shutil
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -40,6 +40,7 @@ from pymongo import ReturnDocument
 
 from integration.core.config import settings
 from integration.db.database import get_db
+from integration.services import r2_service
 
 logger = structlog.get_logger(__name__)
 
@@ -1191,12 +1192,45 @@ async def _run_ci_pipeline(
     )
     test_type = (session_doc or {}).get("test_type", "unit")  # "unit" or "both"
 
+    # ci_results_details_by_gate accumulates the heavy `details` JSON dumps
+    # per gate. We strip `details` from what we $set into Mongo (saves ~10–50
+    # KB per gate × ~6 gates) and shuttle the dumps to R2 instead so the
+    # diff modal can fetch them in one call when the user opens it.
+    ci_results_details_by_gate: Dict[str, str] = {}
+
     async def _update_gate(gate_result: Dict):
         ci_results.append(gate_result)
-        await col.update_one({"_id": oid}, {"$set": {"ci_results": ci_results, "updated_at": datetime.utcnow()}})
+
+        # Slim copy for Mongo: drop the verbose `details` field.
+        details_str = gate_result.get("details") if isinstance(gate_result, dict) else None
+        if isinstance(details_str, str) and details_str:
+            ci_results_details_by_gate[gate_result.get("gate", f"gate_{len(ci_results)-1}")] = details_str
+        slim_results = [{k: v for k, v in r.items() if k != "details"} for r in ci_results]
+        slim_results = [{**r, "details_in_r2": True} if r.get("gate") in ci_results_details_by_gate else r for r in slim_results]
+
+        await col.update_one(
+            {"_id": oid},
+            {"$set": {"ci_results": slim_results, "ci_results_r2_offloaded": True, "updated_at": datetime.utcnow()}},
+        )
+
+        # Best-effort R2 sync: writes the latest accumulated details blob.
+        # Failure is logged but never blocks the pipeline — the gate result
+        # is still durable in Mongo (just without `details`).
+        try:
+            blob = await r2_service.get_sync_request_blob(tenant_id, sync_request_id) or {}
+            blob.setdefault("files", [])  # preserve files written at raise time
+            blob["ci_results_details"] = ci_results_details_by_gate
+            await r2_service.save_sync_request_blob(
+                tenant_id=tenant_id, sync_request_id=sync_request_id, payload=blob,
+            )
+        except Exception as _exc:
+            logger.warning("sync_request.gate_details_r2_failed",
+                           sync_request_id=sync_request_id,
+                           gate=gate_result.get("gate"), error=str(_exc))
+
         _broadcast(tenant_id, "sync:ci_progress", {
             "sync_request_id": sync_request_id,
-            "gate": gate_result,
+            "gate": gate_result,   # broadcast the FULL gate result via SSE
         })
 
     # ── Gate: GitHub Sync — push connector files to GitHub (for PR creation later) ─
@@ -1583,6 +1617,10 @@ async def raise_sync_request(
     checksum_input = f"{body.session_id}:{body.connector_name}:{ts}"
     short_hash = hashlib.sha256(checksum_input.encode()).hexdigest()[:8]
     branch_name = f"SRQ_{sanitized_user}_{dt_str}_{short_hash}"
+    # Phase 6: PR file contents go to R2 (compressed). Mongo only keeps
+    # `file_count` + `files_r2_offloaded:True` so the list endpoint stays tiny.
+    # The detail/diff endpoints lazy-fetch from R2 in a single call.
+    _files_payload = [{"path": f.path, "content": f.content} for f in body.files]
     doc = {
         "tenant_id": x_tenant_id,
         "session_id": body.session_id,
@@ -1600,12 +1638,26 @@ async def raise_sync_request(
         "approved_by": None,
         "merged_at": None,
         "error": None,
-        "files": [{"path": f.path, "content": f.content} for f in body.files],
+        "file_count": len(_files_payload),
+        "files_r2_offloaded": True,
         "created_at": now,
         "updated_at": now,
     }
     result = await col.insert_one(doc)
     sync_request_id = str(result.inserted_id)
+    # Upload files to R2 keyed by the freshly-allocated sync_request_id.
+    # Best-effort: if R2 is briefly unavailable the row still exists in
+    # Mongo and the CI pipeline that needs files can retry — better than
+    # losing the request entirely on a transient cloud blip.
+    try:
+        await r2_service.save_sync_request_blob(
+            tenant_id=x_tenant_id,
+            sync_request_id=sync_request_id,
+            payload={"files": _files_payload, "ci_results_details": {}},
+        )
+    except Exception as _exc:
+        logger.warning("sync_request.r2_files_save_failed",
+                       sync_request_id=sync_request_id, error=str(_exc))
 
     _broadcast(x_tenant_id, "sync:request_created", {
         "sync_request_id": sync_request_id,
@@ -1692,20 +1744,52 @@ async def raise_sync_request(
 async def list_sync_requests(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     status: Optional[str] = Query(None),
+    include_terminal: bool = Query(False),
+    skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=1000),
 ):
-    """List sync requests for a tenant (newest first)."""
+    """List sync requests for a tenant — tuned for fast panel response.
+
+    Pagination: panel default is the most-recent 20 rows; subsequent pages
+    fetch via `?skip=N`. The detail/diff payloads (`files[]`,
+    `ci_results[].details`) live in R2 and are hydrated only when the
+    per-card detail endpoint is called.
+
+    The total-count header lets the panel render "Showing 20 of N".
+    """
     col = _sync_requests_col()
     query: Dict[str, Any] = {"tenant_id": x_tenant_id}
     if status:
         query["status"] = status
+    elif not include_terminal:
+        # Default: hide rows the panel filters out anyway. Massive win on
+        # tenants that have accumulated months of merge history.
+        query["status"] = {"$nin": ["merged", "dismissed", "error"]}
 
-    cursor = col.find(query).sort("created_at", -1).limit(limit)
-    results = []
+    # Inclusive projection: ONLY the fields the row renders + the ones the
+    # client-side derivation logic needs. ci_results compressed to a count
+    # + last gate name; full per-gate breakdown loads when the card opens.
+    projection = {
+        "_id": 1, "tenant_id": 1, "session_id": 1, "connector_name": 1,
+        "status": 1, "pr_state": 1,
+        "target_branch": 1, "branch_name": 1,
+        "pr_number": 1, "pr_url": 1,
+        "raised_by": 1, "approved_by": 1,
+        "created_at": 1, "updated_at": 1, "merged_at": 1,
+        "error": 1,
+        # ci_results compressed: per-gate {gate, status, summary} only,
+        # never the verbose `details` blob.
+        "ci_results.gate": 1,
+        "ci_results.status": 1,
+        "ci_results.summary": 1,
+    }
+    total = await col.count_documents(query)
+    cursor = col.find(query, projection).sort("created_at", -1).skip(skip).limit(limit)
+    items = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])
-        results.append(doc)
-    return results
+        items.append(doc)
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
 class ReconcileRequest(BaseModel):
@@ -2176,12 +2260,64 @@ async def sync_events_stream(
     )
 
 
+@sync_request_router.get("/counts")
+async def sync_request_counts(
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Per-status counts for the tenant — single aggregate, no payload.
+
+    Defined BEFORE the dynamic ``/{sync_request_id}`` route so FastAPI
+    matches the literal ``/counts`` path instead of treating it as an ID.
+    """
+    col = _sync_requests_col()
+    pipeline = [
+        {"$match": {"tenant_id": x_tenant_id}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}},
+    ]
+    by_status: Dict[str, int] = {}
+    async for d in col.aggregate(pipeline):
+        by_status[d["_id"] or "unknown"] = d["n"]
+    return {
+        "by_status": by_status,
+        "mergeable": by_status.get("ci_passed", 0) + by_status.get("ready", 0),
+        "active": sum(n for s, n in by_status.items()
+                       if s not in ("merged", "dismissed", "error")),
+        "total": sum(by_status.values()),
+    }
+
+
+@sync_request_router.post("/cleanup-stuck")
+async def cleanup_stuck_sync_requests(
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    older_than_minutes: int = Query(5, ge=1),
+):
+    """Roll back rows stuck mid-transition (e.g. ``approving`` after a failed
+    merge). Bounded so an in-flight legitimate merge isn't disturbed."""
+    if (x_user_role or "viewer").lower() != "super_admin":
+        raise HTTPException(status_code=403, detail="Only super_admin can run cleanup")
+    cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
+    col = _sync_requests_col()
+    r = await col.update_many(
+        {"tenant_id": x_tenant_id, "status": "approving", "updated_at": {"$lt": cutoff}},
+        {"$set": {"status": "ready", "updated_at": datetime.utcnow()}},
+    )
+    return {"rolled_back": r.modified_count}
+
+
 @sync_request_router.get("/{sync_request_id}")
 async def get_sync_request(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
-    """Get a single sync request with full details."""
+    """Get a single sync request with full details — one call hydrates from R2.
+
+    Mongo holds the slim metadata; R2 holds the heavy blobs (`files[]` and
+    per-gate `ci_results[].details`). This handler reads both in parallel and
+    stitches them back into the legacy shape so existing UI code doesn't
+    need to change — the diff modal still sees `files` and per-gate
+    `details` exactly where it used to.
+    """
     col = _sync_requests_col()
     try:
         doc = await col.find_one({"_id": ObjectId(sync_request_id), "tenant_id": x_tenant_id})
@@ -2190,6 +2326,34 @@ async def get_sync_request(
     if not doc:
         raise HTTPException(status_code=404, detail="Sync request not found")
     doc["_id"] = str(doc["_id"])
+
+    # Hydrate from R2 only when needed (legacy non-offloaded rows pass through).
+    needs_hydration = doc.get("files_r2_offloaded") or doc.get("ci_results_r2_offloaded")
+    if needs_hydration:
+        try:
+            blob = await r2_service.get_sync_request_blob(x_tenant_id, sync_request_id)
+        except Exception as _exc:
+            logger.warning("sync_request.r2_hydrate_failed",
+                           sync_request_id=sync_request_id, error=str(_exc))
+            blob = None
+        if isinstance(blob, dict):
+            if doc.get("files_r2_offloaded") and isinstance(blob.get("files"), list):
+                doc["files"] = blob["files"]
+            details_map = blob.get("ci_results_details") or {}
+            if doc.get("ci_results_r2_offloaded") and isinstance(details_map, dict):
+                merged = []
+                for r in (doc.get("ci_results") or []):
+                    if not isinstance(r, dict):
+                        merged.append(r); continue
+                    gate = r.get("gate")
+                    if gate and gate in details_map and r.get("details_in_r2"):
+                        r = {**r, "details": details_map[gate]}
+                        r.pop("details_in_r2", None)
+                    merged.append(r)
+                doc["ci_results"] = merged
+    # Strip internal offload markers from the client response.
+    doc.pop("files_r2_offloaded", None)
+    doc.pop("ci_results_r2_offloaded", None)
     return doc
 
 
@@ -2536,6 +2700,157 @@ async def approve_sync_request(
         )
         _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
         raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)[:200]}")
+
+
+
+class BulkMergeRequest(BaseModel):
+    """List of sync_request IDs to merge sequentially on the server."""
+    sync_request_ids: List[str]
+
+
+class BulkMergeResult(BaseModel):
+    sync_request_id: str
+    ok: bool
+    status: Optional[str] = None
+    error: Optional[str] = None
+
+
+@sync_request_router.post("/bulk-merge")
+async def bulk_merge_sync_requests(
+    body: BulkMergeRequest,
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Sequentially merge a batch of sync requests.
+
+    Why this exists: the client used to fire ``POST /{id}/approve`` in a loop,
+    which on a batch of ~50 PRs saturated github.com's per-IP concurrent-
+    connection cap and surfaced as "too many concurrent connections from this
+    IP". One HTTP call from the client + server-side serialisation keeps GitHub
+    happy and lets us share auth/permission checks across the batch.
+
+    Per-merge behaviour mirrors the single-PR ``/{id}/approve`` handler:
+      - Permission check (caller role + tenant approver list)
+      - Atomic Mongo transition ``ready → approving``
+      - GitHub merge (squash) — ``_github_request`` already retries 429 with
+        exponential backoff
+      - Branch cleanup + status flip ``approving → merged``
+      - SSE broadcast per merge so the UI updates row-by-row, not all at once
+        at the end
+
+    Between rows we sleep ``INTER_MERGE_DELAY_S`` to space requests out for
+    GitHub's secondary rate limits even when the 429 retry loop hasn't kicked
+    in.
+    """
+    INTER_MERGE_DELAY_S = 0.5
+
+    user_role = (x_user_role or "viewer").lower()
+    user_email = x_user_email or "unknown"
+    perms = SYNC_PERMISSIONS.get(user_role, SYNC_PERMISSIONS["viewer"])
+    if not perms["can_approve"]:
+        raise HTTPException(status_code=403, detail=f"Role '{user_role}' cannot approve sync requests")
+    if not body.sync_request_ids:
+        return {"results": [], "merged": 0, "failed": 0}
+
+    col = _sync_requests_col()
+    sync_settings = await _get_tenant_sync_settings(x_tenant_id)
+    approvers = sync_settings.get("authorized_approvers", [])
+    if approvers and user_email not in approvers and user_role != "super_admin":
+        raise HTTPException(status_code=403, detail="You are not in the authorized approvers list for this tenant")
+    owner, repo = _parse_repo(sync_settings["github_repo_url"])
+    token = sync_settings["github_token"]
+
+    results: List[BulkMergeResult] = []
+    merged_count = 0
+    failed_count = 0
+
+    for i, sid in enumerate(body.sync_request_ids):
+        if i > 0:
+            await asyncio.sleep(INTER_MERGE_DELAY_S)
+        try:
+            try:
+                oid = ObjectId(sid)
+            except Exception:
+                results.append(BulkMergeResult(sync_request_id=sid, ok=False, error="Invalid sync request ID"))
+                failed_count += 1
+                continue
+
+            doc = await col.find_one({"_id": oid, "tenant_id": x_tenant_id})
+            if not doc:
+                results.append(BulkMergeResult(sync_request_id=sid, ok=False, error="Sync request not found"))
+                failed_count += 1
+                continue
+            if doc["status"] != "ready":
+                results.append(BulkMergeResult(sync_request_id=sid, ok=False, status=doc["status"],
+                                               error=f"Cannot approve — status is '{doc['status']}', expected 'ready'"))
+                failed_count += 1
+                continue
+
+            update_result = await col.update_one(
+                {"_id": oid, "status": "ready"},
+                {"$set": {"status": "approving", "approved_by": user_email, "updated_at": datetime.utcnow()}},
+            )
+            if update_result.modified_count == 0:
+                results.append(BulkMergeResult(sync_request_id=sid, ok=False,
+                                               error="Sync request no longer in 'ready' state"))
+                failed_count += 1
+                continue
+
+            _broadcast(x_tenant_id, "sync:request_approving",
+                       {"sync_request_id": sid, "approved_by": user_email})
+
+            try:
+                await _merge_pr(owner, repo, token, doc["pr_number"])
+                await _delete_branch(owner, repo, token, doc["branch_name"])
+            except HTTPException as gh_exc:
+                # Roll back the status so retries are possible.
+                await col.update_one(
+                    {"_id": oid},
+                    {"$set": {"status": "error", "error": str(gh_exc.detail)[:500],
+                              "updated_at": datetime.utcnow()}},
+                )
+                _broadcast(x_tenant_id, "sync:request_error",
+                           {"sync_request_id": sid, "error": str(gh_exc.detail)[:200]})
+                results.append(BulkMergeResult(sync_request_id=sid, ok=False, error=str(gh_exc.detail)[:200]))
+                failed_count += 1
+                continue
+
+            now = datetime.utcnow()
+            await col.update_one(
+                {"_id": oid},
+                {"$set": {"status": "merged", "pr_state": "merged",
+                          "merged_at": now, "updated_at": now}},
+            )
+            _broadcast(x_tenant_id, "sync:request_merged", {
+                "sync_request_id": sid,
+                "approved_by": user_email,
+                "merged_at": now.isoformat(),
+            })
+            results.append(BulkMergeResult(sync_request_id=sid, ok=True, status="merged"))
+            merged_count += 1
+
+        except Exception as e:
+            logger.error("sync.bulk_merge_unexpected", sync_request_id=sid, error=str(e)[:200], exc_info=True)
+            results.append(BulkMergeResult(sync_request_id=sid, ok=False, error=str(e)[:200]))
+            failed_count += 1
+
+    # One queue-empty broadcast at the very end (single check instead of per merge).
+    try:
+        open_count = await col.count_documents({
+            "tenant_id": x_tenant_id,
+            "status": {"$nin": ["merged", "dismissed", "error"]},
+        })
+        if open_count == 0:
+            _broadcast(x_tenant_id, "sync:queue_empty", {"tenant_id": x_tenant_id})
+    except Exception:
+        pass
+
+    return {
+        "results": [r.model_dump() for r in results],
+        "merged": merged_count,
+        "failed": failed_count,
+    }
 
 
 @sync_request_router.post("/{sync_request_id}/hold")

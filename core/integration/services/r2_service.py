@@ -2425,3 +2425,75 @@ async def get_conversation_history(
     except Exception as exc:
         logger.warning("conversation_history.get_failed", key=key, error=str(exc))
     return None
+
+
+# ── Sync-request heavy blobs (Phase 6) ─────────────────────────────────
+# Key pattern: SYNC_REQUESTS/{tenant_id}/{sync_request_id}.json
+#
+# Each sync_request document used to embed the FULL PR file diff (`files[]`,
+# 50–200 KB) and the security-audit JSON dump per CI gate
+# (`ci_results[].details`, 10–50 KB each × ~6 gates). 658 requests × ~113 KB
+# = ~74 MB pulled across the wire on every list call. Move the bytes to R2,
+# keep only metadata in Mongo. Read paths fetch the R2 blob in one call when
+# the detail panel opens.
+
+def _sync_request_blob_key(tenant_id: str, sync_request_id: str) -> str:
+    return _k("SYNC_REQUESTS", tenant_id, f"{sync_request_id}.json")
+
+
+async def save_sync_request_blob(
+    tenant_id: str,
+    sync_request_id: str,
+    payload: Dict[str, Any],
+) -> None:
+    """Persist a sync_request's heavy fields (files + ci_results.details) to R2.
+
+    Payload shape:
+        { "files": [...], "ci_results_details": {gate_name: details_str, ...} }
+
+    Gzip-compressed transparently by `_sync_write`. Failures are logged but
+    not raised so the caller still gets a slim Mongo doc — degraded mode,
+    not data loss.
+    """
+    if not tenant_id or not sync_request_id:
+        return
+    key = _sync_request_blob_key(tenant_id, sync_request_id)
+    content = json.dumps(payload, ensure_ascii=False, default=str)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            await loop.run_in_executor(None, partial(_local_write, key, content))
+        else:
+            client = _get_client()
+            await loop.run_in_executor(
+                None,
+                partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
+            )
+        logger.info("sync_request_blob.saved", tenant_id=tenant_id,
+                    sync_request_id=sync_request_id, bytes=len(content))
+    except Exception as exc:
+        logger.warning("sync_request_blob.save_failed", key=key, error=str(exc))
+
+
+async def get_sync_request_blob(
+    tenant_id: str,
+    sync_request_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Fetch a sync_request's offloaded blob from R2. Returns None when absent."""
+    if not tenant_id or not sync_request_id:
+        return None
+    key = _sync_request_blob_key(tenant_id, sync_request_id)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            raw = await loop.run_in_executor(None, partial(_local_read, key))
+        else:
+            client = _get_client()
+            raw = await loop.run_in_executor(
+                None, partial(_sync_read, client, _get_bucket(), key)
+            )
+        if raw:
+            return json.loads(raw)
+    except Exception as exc:
+        logger.warning("sync_request_blob.get_failed", key=key, error=str(exc))
+    return None
