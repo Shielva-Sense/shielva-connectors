@@ -1,0 +1,237 @@
+{
+  "connector": "brevo",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Brevo connector syncs contacts and email campaigns from Brevo (formerly Sendinblue) into the Shielva knowledge base using the Brevo REST API v3. Authentication uses an API key passed in the api-key request header (Brevo-specific — not Bearer, not Authorization). The connector implements offset-based pagination (using the count field), exponential backoff retry, and error isolation to ensure reliable, throttle-safe data ingestion. Each synced record receives a stable 16-character source_id derived from SHA-256."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_key",
+          "title": "API Key",
+          "content": "Brevo uses a static API key passed as the api-key header on every request. The key is found in Settings → API Keys in your Brevo account.",
+          "steps": [
+            "Log into your Brevo account at app.brevo.com.",
+            "Click your account name (top-right corner) → Profile & Settings.",
+            "Navigate to API Keys in the left menu.",
+            "Generate a new API key or copy an existing one.",
+            "Paste it into the connector install form in Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your Brevo API key",
+          "description": "Your Brevo API key from Settings → API Keys. Passed as the api-key header on every request."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of Brevo objects. For each object type (contacts, email campaigns), it fetches all pages using offset-based pagination. The total record count is read from the count field in each API response. Each raw API record is passed through a normalizer that converts it into a ConnectorDocument with a stable source_id.",
+      "pagination": {
+        "mechanism": "offset-based (limit + offset parameters)",
+        "page_size": 50,
+        "total_field": "count",
+        "endpoint_pattern": "GET /v3/{resource}?limit=50&offset={offset}"
+      },
+      "stable_id": {
+        "algorithm": "SHA-256",
+        "format": "SHA-256(\"{type}:{id}\" or \"{type}:{id}:{email}\")[:16]",
+        "examples": [
+          "normalize_contact: SHA-256('contact:{id}:{email}')[:16]",
+          "normalize_campaign: SHA-256('campaign:{id}')[:16]",
+          "normalize_template: SHA-256('template:{id}')[:16]"
+        ]
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates credentials by probing GET /v3/account. Returns HEALTHY + CONNECTED on success, or OFFLINE + appropriate AuthStatus on failure. Sets http_client on success.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /v3/account. Returns HEALTHY (with user_email and plan), DEGRADED (transient network error), or OFFLINE (auth failure).",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(**kwargs) -> SyncResult",
+          "description": "Paginated full sync of contacts and email campaigns. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_contacts",
+          "signature": "async def list_contacts(limit: int = 50, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of Brevo contacts.",
+          "endpoint": "GET /v3/contacts",
+          "category": "contacts"
+        },
+        {
+          "id": "get_contact",
+          "signature": "async def get_contact(identifier: str) -> dict",
+          "description": "Returns a single Brevo contact by email address or numeric id.",
+          "endpoint": "GET /v3/contacts/{identifier}",
+          "category": "contacts"
+        },
+        {
+          "id": "list_contact_lists",
+          "signature": "async def list_contact_lists(limit: int = 50, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of Brevo contact lists.",
+          "endpoint": "GET /v3/contacts/lists",
+          "category": "lists"
+        },
+        {
+          "id": "list_campaigns",
+          "signature": "async def list_campaigns(status: str | None = None, limit: int = 50, offset: int = 0) -> dict",
+          "description": "Returns a paginated page of Brevo email campaigns, optionally filtered by status.",
+          "endpoint": "GET /v3/emailCampaigns",
+          "category": "campaigns"
+        },
+        {
+          "id": "list_senders",
+          "signature": "async def list_senders() -> dict",
+          "description": "Returns all senders configured in the Brevo account.",
+          "endpoint": "GET /v3/senders",
+          "category": "senders"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying aiohttp.ClientSession and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Brevo object is normalized into a ConnectorDocument before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "Stable 16-char hex derived from SHA-256 of type-specific key." },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format varies by object type." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the object's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "Empty string — Brevo does not have stable deep links." },
+          { "name": "metadata", "type": "dict", "description": "Object-type-specific properties map. Always includes object_type and brevo_id keys." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_contact(c, connector_id, tenant_id)",
+          "object_type": "contact",
+          "source_id_formula": "SHA-256('contact:{id}:{email}')[:16]",
+          "title_format": "Brevo contact: {name} <{email}>",
+          "metadata_keys": ["object_type", "brevo_id", "email", "name", "list_ids", "createdAt", "modifiedAt"]
+        },
+        {
+          "function": "normalize_campaign(c, connector_id, tenant_id)",
+          "object_type": "email_campaign",
+          "source_id_formula": "SHA-256('campaign:{id}')[:16]",
+          "title_format": "Brevo campaign: {name} ({status})",
+          "metadata_keys": ["object_type", "brevo_id", "name", "subject", "status", "sentDate", "createdAt", "statistics"]
+        },
+        {
+          "function": "normalize_template(t, connector_id, tenant_id)",
+          "object_type": "email_template",
+          "source_id_formula": "SHA-256('template:{id}')[:16]",
+          "title_format": "Brevo template: {name}",
+          "metadata_keys": ["object_type", "brevo_id", "name", "subject", "tag", "isActive", "createdAt", "modifiedAt"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "BrevoError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "BrevoAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "BrevoRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "BrevoNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
+          "http_status": 404
+        },
+        {
+          "name": "BrevoNetworkError",
+          "description": "Raised on aiohttp timeout or connection errors. Retried with exponential backoff.",
+          "http_status": null
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "API key is invalid, has been regenerated, or the account was deleted.",
+          "solution": "Go to Brevo Settings → API Keys, copy the current key, and update the connector's api_key field."
+        },
+        {
+          "problem": "403 Forbidden",
+          "cause": "The API key does not have the required scope or the account plan does not support the API.",
+          "solution": "Ensure the API key has the necessary permissions (contacts, campaigns, senders read access)."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Brevo API rate limit exceeded.",
+          "solution": "The connector retries automatically with exponential backoff honouring Retry-After. For very large accounts, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors.",
+          "solution": "Resolve the underlying network issue and trigger a health check."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more records returned unexpected data that caused normalization to fail.",
+          "solution": "Check the connector logs for which record IDs failed. Inspect those records in Brevo for corrupted or null property values."
+        }
+      ]
+    }
+  ]
+}
