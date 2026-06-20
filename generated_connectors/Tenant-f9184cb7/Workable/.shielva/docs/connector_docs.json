@@ -1,0 +1,83 @@
+{
+  "title": "Workable ATS Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Workable** connector integrates Shielva with the [Workable REST API v3](https://workable.readme.io/reference) to sync ATS data — jobs, candidates, and pipeline stages — into the Shielva knowledge base.\n\nWorkable is a leading applicant tracking system (ATS). This connector reads all jobs, candidates, and stages from your Workable account, normalizes each record into a `ConnectorDocument` with a stable SHA-256-derived ID, and makes the data available for search, analysis, and automation within Shielva.\n\n**Key capabilities:**\n- List and fetch all jobs, candidates, and pipeline stages\n- List all team members\n- Full sync with automatic `since_id` cursor pagination\n- Bearer token authentication (`Authorization: Bearer {api_token}`)\n- Stable document IDs for deduplication across syncs\n- Two install fields: `api_token` (password) + `subdomain` (string)"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Workable connector running in minutes.\n\n### 1. Generate an API Token\n\n1. Log in to Workable\n2. Go to **Settings → Integrations → API Access Tokens**\n3. Click **Generate new token**\n4. Name it (e.g. \"Shielva Integration\")\n5. Copy the token — it is shown only once\n\n### 2. Find Your Subdomain\n\nYour subdomain is the prefix of your Workable URL: if your URL is `https://acme.workable.com`, your subdomain is `acme`.\n\n### 3. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Workable**\n2. Click **Connect**\n3. Enter your **API Token** and **Workable Subdomain**\n4. Click **Install** — status changes to **Connected** immediately on success\n\n### 4. Run Your First Sync\n\n```python\nresult = await connector.sync()\nprint(f\"Synced {result.documents_synced} documents\")\n# Synced 412 documents\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Workable connector uses **Bearer token** authentication.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | From Workable Settings → Integrations → API Access Tokens |\n| Workable Subdomain | `subdomain` | string | Yes | The prefix of your Workable account URL (e.g. `mycompany`) |\n\n### Auth Mechanism\n\nEvery request sends:\n```\nAuthorization: Bearer {api_token}\n```\n\nRequests go to `https://{subdomain}.workable.com/spi/v3/...`\n\n### Validation\n\n`install()` and `health_check()` both call `GET /spi/v3/accounts/{subdomain}` to verify the token and subdomain. A 401/403 response indicates an invalid token.\n\n### Security\n\n- The API token is stored encrypted in the Shielva vault — never logged\n- All requests use HTTPS to `{subdomain}.workable.com`\n- Rotate the token in Workable Settings and update in Shielva ACP if compromised"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"api_token\": \"your_workable_api_token\",\n  \"subdomain\": \"mycompany\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `SYNC_PAGE_SIZE` | `100` | Records per page during sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 public API methods plus the sync engine.",
+      "children": [
+        {
+          "id": "list-jobs",
+          "title": "list_jobs(limit, since_id)",
+          "content": "List jobs (single page).\n\n```python\njobs = await connector.list_jobs(limit=100)\n# Returns: [{\"shortcode\": \"ABC001\", \"title\": \"Senior Engineer\", \"state\": \"published\", ...}]\n\n# With cursor pagination:\njobs = await connector.list_jobs(limit=100, since_id=\"ABC001\")\n```\n\n**Endpoint:** `GET /spi/v3/jobs?limit=100`"
+        },
+        {
+          "id": "get-job",
+          "title": "get_job(shortcode)",
+          "content": "Return a single job by shortcode.\n\n```python\njob = await connector.get_job(\"ABC001\")\n# Returns: {\"shortcode\": \"ABC001\", \"title\": \"Senior Engineer\", ...}\n```\n\n**Endpoint:** `GET /spi/v3/jobs/{shortcode}`"
+        },
+        {
+          "id": "list-candidates",
+          "title": "list_candidates(limit, since_id)",
+          "content": "List candidates (single page).\n\n```python\ncandidates = await connector.list_candidates(limit=100)\n# Returns: [{\"id\": \"cand_abc\", \"name\": \"Alice Johnson\", \"email\": \"alice@example.com\", ...}]\n```\n\n**Endpoint:** `GET /spi/v3/candidates?limit=100`"
+        },
+        {
+          "id": "get-candidate",
+          "title": "get_candidate(candidate_id)",
+          "content": "Return a single candidate by ID.\n\n```python\ncandidate = await connector.get_candidate(\"cand_abc123xyz\")\n# Returns: {\"id\": \"cand_abc123xyz\", \"name\": \"Alice Johnson\", ...}\n```\n\n**Endpoint:** `GET /spi/v3/candidates/{candidate_id}`"
+        },
+        {
+          "id": "list-stages",
+          "title": "list_stages()",
+          "content": "Return all pipeline stages (no pagination).\n\n```python\nstages = await connector.list_stages()\n# Returns: [{\"slug\": \"application_review\", \"name\": \"Application Review\", ...}]\n```\n\n**Endpoint:** `GET /spi/v3/stages`"
+        },
+        {
+          "id": "list-members",
+          "title": "list_members()",
+          "content": "Return all team members (no pagination).\n\n```python\nmembers = await connector.list_members()\n# Returns: [{\"id\": \"mem_111\", \"name\": \"Recruiter One\", \"role\": \"recruiter\", ...}]\n```\n\n**Endpoint:** `GET /spi/v3/members`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Document Schema",
+      "content": "### How sync() works\n\n1. Fetches all jobs (paginated via `paging.next` cursor)\n2. Normalizes each job into a `ConnectorDocument`\n3. Fetches all candidates (paginated)\n4. Normalizes each candidate into a `ConnectorDocument`\n5. Fetches all pipeline stages (single response)\n6. Normalizes each stage into a `ConnectorDocument`\n7. Optionally ingests each document into the knowledge base identified by `kb_id`\n\n### Usage\n\n```python\n# Full sync of all Workable records\nresult = await connector.sync(kb_id=\"my_kb\")\n\nprint(result.status)            # SyncStatus.COMPLETED\nprint(result.documents_found)   # total docs produced\nprint(result.documents_synced)  # docs successfully ingested\nprint(result.documents_failed)  # docs that failed ingestion\n```\n\n### Document ID Scheme\n\n| Resource | source_id formula |\n|----------|------------------|\n| Job | `SHA-256(\"job:\" + shortcode)[:16]` |\n| Candidate | `SHA-256(\"candidate:\" + candidate_id)[:16]` |\n| Stage | `SHA-256(\"stage:\" + slug)[:16]` |\n\n### Job Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"job:\" + shortcode)[:16]` |\n| `title` | Job title |\n| `content` | Title, State, Department, Location, Employment Type, Code, Description |\n| `source_url` | Job URL from Workable |\n| `metadata.resource_type` | `\"job\"` |\n| `metadata.shortcode` | Workable job shortcode |\n| `metadata.state` | `\"published\"` / `\"closed\"` / `\"draft\"` |\n| `metadata.department` | Department name |\n| `metadata.location` | Formatted city + country |\n| `metadata.employment_type` | Employment type string |\n\n### Candidate Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"candidate:\" + id)[:16]` |\n| `title` | Full name |\n| `content` | Name, Email, Phone, Job Title, Domain, LinkedIn, Tags, Summary |\n| `source_url` | Candidate profile URL |\n| `metadata.resource_type` | `\"candidate\"` |\n| `metadata.candidate_id` | Workable candidate ID |\n| `metadata.email` | Email address |\n| `metadata.tags` | List of tag strings |\n\n### Stage Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"stage:\" + slug)[:16]` |\n| `title` | Stage name |\n| `content` | Stage name, Kind, Position |\n| `metadata.resource_type` | `\"stage\"` |\n| `metadata.slug` | Stage slug |\n| `metadata.kind` | Stage kind (review, interview, offer, etc.) |\n| `metadata.position` | Ordinal position in pipeline |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nWorkableError (base)\n├── WorkableAuthError      — 401/403: invalid or expired API token\n├── WorkableNetworkError   — timeouts, connection errors, 5xx\n├── WorkableRateLimitError — 429: too many requests\n└── WorkableNotFoundError  — 404: resource not found\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `WorkableRateLimitError` (429) | Yes | Exponential backoff; honours `Retry-After` header |\n| `WorkableNetworkError` (5xx, timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `WorkableAuthError` (401/403) | No | Immediate failure — fix the API token |\n| `WorkableNotFoundError` (404) | No | Immediate failure — check the resource ID |\n\n### Error Mapping\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `WorkableAuthError` |\n| 403 | `WorkableAuthError` |\n| 404 | `WorkableNotFoundError` |\n| 429 | `WorkableRateLimitError` |\n| 5xx | `WorkableNetworkError` |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\nThe API token is invalid, expired, or has been deleted.\n\n- Go to **Workable → Settings → Integrations → API Access Tokens**\n- Verify the token exists and has not been revoked\n- Generate a new API token and update it in Shielva ACP\n\n---\n\n### 403 Forbidden\n\nThe API token does not have read access for the requested resource.\n\n- Verify the token was created with the appropriate permissions\n- Contact your Workable admin to review API access settings\n\n---\n\n### 404 Not Found\n\nThe subdomain is incorrect or the resource ID does not exist.\n\n- Verify your subdomain matches your Workable account URL prefix exactly\n- Check that the job shortcode or candidate ID exists in Workable\n\n---\n\n### Rate Limit (429)\n\nWorkable enforces rate limits on API requests. The connector retries automatically and honours the `Retry-After` header. For large accounts, schedule sync during off-peak hours.\n\n---\n\n### Sync Finds No Data\n\n- Confirm your Workable account has active jobs and candidates\n- Verify the API token has the correct read permissions\n- Ensure the subdomain is correct"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "### Unit Tests (102 tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/workable_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 102 passed\n```\n\nAll HTTP calls are mocked via `AsyncMock` — no Workable account required.\n\n**Coverage:**\n- `install()` — missing token, empty token, missing subdomain, success (with company name), invalid token, network error, generic exception\n- `health_check()` — no token, no subdomain, healthy (with company name), auth error, network error, generic error\n- `sync()` — no token, no subdomain, empty, jobs+candidates+stages, job fetch failure, candidate fetch failure, stage fetch failure, kb_id ingestion, pagination (jobs, candidates), ingest failure counting\n- `list_jobs()` — success, empty, with since_id, auth error\n- `get_job()` — success, not found, called with shortcode\n- `list_candidates()` — success, empty, with since_id\n- `get_candidate()` — success, not found\n- `list_stages()` — success, empty\n- `list_members()` — success, empty\n- `normalize_job()` — basic, stable IDs, 16-char IDs, shortcode-based SHA-256, different IDs, source URL, metadata, no description, string location, no location\n- `normalize_candidate()` — basic, stable IDs, 16-char IDs, candidate_id SHA-256, no email/phone, no linkedin, source URL, metadata, None social profiles, summary in content\n- `normalize_stage()` — basic, stable IDs, 16-char IDs, slug SHA-256, different IDs, metadata\n- `with_retry()` — success, transient retry, auth no-retry, exhausted, rate limit retry\n- Exception hierarchy and attributes (all 5 exception types)\n- Connector model: type, config parsing, defaults, context manager, aclose idempotent\n- `ConnectorDocument` defaults and metadata isolation\n- HTTP client: Bearer header, base URL, get_jobs params, no since_id, candidates paging next, stages extraction, members extraction, get_job unwraps, get_candidate unwraps, _raise_for_status (401, 403, 404, 429, 500)\n- `_extract_since_id()` — present, absent, empty string, candidate cursor"
+    }
+  ]
+}
