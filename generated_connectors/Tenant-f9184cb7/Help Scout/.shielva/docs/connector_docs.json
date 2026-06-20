@@ -1,0 +1,90 @@
+{
+  "title": "Help Scout Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "connector_type": "helpscout",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Help Scout** connector integrates Shielva with the [Help Scout API v2](https://developer.helpscout.com/mailbox-api/) to sync conversations, customers, mailboxes, users, and tags into your Shielva knowledge base.\n\nHelp Scout is a customer support platform used by teams to manage shared inboxes, live chat, and customer relationships. This connector exposes **7 API methods** across 4 resource domains — Conversations, Customers, Mailboxes, and Users — and normalizes all data to Shielva's `ConnectorDocument` schema for downstream search and AI workflows.\n\n**Key capabilities:**\n- Full conversation sync with subject, preview, customer info, assignee, mailbox, and tags\n- Customer sync with contact details (email, phone from embedded _embedded arrays), company, and background notes\n- Mailbox listing for inbox management\n- User/agent listing for team management\n- HAL+JSON pagination (`_links.next.href`) for all paginated resources\n- OAuth 2.0 Client Credentials flow — no user redirect required, fully server-side\n- Auto-refresh bearer token when within 30 seconds of expiry\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid credentials"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Help Scout connector running in under 5 minutes.\n\n### 1. Create a Help Scout OAuth App\n\n1. Log in to Help Scout → click your name → **Your Profile** → **My Apps**.\n2. Click **Create My App**, fill in a name and any redirect URL.\n3. Copy the **App ID** and **App Secret**.\n\n### 2. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Help Scout**.\n2. Enter your **App ID** and **App Secret**.\n3. Click **Install**.\n\nThe connector calls `GET /users/me` to validate credentials and returns the connected user's name on success.\n\n### 3. Run a sync\n\n```python\nfrom connector import HelpScoutConnector\n\nasync with HelpScoutConnector(\n    config={\"client_id\": \"YOUR_APP_ID\", \"client_secret\": \"YOUR_APP_SECRET\"}\n) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_support_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Help Scout connector uses **OAuth 2.0 Client Credentials** flow.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| App ID | `client_id` | string | Yes | From Help Scout → Your Profile → My Apps |\n| App Secret | `client_secret` | password | Yes | From Help Scout → Your Profile → My Apps |\n\n### Token flow\n\n```\nPOST https://api.helpscout.net/v2/oauth2/token\ngrant_type=client_credentials&client_id=...&client_secret=...\n→ { \"access_token\": \"...\", \"expires_in\": 7200 }\n```\n\nThe `HelpScoutHTTPClient` automatically:\n1. Exchanges credentials for a bearer token on first use.\n2. Injects `Authorization: Bearer {token}` on every request.\n3. Refreshes the token when within 30 seconds of expiry.\n\n### No scopes needed\n\nHelp Scout's Client Credentials grant automatically provides access to all resources the app owner can access. No scope configuration is required.\n\n### Security\n\n- App credentials are stored encrypted in the Shielva vault and never logged.\n- Bearer tokens are held in memory only and never persisted to disk."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Help Scout connector requires two install fields.\n\n### Install fields\n\n```json\n{\n  \"client_id\": \"your_help_scout_app_id\",\n  \"client_secret\": \"your_help_scout_app_secret\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |\n| `TOKEN_REFRESH_BUFFER` | `30s` | Refresh token this many seconds before expiry |\n| `TOKEN_URL` | `https://api.helpscout.net/v2/oauth2/token` | OAuth token endpoint |\n| `API_BASE` | `https://api.helpscout.net/v2` | API base URL |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 7 methods across 4 resource domains.",
+      "children": [
+        {
+          "id": "list_conversations",
+          "title": "list_conversations(**kwargs)",
+          "content": "Returns all conversations across all pages.\n\n```python\nconversations = await conn.list_conversations(status=\"active\")\n```\n\nPaginates automatically via HAL `_links.next.href` until no next page."
+        },
+        {
+          "id": "get_conversation",
+          "title": "get_conversation(conversation_id)",
+          "content": "Returns a single conversation by numeric ID.\n\n```python\nconv = await conn.get_conversation(\"1001\")\n```"
+        },
+        {
+          "id": "list_customers",
+          "title": "list_customers(**kwargs)",
+          "content": "Returns all customers across all pages.\n\n```python\ncustomers = await conn.list_customers()\n```"
+        },
+        {
+          "id": "list_mailboxes",
+          "title": "list_mailboxes()",
+          "content": "Returns all mailboxes the account can access.\n\n```python\nmailboxes = await conn.list_mailboxes()\n```"
+        },
+        {
+          "id": "list_users",
+          "title": "list_users()",
+          "content": "Returns all users/agents across all pages.\n\n```python\nusers = await conn.list_users()\n```"
+        },
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials and returns an `InstallResult`. Internally calls `authenticate()` then `GET /users/me`.\n\n```python\nresult = await conn.install()\nprint(result.health, result.message)\n```"
+        },
+        {
+          "id": "health_check",
+          "title": "health_check()",
+          "content": "Pings `GET /users/me` and returns a `HealthCheckResult`.\n\n```python\nhealth = await conn.health_check()\nassert health.health == ConnectorHealth.HEALTHY\n```"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Help Scout uses **HAL+JSON** (`application/hal+json`) for paginated responses. The connector reads `_links.next.href` to determine whether a next page exists.\n\n```json\n{\n  \"_embedded\": {\n    \"conversations\": [ ... ]\n  },\n  \"_links\": {\n    \"next\": { \"href\": \"https://api.helpscout.net/v2/conversations?page=2\" }\n  }\n}\n```\n\nThe connector extracts items from `_embedded.<resource_key>` and increments `page` until `_links.next` is absent or the item list is empty."
+    },
+    {
+      "id": "sync",
+      "title": "Sync Engine",
+      "content": "The `sync()` method sequentially syncs all resource types in this order:\n\n1. **Conversations** — paginated; failure aborts and returns `FAILED`\n2. **Customers** — paginated; failure returns `PARTIAL`\n3. **Mailboxes** — single request; failure is non-fatal (supplemental data)\n4. **Users** — paginated; failure is non-fatal (supplemental data)\n\nEach item is normalized to a `ConnectorDocument` and optionally pushed to the knowledge base via `_ingest_document(doc, kb_id)` when `kb_id` is provided.\n\n```python\nresult = await conn.sync(full=True, kb_id=\"kb_support_001\")\nprint(result.status, result.documents_synced, result.documents_failed)\n```"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception hierarchy\n\n```\nHelpScoutError (base)\n├── HelpScoutAuthError        — 401/403 or OAuth token failure\n├── HelpScoutNetworkError     — 5xx, connection errors, timeouts\n├── HelpScoutNotFoundError    — 404\n└── HelpScoutRateLimitError   — 429; carries retry_after\n```\n\n### Retry behavior\n\n- Auth errors: **never retried** (require human action — re-check credentials)\n- Rate limit: retried using `Retry-After` header value if present, else exponential backoff\n- Network errors: retried up to 3 times with exponential backoff + jitter\n\n### Status mapping\n\n| HTTP status | Exception |\n|-------------|----------|\n| 401 / 403 | `HelpScoutAuthError` |\n| 404 | `HelpScoutNotFoundError` |\n| 429 | `HelpScoutRateLimitError` |\n| 5xx | `HelpScoutNetworkError` |\n| Other | `HelpScoutError` |"
+    },
+    {
+      "id": "document-schema",
+      "title": "Document Schema",
+      "content": "All resources are normalized to `ConnectorDocument`:\n\n```python\n@dataclass\nclass ConnectorDocument:\n    source_id: str          # sha256(\"<type>:<id>\")[:16]\n    title: str              # Human-readable title\n    content: str            # Searchable text content\n    connector_id: str       # Stamped by connector at sync time\n    tenant_id: str          # Stamped by connector at sync time\n    source_url: str         # Deep link into Help Scout\n    metadata: dict          # Resource-specific fields\n```\n\n### Source ID stability\n\nSource IDs are deterministic SHA-256 prefixes:\n\n| Resource | Formula |\n|----------|--------|\n| Conversation | `sha256(\"conversation:{id}\")[:16]` |\n| Customer | `sha256(\"customer:{id}\")[:16]` |\n| Mailbox | `sha256(\"mailbox:{id}\")[:16]` |\n| User | `sha256(\"user:{id}\")[:16]` |"
+    }
+  ]
+}
