@@ -1,0 +1,130 @@
+{
+  "connector_type": "amplitude",
+  "connector_id": "amplitude",
+  "name": "Amplitude",
+  "provider": "amplitude",
+  "service": "amplitude",
+  "version": "1.0.0",
+  "description": "Connects to Amplitude Analytics API v2 to sync event data, cohorts, and active user metrics into the Shielva knowledge base. Supports both US and EU data residency regions.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. abc123def456ghi789",
+      "help": "Your Amplitude API Key. Found in Amplitude → Settings → Projects → [Project] → General."
+    },
+    {
+      "key": "api_secret",
+      "label": "API Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Amplitude API Secret",
+      "help": "Your Amplitude API Secret (paired with the API Key). Keep this secure."
+    },
+    {
+      "key": "region",
+      "label": "Data Residency Region",
+      "type": "string",
+      "required": false,
+      "placeholder": "us",
+      "default": "us",
+      "help": "Data residency region: 'us' (default) or 'eu'. Must match your Amplitude project region."
+    }
+  ],
+  "features": [
+    "retry",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "region_support",
+    "event_segmentation",
+    "cohorts",
+    "active_users",
+    "raw_export"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate api_key and api_secret via GET /taxonomy/category. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /taxonomy/category and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches event segmentation for default events, active user counts, and cohorts for the last 30 days. Normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "export_events",
+      "name": "Export Events",
+      "description": "Export raw event data as a ZIP archive for a given hour-range (YYYYMMDDTHH format).",
+      "category": "events",
+      "endpoint": "GET https://amplitude.com/api/2/export"
+    },
+    {
+      "id": "get_event_segmentation",
+      "name": "Get Event Segmentation",
+      "description": "Retrieve event counts over a date range for a specific event type.",
+      "category": "events",
+      "endpoint": "GET /events/segmentation"
+    },
+    {
+      "id": "list_cohorts",
+      "name": "List Cohorts",
+      "description": "List all cohorts defined in the Amplitude project.",
+      "category": "cohorts",
+      "endpoint": "GET /cohorts"
+    },
+    {
+      "id": "get_cohort",
+      "name": "Get Cohort Members",
+      "description": "Retrieve user IDs belonging to a specific cohort.",
+      "category": "cohorts",
+      "endpoint": "GET /cohorts/{cohort_id}/members"
+    },
+    {
+      "id": "get_active_users",
+      "name": "Get Active Users",
+      "description": "Retrieve DAU/WAU/MAU data for a date range.",
+      "category": "users",
+      "endpoint": "GET /active"
+    },
+    {
+      "id": "get_user_activity",
+      "name": "Get User Activity",
+      "description": "Retrieve event stream for a specific Amplitude user ID.",
+      "category": "users",
+      "endpoint": "GET /usersearch"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "events",
+    "cohorts",
+    "users"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync", "id": "sync", "category": "sync"},
+    {"name": "Export Events", "id": "export_events", "category": "events"},
+    {"name": "Get Event Segmentation", "id": "get_event_segmentation", "category": "events"},
+    {"name": "List Cohorts", "id": "list_cohorts", "category": "cohorts"},
+    {"name": "Get Cohort Members", "id": "get_cohort", "category": "cohorts"},
+    {"name": "Get Active Users", "id": "get_active_users", "category": "users"},
+    {"name": "Get User Activity", "id": "get_user_activity", "category": "users"}
+  ]
+}
