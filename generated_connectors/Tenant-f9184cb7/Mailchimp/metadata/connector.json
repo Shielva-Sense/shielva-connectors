@@ -1,0 +1,20 @@
+{
+  "connector_type": "mailchimp",
+  "name": "Mailchimp",
+  "display_name": "Mailchimp",
+  "description": "Connect to Mailchimp to sync audiences, contacts, and campaigns from your Mailchimp account.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Mailchimp API key (e.g. abc123-us10). Found in Account → Extras → API keys."
+    }
+  ],
+  "capabilities": ["list_audiences", "get_audience", "list_members", "get_member", "list_campaigns", "sync"],
+  "provider": "mailchimp",
+  "category": "email_marketing"
+}
