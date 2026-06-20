@@ -27,13 +27,10 @@ class SyncStatus(str, Enum):
 
 @dataclass
 class ConnectorDocument:
-    """Normalized document emitted by the connector during sync."""
-
     id: str
     title: str
     content: str
-    source: str = "monday_com"
-    type: str = "work_item"
+    type: str = "monday_item"
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

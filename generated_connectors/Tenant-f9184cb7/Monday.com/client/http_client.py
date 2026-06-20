@@ -1,35 +1,80 @@
-"""Monday.com connector — GraphQL HTTP client.
-
-All calls are POST to https://api.monday.com/v2 with a JSON body
-``{"query": "...", "variables": {...}}``.
-
-Headers sent on every request:
-    Authorization: <api_key>    (raw token — no "Bearer" prefix)
-    Content-Type:  application/json
-    API-Version:   2023-10
-"""
+"""Monday.com connector — GraphQL HTTP client."""
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import aiohttp
 
 from exceptions import (
-    MondayComAuthError,
-    MondayComError,
-    MondayComNetworkError,
-    MondayComNotFoundError,
-    MondayComRateLimitError,
+    MondayAuthError,
+    MondayNetworkError,
+    MondayNotFoundError,
+    MondayRateLimitError,
+    MondayError,
 )
 
 _MONDAY_API_URL = "https://api.monday.com/v2"
 _API_VERSION = "2023-10"
 _DEFAULT_TIMEOUT = 30.0
 
+# GraphQL error message fragments that indicate auth failure
+_AUTH_ERROR_FRAGMENTS = frozenset({
+    "not authenticated",
+    "invalid api key",
+    "unauthorized",
+    "unauthenticated",
+    "authentication failed",
+    "invalid token",
+    "api token",
+})
 
-class MondayComHTTPClient:
-    """Thin async HTTP wrapper for the Monday.com GraphQL API v2."""
+# GraphQL error message fragments that indicate rate limiting
+_RATE_LIMIT_FRAGMENTS = frozenset({
+    "rate limit",
+    "too many requests",
+    "complexity budget",
+})
+
+# GraphQL error message fragments that indicate resource not found
+_NOT_FOUND_FRAGMENTS = frozenset({
+    "not found",
+    "does not exist",
+    "invalid board",
+    "invalid item",
+})
+
+
+def _classify_graphql_error(errors: list[Dict[str, Any]], context: str) -> None:
+    """Map a Monday.com GraphQL errors list to typed exceptions."""
+    if not errors:
+        return
+
+    messages = " ".join(
+        (e.get("message") or "").lower()
+        for e in errors
+    )
+
+    if any(frag in messages for frag in _RATE_LIMIT_FRAGMENTS):
+        raise MondayRateLimitError(f"[{context}] Rate limited: {messages}")
+    if any(frag in messages for frag in _AUTH_ERROR_FRAGMENTS):
+        raise MondayAuthError(f"[{context}] Auth error: {messages}")
+    if any(frag in messages for frag in _NOT_FOUND_FRAGMENTS):
+        raise MondayNotFoundError(f"[{context}] Not found: {messages}")
+    raise MondayError(f"[{context}] GraphQL error: {messages}")
+
+
+class MondayHTTPClient:
+    """Thin async HTTP wrapper for the Monday.com GraphQL API v2.
+
+    All requests are POST to https://api.monday.com/v2 with a JSON body
+    containing the GraphQL ``query`` (and optional ``variables``).
+
+    Headers sent on every request:
+        Authorization: <api_token>          (no "Bearer" prefix — Monday.com docs)
+        Content-Type:  application/json
+        API-Version:   2023-10
+    """
 
     def __init__(
         self,
@@ -39,77 +84,24 @@ class MondayComHTTPClient:
         self._api_url = api_url
         self._timeout = aiohttp.ClientTimeout(total=timeout)
 
-    def _build_headers(self, api_key: str) -> Dict[str, str]:
+    def _build_headers(self, api_token: str) -> Dict[str, str]:
         return {
-            "Authorization": api_key,
+            "Authorization": api_token,
             "Content-Type": "application/json",
             "API-Version": _API_VERSION,
         }
 
-    def _raise_for_status(self, status: int, context: str = "") -> None:
-        """Map HTTP status codes to typed exceptions."""
-        if status == 401:
-            raise MondayComAuthError(
-                f"[{context}] HTTP 401 — invalid API key"
-            )
-        if status == 403:
-            raise MondayComAuthError(
-                f"[{context}] HTTP 403 — forbidden"
-            )
-        if status == 429:
-            raise MondayComRateLimitError(
-                f"[{context}] HTTP 429 — rate limited"
-            )
-        if status >= 500:
-            raise MondayComNetworkError(
-                f"[{context}] HTTP {status} — server error"
-            )
-        if status >= 400:
-            raise MondayComError(
-                f"[{context}] HTTP {status} — client error"
-            )
-
-    def _check_graphql_errors(
-        self, errors: List[Dict[str, Any]], context: str
-    ) -> None:
-        """Raise a typed exception from a GraphQL errors list."""
-        if not errors:
-            return
-
-        messages = " ".join(
-            (e.get("message") or "").lower() for e in errors
-        )
-
-        _rate_fragments = {"rate limit", "too many requests", "complexity budget"}
-        _auth_fragments = {
-            "not authenticated",
-            "invalid api key",
-            "unauthorized",
-            "unauthenticated",
-            "authentication failed",
-            "invalid token",
-        }
-        _not_found_fragments = {"not found", "does not exist", "invalid board", "invalid item"}
-
-        if any(frag in messages for frag in _rate_fragments):
-            raise MondayComRateLimitError(f"[{context}] Rate limited: {messages}")
-        if any(frag in messages for frag in _auth_fragments):
-            raise MondayComAuthError(f"[{context}] Auth error: {messages}")
-        if any(frag in messages for frag in _not_found_fragments):
-            raise MondayComNotFoundError(f"[{context}] Not found: {messages}")
-        raise MondayComError(f"[{context}] GraphQL error: {messages}")
-
-    async def execute_query(
+    async def graphql_query(
         self,
-        api_key: str,
+        api_token: str,
         query: str,
         variables: Optional[Dict[str, Any]] = None,
-        context: str = "execute_query",
+        context: str = "graphql_query",
     ) -> Dict[str, Any]:
-        """POST a GraphQL query to the Monday.com API endpoint.
+        """Execute a GraphQL query/mutation against the Monday.com API.
 
-        Returns the ``data`` portion of the response on success.
-        Raises a typed exception on HTTP errors or GraphQL-level errors.
+        Returns the ``data`` portion of the response dict.
+        Raises typed exceptions on errors or HTTP failures.
         """
         payload: Dict[str, Any] = {"query": query}
         if variables:
@@ -119,54 +111,53 @@ class MondayComHTTPClient:
             async with aiohttp.ClientSession(timeout=self._timeout) as session:
                 async with session.post(
                     self._api_url,
-                    headers=self._build_headers(api_key),
+                    headers=self._build_headers(api_token),
                     data=json.dumps(payload),
                 ) as resp:
-                    self._raise_for_status(resp.status, context)
+                    if resp.status == 429:
+                        raise MondayRateLimitError(
+                            f"[{context}] HTTP 429 — rate limited"
+                        )
+                    if resp.status == 401:
+                        raise MondayAuthError(
+                            f"[{context}] HTTP 401 — invalid API token"
+                        )
+                    if resp.status >= 500:
+                        raise MondayNetworkError(
+                            f"[{context}] HTTP {resp.status} — server error"
+                        )
                     body: Dict[str, Any] = await resp.json(content_type=None)
         except (aiohttp.ClientError, aiohttp.ServerTimeoutError) as exc:
-            raise MondayComNetworkError(
+            raise MondayNetworkError(
                 f"[{context}] Network error: {exc}"
             ) from exc
 
-        # GraphQL-level errors take precedence over missing data
+        # GraphQL-level errors
         errors = body.get("errors")
         if errors:
-            self._check_graphql_errors(errors, context)
+            _classify_graphql_error(errors, context)
 
         data = body.get("data")
         if data is None:
-            raise MondayComError(f"[{context}] Empty data in response: {body}")
+            raise MondayError(f"[{context}] Empty data in response: {body}")
 
         return data
 
-    # ── Convenience query methods ──────────────────────────────────────────────
+    # ── Convenience query methods ─────────────────────────────────────────────
 
-    async def get_me(self, api_key: str) -> Dict[str, Any]:
-        """Query ``{ me { id name email account { id name } } }``."""
-        query = """
-        {
-          me {
-            id
-            name
-            email
-            account {
-              id
-              name
-            }
-          }
-        }
-        """
-        data = await self.execute_query(api_key, query, context="get_me")
+    async def get_me(self, api_token: str) -> Dict[str, Any]:
+        """Query { me { name email } } — used for health check and install validation."""
+        query = "{ me { name email } }"
+        data = await self.graphql_query(api_token, query, context="get_me")
         return data.get("me") or {}
 
-    async def list_boards(
+    async def get_boards(
         self,
-        api_key: str,
-        page: int = 1,
+        api_token: str,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """List boards with pagination (page-number based)."""
+        page: int = 1,
+    ) -> list[Dict[str, Any]]:
+        """List boards with id, name, description, state."""
         query = """
         query($limit: Int!, $page: Int!) {
           boards(limit: $limit, page: $page) {
@@ -177,20 +168,20 @@ class MondayComHTTPClient:
           }
         }
         """
-        data = await self.execute_query(
-            api_key,
+        data = await self.graphql_query(
+            api_token,
             query,
             variables={"limit": limit, "page": page},
-            context="list_boards",
+            context="get_boards",
         )
         return data.get("boards") or []
 
     async def get_board(
         self,
-        api_key: str,
+        api_token: str,
         board_id: str,
     ) -> Dict[str, Any]:
-        """Fetch a single board with its groups and columns."""
+        """Fetch a single board by ID with its items and column values."""
         query = """
         query($ids: [ID!]!) {
           boards(ids: $ids) {
@@ -198,44 +189,38 @@ class MondayComHTTPClient:
             name
             description
             state
-            groups {
-              id
-              title
-            }
-            columns {
-              id
-              title
-              type
+            items_page(limit: 50) {
+              items {
+                id
+                name
+                column_values {
+                  id
+                  text
+                }
+              }
             }
           }
         }
         """
-        data = await self.execute_query(
-            api_key,
+        data = await self.graphql_query(
+            api_token,
             query,
             variables={"ids": [board_id]},
             context="get_board",
         )
         boards = data.get("boards") or []
         if not boards:
-            raise MondayComNotFoundError(
-                f"[get_board] Board {board_id} not found"
-            )
+            raise MondayNotFoundError(f"[get_board] Board {board_id} not found")
         return boards[0]
 
-    async def list_board_items(
+    async def get_items_page(
         self,
-        api_key: str,
+        api_token: str,
         board_id: str,
-        limit: int = 100,
+        limit: int = 50,
         cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fetch a page of items from a board using cursor-based pagination.
-
-        Returns a dict with keys ``cursor`` and ``items``.
-        Pass ``cursor=None`` for the first page; subsequent calls use the
-        returned ``cursor`` value.
-        """
+        """Fetch a page of items from a board (cursor-based pagination)."""
         if cursor:
             query = """
             query($cursor: String!, $limit: Int!) {
@@ -252,11 +237,11 @@ class MondayComHTTPClient:
               }
             }
             """
-            data = await self.execute_query(
-                api_key,
+            data = await self.graphql_query(
+                api_token,
                 query,
                 variables={"cursor": cursor, "limit": limit},
-                context="list_board_items_next",
+                context="get_items_page_next",
             )
             return data.get("next_items_page") or {}
         else:
@@ -277,11 +262,11 @@ class MondayComHTTPClient:
               }
             }
             """
-            data = await self.execute_query(
-                api_key,
+            data = await self.graphql_query(
+                api_token,
                 query,
                 variables={"ids": [board_id], "limit": limit},
-                context="list_board_items_first",
+                context="get_items_page_first",
             )
             boards = data.get("boards") or []
             if not boards:
@@ -290,10 +275,10 @@ class MondayComHTTPClient:
 
     async def get_item(
         self,
-        api_key: str,
+        api_token: str,
         item_id: str,
     ) -> Dict[str, Any]:
-        """Fetch a single item by ID with board info and column values."""
+        """Fetch a single item by ID with its column values."""
         query = """
         query($ids: [ID!]!) {
           items(ids: $ids) {
@@ -310,55 +295,30 @@ class MondayComHTTPClient:
           }
         }
         """
-        data = await self.execute_query(
-            api_key,
+        data = await self.graphql_query(
+            api_token,
             query,
             variables={"ids": [item_id]},
             context="get_item",
         )
         items = data.get("items") or []
         if not items:
-            raise MondayComNotFoundError(
-                f"[get_item] Item {item_id} not found"
-            )
+            raise MondayNotFoundError(f"[get_item] Item {item_id} not found")
         return items[0]
 
-    async def list_teams(self, api_key: str) -> List[Dict[str, Any]]:
-        """Query all teams in the account."""
+    async def get_workspaces(self, api_token: str) -> list[Dict[str, Any]]:
+        """List all workspaces with id and name."""
         query = """
         {
-          teams {
+          workspaces {
             id
             name
-            picture_url
           }
         }
         """
-        data = await self.execute_query(api_key, query, context="list_teams")
-        return data.get("teams") or []
-
-    async def list_users(
-        self,
-        api_key: str,
-        page: int = 1,
-        limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """Query users with page-number based pagination."""
-        query = """
-        query($limit: Int!, $page: Int!) {
-          users(limit: $limit, page: $page) {
-            id
-            name
-            email
-            title
-            enabled
-          }
-        }
-        """
-        data = await self.execute_query(
-            api_key,
+        data = await self.graphql_query(
+            api_token,
             query,
-            variables={"limit": limit, "page": page},
-            context="list_users",
+            context="get_workspaces",
         )
-        return data.get("users") or []
+        return data.get("workspaces") or []
