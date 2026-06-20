@@ -1,0 +1,73 @@
+{
+  "title": "Plaid Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Plaid** connector integrates Shielva with the [Plaid API](https://plaid.com/docs/) to sync bank transactions, account balances, and financial institution data.\n\nPlaid is the leading financial data platform, connecting over 12,000 banks and financial institutions. This connector uses Plaid's Item-based model — each Item represents one bank connection established through Plaid Link — to fetch accounts, real-time balances, and up to 90 days of transaction history.\n\n**Key capabilities:**\n- Sync bank accounts and their balances\n- Fetch up to 90 days of paginated transaction history\n- Real-time balance lookups for specific account IDs\n- Institution metadata (bank name, routing numbers, products)\n- Incremental sync with configurable date range\n- All data normalized to Shielva's canonical `ConnectorDocument` schema\n- Retry logic with exponential backoff for transient failures\n- Typed exception hierarchy for auth, item, rate-limit, and network errors"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Plaid connector running in under 10 minutes.\n\n### 1. Get Plaid Credentials\n\n1. Log in to [dashboard.plaid.com](https://dashboard.plaid.com)\n2. Go to **Team Settings → Keys**\n3. Copy your **Client ID** (shared across environments)\n4. Copy your **Sandbox Secret** (for testing)\n\n### 2. Get an Access Token (Sandbox)\n\nUse the [Plaid Quickstart](https://github.com/plaid/quickstart) to run a local Link flow and get a sandbox access token:\n\n```bash\ngit clone https://github.com/plaid/quickstart.git\ncd quickstart && # follow README\n# access token will look like: access-sandbox-xxxxxxxx-...\n```\n\n### 3. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Plaid**\n2. Click **Connect**\n3. Enter `client_id`, `secret`, `access_token`, and `environment=sandbox`\n4. Click **Install**\n\n### 4. Run a Sync\n\n```python\nresult = await connector.sync(full=True)\nprint(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Plaid connector uses **API Key + Access Token** authentication. All Plaid endpoints are called via HTTP POST with credentials in the JSON body.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | From Plaid Dashboard → Team Settings → Keys |\n| Secret | `secret` | password | Yes | Environment-specific secret (sandbox/development/production) |\n| Access Token | `access_token` | password | Yes | Item access token from Plaid Link flow |\n| Environment | `environment` | string | No | sandbox, development, or production (default: production) |\n\n### How it works\n\nEvery Plaid API call is a POST request with credentials embedded in the body:\n\n```json\n{\n  \"client_id\": \"your_client_id\",\n  \"secret\": \"your_secret\",\n  \"access_token\": \"access-sandbox-...\"\n}\n```\n\nThe `PlaidHTTPClient` injects these automatically — no manual header management.\n\n### Credential Validation\n\nDuring `install()`, the connector calls `POST /item/get`. A response with `error_code=INVALID_API_KEYS` or `INVALID_ACCESS_TOKEN` sets `auth_status=INVALID_CREDENTIALS`. A successful response confirms the Item is active and returns the `institution_id`.\n\n### Security\n\n- All credentials are stored encrypted in the Shielva vault\n- The `access_token` grants access to a specific user's bank accounts — treat like a password\n- Rotate via Plaid Dashboard if exposed\n- Use environment-specific secrets — never mix sandbox secrets with production tokens"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"client_id\": \"your_plaid_client_id\",\n  \"secret\": \"your_plaid_secret\",\n  \"access_token\": \"access-sandbox-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\",\n  \"environment\": \"sandbox\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `SYNC_DAYS_DEFAULT` | 90 | Days of transaction history fetched on full sync |\n| `SYNC_PAGE_SIZE` | 100 | Transactions per page |\n| `TIMEOUT` | 30s | HTTP request timeout |\n| `MAX_RETRIES` | 3 | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |\n| `Plaid-Version` | 2020-09-14 | API version header sent on every request |\n\n### Environment URLs\n\n| Environment | Base URL |\n|-------------|----------|\n| sandbox | `https://sandbox.plaid.com` |\n| development | `https://development.plaid.com` |\n| production | `https://production.plaid.com` |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 public API methods plus `install()`, `health_check()`, and `sync()`.",
+      "children": [
+        {
+          "id": "get-accounts",
+          "title": "get_accounts()",
+          "content": "List all bank accounts for the Plaid Item.\n\n```python\nresult = await connector.get_accounts()\nfor account in result[\"accounts\"]:\n    print(account[\"name\"], account[\"mask\"])\n```\n\n**Plaid endpoint:** `POST /accounts/get`\n\n**Returns:**\n```json\n{\n  \"accounts\": [\n    {\n      \"account_id\": \"acct_abc123\",\n      \"name\": \"Plaid Checking\",\n      \"mask\": \"0000\",\n      \"type\": \"depository\",\n      \"subtype\": \"checking\",\n      \"balances\": { \"current\": 110.01, \"available\": 100.00, \"iso_currency_code\": \"USD\" }\n    }\n  ]\n}\n```"
+        },
+        {
+          "id": "get-balance",
+          "title": "get_balance(account_ids=None)",
+          "content": "Fetch real-time balances. Optionally scope to specific account IDs.\n\n```python\n# All accounts\nresult = await connector.get_balance()\n\n# Specific accounts\nresult = await connector.get_balance(account_ids=[\"acct_abc123\", \"acct_def456\"])\n\nfor account in result[\"accounts\"]:\n    b = account[\"balances\"]\n    print(f\"{account['name']}: current={b['current']}, available={b['available']}\")\n```\n\n**Plaid endpoint:** `POST /accounts/balance/get`\n\n> Note: Balance calls always hit Plaid's servers in real time — they are not cached."
+        },
+        {
+          "id": "get-transactions",
+          "title": "get_transactions(start_date, end_date, ...)",
+          "content": "Fetch paginated transactions between two dates. Automatically loops through all pages.\n\n```python\nresult = await connector.get_transactions(\n    start_date=\"2026-04-01\",\n    end_date=\"2026-06-19\",\n    count=100,              # optional, default 100\n    account_ids=[\"acct_abc123\"]  # optional filter\n)\nprint(f\"Total: {result['total_transactions']}\")\nfor txn in result[\"transactions\"]:\n    print(txn[\"name\"], txn[\"amount\"], txn[\"date\"])\n```\n\n**Plaid endpoint:** `POST /transactions/get` (paginated via offset)\n\n**Parameters:**\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `start_date` | str | required | YYYY-MM-DD |\n| `end_date` | str | required | YYYY-MM-DD |\n| `count` | int | 100 | Transactions per page (max 500) |\n| `offset` | int | 0 | Starting offset for pagination |\n| `account_ids` | list | None | Filter to specific accounts |"
+        },
+        {
+          "id": "get-institution",
+          "title": "get_institution(institution_id, country_codes=None)",
+          "content": "Fetch institution metadata by ID.\n\n```python\nresult = await connector.get_institution(\"ins_3\", country_codes=[\"US\"])\ninstitution = result[\"institution\"]\nprint(institution[\"name\"])          # \"Chase\"\nprint(institution[\"routing_numbers\"])  # [\"021000021\"]\n```\n\n**Plaid endpoint:** `POST /institutions/get_by_id`\n\n> The `institution_id` is returned by `install()` and `get_item()` in the item metadata."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Incremental Ingestion",
+      "content": "The `sync()` method fetches accounts and transactions and normalizes them into `ConnectorDocument` records.\n\n### How sync works\n\n1. Fetches all accounts via `POST /accounts/get` — normalized to `plaid_account` documents\n2. Fetches transactions via `POST /transactions/get` with offset pagination:\n   - **Full sync** (`full=True`): last 90 days\n   - **Incremental** (`since=<datetime>`): from `since` to today\n3. Normalizes each record to `ConnectorDocument`\n4. Calls `_ingest_document()` if `kb_id` is provided\n\n### Usage\n\n```python\n# Full sync — last 90 days\nresult = await connector.sync(full=True, kb_id=\"kb_abc123\")\nprint(f\"Found {result.documents_found}, synced {result.documents_synced}\")\n\n# Incremental — from a specific date\nfrom datetime import datetime, timezone\nsince = datetime(2026, 6, 1, tzinfo=timezone.utc)\nresult = await connector.sync(since=since, kb_id=\"kb_abc123\")\n```\n\n### Document Types\n\n| `source_id` | `title` | `metadata` fields |\n|-------------|---------|-------------------|\n| sha256(transaction_id)[:16] | `{merchant_name or name}: {amount} {currency}` | transaction_id, account_id, amount, iso_currency_code, date, merchant_name, category, pending, payment_channel |\n| sha256(account_id)[:16] | `{name} ({mask})` | account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code |\n\n### Recommended Schedule\n\nRun sync every 15–60 minutes for near-real-time transaction data. Plaid's transaction history has a 90-day window by default."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nPlaidError (base)\n├── PlaidAuthError       — INVALID_API_KEYS / INVALID_ACCESS_TOKEN\n├── PlaidItemError       — ITEM_ERROR (item needs re-authentication)\n├── PlaidRateLimitError  — RATE_LIMIT_EXCEEDED (429)\n├── PlaidNotFoundError   — Resource not found (404)\n└── PlaidNetworkError    — Connection timeout, DNS failure\n```\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `PlaidNetworkError` | Yes | Exponential backoff up to 3 attempts |\n| `PlaidRateLimitError` | Yes | Honours `Retry-After` header, then exponential backoff |\n| `PlaidAuthError` | No | Immediate failure — fix credentials |\n| `PlaidItemError` | No | Immediate failure — user re-authentication required |\n| `PlaidNotFoundError` | No | Immediate failure — check resource ID |\n\n### Error Detection\n\nPlaid errors are returned as 400 responses with a JSON body:\n```json\n{\n  \"error_type\": \"ITEM_ERROR\",\n  \"error_code\": \"ITEM_LOGIN_REQUIRED\",\n  \"error_message\": \"the login details of this item have changed\"\n}\n```\n\nThe `PlaidHTTPClient` maps these to typed Python exceptions automatically."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `INVALID_ACCESS_TOKEN`\n\nThe access token is malformed, expired, or from the wrong environment.\n\n**Fix:** Verify the token matches the environment (sandbox token + sandbox secret). Re-run the Plaid Link flow to get a fresh token.\n\n---\n\n### `INVALID_API_KEYS`\n\nThe `client_id` or `secret` is incorrect.\n\n**Fix:** Copy credentials from Plaid Dashboard → Team Settings → Keys. Check for trailing whitespace.\n\n---\n\n### `ITEM_LOGIN_REQUIRED`\n\nThe user's bank credentials changed or the bank requires step-up authentication.\n\n**Fix:** Use Plaid Link's update mode to have the user re-authenticate. The access token for the Item will be refreshed.\n\n---\n\n### `RATE_LIMIT_EXCEEDED`\n\nYou've exceeded Plaid's API call limits.\n\n**Fix:** The connector retries automatically. Reduce sync frequency if persistent. Contact Plaid to review limits.\n\n---\n\n### `health=DEGRADED` after install\n\nTransient network failure prevented reaching the Plaid API.\n\n**Fix:** Check network connectivity and [Plaid Status](https://status.plaid.com).\n\n---\n\n### `ModuleNotFoundError: shared` during tests\n\nThe `shared.base_connector` import is optional (used only in the full Shielva runtime).\n\n**Fix:** Tests run standalone — the connector falls back to `object` as the base class automatically. Run tests from the connector root:\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/plaid_connector\npytest tests/ -v\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 60 unit tests — all mocked, zero I/O.\n\n### Run Unit Tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/plaid_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 60 passed\n```\n\n### Coverage\n\n- `install()` — success, missing credentials (all/partial), invalid credentials, item error, generic exception\n- `health_check()` — healthy, missing credentials, auth error, item error, network error, generic error\n- `sync()` — empty, accounts + transactions, pagination, since-date, accounts failure, transactions failure, partial normalize failure, lazy client init\n- `get_accounts()` — success, empty\n- `get_balance()` — all accounts, specific IDs, multiple accounts\n- `get_transactions()` — single page, pagination loop, empty, with account IDs\n- `get_institution()` — success, with country codes\n- Normalizers — transaction fields, SHA-256 ID, merchant fallback, category list, currency fallback\n- Account normalizer — fields, SHA-256 ID, no-mask title, type in content\n- `with_retry` — first attempt success, auth error not retried, network error retried, exhausted raises, rate limit retry-after\n- Exception hierarchy — all exception types and inheritance\n- Lifecycle — aclose clears client, idempotent aclose, context manager, credentials_present, environment defaults"
+    }
+  ]
+}
