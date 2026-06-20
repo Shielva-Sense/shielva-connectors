@@ -957,3 +957,157 @@ class TestContextManager:
         async with c as ctx:
             assert ctx is c
         mock_http.aclose.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 17. _auth_base_url()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuthBaseUrl:
+    def test_production_base_url(self) -> None:
+        c = _make_connector(sandbox=False)
+        assert c._auth_base_url() == "https://login.salesforce.com"
+
+    def test_sandbox_base_url(self) -> None:
+        c = _make_connector(sandbox=True)
+        assert c._auth_base_url() == "https://test.salesforce.com"
+
+    def test_no_sandbox_key_defaults_to_production(self) -> None:
+        c = SalesforceConnector(tenant_id="t", connector_id="c", config={})
+        assert c._auth_base_url() == "https://login.salesforce.com"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18. authorize()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuthorize:
+    @pytest.mark.asyncio
+    async def test_production_auth_url(self) -> None:
+        c = _make_connector(sandbox=False)
+        result = await c.authorize()
+        assert "auth_url" in result
+        assert "login.salesforce.com" in result["auth_url"]
+        assert "services/oauth2/authorize" in result["auth_url"]
+
+    @pytest.mark.asyncio
+    async def test_sandbox_auth_url(self) -> None:
+        c = _make_connector(sandbox=True)
+        result = await c.authorize()
+        assert "auth_url" in result
+        assert "test.salesforce.com" in result["auth_url"]
+
+    @pytest.mark.asyncio
+    async def test_auth_url_contains_client_id(self) -> None:
+        c = _make_connector(sandbox=False)
+        result = await c.authorize()
+        assert "CLIENT_ID" in result["auth_url"]
+
+    @pytest.mark.asyncio
+    async def test_auth_url_contains_scope(self) -> None:
+        c = _make_connector(sandbox=False)
+        result = await c.authorize()
+        assert "scope" in result["auth_url"]
+
+    @pytest.mark.asyncio
+    async def test_custom_redirect_uri_used(self) -> None:
+        c = _make_connector(redirect_uri="https://myapp.example.com/callback")
+        result = await c.authorize()
+        assert "myapp.example.com" in result["auth_url"]
+        assert result["redirect_uri"] == "https://myapp.example.com/callback"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 19. install() — client_id/client_secret validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestInstallValidation:
+    @pytest.mark.asyncio
+    async def test_missing_client_id_returns_offline(self) -> None:
+        c = SalesforceConnector(
+            tenant_id="t", connector_id="c",
+            config={"client_secret": "SECRET"},
+        )
+        result = await c.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+        assert "client_id" in result.message
+
+    @pytest.mark.asyncio
+    async def test_missing_client_secret_returns_offline(self) -> None:
+        c = SalesforceConnector(
+            tenant_id="t", connector_id="c",
+            config={"client_id": "ID"},
+        )
+        result = await c.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+        assert "client_secret" in result.message
+
+    @pytest.mark.asyncio
+    async def test_client_id_and_secret_without_token_offline(self) -> None:
+        # Has credentials but no access_token/instance_url — offline (awaiting OAuth)
+        c = SalesforceConnector(
+            tenant_id="t", connector_id="c",
+            config={"client_id": "ID", "client_secret": "SECRET"},
+        )
+        result = await c.install()
+        assert result.health == ConnectorHealth.OFFLINE
+        assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 20. list_cases()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestListCases:
+    @pytest.mark.asyncio
+    async def test_list_cases_correct_soql(self) -> None:
+        c = _make_connector()
+        expected = {"records": [], "totalSize": 0, "done": True}
+        mock_http = AsyncMock()
+        mock_http.query = AsyncMock(return_value=expected)
+        c.http_client = mock_http
+        result = await c.list_cases(limit=50)
+        assert result == expected
+        soql = mock_http.query.call_args[0][0]
+        assert "FROM Case" in soql
+        assert "LIMIT 50" in soql
+
+    @pytest.mark.asyncio
+    async def test_list_cases_returns_result(self) -> None:
+        c = _make_connector()
+        expected = {"records": [{"Id": "CS001", "Subject": "Login issue"}], "totalSize": 1, "done": True}
+        mock_http = AsyncMock()
+        mock_http.query = AsyncMock(return_value=expected)
+        c.http_client = mock_http
+        result = await c.list_cases()
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_list_cases_default_limit(self) -> None:
+        c = _make_connector()
+        mock_http = AsyncMock()
+        mock_http.query = AsyncMock(return_value={"records": []})
+        c.http_client = mock_http
+        await c.list_cases()
+        soql = mock_http.query.call_args[0][0]
+        assert "LIMIT 100" in soql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 21. Module-level constants
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestModuleConstants:
+    def test_connector_type_constant(self) -> None:
+        from connector import CONNECTOR_TYPE
+        assert CONNECTOR_TYPE == "salesforce"
+
+    def test_auth_type_constant(self) -> None:
+        from connector import AUTH_TYPE
+        assert AUTH_TYPE == "oauth2"
+
+    def test_api_version_constant(self) -> None:
+        from connector import SALESFORCE_API_VERSION
+        assert SALESFORCE_API_VERSION == "v58.0"

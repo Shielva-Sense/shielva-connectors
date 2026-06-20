@@ -1,41 +1,61 @@
 {
   "connector_type": "salesforce",
-  "connector_id": "salesforce",
-  "name": "Salesforce CRM",
-  "provider": "salesforce",
+  "name": "Salesforce",
+  "provider": "Salesforce",
   "service": "salesforce",
-  "version": "1.0.0",
-  "description": "Sync Salesforce leads, contacts, opportunities and accounts into the Shielva knowledge base.",
+  "service_slug": "salesforce",
   "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync contacts, accounts, opportunities, leads, and cases from Salesforce CRM.",
   "install_fields": [
     {
       "key": "client_id",
-      "label": "Connected App Client ID",
-      "type": "text",
+      "label": "Consumer Key (Client ID)",
+      "type": "string",
       "required": true,
       "placeholder": "3MVG9...",
       "help": "From Salesforce Setup → App Manager → Connected App → Consumer Key"
     },
     {
       "key": "client_secret",
-      "label": "Connected App Client Secret",
-      "type": "secret",
+      "label": "Consumer Secret (Client Secret)",
+      "type": "password",
       "required": true,
       "placeholder": "Consumer Secret from Connected App",
       "help": "Consumer Secret from your Salesforce Connected App"
     },
     {
-      "key": "instance_url",
-      "label": "Instance URL",
-      "type": "text",
+      "key": "redirect_uri",
+      "label": "Callback URL",
+      "type": "string",
       "required": false,
-      "placeholder": "https://yourorg.salesforce.com",
-      "help": "Your Salesforce org URL. Auto-detected from OAuth if left blank."
+      "placeholder": "https://app.shielva.ai/oauth/callback/salesforce",
+      "help": "OAuth redirect/callback URL registered in your Salesforce Connected App"
+    },
+    {
+      "key": "sandbox",
+      "label": "Use Sandbox",
+      "type": "boolean",
+      "required": false,
+      "help": "Enable to use test.salesforce.com instead of login.salesforce.com"
     }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "authorize",
+    "query",
+    "list_contacts",
+    "list_accounts",
+    "list_opportunities",
+    "list_leads",
+    "list_cases"
   ],
   "oauth_scopes": ["api", "refresh_token", "offline_access"],
   "oauth_auth_url": "https://login.salesforce.com/services/oauth2/authorize",
   "oauth_token_url": "https://login.salesforce.com/services/oauth2/token",
+  "oauth_auth_url_sandbox": "https://test.salesforce.com/services/oauth2/authorize",
+  "oauth_token_url_sandbox": "https://test.salesforce.com/services/oauth2/token",
   "features": [
     "retry",
     "pagination",
@@ -68,72 +88,42 @@
       "name": "SOQL Query",
       "description": "Execute an arbitrary SOQL query against the org.",
       "category": "query",
-      "endpoint": "GET /services/data/v57.0/query?q={soql}"
-    },
-    {
-      "id": "list_objects",
-      "name": "List SObjects",
-      "description": "List all available SObject types in this org.",
-      "category": "objects",
-      "endpoint": "GET /services/data/v57.0/sobjects/"
-    },
-    {
-      "id": "get_object",
-      "name": "Get SObject Record",
-      "description": "Retrieve a single SObject record by type and ID.",
-      "category": "objects",
-      "endpoint": "GET /services/data/v57.0/sobjects/{type}/{id}"
-    },
-    {
-      "id": "list_leads",
-      "name": "List Leads",
-      "description": "List Leads ordered by creation date descending via SOQL.",
-      "category": "leads",
-      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Lead"
+      "endpoint": "GET /services/data/v58.0/query?q={soql}"
     },
     {
       "id": "list_contacts",
       "name": "List Contacts",
-      "description": "List Contacts ordered by creation date descending via SOQL.",
+      "description": "List Contacts ordered by LastModifiedDate descending via SOQL.",
       "category": "contacts",
-      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Contact"
-    },
-    {
-      "id": "list_opportunities",
-      "name": "List Opportunities",
-      "description": "List Opportunities ordered by creation date descending via SOQL.",
-      "category": "opportunities",
-      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Opportunity"
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Contact"
     },
     {
       "id": "list_accounts",
       "name": "List Accounts",
-      "description": "List Accounts ordered by creation date descending via SOQL.",
+      "description": "List Accounts ordered by LastModifiedDate descending via SOQL.",
       "category": "accounts",
-      "endpoint": "GET /services/data/v57.0/query?q=SELECT ... FROM Account"
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Account"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List Opportunities ordered by LastModifiedDate descending via SOQL.",
+      "category": "opportunities",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Opportunity"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List Leads ordered by LastModifiedDate descending via SOQL.",
+      "category": "leads",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Lead"
+    },
+    {
+      "id": "list_cases",
+      "name": "List Cases",
+      "description": "List Cases ordered by LastModifiedDate descending via SOQL.",
+      "category": "cases",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Case"
     }
-  ],
-  "categories": [
-    "auth",
-    "health",
-    "sync",
-    "query",
-    "objects",
-    "leads",
-    "contacts",
-    "opportunities",
-    "accounts"
-  ],
-  "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync CRM Records", "id": "sync", "category": "sync" },
-    { "name": "SOQL Query", "id": "query", "category": "query" },
-    { "name": "List SObjects", "id": "list_objects", "category": "objects" },
-    { "name": "Get SObject Record", "id": "get_object", "category": "objects" },
-    { "name": "List Leads", "id": "list_leads", "category": "leads" },
-    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
-    { "name": "List Opportunities", "id": "list_opportunities", "category": "opportunities" },
-    { "name": "List Accounts", "id": "list_accounts", "category": "accounts" }
   ]
 }
