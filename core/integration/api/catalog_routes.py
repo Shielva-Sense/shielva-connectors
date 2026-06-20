@@ -157,40 +157,51 @@ async def list_providers():
 
 @catalog_router.get("/providers/{provider}/services")
 async def list_services(provider: str):
-    """Return all services offered by a provider (static or custom)."""
-    # Try static catalog first
-    services = get_provider_services(provider)
-    if services:
-        logger.info("catalog.list_services", provider=provider, count=len(services), source="static")
-        return services
+    """Return all services offered by a provider — static catalog + custom additions merged.
 
-    # Try custom providers
+    A provider can have services from both sources:
+      1. Static catalog (`SERVICE_CATALOG` in data/catalog.py)
+      2. Custom services stored in `custom_providers` MongoDB collection
+
+    Both contribute to the rendered card grid so adding a service for a provider
+    that already exists in the static catalog (e.g. an extra Google service like
+    Looker) just requires an insert into `custom_providers` — no Python edit.
+    """
+    services = list(get_provider_services(provider))
+    seen_keys = {s.get("service") for s in services}
+
     try:
         doc = await custom_providers_collection().find_one({"provider_key": provider})
         if doc:
             doc = _serialize(doc)
-            result = []
+            sdk_pkg = " ".join(d["name"] for d in doc.get("dependencies", []))
             for svc in doc.get("services", []):
-                result.append({
+                key = svc.get("service_key", "")
+                if not key or key in seen_keys:
+                    continue
+                services.append({
                     "provider": provider,
-                    "service": svc.get("service_key", ""),
+                    "service": key,
+                    "service_key": key,
                     "display_name": svc.get("display_name", ""),
                     "description": svc.get("description", ""),
                     "auth_type": svc.get("auth_type", "api_key"),
                     "category": svc.get("category", "general"),
                     "logo_url": svc.get("logo_url", ""),
-                    "sdk_package": " ".join(
-                        d["name"] for d in doc.get("dependencies", [])
-                    ),
+                    "sdk_package": sdk_pkg,
                     "is_custom": True,
                 })
-            logger.info("catalog.list_services", provider=provider, count=len(result), source="custom")
-            return result
+                seen_keys.add(key)
     except Exception as exc:
         logger.warning("catalog.custom_service_fetch_failed", provider=provider, error=str(exc))
 
-    logger.warning("catalog.provider_not_found", provider=provider)
-    raise HTTPException(404, f"Provider '{provider}' not found in catalog")
+    if not services:
+        logger.warning("catalog.provider_not_found", provider=provider)
+        raise HTTPException(404, f"Provider '{provider}' not found in catalog")
+
+    services.sort(key=lambda s: (s.get("display_name") or s.get("service") or "").lower())
+    logger.info("catalog.list_services", provider=provider, count=len(services))
+    return services
 
 
 @catalog_router.get("/services/{provider}/{service}")

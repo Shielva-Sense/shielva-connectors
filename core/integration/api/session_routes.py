@@ -238,6 +238,23 @@ def _cache_prompt_to_tmp(content: str, label: str) -> str:
     return tmp_path
 
 
+def _canon_key(s: str) -> str:
+    """Canonical catalog key: lowercase, alnum + underscore only.
+
+    Convention enforced on every session at write time so the catalog key
+    is the single source of truth — never display names, never provider-
+    prefixed service values, never mixed case.
+    """
+    import re as _re_canon
+    if not s:
+        return s
+    s = s.lower().strip()
+    s = s.replace(" ", "_").replace("-", "_").replace(".", "_")
+    s = _re_canon.sub(r"[^a-z0-9_]", "", s)
+    s = _re_canon.sub(r"_+", "_", s).strip("_")
+    return s
+
+
 def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> Optional[str]:
     """Return tenant_id from header (optional — may be None pre-login)."""
     return x_tenant_id or None
@@ -478,14 +495,40 @@ async def restore_sessions_from_r2(
     col = sessions_collection()
     restored: List[str] = []
     skipped: List[str] = []
+    # Track slugs whose connector already exists (by id OR by connector_name match) so
+    # we never restore a second session for the same connector when two R2 entries exist.
+    # Key: (tenant_id_or_empty, slug) → True when already present in Mongo.
+    restored_slugs: set[tuple[str, str]] = set()
+
+    # Pre-load existing slugs for this app/tenant to avoid double-restoring.
+    existing_slug_query: dict = {}
+    if tenant_id:
+        existing_slug_query["tenant_id"] = tenant_id
+    if app_id:
+        existing_slug_query["app_id"] = app_id
+    async for existing in col.find(existing_slug_query, {"service_slug": 1, "service": 1}):
+        _es = (existing.get("service_slug") or existing.get("service") or "").lower()
+        if _es:
+            restored_slugs.add((_es, (tenant_id or "").lower()))
+
     for slug, sid in found:
         try:
             oid = _OID(sid)
         except Exception:
             continue
+        # Skip if the exact session id is already in Mongo.
         if await col.find_one({"_id": oid}):
             skipped.append(sid)
             continue
+        # Skip if we already have any session (restored or native) for this connector slug
+        # under this tenant — prevents duplicate restore when R2 has two build sessions for
+        # the same connector (e.g. two google_gmail entries after a re-build).
+        _slug_key = (slug.lower(), (tenant_id or "").lower())
+        if _slug_key in restored_slugs:
+            skipped.append(sid)
+            logger.info("session.restore_skipped_duplicate", session_id=sid, slug=slug)
+            continue
+
         cj = _getj(slug, sid, "metadata/connector.json") or {}
         ps = _getj(slug, sid, "plan_steps.json") or {}
         sp = _getj(slug, sid, "stepper_progress.json") or {}
@@ -517,9 +560,20 @@ async def restore_sessions_from_r2(
             doc["output_dir"] = ps["output_dir"]
         doc["metadata_version"] = cj.get("version")
         doc["stepper_max_step"] = int(sp.get("maxReachedStep", 7) or 7)
-        doc["plan"] = {"steps": steps, "version": 1}
+        # Phase 4: full plan body → R2; slim {version, steps:[{index,title,
+        # type,status}]} → Mongo. Restored sessions get the same offload as
+        # freshly-planned ones so the Mongo doc stays tiny.
+        _full_plan = {"steps": steps, "version": 1}
+        from integration.services.planning_service import persist_plan as _persist_plan
+        doc["plan"] = await _persist_plan(
+            session_id=str(oid),
+            provider=cj.get("provider", ""),
+            service_slug=slug,
+            plan=_full_plan,
+        )
         doc["restored_from_r2"] = True
         await col.insert_one(doc)
+        restored_slugs.add(_slug_key)
         restored.append(sid)
         logger.info("session.restored_from_r2", session_id=sid, slug=slug, steps=len(steps))
 
@@ -713,7 +767,18 @@ async def import_existing_sessions(
             doc["output_dir"] = spec.output_dir
         steps = _load_plan_steps(spec.output_dir)
         if steps:
-            doc["plan"] = {"steps": steps, "version": 1}
+            # Phase 4: pre-allocate the session _id so we can write the full
+            # plan to R2 (keyed by session_id) before the insert. Mongo then
+            # gets the slim summary only.
+            from bson import ObjectId as _OID
+            doc["_id"] = _OID()
+            from integration.services.planning_service import persist_plan as _persist_plan
+            doc["plan"] = await _persist_plan(
+                session_id=str(doc["_id"]),
+                provider=spec.provider,
+                service_slug=spec.service_slug,
+                plan={"steps": steps, "version": 1},
+            )
         res = await col.insert_one(doc)
         created.append(str(res.inserted_id))
         logger.info("session.imported_from_disk", service_slug=spec.service_slug, session_id=str(res.inserted_id),
@@ -741,12 +806,21 @@ async def create_session(
     if not app_id and not tenant_id:
         raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
 
+    canon_provider = _canon_key(body.provider)
+    canon_service = _canon_key(body.service)
+    # Strip duplicated provider prefix from service (e.g. "google_drive" → "drive")
+    if canon_provider and canon_service.startswith(canon_provider + "_"):
+        canon_service = canon_service[len(canon_provider) + 1:]
+    # Strip "_connector" suffix
+    if canon_service.endswith("_connector"):
+        canon_service = canon_service[:-len("_connector")]
+
     session = IntegrationSession(
         app_id=app_id,
         tenant_id=tenant_id,
         tenant_name=tenant_name,
-        provider=body.provider,
-        service=body.service,
+        provider=canon_provider,
+        service=canon_service,
         connector_name=body.connector_name or "",
         user_prompt=body.user_prompt,
         docs_urls=body.docs_urls or [],
@@ -762,7 +836,7 @@ async def create_session(
     # Each session gets its own isolated output directory even when the same
     # connector name is used multiple times (build run + every enhance run).
     _unique_slug = _compute_unique_slug(
-        session_id_str, body.connector_name, body.service, app_id or tenant_id or session_id_str
+        session_id_str, body.connector_name, canon_service, app_id or tenant_id or session_id_str
     )
 
     await sessions_collection().update_one(
@@ -797,7 +871,7 @@ async def patch_session(
     from bson import ObjectId
     app_id    = x_app_id or None
     tenant_id = x_tenant_id or None
-    allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt", "output_dir", "auth_type", "package_structure", "recommended_features", "default_config_fields"}
+    allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt", "output_dir", "auth_type", "package_structure", "recommended_features", "default_config_fields", "alias_name", "status"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         return {"ok": True}
@@ -902,8 +976,10 @@ async def list_sessions(
     status: Optional[str] = None,
     provider: Optional[str] = None,
     service: Optional[str] = None,
+    include_inactive: bool = False,
     skip: int = 0,
     limit: int = 50,
+    summary: bool = False,
 ):
     """List sessions for this app install / tenant, filtered by status, provider, service.
 
@@ -925,11 +1001,36 @@ async def list_sessions(
 
     if status:
         query["status"] = status
+    elif not include_inactive:
+        # Exclude inactive sessions unless the caller opts in (SAD uses include_inactive=true)
+        query["status"] = {"$ne": "inactive"}
     if provider:
-        query["provider"] = provider
+        query["provider"] = provider.lower()
     if service:
         query["service"] = service
-    cursor = sessions_collection().find(query).sort("created_at", -1).skip(skip).limit(limit)
+    # Summary mode: project ONLY the fields the Manage Connectors row renders.
+    # The row needs id + connector_name + provider + service + service_slug +
+    # status + version + dates + a couple of derived flags. Everything else —
+    # plan steps, execution_results, conversation_history, generated_files,
+    # docs, default_config — is loaded on demand by /sessions/{id} when the
+    # user opens one. Dropping `plan` collapses the response from ~192 KB to
+    # ~20 KB on 129 sessions (and the on-wire query is faster too — Mongo
+    # never has to read the steps subdocument).
+    if summary:
+        projection = {
+            "_id": 1, "app_id": 1, "tenant_id": 1, "tenant_name": 1,
+            "provider": 1, "service": 1, "service_slug": 1,
+            "connector_name": 1, "auth_type": 1, "status": 1,
+            "version": 1, "metadata_version": 1, "run_kind": 1,
+            "parent_session_id": 1, "output_dir": 1,
+            "created_at": 1, "updated_at": 1,
+            "version_upgrade_pending": 1, "version_upgraded_from": 1,
+            "gateway_connector_id": 1, "imported_from_disk": 1,
+            "stepper_max_step": 1,
+        }
+        cursor = sessions_collection().find(query, projection).sort("created_at", -1).skip(skip).limit(limit)
+    else:
+        cursor = sessions_collection().find(query).sort("created_at", -1).skip(skip).limit(limit)
     sessions = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])
@@ -993,6 +1094,88 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
 
     doc["_id"] = str(doc["_id"])
     doc["id"] = doc["_id"]
+
+    # Lazy-hydrate the FULL plan body from R2 when Mongo holds only the slim
+    # summary (Phase 4). We merge per-step fields back over the slim Mongo
+    # steps so the Builder + codegen see the original PlanDocument shape.
+    # Mongo's `status` ALWAYS wins — R2's plan_full.json is the "spec" and
+    # may be stale relative to live execution status.
+    _plan_doc = doc.get("plan")
+    if isinstance(_plan_doc, dict) and _plan_doc.get("_r2_offloaded"):
+        try:
+            from integration.services import r2_service as _r2_plan
+            _provider = doc.get("provider", "")
+            _service_slug = doc.get("service_slug") or doc.get("service") or ""
+            if _provider and _service_slug:
+                _r2_plan_doc = await _r2_plan.get_plan_full(
+                    provider=_provider, service_slug=_service_slug, session_id=doc["_id"],
+                )
+                if isinstance(_r2_plan_doc, dict):
+                    _r2_steps_by_idx = {}
+                    for _r2_step in _r2_plan_doc.get("steps") or []:
+                        if isinstance(_r2_step, dict):
+                            _idx = _r2_step.get("index")
+                            if _idx is not None:
+                                _r2_steps_by_idx[_idx] = _r2_step
+                    _merged_steps = []
+                    for _slim in _plan_doc.get("steps") or []:
+                        if not isinstance(_slim, dict):
+                            _merged_steps.append(_slim); continue
+                        _full = _r2_steps_by_idx.get(_slim.get("index"))
+                        if _full:
+                            _merged_steps.append({**_full, **_slim})  # Mongo status wins
+                        else:
+                            _merged_steps.append(_slim)
+                    _merged_plan = {**_r2_plan_doc, **_plan_doc, "steps": _merged_steps}
+                    _merged_plan.pop("_r2_offloaded", None)
+                    doc["plan"] = _merged_plan
+        except Exception as _exc:
+            logger.warning("session.plan_hydrate_failed", session_id=doc["_id"], error=str(_exc))
+
+    # Lazy-hydrate conversation_history from R2 when Mongo holds only a
+    # pointer dict (Phase 5). The Builder needs the full turn list when it
+    # opens a session for replan; without this the panel would render an
+    # empty conversation.
+    _ch = doc.get("conversation_history")
+    if isinstance(_ch, dict) and _ch.get("_r2_offloaded"):
+        try:
+            from integration.services import r2_service as _r2_ch
+            _provider = doc.get("provider", "")
+            _service_slug = doc.get("service_slug") or doc.get("service") or ""
+            if _provider and _service_slug:
+                _arr = await _r2_ch.get_conversation_history(
+                    provider=_provider, service_slug=_service_slug, session_id=doc["_id"],
+                )
+                doc["conversation_history"] = _arr if isinstance(_arr, list) else []
+        except Exception as _exc:
+            logger.warning("session.conversation_hydrate_failed", session_id=doc["_id"], error=str(_exc))
+
+    # Lazy-hydrate execution_results from R2 for any step rows that were
+    # offloaded (Phase 3). We only fetch heavy bytes when the Builder is
+    # actively opening this session — single round of parallel R2 GETs, one
+    # per step that has `r2_offloaded: True`. Steps that still embed their
+    # `output`/`logs` in Mongo (legacy rows) are passed through untouched.
+    _exec_results = doc.get("execution_results") or []
+    if _exec_results:
+        _provider = doc.get("provider", "")
+        _service_slug = doc.get("service_slug") or doc.get("service") or ""
+        if _provider and _service_slug:
+            from integration.services import r2_service as _r2
+            import asyncio as _asyncio
+            _needs = [
+                (i, r) for i, r in enumerate(_exec_results)
+                if isinstance(r, dict) and r.get("r2_offloaded") and not r.get("output") and not r.get("logs")
+            ]
+            if _needs:
+                _payloads = await _asyncio.gather(
+                    *[_r2.get_step_output(provider=_provider, service_slug=_service_slug,
+                                          session_id=session_id, step_index=int(r.get("step_index", -1)))
+                      for _, r in _needs],
+                    return_exceptions=True,
+                )
+                for (i, row), payload in zip(_needs, _payloads):
+                    if isinstance(payload, dict):
+                        _exec_results[i] = {**row, **payload}
 
     # Strip deprecated deploy_form steps from old sessions
     _plan = doc.get("plan")
@@ -1174,10 +1357,14 @@ async def cleanup_generated_files(
         {"plan": 1},
     )
     plan = plan_doc.get("plan", {}) if plan_doc else {}
-    steps = plan.get("steps", [])
+    steps = plan.get("steps", []) or []
+    # Some legacy sessions stored a None inside steps[] (or stored the entire
+    # `steps` field as None at the plan level). Skip non-dict entries instead
+    # of crashing with `TypeError: 'NoneType' object is not a mapping`.
     reset_steps = [
         {**step, "status": "pending", "output": None, "error": None}
         for step in steps
+        if isinstance(step, dict)
     ]
 
     update: dict = {
@@ -2887,7 +3074,7 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         {"_id": oid},
-        {"service": 1, "service_slug": 1, "tenant_id": 1, "app_id": 1},
+        {"service": 1, "service_slug": 1, "connector_name": 1, "tenant_id": 1, "app_id": 1},
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -2898,6 +3085,8 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
     #   shielva_gmail_connector        → shielva_gmail
     #   shielva_gmail_connector_cb03d1 → shielva_gmail_cb03d1  (legacy sessions)
     service_slug = _re_sync.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug_raw)
+    # connector_name holds the display name written by codegen (e.g. "Google Gmail", "Rippling")
+    _connector_display_name = (doc.get("connector_name") or "").strip()
     r2_tenant = doc.get("tenant_id") or tenant_id
 
     # Explicitly set R2 bucket context from session.app_id so upload goes to the correct
@@ -2920,14 +3109,21 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
             out_dir = _cand
             logger.info("sync_to_r2.using_client_dir", session_id=session_id, path=str(out_dir))
 
-    # Priority 2: server GENERATED_CODE_DIR fallback (flat + legacy tenant-subdir paths)
+    # Priority 2: server GENERATED_CODE_DIR fallback — try slug forms AND display-name form.
+    # Generated dirs use the display name (e.g. "Rippling", "Google Gmail") not the slug form.
     if out_dir is None:
         _base = Path(settings.GENERATED_CODE_DIR)
-        for _cand in [
-            _base / f"{service_slug}_connector",                    # flat (correct)
+        _candidates = [
+            _base / f"{service_slug}_connector",                    # slug (legacy)
             _base / r2_tenant / f"{service_slug}_connector",        # legacy: tenant subdir
             _base / tenant_id / f"{service_slug}_connector",        # legacy: tenant subdir
-        ]:
+        ]
+        # Add display-name candidates (the actual generated dir name).
+        if _connector_display_name:
+            _candidates.insert(0, _base / _connector_display_name)
+            _candidates.insert(1, _base / r2_tenant / _connector_display_name)
+            _candidates.insert(2, _base / tenant_id / _connector_display_name)
+        for _cand in _candidates:
             if _cand and _cand.exists():
                 out_dir = _cand
                 break

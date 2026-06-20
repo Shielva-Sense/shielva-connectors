@@ -93,7 +93,7 @@ async def get_session_execution_logs(
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"execution_results": 1, "provider": 1, "service": 1, "status": 1},
+        {"execution_results": 1, "provider": 1, "service": 1, "service_slug": 1, "status": 1},
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -107,19 +107,40 @@ async def get_session_execution_logs(
             "logs": [],
         }
 
-    # Collect logs from execution results
+    # Lazy R2 hydration. Step rows written after Phase 3 carry only metadata
+    # (step_index/status/duration/etc.) — the heavy `output` + `logs` arrays
+    # live at CONNECTORS/{provider}/{slug}/{session_id}/step_outputs/{i}.json.
+    # We fetch from R2 only for rows the caller actually wants (one when
+    # `step_index` is set, all matching otherwise). Pre-Phase-3 rows that
+    # still embed `logs` directly are read in place.
+    from integration.services import r2_service as _r2
+    provider = session.get("provider", "")
+    service_slug = session.get("service_slug") or session.get("service") or ""
+
     all_logs = []
     for result in execution_results:
         idx = result.get("step_index")
         if step_index is not None and idx != step_index:
             continue
-        step_logs = result.get("logs", [])
+        step_logs = result.get("logs") or []
+        if not step_logs and result.get("r2_offloaded"):
+            try:
+                r2_payload = await _r2.get_step_output(
+                    provider=provider,
+                    service_slug=service_slug,
+                    session_id=session_id,
+                    step_index=int(idx),
+                )
+                if r2_payload:
+                    step_logs = r2_payload.get("logs") or []
+            except Exception as exc:
+                logger.warning("logs.r2_hydrate_failed", session_id=session_id, step_index=idx, error=str(exc))
         for log_entry in step_logs:
             all_logs.append({
                 "step_index": idx,
                 "step_status": result.get("status"),
                 "duration_ms": result.get("duration_ms"),
-                **log_entry,
+                **(log_entry if isinstance(log_entry, dict) else {"message": str(log_entry)}),
             })
 
     logger.info(

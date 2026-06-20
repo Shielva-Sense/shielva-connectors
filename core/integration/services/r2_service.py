@@ -361,11 +361,25 @@ def _progress_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
 
 
 def _sync_read(client, bucket: str, key: str) -> Optional[str]:
+    """Read an object from R2 and return its body as a UTF-8 string.
+
+    Transparent decompression: if the stored object was uploaded with
+    ``Content-Encoding: gzip`` (every blob written through ``_sync_write``
+    larger than ``_GZIP_MIN_BYTES``), we gunzip the body before returning.
+    Older objects without the header come back as plain UTF-8 — no behavior
+    change for them.
+    """
     from botocore.exceptions import ClientError
+    import gzip as _gzip
 
     try:
         resp = client.get_object(Bucket=bucket, Key=key)
-        return resp["Body"].read().decode("utf-8")
+        raw = resp["Body"].read()
+        if resp.get("ContentEncoding") == "gzip":
+            try: raw = _gzip.decompress(raw)
+            except Exception:  # corrupted gzip stream — surface raw instead of crashing
+                pass
+        return raw.decode("utf-8")
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchKey", "404", "NoSuchBucket"):
@@ -373,14 +387,39 @@ def _sync_read(client, bucket: str, key: str) -> Optional[str]:
         raise
 
 
+# Bodies smaller than this are stored uncompressed — the gzip framing overhead
+# costs more than the savings on tiny payloads, and many R2 viewers can't
+# preview gzipped objects. JSON/markdown blobs of any meaningful size
+# (plan_full.json, connector_docs.json, step_outputs/*.log, conversation
+# history) all comfortably clear this threshold.
+_GZIP_MIN_BYTES = 1024
+
+
 def _sync_write(
     client, bucket: str, key: str, content: str, content_type: str = "text/plain"
 ) -> None:
+    """Write a string to R2, gzip-compressed when the body is large enough.
+
+    Compression ratio for our payloads (plan JSON, docs JSON, step logs,
+    conversation history) is typically 4–10× because they're highly
+    redundant Claude-generated text. The encoded body carries
+    ``Content-Encoding: gzip`` so readers (and ``_sync_read``) know to
+    decompress; the ``Content-Type`` header keeps the logical MIME so
+    cache invalidation / proxies behave correctly.
+    """
+    import gzip as _gzip
+
+    body = content.encode("utf-8")
+    extra: dict = {}
+    if len(body) >= _GZIP_MIN_BYTES:
+        body = _gzip.compress(body, compresslevel=6)
+        extra["ContentEncoding"] = "gzip"
     client.put_object(
         Bucket=bucket,
         Key=key,
-        Body=content.encode("utf-8"),
+        Body=body,
         ContentType=content_type,
+        **extra,
     )
 
 
@@ -2164,3 +2203,225 @@ async def save_connector_analysis(provider: str, service_slug: str, analysis: Di
         logger.warning("analysis.save_failed", provider=provider, service_slug=service_slug, error=str(exc))
         # Fall back to local
         await loop.run_in_executor(None, partial(_local_write, key, content))
+
+
+# ── Per-step execution output ─────────────────────────────────────────
+# Key pattern: {coll}/{provider}/{service_slug}/{session_id}/step_outputs/{step_index}.json
+#
+# Stores the FULL stdout/stderr + per-step log buffer that the codegen
+# service used to embed in `execution_results[].output` / `execution_results[].logs`
+# inside the Mongo session document. Offloading these here keeps each Mongo
+# session row tiny — Mongo holds only {step_index, status, duration_ms,
+# started_at, finished_at}; the heavyweight bytes live in R2 and are pulled
+# on demand by the Logs tab in the Builder.
+
+def _step_output_key(provider: str, service_slug: str, session_id: str, step_index: int) -> str:
+    return _k(_coll(), provider, service_slug, session_id, "step_outputs", f"{step_index}.json")
+
+
+async def save_step_output(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+    step_index: int,
+    payload: Dict[str, Any],
+) -> None:
+    """Persist a step's stdout/stderr + logs to R2.
+
+    Payload shape (matches what the codegen service used to put in the Mongo
+    execution_results entry's ``output`` and ``logs`` fields):
+
+        { "output": str, "logs": List[str | dict], "step_type": str, "command": str? }
+
+    Gzip-compressed transparently when the encoded body is ≥ 1 KB (the
+    default for any real step run). The reader (`get_step_output`) handles
+    decompression automatically.
+    """
+    if not provider or not service_slug or not session_id:
+        return
+    key = _step_output_key(provider, service_slug, session_id, step_index)
+    content = json.dumps(payload, ensure_ascii=False, default=str)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            await loop.run_in_executor(None, partial(_local_write, key, content))
+        else:
+            client = _get_client()
+            await loop.run_in_executor(
+                None,
+                partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
+            )
+        logger.info("step_output.saved", provider=provider, service_slug=service_slug,
+                    session_id=session_id, step_index=step_index, bytes=len(content))
+    except Exception as exc:
+        logger.warning("step_output.save_failed", key=key, error=str(exc))
+
+
+async def get_step_output(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+    step_index: int,
+) -> Optional[Dict[str, Any]]:
+    """Fetch a step's R2-stored output payload. Returns None when absent."""
+    if not provider or not service_slug or not session_id:
+        return None
+    key = _step_output_key(provider, service_slug, session_id, step_index)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            raw = await loop.run_in_executor(None, partial(_local_read, key))
+        else:
+            client = _get_client()
+            raw = await loop.run_in_executor(
+                None, partial(_sync_read, client, _get_bucket(), key)
+            )
+        if raw:
+            return json.loads(raw)
+    except Exception as exc:
+        logger.warning("step_output.get_failed", key=key, error=str(exc))
+    return None
+
+
+# ── Per-session full plan (Phase 4) ───────────────────────────────────
+# Key pattern: {coll}/{provider}/{service_slug}/{session_id}/plan_full.json
+#
+# Mongo keeps only a slim plan summary {version, steps:[{index,title,type,
+# status}]} that the Manage Connectors list + Builder badges read on every
+# page load. The FULL PlanDocument (per-step description, config, install
+# fields, methods, etc.) lives here in R2 — written once on plan generation
+# (or replan), read on demand when the Builder opens a session.
+
+def _plan_full_key(provider: str, service_slug: str, session_id: str) -> str:
+    return _k(_coll(), provider, service_slug, session_id, "plan_full.json")
+
+
+async def save_plan_full(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+    plan: Dict[str, Any],
+) -> None:
+    """Persist the full PlanDocument (as a dict) to R2.
+
+    Compressed transparently via ``_sync_write`` when the encoded body is
+    ≥ 1 KB (always true for a real plan — each step description + config is
+    multiple hundreds of bytes). The matching reader (``get_plan_full``)
+    decompresses on the fly.
+    """
+    if not provider or not service_slug or not session_id or not plan:
+        return
+    key = _plan_full_key(provider, service_slug, session_id)
+    content = json.dumps(plan, ensure_ascii=False, default=str)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            await loop.run_in_executor(None, partial(_local_write, key, content))
+        else:
+            client = _get_client()
+            await loop.run_in_executor(
+                None,
+                partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
+            )
+        logger.info("plan_full.saved", provider=provider, service_slug=service_slug,
+                    session_id=session_id, bytes=len(content))
+    except Exception as exc:
+        logger.warning("plan_full.save_failed", key=key, error=str(exc))
+
+
+async def get_plan_full(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Fetch the full PlanDocument dict from R2. Returns None when absent."""
+    if not provider or not service_slug or not session_id:
+        return None
+    key = _plan_full_key(provider, service_slug, session_id)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            raw = await loop.run_in_executor(None, partial(_local_read, key))
+        else:
+            client = _get_client()
+            raw = await loop.run_in_executor(
+                None, partial(_sync_read, client, _get_bucket(), key)
+            )
+        if raw:
+            return json.loads(raw)
+    except Exception as exc:
+        logger.warning("plan_full.get_failed", key=key, error=str(exc))
+    return None
+
+
+# ── Conversation history (Phase 5) ─────────────────────────────────────
+# Key pattern: {coll}/{provider}/{service_slug}/{session_id}/conversation_history.json
+#
+# Each Claude turn ({role, content}) appended to the planner's running
+# conversation_history grows the array — replanning a complex connector
+# can leave 20–50 turns × hundreds of tokens each. Embedding that in the
+# Mongo session doc was the third-largest contributor after plan + docs.
+#
+# Mongo keeps a tiny pointer ({r2_offloaded:True, turn_count:N,
+# last_turn_at:ts}); the array itself lives here, gzipped.
+
+def _conversation_history_key(provider: str, service_slug: str, session_id: str) -> str:
+    return _k(_coll(), provider, service_slug, session_id, "conversation_history.json")
+
+
+async def save_conversation_history(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+    history: List[Dict[str, Any]],
+) -> None:
+    """Persist a session's full conversation history (list of {role,content}) to R2.
+
+    The companion Mongo write should be a slim pointer dict — see
+    planning_service.persist_conversation_history. Reader = get_conversation_history.
+    """
+    if not provider or not service_slug or not session_id:
+        return
+    key = _conversation_history_key(provider, service_slug, session_id)
+    content = json.dumps(history or [], ensure_ascii=False, default=str)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            await loop.run_in_executor(None, partial(_local_write, key, content))
+        else:
+            client = _get_client()
+            await loop.run_in_executor(
+                None,
+                partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
+            )
+        logger.info("conversation_history.saved", provider=provider, service_slug=service_slug,
+                    session_id=session_id, turns=len(history or []), bytes=len(content))
+    except Exception as exc:
+        logger.warning("conversation_history.save_failed", key=key, error=str(exc))
+
+
+async def get_conversation_history(
+    provider: str,
+    service_slug: str,
+    session_id: str,
+) -> Optional[List[Dict[str, Any]]]:
+    """Fetch the conversation history list from R2. Returns None when absent."""
+    if not provider or not service_slug or not session_id:
+        return None
+    key = _conversation_history_key(provider, service_slug, session_id)
+    loop = asyncio.get_event_loop()
+    try:
+        if _use_local():
+            raw = await loop.run_in_executor(None, partial(_local_read, key))
+        else:
+            client = _get_client()
+            raw = await loop.run_in_executor(
+                None, partial(_sync_read, client, _get_bucket(), key)
+            )
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parsed
+    except Exception as exc:
+        logger.warning("conversation_history.get_failed", key=key, error=str(exc))
+    return None

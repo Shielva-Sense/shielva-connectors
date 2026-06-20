@@ -603,15 +603,33 @@ async def update_docs_with_prompt(
                     f"Failed to parse updated docs JSON after {_MAX_JSON_RETRIES} attempts: {last_error}"
                 ) from last_error
 
-    # Save to MongoDB
+    # Persist only the docs metadata to Mongo — the JSON body itself lives
+    # in R2 (durable, compressed). Reading docs goes R2 → local fallback;
+    # Mongo never holds the bytes again. Eliminates the 60–70 KB-per-session
+    # blob that was the single biggest contributor to list-response size.
+    session_meta = await sessions_collection().find_one(
+        {"_id": oid, "tenant_id": tenant_id},
+        {"provider": 1, "service_slug": 1},
+    )
+    if session_meta:
+        try:
+            from integration.services import r2_service as _r2
+            await _r2.save_connector_docs(
+                tenant_id=tenant_id,
+                provider=session_meta.get("provider", ""),
+                service_slug=session_meta.get("service_slug", ""),
+                docs=docs_json,
+            )
+        except Exception as exc:
+            logger.warning("docs_builder.r2_save_failed", session_id=session_id, error=str(exc))
     await sessions_collection().update_one(
         {"_id": oid, "tenant_id": tenant_id},
         {
             "$set": {
-                "docs_json": docs_json,
                 "docs_updated_at": datetime.now(timezone.utc),
                 "updated_at": datetime.now(timezone.utc),
-            }
+            },
+            "$unset": {"docs_json": ""},
         },
     )
 

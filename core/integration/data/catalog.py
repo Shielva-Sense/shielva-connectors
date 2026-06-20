@@ -4758,6 +4758,629 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
 }
 
 
+# ── Catalog extensions ─────────────────────────────────────────────────
+# Real providers + services added after the initial catalog rollout.
+# Merged into SERVICE_CATALOG below so existing static-catalog code paths
+# pick them up automatically.
+
+_LOGO_BASE = "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos"
+
+
+def _logo(name: str) -> str:
+    return f"{_LOGO_BASE}/{name}.png"
+
+
+_CATALOG_EXTRA: Dict[str, Dict[str, CatalogEntry]] = {
+    "15five": {
+        "15five": {
+            "display_name": "15Five",
+            "description": "Continuous performance management — check-ins, OKRs, reviews, engagement surveys",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.15five.com/",
+            "default_scopes": [],
+            "category": "hr",
+            "logo_url": _logo("15five"),
+        },
+    },
+    "37signals": {
+        "basecamp": {
+            "display_name": "Basecamp",
+            "description": "Project management — to-dos, message boards, schedules, docs, and files",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://github.com/basecamp/bc3-api",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": _logo("basecamp"),
+        },
+    },
+    "acuity_scheduling": {
+        "acuity_scheduling": {
+            "display_name": "Acuity Scheduling",
+            "description": "Online appointment scheduling, intake forms, and calendar sync",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.acuityscheduling.com/reference",
+            "default_scopes": [],
+            "category": "scheduling",
+            "logo_url": _logo("acuity_scheduling"),
+        },
+    },
+    "adobe": {
+        "analytics": {
+            "display_name": "Adobe Analytics",
+            "description": "Web/app analytics, segmentation, and audience reporting",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.adobe.com/analytics-apis/docs/2.0/",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": _logo("adobe"),
+        },
+    },
+    "aha": {
+        "aha": {
+            "display_name": "Aha!",
+            "description": "Product roadmap, ideas, features, and release planning",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://www.aha.io/api",
+            "default_scopes": [],
+            "category": "product",
+            "logo_url": _logo("aha"),
+        },
+    },
+    "apollo": {
+        "apollo_io": {
+            "display_name": "Apollo.io",
+            "description": "B2B sales intelligence — contacts, accounts, sequences, and enrichment",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.apollo.io/reference",
+            "default_scopes": [],
+            "category": "sales",
+            "logo_url": _logo("apollo_io"),
+        },
+    },
+    "box": {
+        "box": {
+            "display_name": "Box",
+            "description": "Enterprise file storage, sharing, collaboration, and metadata",
+            "auth_type": "oauth2",
+            "sdk_package": "boxsdk",
+            "docs_url": "https://developer.box.com/reference/",
+            "default_scopes": [],
+            "category": "storage",
+            "logo_url": _logo("box"),
+        },
+    },
+    "bugsnag": {
+        "bugsnag": {
+            "display_name": "Bugsnag",
+            "description": "Application stability monitoring — errors, releases, and stability scores",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://bugsnagapiv2.docs.apiary.io/",
+            "default_scopes": [],
+            "category": "observability",
+            "logo_url": _logo("bugsnag"),
+        },
+    },
+    "cisco": {
+        "webex": {
+            "display_name": "Cisco Webex",
+            "description": "Meetings, messaging, calling, rooms, and team collaboration",
+            "auth_type": "oauth2",
+            "sdk_package": "webexteamssdk",
+            "docs_url": "https://developer.webex.com/docs/api/v1/",
+            "default_scopes": [],
+            "category": "communication",
+            "logo_url": _logo("webex"),
+        },
+    },
+    "clearbit": {
+        "clearbit": {
+            "display_name": "Clearbit",
+            "description": "B2B data enrichment — person, company, and website intelligence",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://dashboard.clearbit.com/docs",
+            "default_scopes": [],
+            "category": "data_enrichment",
+            "logo_url": _logo("clearbit"),
+        },
+    },
+    "coda": {
+        "coda": {
+            "display_name": "Coda",
+            "description": "Docs platform — tables, formulas, and integrations across teams",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://coda.io/developers/apis/v1",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": _logo("coda"),
+        },
+    },
+    "culture_amp": {
+        "culture_amp": {
+            "display_name": "Culture Amp",
+            "description": "Employee engagement surveys, performance, and people analytics",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://academy.cultureamp.com/hc/en-us/categories/4413054683539",
+            "default_scopes": [],
+            "category": "hr",
+            "logo_url": _logo("culture_amp"),
+        },
+    },
+    "customerio": {
+        "customerio": {
+            "display_name": "Customer.io",
+            "description": "Behavioral messaging — emails, SMS, push, and lifecycle campaigns",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://customer.io/docs/api/",
+            "default_scopes": [],
+            "category": "marketing",
+            "logo_url": _logo("customerio"),
+        },
+    },
+    "databricks": {
+        "databricks": {
+            "display_name": "Databricks",
+            "description": "Lakehouse platform — clusters, jobs, notebooks, SQL warehouses, MLflow",
+            "auth_type": "oauth2",
+            "sdk_package": "databricks-sdk",
+            "docs_url": "https://docs.databricks.com/api/workspace/introduction",
+            "default_scopes": [],
+            "category": "data_platform",
+            "logo_url": _logo("databricks"),
+        },
+    },
+    "dialpad": {
+        "dialpad": {
+            "display_name": "Dialpad",
+            "description": "Cloud calling, messaging, meetings, contact center, and call analytics",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.dialpad.com/reference",
+            "default_scopes": [],
+            "category": "communication",
+            "logo_url": _logo("dialpad"),
+        },
+    },
+    "docusign": {
+        "docusign": {
+            "display_name": "DocuSign",
+            "description": "Electronic signatures, envelopes, templates, and agreement lifecycle",
+            "auth_type": "oauth2",
+            "sdk_package": "docusign-esign",
+            "docs_url": "https://developers.docusign.com/docs/esign-rest-api/",
+            "default_scopes": [],
+            "category": "agreements",
+            "logo_url": _logo("docusign"),
+        },
+    },
+    "domo": {
+        "domo": {
+            "display_name": "Domo",
+            "description": "Cloud BI — datasets, cards, dashboards, and workflow automation",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.domo.com/portal/8ba9aedad3679-ap-is",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": _logo("domo"),
+        },
+    },
+    "dropbox": {
+        "dropbox": {
+            "display_name": "Dropbox",
+            "description": "File storage, sharing, team folders, and Paper docs",
+            "auth_type": "oauth2",
+            "sdk_package": "dropbox",
+            "docs_url": "https://www.dropbox.com/developers/documentation/http/documentation",
+            "default_scopes": [],
+            "category": "storage",
+            "logo_url": _logo("dropbox"),
+        },
+    },
+    "figma": {
+        "figma": {
+            "display_name": "Figma",
+            "description": "Design files, frames, components, comments, and team libraries",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://www.figma.com/developers/api",
+            "default_scopes": [],
+            "category": "design",
+            "logo_url": _logo("figma"),
+        },
+    },
+    "freshworks": {
+        "crm": {
+            "display_name": "Freshworks CRM",
+            "description": "Contacts, deals, sales activities, and sales pipelines",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.freshworks.com/crm/api/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": _logo("freshworks"),
+        },
+        "freshservice": {
+            "display_name": "Freshservice",
+            "description": "IT service management — tickets, assets, problems, and changes",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://api.freshservice.com/",
+            "default_scopes": [],
+            "category": "itsm",
+            "logo_url": _logo("freshservice"),
+        },
+    },
+    "fullstory": {
+        "fullstory": {
+            "display_name": "FullStory",
+            "description": "Digital experience analytics — sessions, events, segments, and funnels",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.fullstory.com/server/v2/getting-started/",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": _logo("fullstory"),
+        },
+    },
+    "jotform": {
+        "jotform": {
+            "display_name": "Jotform",
+            "description": "Online forms, submissions, conditional logic, and integrations",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://api.jotform.com/docs/",
+            "default_scopes": [],
+            "category": "forms",
+            "logo_url": _logo("jotform"),
+        },
+    },
+    "lattice": {
+        "lattice": {
+            "display_name": "Lattice",
+            "description": "Performance reviews, 1:1s, goals, engagement, and growth plans",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.lattice.com/",
+            "default_scopes": [],
+            "category": "hr",
+            "logo_url": _logo("lattice"),
+        },
+    },
+    "launchdarkly": {
+        "launchdarkly": {
+            "display_name": "LaunchDarkly",
+            "description": "Feature flags, experiments, segments, and rollouts",
+            "auth_type": "api_key",
+            "sdk_package": "launchdarkly-server-sdk",
+            "docs_url": "https://apidocs.launchdarkly.com/",
+            "default_scopes": [],
+            "category": "feature_flags",
+            "logo_url": _logo("launchdarkly"),
+        },
+    },
+    "linkedin": {
+        "linkedin": {
+            "display_name": "LinkedIn",
+            "description": "Profiles, organizations, shares, advertising, and recruitment",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://learn.microsoft.com/en-us/linkedin/",
+            "default_scopes": [],
+            "category": "social",
+            "logo_url": _logo("linkedin"),
+        },
+    },
+    "loom": {
+        "loom": {
+            "display_name": "Loom",
+            "description": "Async video — videos, folders, sharing, comments, and view analytics",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://dev.loom.com/docs/",
+            "default_scopes": [],
+            "category": "media",
+            "logo_url": _logo("loom"),
+        },
+    },
+    "miro": {
+        "miro": {
+            "display_name": "Miro",
+            "description": "Collaborative whiteboards — boards, items, teams, and webhooks",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.miro.com/reference/api-reference",
+            "default_scopes": [],
+            "category": "collaboration",
+            "logo_url": _logo("miro"),
+        },
+    },
+    "newrelic": {
+        "newrelic": {
+            "display_name": "New Relic",
+            "description": "Observability — APM, infrastructure, logs, NRQL queries, and alerts",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.newrelic.com/docs/apis/intro-apis/introduction-new-relic-apis/",
+            "default_scopes": [],
+            "category": "observability",
+            "logo_url": _logo("newrelic"),
+        },
+    },
+    "oracle": {
+        "netsuite": {
+            "display_name": "Oracle NetSuite",
+            "description": "ERP — accounting, CRM, inventory, orders, and SuiteQL queries",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_158266356537.html",
+            "default_scopes": [],
+            "category": "erp",
+            "logo_url": _logo("netsuite"),
+        },
+    },
+    "pandadoc": {
+        "pandadoc": {
+            "display_name": "PandaDoc",
+            "description": "Document automation — proposals, contracts, e-signatures, and templates",
+            "auth_type": "api_key",
+            "sdk_package": "pandadoc-python-client",
+            "docs_url": "https://developers.pandadoc.com/reference/about",
+            "default_scopes": [],
+            "category": "agreements",
+            "logo_url": _logo("pandadoc"),
+        },
+    },
+    "pendo": {
+        "pendo": {
+            "display_name": "Pendo",
+            "description": "Product analytics, guides, NPS surveys, and feature feedback",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://engageapi.pendo.io/",
+            "default_scopes": [],
+            "category": "product",
+            "logo_url": _logo("pendo"),
+        },
+    },
+    "productboard": {
+        "productboard": {
+            "display_name": "Productboard",
+            "description": "Product management — features, notes, insights, and roadmaps",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.productboard.com/reference/introduction",
+            "default_scopes": [],
+            "category": "product",
+            "logo_url": _logo("productboard"),
+        },
+    },
+    "ringcentral": {
+        "ringcentral": {
+            "display_name": "RingCentral",
+            "description": "Cloud phone, SMS, video meetings, fax, and contact center",
+            "auth_type": "oauth2",
+            "sdk_package": "ringcentral",
+            "docs_url": "https://developers.ringcentral.com/api-reference",
+            "default_scopes": [],
+            "category": "communication",
+            "logo_url": _logo("ringcentral"),
+        },
+    },
+    "rollbar": {
+        "rollbar": {
+            "display_name": "Rollbar",
+            "description": "Error tracking — items, occurrences, deploys, and notifications",
+            "auth_type": "api_key",
+            "sdk_package": "rollbar",
+            "docs_url": "https://docs.rollbar.com/reference/getting-started-1",
+            "default_scopes": [],
+            "category": "observability",
+            "logo_url": _logo("rollbar"),
+        },
+    },
+    "salesloft": {
+        "salesloft": {
+            "display_name": "Salesloft",
+            "description": "Sales engagement — cadences, calls, emails, and analytics",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.salesloft.com/docs/api",
+            "default_scopes": [],
+            "category": "sales",
+            "logo_url": _logo("salesloft"),
+        },
+    },
+    "sentry": {
+        "sentry": {
+            "display_name": "Sentry",
+            "description": "Error monitoring — issues, events, projects, releases, and alerts",
+            "auth_type": "api_key",
+            "sdk_package": "sentry-sdk",
+            "docs_url": "https://docs.sentry.io/api/",
+            "default_scopes": [],
+            "category": "observability",
+            "logo_url": _logo("sentry"),
+        },
+    },
+    "smartrecruiters": {
+        "smartrecruiters": {
+            "display_name": "SmartRecruiters",
+            "description": "ATS — jobs, candidates, applications, and hiring workflows",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.smartrecruiters.com/reference/welcome-1",
+            "default_scopes": [],
+            "category": "hr",
+            "logo_url": _logo("smartrecruiters"),
+        },
+    },
+    "smartsheet": {
+        "smartsheet": {
+            "display_name": "Smartsheet",
+            "description": "Sheets, rows, attachments, automations, and workspaces",
+            "auth_type": "oauth2",
+            "sdk_package": "smartsheet-python-sdk",
+            "docs_url": "https://smartsheet.redoc.ly/",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": _logo("smartsheet"),
+        },
+    },
+    "snowflake": {
+        "snowflake": {
+            "display_name": "Snowflake",
+            "description": "Cloud data warehouse — SQL execution, databases, warehouses, and roles",
+            "auth_type": "oauth2",
+            "sdk_package": "snowflake-connector-python",
+            "docs_url": "https://docs.snowflake.com/en/developer-guide/sql-api/index",
+            "default_scopes": [],
+            "category": "data_warehouse",
+            "logo_url": _logo("snowflake"),
+        },
+    },
+    "surveymonkey": {
+        "surveymonkey": {
+            "display_name": "SurveyMonkey",
+            "description": "Surveys, collectors, responses, and analytics",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://api.surveymonkey.com/v3/docs",
+            "default_scopes": [],
+            "category": "surveys",
+            "logo_url": _logo("surveymonkey"),
+        },
+    },
+    "tableau": {
+        "tableau": {
+            "display_name": "Tableau",
+            "description": "Workbooks, views, data sources, permissions, and metrics",
+            "auth_type": "api_key",
+            "sdk_package": "tableauserverclient",
+            "docs_url": "https://help.tableau.com/current/api/rest_api/en-us/REST/rest_api.htm",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": _logo("tableau"),
+        },
+    },
+    "twilio_segment": {
+        "segment": {
+            "display_name": "Twilio Segment",
+            "description": "Customer data platform — sources, destinations, events, and audiences",
+            "auth_type": "api_key",
+            "sdk_package": "requests",
+            "docs_url": "https://docs.segmentapis.com/tag/Welcome",
+            "default_scopes": [],
+            "category": "data_platform",
+            "logo_url": _logo("segment"),
+        },
+    },
+    "typeform": {
+        "typeform": {
+            "display_name": "Typeform",
+            "description": "Forms, responses, webhooks, and themes",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://www.typeform.com/developers/get-started/",
+            "default_scopes": [],
+            "category": "forms",
+            "logo_url": _logo("typeform"),
+        },
+    },
+    "webflow": {
+        "webflow": {
+            "display_name": "Webflow",
+            "description": "Sites, collections, CMS items, e-commerce orders, and webhooks",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.webflow.com/v2.0.0/reference/intro",
+            "default_scopes": [],
+            "category": "cms",
+            "logo_url": _logo("webflow"),
+        },
+    },
+    "wordpress": {
+        "wordpress": {
+            "display_name": "WordPress",
+            "description": "Posts, pages, media, comments, users, and custom post types",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developer.wordpress.org/rest-api/",
+            "default_scopes": [],
+            "category": "cms",
+            "logo_url": _logo("wordpress"),
+        },
+    },
+    "wrike": {
+        "wrike": {
+            "display_name": "Wrike",
+            "description": "Project management — tasks, folders, projects, timelogs, and workflows",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://developers.wrike.com/overview/",
+            "default_scopes": [],
+            "category": "productivity",
+            "logo_url": _logo("wrike"),
+        },
+    },
+}
+
+
+# Add-on services for providers already in SERVICE_CATALOG.
+# Same shape as a provider entry; merged service-by-service to avoid
+# clobbering existing keys.
+_CATALOG_EXTRA_SERVICES: Dict[str, Dict[str, CatalogEntry]] = {
+    "google": {
+        "looker": {
+            "display_name": "Looker",
+            "description": "BI platform — explores, looks, dashboards, and LookML modeling",
+            "auth_type": "api_key",
+            "sdk_package": "looker-sdk",
+            "docs_url": "https://cloud.google.com/looker/docs/reference/looker-api/latest",
+            "default_scopes": [],
+            "category": "analytics",
+            "logo_url": _logo("looker"),
+        },
+    },
+    "microsoft": {
+        "dynamics365": {
+            "display_name": "Microsoft Dynamics 365",
+            "description": "CRM + ERP — sales, customer service, finance, and supply chain entities",
+            "auth_type": "oauth2",
+            "sdk_package": "requests",
+            "docs_url": "https://learn.microsoft.com/en-us/dynamics365/customer-engagement/web-api/",
+            "default_scopes": [],
+            "category": "crm",
+            "logo_url": _logo("dynamics365"),
+        },
+    },
+}
+
+
+# ── Merge extras into the master catalog ──────────────────────────────
+# Net effect: SERVICE_CATALOG now contains the additions as if they had
+# been declared inline above. Done outside the literal so the bulk
+# additions stay grouped + auditable + easy to remove.
+
+for _prov, _services in _CATALOG_EXTRA.items():
+    SERVICE_CATALOG.setdefault(_prov, {}).update(_services)
+
+for _prov, _services in _CATALOG_EXTRA_SERVICES.items():
+    if _prov in SERVICE_CATALOG:
+        for _svc_key, _svc_meta in _services.items():
+            SERVICE_CATALOG[_prov].setdefault(_svc_key, _svc_meta)
+
+
 # ── Helper functions ──────────────────────────────────────────────────
 
 def get_all_providers() -> List[Dict[str, Any]]:

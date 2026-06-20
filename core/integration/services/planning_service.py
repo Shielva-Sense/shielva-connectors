@@ -34,6 +34,139 @@ from integration.services.llm_client import set_llm_tenant_id
 from integration.services.codegen_service import _slug_from_connector_name, _service_slug
 from platform_default.claude.skill import ClaudeSkill
 
+
+# ── Plan offload (Phase 4) ────────────────────────────────────────────
+# Mongo keeps only `{version, steps:[{index,title,type,status}]}` — the
+# minimal subset the Manage Connectors list + Builder status badges read on
+# every render. The FULL plan body (per-step description, config dict,
+# install_fields, methods, etc.) is offloaded to R2 at
+# CONNECTORS/{provider}/{slug}/{session_id}/plan_full.json.
+#
+# Read paths in session_routes.get_session() merge R2 fields back over the
+# slim Mongo steps when the Builder opens a session, so the UI sees the same
+# shape as before; codegen_service hydrates plan from R2 on first read.
+
+_PLAN_STEP_SLIM_KEYS = ("index", "title", "type", "status")
+
+
+def _slim_plan(plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a tiny copy of a plan dict suitable for Mongo storage.
+
+    Keeps top-level metadata (version) and only the per-step fields the list
+    view + Builder badge ever read. Everything else (description, config,
+    install_fields, methods, scopes) is dropped — it must be fetched from R2
+    `plan_full.json` by the readers that need it.
+    """
+    if not plan or not isinstance(plan, dict):
+        return plan
+    steps_in = plan.get("steps") or []
+    slim_steps = []
+    for s in steps_in:
+        if not isinstance(s, dict):
+            slim_steps.append(s)
+            continue
+        slim_steps.append({k: s[k] for k in _PLAN_STEP_SLIM_KEYS if k in s})
+    slim = {k: v for k, v in plan.items() if k not in ("steps",)}
+    slim["steps"] = slim_steps
+    slim["_r2_offloaded"] = True
+    return slim
+
+
+async def persist_conversation_history(
+    *,
+    session_id: str,
+    provider: str,
+    service_slug: str,
+    history: List[Dict[str, Any]],
+) -> Any:
+    """Write the full conversation history to R2 and return a slim Mongo pointer.
+
+    Mongo keeps only ``{r2_offloaded:True, turn_count:N, last_turn_at:isoformat}``;
+    R2 holds the array. The Builder read path (session_routes.get_session) and
+    any reader needing the full history hydrate from R2 on demand.
+
+    On R2 failure we fall through to storing the full list in Mongo so we
+    never lose conversational context — degraded mode, not data loss.
+    """
+    from datetime import datetime as _dt
+    if history is None:
+        return []
+    try:
+        await r2_service.save_conversation_history(
+            provider=provider, service_slug=service_slug,
+            session_id=session_id, history=history,
+        )
+        return {
+            "_r2_offloaded": True,
+            "turn_count": len(history),
+            "last_turn_at": _dt.utcnow().isoformat(),
+        }
+    except Exception as exc:
+        logger.warning(
+            "conversation_history.r2_save_failed",
+            session_id=session_id, error=str(exc),
+        )
+        return history
+
+
+async def hydrate_conversation_history(
+    *,
+    session: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Return the full history list from a session dict.
+
+    If Mongo holds the offload pointer, pull the array from R2; otherwise
+    return whatever's embedded in Mongo (legacy sessions). Always returns
+    a list — never None.
+    """
+    ch = session.get("conversation_history")
+    if isinstance(ch, list):
+        return ch
+    if not isinstance(ch, dict) or not ch.get("_r2_offloaded"):
+        return []
+    provider = session.get("provider", "")
+    service_slug = session.get("service_slug") or session.get("service") or ""
+    sid_val = session.get("_id")
+    sid = str(sid_val) if sid_val is not None else ""
+    if not provider or not service_slug or not sid:
+        return []
+    try:
+        arr = await r2_service.get_conversation_history(
+            provider=provider, service_slug=service_slug, session_id=sid,
+        )
+        if isinstance(arr, list):
+            return arr
+    except Exception as exc:
+        logger.warning("conversation_history.r2_hydrate_failed", session_id=sid, error=str(exc))
+    return []
+
+
+async def persist_plan(
+    *,
+    session_id: str,
+    provider: str,
+    service_slug: str,
+    plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Write the FULL plan to R2 and return the slim version for Mongo.
+
+    Callers should `$set: {"plan": <returned slim>}` on the session. The
+    Builder + codegen read paths lazily hydrate the full step config back
+    in. R2 write failures fall through to the full dict so we never lose
+    plan data even if storage is briefly unreachable.
+    """
+    if not plan:
+        return plan
+    try:
+        await r2_service.save_plan_full(
+            provider=provider, service_slug=service_slug,
+            session_id=session_id, plan=plan,
+        )
+        return _slim_plan(plan)
+    except Exception as exc:
+        logger.warning("plan.r2_save_failed", session_id=session_id, error=str(exc))
+        return plan
+
 # Shared skill instance — loaded once at module import time from env settings
 _claude = ClaudeSkill.from_integration_settings()
 
@@ -639,7 +772,9 @@ async def generate_plan(
         guidelines_version=guidelines_version,
     )
 
-    prior_history = session.get("conversation_history", [])
+    # Phase 5: history may be an R2 pointer dict in Mongo — hydrate to the
+    # real list before passing it through to the LLM context builder.
+    prior_history = await hydrate_conversation_history(session=session)
 
     # Extract user-requested operations from raw prompt and inject as explicit method list
     extracted_ops = _extract_user_operations(session.get("user_prompt", "") or user_prompt or "", service_slug)
@@ -695,11 +830,25 @@ async def generate_plan(
 
     plan = PlanDocument(steps=steps, version=1)
 
+    # Phase 4: full plan body lives in R2. Mongo keeps only the slim summary
+    # (version + per-step {index, title, type, status}). The Builder + codegen
+    # lazy-hydrate the full step config back from R2 when needed.
+    _plan_for_mongo = await persist_plan(
+        session_id=session_id, provider=provider, service_slug=service_slug,
+        plan=plan.model_dump(),
+    )
+
+    # Phase 5: conversation history → R2; Mongo gets a tiny pointer dict.
+    _history_pointer = await persist_conversation_history(
+        session_id=session_id, provider=provider, service_slug=service_slug,
+        history=updated_history,
+    )
+
     # Persist to session (include package_structure + recommended_features + default_config_fields + history)
     update_fields: Dict[str, Any] = {
-        "plan": plan.model_dump(),
+        "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
-        "conversation_history": updated_history,
+        "conversation_history": _history_pointer,
         "updated_at": __import__("datetime").datetime.utcnow(),
     }
     if parts["package_structure"]:
@@ -1118,7 +1267,8 @@ async def generate_plan_stream(
             guidelines_version=guidelines_version,
         )
 
-        prior_history = session.get("conversation_history", [])
+        # Phase 5: hydrate the R2 pointer back into the full conversation list.
+        prior_history = await hydrate_conversation_history(session=session)
 
         # Extract user-requested operations and inject as explicit method list
         _stream_extracted_ops = _extract_user_operations(session.get("user_prompt", "") or user_prompt or "", service_slug)
@@ -1288,11 +1438,22 @@ async def generate_plan_stream(
             "elapsed_ms": int((time.time() - t0) * 1000),
         })
 
+        # Phase 4: full plan → R2; slim summary → Mongo (see persist_plan docstring).
+        _plan_for_mongo = await persist_plan(
+            session_id=session_id, provider=provider, service_slug=service_slug,
+            plan=plan.model_dump(),
+        )
+        # Phase 5: conversation history → R2; Mongo gets a pointer.
+        _history_pointer = await persist_conversation_history(
+            session_id=session_id, provider=provider, service_slug=service_slug,
+            history=updated_history,
+        )
+
         # Persist plan + conversation history
         update_fields: Dict[str, Any] = {
-            "plan": plan.model_dump(),
+            "plan": _plan_for_mongo,
             "status": SessionStatus.REVIEWING.value,
-            "conversation_history": updated_history,
+            "conversation_history": _history_pointer,
             "updated_at": __import__("datetime").datetime.utcnow(),
         }
         if package_structure:
@@ -1429,7 +1590,8 @@ async def replan(
     )
 
     # Load prior conversation history so Claude recalls the full planning journey
-    prior_history = session.get("conversation_history", [])
+    # Phase 5: hydrate from R2 so the replan request has the full history.
+    prior_history = await hydrate_conversation_history(session=session)
     user_msg = f"Replan the integration. My feedback on step {step_index}: {user_comment}"
 
     logger.info(
@@ -1463,12 +1625,22 @@ async def replan(
 
     new_plan = PlanDocument(steps=steps, version=current_version + 1)
 
+    # Phase 4: full plan → R2; slim summary → Mongo.
+    _plan_for_mongo = await persist_plan(
+        session_id=session_id, provider=provider, service_slug=service_slug,
+        plan=new_plan.model_dump(),
+    )
+    _history_pointer = await persist_conversation_history(
+        session_id=session_id, provider=provider, service_slug=service_slug,
+        history=updated_history,
+    )
+
     # Save comment + updated plan + any new package_structure/features/config_fields + conversation history
     comment = StepComment(step_index=step_index, comment=user_comment)
     update_fields: Dict[str, Any] = {
-        "plan": new_plan.model_dump(),
+        "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
-        "conversation_history": updated_history,
+        "conversation_history": _history_pointer,
         "updated_at": __import__("datetime").datetime.utcnow(),
     }
     if parts["package_structure"]:
@@ -1610,7 +1782,8 @@ async def replan_stream(
             guidelines_version=guidelines_version,
         )
 
-        prior_history = session.get("conversation_history", [])
+        # Phase 5: hydrate from R2 so the replan request has the full history.
+        prior_history = await hydrate_conversation_history(session=session)
         user_msg = f"Replan the integration. My feedback on step {step_index}: {user_comment}"
 
         yield _sse("llm_calling", {
@@ -1658,12 +1831,22 @@ async def replan_stream(
 
         new_plan = PlanDocument(steps=steps, version=current_version + 1)
 
+        # Phase 4: full plan → R2; slim summary → Mongo.
+        _plan_for_mongo = await persist_plan(
+            session_id=session_id, provider=provider, service_slug=service_slug,
+            plan=new_plan.model_dump(),
+        )
+        _history_pointer = await persist_conversation_history(
+            session_id=session_id, provider=provider, service_slug=service_slug,
+            history=updated_history,
+        )
+
         # Persist
         comment_obj = StepComment(step_index=step_index, comment=user_comment)
         update_fields: Dict[str, Any] = {
-            "plan": new_plan.model_dump(),
+            "plan": _plan_for_mongo,
             "status": SessionStatus.REVIEWING.value,
-            "conversation_history": updated_history,
+            "conversation_history": _history_pointer,
             "updated_at": __import__("datetime").datetime.utcnow(),
         }
         if parts["package_structure"]:
@@ -1919,9 +2102,15 @@ async def import_cached_plan(
 
     plan = PlanDocument(steps=steps, version=plan_data.get("version", 1))
 
+    # Phase 4: full plan → R2; slim summary → Mongo.
+    _plan_for_mongo = await persist_plan(
+        session_id=session_id, provider=provider, service_slug=service_slug,
+        plan=plan.model_dump(),
+    )
+
     # 1. Persist to MongoDB
     update_fields: Dict[str, Any] = {
-        "plan": plan.model_dump(),
+        "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
         "updated_at": __import__("datetime").datetime.utcnow(),
         "package_structure": package_structure,

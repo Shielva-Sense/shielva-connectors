@@ -389,7 +389,7 @@ def _load_generated_connectors(generated_root: str = None) -> None:
         if not tenant_dir.is_dir():
             continue
         for pkg_dir in tenant_dir.iterdir():
-            if not pkg_dir.is_dir() or not pkg_dir.name.endswith("_connector"):
+            if not pkg_dir.is_dir():
                 continue
             connector_file = pkg_dir / "connector.py"
             if not connector_file.exists():
@@ -412,18 +412,36 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                         package=pkg_dir.name, tenant=tenant_dir.name, findings=scan_findings,
                     )
 
+            # Track sys.path / sys.modules mutations so we can revert them
+            # AFTER this connector loads. Without this, the previous connector's
+            # `exceptions.py` (a top-level file the loader can't pre-register as
+            # a package) wins the bare `from exceptions import ...` lookup for
+            # every connector loaded after it — `DomoAuthError not in Freshservice/exceptions.py`.
+            _path_added: list[str] = []
+            _bare_modules_set: list[str] = []
+            # Snapshot sys.modules BEFORE this connector loads so we can
+            # remove the bare-name entries (`exceptions`, `models`, etc.)
+            # this connector populated. Otherwise Python caches the first
+            # connector's `exceptions` module and the next connector's
+            # `from exceptions import X` reuses it without scanning sys.path.
+            _modules_before = set(sys.modules.keys())
+            _pkg_dir_resolved = str(pkg_dir.resolve())
             try:
                 # Add package root and shared path to sys.path if needed
                 connectors_root = str(Path(__file__).resolve().parent)
                 if connectors_root not in sys.path:
                     sys.path.insert(0, connectors_root)
+                    _path_added.append(connectors_root)
 
                 # Also add the connector's own directory so that
-                # `from repository.X import Y`, `from client.X import Y` etc.
-                # resolve against THIS connector's local packages.
+                # `from exceptions import ...`, `from models import ...`, and
+                # other bare-name imports of top-level files in THIS connector
+                # resolve correctly. MUST be removed after load (below) so the
+                # next connector's bare imports don't resolve to this one.
                 pkg_dir_str = str(pkg_dir.resolve())
                 if pkg_dir_str not in sys.path:
                     sys.path.insert(0, pkg_dir_str)
+                    _path_added.append(pkg_dir_str)
 
                 mod_name = f"generated_{tenant_dir.name}_{pkg_dir.name}"
 
@@ -448,6 +466,7 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                         # otherwise the first connector's `helpers` shadows every sibling
                         # (e.g. gmail's `helpers.gmail_utils` resolving against google's).
                         sys.modules[subpkg] = subpkg_mod
+                        _bare_modules_set.append(subpkg)
                         _exec_module_with_timeout(
                             lambda m=subpkg_mod, s=subpkg_spec: s.loader.exec_module(m),
                             CONNECTOR_IMPORT_TIMEOUT_S, f"{mod_name}.{subpkg}",
@@ -462,6 +481,7 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                             sys.modules[child_mod_name] = child_mod
                             # Overwrite the bare submodule name too (see note above).
                             sys.modules[f"{subpkg}.{child_py.stem}"] = child_mod
+                            _bare_modules_set.append(f"{subpkg}.{child_py.stem}")
                             _exec_module_with_timeout(
                                 lambda m=child_mod, s=child_spec: s.loader.exec_module(m),
                                 CONNECTOR_IMPORT_TIMEOUT_S, child_mod_name,
@@ -507,6 +527,32 @@ def _load_generated_connectors(generated_root: str = None) -> None:
                     error=str(e),
                     traceback=traceback.format_exc(),
                 )
+            finally:
+                # Roll back sys.path / sys.modules pollution so the next
+                # connector's bare-name imports (`from exceptions import ...`,
+                # `from models import ...`) resolve to ITS OWN files, not
+                # ones left behind by the connector we just loaded.
+                for _p in _path_added:
+                    try: sys.path.remove(_p)
+                    except ValueError: pass
+                for _bm in _bare_modules_set:
+                    sys.modules.pop(_bm, None)
+                # Drop any newly-cached sys.modules entries whose file lives
+                # inside THIS connector's pkg_dir. The next connector imports
+                # `exceptions`, `models`, etc. against ITS OWN files — but
+                # Python will reuse the cached module if its key still exists.
+                for _k in list(sys.modules.keys()):
+                    if _k in _modules_before:
+                        continue
+                    _m = sys.modules.get(_k)
+                    _f = getattr(_m, "__file__", None) or ""
+                    if _f.startswith(_pkg_dir_resolved):
+                        # Keep the fully-qualified namespaced modules
+                        # (generated_<tenant>_<pkg>.*) — those won't collide
+                        # because they include the connector name. Only drop
+                        # the bare-name entries.
+                        if not _k.startswith(f"generated_{tenant_dir.name}_"):
+                            sys.modules.pop(_k, None)
 
     logger.info(f"Loaded {loaded} generated connector(s) from {root}")
 
@@ -546,7 +592,7 @@ def _reload_generated_connectors(generated_root: str = None) -> dict:
         if not tenant_dir.is_dir():
             continue
         for pkg_dir in tenant_dir.iterdir():
-            if not pkg_dir.is_dir() or not pkg_dir.name.endswith("_connector"):
+            if not pkg_dir.is_dir():
                 continue
             connector_file = pkg_dir / "connector.py"
             if not connector_file.exists():
@@ -1755,8 +1801,9 @@ async def deploy_connector(
     oauth_url = None
 
     try:
-        await connector.initialize()  # pulls token from Redis into memory
-        health = await connector.health_check()
+        import asyncio as _asyncio
+        await _asyncio.wait_for(connector.initialize(), timeout=8.0)
+        health = await _asyncio.wait_for(connector.health_check(), timeout=10.0)
         test_healthy = health.health.value == "healthy"
         test_result = {
             "healthy": test_healthy,
@@ -1771,7 +1818,7 @@ async def deploy_connector(
             healthy=test_healthy,
         )
     except Exception as _health_err:
-        # Token not yet stored (OAuth still pending) — not a fatal error
+        # Token not yet stored (OAuth pending) or health check timed out — not fatal
         logger.warning("deploy.test_api_skipped", connector_id=connector_id, reason=str(_health_err))
         test_result = None
 

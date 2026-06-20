@@ -28,6 +28,125 @@ from integration.services import r2_service
 from integration.services import failure_tracker
 
 
+# ── R2 offload for per-step execution output ──────────────────────────
+# `execution_results[].output` and `execution_results[].logs` used to live
+# embedded in the Mongo session document. A single connector run that retried
+# steps could push that field past 100–500 KB per session, multiplied across
+# 130 sessions made every list query haul 1.8 MB even with Mongo projection.
+#
+# These helpers split each execution result into:
+#   • R2 payload  →  {step_index}.json  (stdout/stderr + logs, gzipped)
+#   • Mongo slim  →  {step_index, status, duration_ms, started_at, finished_at,
+#                     r2_offloaded: True}
+# The logs endpoint reads the slim row + lazily fetches R2 when the UI opens
+# that step's panel.
+
+_EXEC_META_KEYS = {"step_index", "status", "duration_ms", "started_at", "finished_at"}
+
+
+async def _offload_exec_result_to_r2(
+    *,
+    provider: str,
+    service_slug: str,
+    session_id: str,
+    result_dict: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Split a fat execution-result dict into (R2 payload, Mongo slim row).
+
+    Side-effect: writes the heavy payload to R2 (best-effort — failures fall
+    through to a Mongo row that still contains the data, so we never lose
+    output).  Returns the slim dict that callers should `$push` into Mongo.
+    """
+    payload = {
+        "output": result_dict.get("output", "") or "",
+        "logs": result_dict.get("logs", []) or [],
+    }
+    # Stash any extra heavy fields the caller added (e.g. command, cwd, exit_code).
+    for k, v in list(result_dict.items()):
+        if k in _EXEC_META_KEYS or k in payload:
+            continue
+        payload[k] = v
+
+    slim: Dict[str, Any] = {k: result_dict[k] for k in _EXEC_META_KEYS if k in result_dict}
+    # `step_index` is the only field the UI keys on, so guard its presence.
+    if "step_index" not in slim:
+        return result_dict  # nothing to offload safely — fall back to full row
+
+    has_heavy = bool(payload.get("output")) or bool(payload.get("logs")) or any(
+        k for k in payload if k not in ("output", "logs")
+    )
+    if not has_heavy:
+        return slim  # no body to upload — slim row is the whole record
+
+    try:
+        step_index = int(slim["step_index"])
+        await r2_service.save_step_output(
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            step_index=step_index,
+            payload=payload,
+        )
+        slim["r2_offloaded"] = True
+    except Exception as exc:
+        # Upload failed — fall back to the legacy fat row so we don't lose data.
+        logger.warning(
+            "execution.r2_offload_failed",
+            session_id=session_id,
+            step_index=slim.get("step_index"),
+            error=str(exc),
+        )
+        return result_dict
+    return slim
+
+
+async def _hydrate_plan_from_r2(session: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore a Phase-4-slimmed plan to its full shape so step_executor can
+    dispatch on per-step ``config`` / ``description`` / install_fields.
+
+    Returns the session dict (possibly mutated) so call sites can chain. Safe
+    to call on legacy sessions whose Mongo plan was never slimmed — the
+    `_r2_offloaded` flag gates the work, so it's a no-op there.
+    """
+    plan_doc = session.get("plan")
+    if not isinstance(plan_doc, dict) or not plan_doc.get("_r2_offloaded"):
+        return session
+    provider = session.get("provider", "")
+    service_slug = session.get("service_slug") or session.get("service") or ""
+    sid_val = session.get("_id")
+    sid = str(sid_val) if sid_val is not None else ""
+    if not provider or not service_slug or not sid:
+        return session
+    try:
+        r2_plan = await r2_service.get_plan_full(
+            provider=provider, service_slug=service_slug, session_id=sid,
+        )
+    except Exception as exc:
+        logger.warning("codegen.plan_hydrate_failed", session_id=sid, error=str(exc))
+        return session
+    if not isinstance(r2_plan, dict):
+        return session
+    r2_by_idx = {
+        s.get("index"): s for s in (r2_plan.get("steps") or [])
+        if isinstance(s, dict)
+    }
+    merged_steps = []
+    for slim in plan_doc.get("steps") or []:
+        if not isinstance(slim, dict):
+            merged_steps.append(slim); continue
+        full = r2_by_idx.get(slim.get("index"))
+        if full:
+            # Mongo status wins — codegen needs the live status, not the
+            # stale R2 snapshot from plan-generation time.
+            merged_steps.append({**full, **slim})
+        else:
+            merged_steps.append(slim)
+    merged = {**r2_plan, **plan_doc, "steps": merged_steps}
+    merged.pop("_r2_offloaded", None)
+    session["plan"] = merged
+    return session
+
+
 def _compute_version_suggestions(current: str) -> Dict[str, str]:
     """Given a semantic version string like '1.2.3', return patch/minor/major suggestions.
     Never includes 'current' — the version upgrade step always requires a real bump.
@@ -251,6 +370,10 @@ async def execute_plan(
         logger.error("execution.session_not_found", session_id=session_id)
         yield _sse_event("error", {"message": f"Session {session_id} not found"})
         return
+
+    # Phase 4: rehydrate the full plan body from R2 so step_executor sees the
+    # original `config` / `description` / install_fields on every step.
+    await _hydrate_plan_from_r2(session)
 
     # Propagate preferred Claude model to LLM client ContextVar
     set_llm_model(session.get("llm_model", "") or "")
@@ -1059,11 +1182,14 @@ async def execute_plan(
 
         # Update step status in DB + persist result immediately
         final_step_status = StepStatus.COMPLETED.value if step_status == "pass" else StepStatus.FAILED.value
+        slim_result = await _offload_exec_result_to_r2(
+            provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+        )
         await sessions_collection().update_one(
             {"_id": oid},
             {
                 "$set": {f"plan.steps.{i}.status": final_step_status, "updated_at": datetime.utcnow()},
-                "$push": {"execution_results": result_dict},
+                "$push": {"execution_results": slim_result},
             },
         )
 
@@ -1427,6 +1553,8 @@ async def execute_single_step(
     # Resolve real tenant from stored doc
     tenant_id = session.get("tenant_id") or tenant_id
 
+    # Phase 4: rehydrate the full plan body before reading step config.
+    await _hydrate_plan_from_r2(session)
     plan = session.get("plan", {})
     steps = plan.get("steps", [])
     if step_index < 0 or step_index >= len(steps):
@@ -1581,10 +1709,13 @@ async def execute_single_step(
         )
         result_dict = exec_result.model_dump(mode="json")
         result_dict["logs"] = log_messages
+        slim_result = await _offload_exec_result_to_r2(
+            provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+        )
         await sessions_collection().update_one(
             {"_id": oid},
             {"$set": {f"plan.steps.{step_index}.status": final_step_status, "updated_at": datetime.utcnow()},
-             "$push": {"execution_results": result_dict}},
+             "$push": {"execution_results": slim_result}},
         )
         logger.info("execution.single_step_finished", session_id=session_id, step_index=step_index,
                     step_type=step_type, status="fail", duration_ms=0)
@@ -1620,10 +1751,13 @@ async def execute_single_step(
             )
             result_dict = exec_result.model_dump(mode="json")
             result_dict["logs"] = log_messages
+            slim_result = await _offload_exec_result_to_r2(
+                provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+            )
             await sessions_collection().update_one(
                 {"_id": oid},
                 {"$set": {f"plan.steps.{step_index}.status": StepStatus.FAILED.value, "updated_at": datetime.utcnow()},
-                 "$push": {"execution_results": result_dict}},
+                 "$push": {"execution_results": slim_result}},
             )
             logger.info("execution.single_step_finished", session_id=session_id, step_index=step_index,
                         step_type=step_type, status="fail", duration_ms=0)
@@ -1721,6 +1855,9 @@ async def execute_single_step(
 
     # Persist result + update step status
     final_step_status = StepStatus.COMPLETED.value if step_status == "pass" else StepStatus.FAILED.value
+    slim_result = await _offload_exec_result_to_r2(
+        provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+    )
     await sessions_collection().update_one(
         {"_id": oid},
         {
@@ -1728,7 +1865,7 @@ async def execute_single_step(
                 f"plan.steps.{step_index}.status": final_step_status,
                 "updated_at": datetime.utcnow(),
             },
-            "$push": {"execution_results": result_dict},
+            "$push": {"execution_results": slim_result},
         },
     )
 
@@ -1786,6 +1923,8 @@ async def attempt_fix_step(
     set_llm_tenant_id(tenant_id or "")
     set_llm_model(session.get("llm_model", "") or "")
 
+    # Phase 4: rehydrate the full plan body before reading step config.
+    await _hydrate_plan_from_r2(session)
     plan = session.get("plan", {})
     steps = plan.get("steps", [])
     if step_index < 0 or step_index >= len(steps):
@@ -2189,7 +2328,9 @@ async def attempt_fix_step(
         result_dict = exec_result.model_dump(mode="json")
         result_dict["logs"] = log_messages[-100:]
         result_dict["fix_attempted"] = True
-
+        slim_result = await _offload_exec_result_to_r2(
+            provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+        )
         await sessions_collection().update_one(
             {"_id": oid},
             {
@@ -2197,7 +2338,7 @@ async def attempt_fix_step(
                     f"plan.steps.{step_index}.status": StepStatus.FAILED.value,
                     "updated_at": datetime.utcnow(),
                 },
-                "$push": {"execution_results": result_dict},
+                "$push": {"execution_results": slim_result},
             },
         )
         return result_dict
@@ -2356,11 +2497,14 @@ async def attempt_fix_step(
         for _i, _s in enumerate(steps):
             if isinstance(_s, dict) and _s.get("type") == "write_tests":
                 _step_set[f"plan.steps.{_i}.status"] = StepStatus.COMPLETED.value
+    slim_result = await _offload_exec_result_to_r2(
+        provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+    )
     await sessions_collection().update_one(
         {"_id": oid},
         {
             "$set": _step_set,
-            "$push": {"execution_results": result_dict},
+            "$push": {"execution_results": slim_result},
         },
     )
 
@@ -2400,6 +2544,8 @@ async def auto_run_session(
         yield _sse_event("error", {"message": f"Session {session_id} not found"})
         return
 
+    # Phase 4: rehydrate the full plan body before reading step config.
+    await _hydrate_plan_from_r2(session)
     plan = session.get("plan", {})
     steps = plan.get("steps", [])
     if not steps:
@@ -2873,11 +3019,14 @@ async def auto_run_session(
         result_dict["validation"] = validation
 
         final_step_status = StepStatus.COMPLETED.value if step_status == "pass" else StepStatus.FAILED.value
+        slim_result = await _offload_exec_result_to_r2(
+            provider=provider, service_slug=service_slug, session_id=session_id, result_dict=result_dict,
+        )
         await sessions_collection().update_one(
             {"_id": oid},
             {
                 "$set": {f"plan.steps.{i}.status": final_step_status, "updated_at": datetime.utcnow()},
-                "$push": {"execution_results": result_dict},
+                "$push": {"execution_results": slim_result},
             },
         )
 

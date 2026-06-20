@@ -6,6 +6,7 @@ connector documentation as structured JSON (rendered by SiteRenderer).
 
 import asyncio
 import json
+import re as _re
 import structlog
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -18,32 +19,94 @@ from datetime import datetime
 
 from integration.db.database import sessions_collection
 from integration.services.docs_builder_service import (
-    _output_dir,
     export_docs_html,
     generate_docs,
     update_docs_with_prompt,
 )
 from integration.services import r2_service
+from integration.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
 _SHIELVA_DOCS_REL = Path(".shielva") / "docs" / "connector_docs.json"
 
 
-def _read_local_docs(tenant_id: str, service_slug: str) -> Optional[dict]:
+def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> Optional[dict]:
     """Read connector_docs.json from generated_connectors/ (local fallback when R2 not configured).
 
-    Path: {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector/.shielva/docs/connector_docs.json
-    This file is pushed to git via the sync request alongside the connector source.
+    Scans all subdirectories under {GENERATED_CODE_DIR}/{tenant_id}/ for a
+    connector_docs.json, matching by connector_type in metadata/connector.json or
+    by a normalized directory-name comparison against service_slug.
+
+    Sessions store the canonical CATALOG service key (e.g. ``analytics_data``)
+    while the connector dir's ``connector_type`` is typically the LLM-built
+    name (e.g. ``google_analytics``). So we also try the provider-prefixed form
+    ``<provider>_<service_slug>`` when computing match candidates.
     """
-    if not tenant_id or not service_slug:
+    if not tenant_id:
         return None
     try:
-        p = _output_dir(tenant_id, service_slug) / _SHIELVA_DOCS_REL
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if data.get("sections"):
-                return data
+        base = Path(settings.GENERATED_CODE_DIR).resolve()
+        tenant_dir = base / tenant_id
+        if not tenant_dir.exists():
+            return None
+
+        # Derive candidate slugs:
+        #   - bare canonical service_slug (e.g. "analytics_data")
+        #   - provider-prefixed form (e.g. "google_analytics_data" → "google_analytics")
+        bare = _re.sub(r'_[a-f0-9]{6}$', '', service_slug or "")
+        bare = _re.sub(r'_connector$', '', bare).strip("_")
+        prov = (provider or "").lower().strip()
+        candidates = {bare}
+        if prov:
+            candidates.add(f"{prov}_{bare}")
+        candidates.discard("")
+
+        def _matches(value: str) -> bool:
+            v = value.lower()
+            v_collapsed = v.replace("_", "")
+            for c in candidates:
+                if not c:
+                    continue
+                if v == c or v_collapsed == c.replace("_", ""):
+                    return True
+                if v.startswith(c) or c.startswith(v):
+                    return True
+            return False
+
+        for pkg_dir in tenant_dir.iterdir():
+            if not pkg_dir.is_dir():
+                continue
+            docs_path = pkg_dir / _SHIELVA_DOCS_REL
+            if not docs_path.exists():
+                continue
+
+            matched = False
+            # Primary: match via metadata/connector.json connector_type or service field
+            meta_path = pkg_dir / "metadata" / "connector.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    ct = (meta.get("connector_type") or meta.get("service") or "")
+                    if ct and _matches(ct):
+                        matched = True
+                except Exception:
+                    pass
+
+            # Fallback: normalize directory name and compare
+            if not matched:
+                dir_slug = _re.sub(r'[^a-z0-9]+', '_', pkg_dir.name.lower()).strip("_")
+                dir_slug = _re.sub(r'_connector$', '', dir_slug)
+                if dir_slug and _matches(dir_slug):
+                    matched = True
+
+            if matched:
+                try:
+                    data = json.loads(docs_path.read_text(encoding="utf-8"))
+                    if data.get("sections"):
+                        return data
+                except Exception:
+                    pass
     except Exception:
         pass
     return None
@@ -260,14 +323,25 @@ async def export_session_docs_html(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
+    # docs_json no longer lives in Mongo — pull it from R2 (durable, compressed
+    # primary store) via the same loader the modal uses. Fall back to the local
+    # `.shielva/docs/connector_docs.json` for dev environments without R2.
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"docs_json": 1},
+        {"provider": 1, "service_slug": 1},
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    docs_json = session.get("docs_json")
+    provider = session.get("provider", "")
+    service_slug = session.get("service_slug", "")
+    docs_json = None
+    if provider and service_slug:
+        docs_json = await r2_service.get_connector_docs(x_tenant_id, provider, service_slug)
+        if docs_json and not docs_json.get("sections"):
+            docs_json = None
+    if not docs_json:
+        docs_json = _read_local_docs(x_tenant_id, service_slug, provider)
     if not docs_json:
         raise HTTPException(status_code=404, detail="No documentation found for this session. Generate docs first.")
 
@@ -317,7 +391,7 @@ async def get_session_docs(
 
     # 2. generated_connectors/ local fallback — file is git-tracked via sync request
     if not docs_json:
-        docs_json = _read_local_docs(x_tenant_id, service_slug)
+        docs_json = _read_local_docs(x_tenant_id, service_slug, provider)
 
     if not docs_json:
         raise HTTPException(status_code=404, detail="No documentation found for this session. Generate docs first.")

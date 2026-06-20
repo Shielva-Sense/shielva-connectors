@@ -19,6 +19,7 @@ class SessionStatus(str, Enum):
     TESTING = "testing"
     COMPLETED = "completed"
     FAILED = "failed"
+    INACTIVE = "inactive"
 
 
 class StepType(str, Enum):
@@ -169,6 +170,7 @@ class IntegrationSession(BaseModel):
     provider: str = Field(json_schema_extra={"enhance_inherit": True})
     service: str = Field(json_schema_extra={"enhance_inherit": True})
     connector_name: str = Field(default="", json_schema_extra={"enhance_inherit": True})   # human-readable name for this connector instance
+    alias_name: str = Field(default="", json_schema_extra={"enhance_inherit": True})       # user-editable display alias (defaults to connector_name; connector_name is never mutated)
     auth_type: str = Field(default="", json_schema_extra={"enhance_inherit": True})         # oauth2_code | api_key | … — drives the CONNECTOR_GEN_SYSTEM overlay at codegen time
     user_prompt: str = ""
     # ── Run lineage ───────────────────────────────────────────────────────────
