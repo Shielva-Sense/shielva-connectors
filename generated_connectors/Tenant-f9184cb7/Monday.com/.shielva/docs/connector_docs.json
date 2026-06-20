@@ -1,0 +1,180 @@
+{
+  "title": "Monday.com Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Monday.com connector** integrates with Monday.com workspaces via the Monday.com GraphQL API v2. It enables Shielva to sync boards, items, and workspaces — making your project management data searchable and actionable in the Shielva knowledge base.\n\nThis connector uses personal API token authentication, granting read access to all boards and workspaces accessible to the token owner.\n\n**Key capabilities:**\n- List all boards (paginated, page-based)\n- Fetch a single board with its items and column values\n- List all items on a board (cursor-based pagination)\n- Fetch a single item by ID\n- List all workspaces\n- Full sync: all boards → all items → normalized ConnectorDocuments\n- Stable document IDs via SHA-256(\"item:\" + item_id) for deduplication",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`monday` — registered in ACP as **Monday.com**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "monday.com (GraphQL API v2 — `https://api.monday.com/v2`, API-Version: 2023-10)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_token presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls `{ me { name email } }` to verify token; returns authenticated user name |\n| `sync()` | Lists all boards, fetches all items per board, normalizes to ConnectorDocuments |\n| `list_boards(limit)` | Paginated boards query with page-based pagination |\n| `get_board(board_id)` | Single board with items_page (first 50 items) and column values |\n| `list_items(board_id, limit)` | Cursor-based item pagination for a board |\n| `get_item(item_id)` | Single item with board reference and column values |\n| `list_workspaces()` | All workspaces the account belongs to |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **personal API token authentication** — a single token tied to the Monday.com user account.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — obtain the token from **Profile → Developers → My Access Tokens → Show**."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | Monday.com personal API token from Profile → Developers → My Access Tokens |"
+        },
+        {
+          "id": "auth-headers",
+          "title": "Auth Headers",
+          "content": "Every request to `https://api.monday.com/v2` includes:\n\n```\nAuthorization: <api_token>      (no \"Bearer\" prefix)\nContent-Type: application/json\nAPI-Version: 2023-10\n```\n\nNote: Monday.com does NOT require the `Bearer` prefix — the raw token is sent directly."
+        },
+        {
+          "id": "token-security",
+          "title": "Token Security",
+          "content": "Personal API tokens do not expire unless regenerated. Shielva stores the token AES-256-GCM encrypted at rest via the vault. The token can be regenerated at any time from Profile → Developers → My Access Tokens → Regenerate."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `api_token` | Monday.com personal API token |"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `MondayHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `api_token` is present in config. Does not make network calls — token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when api_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when api_token is absent or empty"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nRuns `{ me { name email } }` against the Monday.com GraphQL API to verify the token. Returns the authenticated user's name in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected as: Alice Smith')`\n- `HealthCheckResult(health=DEGRADED, auth_status=INVALID_CREDENTIALS)` on auth errors\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFetches all boards via `list_boards()`, then for each board fetches all items via `list_items()`. Normalizes each item to a ConnectorDocument.\n\n**Parameters:**\n- `full` — accepted for interface compatibility; sync is always a full snapshot (Monday.com API has no incremental filter)\n- `since` — accepted for interface compatibility; not applied\n- `kb_id` — knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures, `PARTIAL` when some boards/items fail, `FAILED` when the board list or auth fails entirely."
+        },
+        {
+          "id": "list-boards",
+          "title": "list_boards()",
+          "content": "**Signature:** `async def list_boards(self, limit=50) -> list[dict]`\n\nPaginated boards query using page-based pagination (`page` parameter). Continues until a page returns fewer results than the limit.\n\n**Returns:** List of board objects with `id`, `name`, `description`, `state`."
+        },
+        {
+          "id": "get-board",
+          "title": "get_board()",
+          "content": "**Signature:** `async def get_board(self, board_id: str) -> dict`\n\nFetches a single board by ID including the first 50 items via `items_page` with column values.\n\n**Raises:** `MondayNotFoundError` if the board does not exist or the token lacks access."
+        },
+        {
+          "id": "list-items",
+          "title": "list_items()",
+          "content": "**Signature:** `async def list_items(self, board_id: str, limit=50) -> list[dict]`\n\nCursor-based item pagination for a board. First page uses `boards(ids: [board_id]) { items_page }`. Subsequent pages use `next_items_page(cursor: ...)`. Continues until the cursor is exhausted.\n\n**Returns:** List of item objects with `id`, `name`, `column_values`."
+        },
+        {
+          "id": "get-item",
+          "title": "get_item()",
+          "content": "**Signature:** `async def get_item(self, item_id: str) -> dict`\n\nFetches a single item by ID with its board reference and column values.\n\n**Raises:** `MondayNotFoundError` if the item does not exist."
+        },
+        {
+          "id": "list-workspaces",
+          "title": "list_workspaces()",
+          "content": "**Signature:** `async def list_workspaces(self) -> list[dict]`\n\nReturns all workspaces the account belongs to with `id` and `name`."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `MondayHTTPClient` (`client/http_client.py`) using `aiohttp`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | GraphQL Operation | Description |\n|--------|-------------------|-------------|\n| `graphql_query(token, query, variables, context)` | Any query | Core method — POST to `https://api.monday.com/v2` |\n| `get_me(token)` | `{ me { name email } }` | Health check — authenticated user |\n| `get_boards(token, limit, page)` | `boards(limit, page)` | Paginated board list |\n| `get_board(token, board_id)` | `boards(ids: [id])` with `items_page` | Single board with items |\n| `get_items_page(token, board_id, limit, cursor)` | `boards(ids) { items_page }` / `next_items_page` | Cursor-based item page |\n| `get_item(token, item_id)` | `items(ids: [id])` | Single item with column values |\n| `get_workspaces(token)` | `{ workspaces { id name } }` | All workspaces |"
+        },
+        {
+          "id": "error-handling",
+          "title": "Error Handling",
+          "content": "GraphQL errors are mapped by `_classify_graphql_error()` inspecting the error `message` field:\n\n| Error message contains | Exception |\n|------------------------|----------|\n| `not authenticated`, `invalid api key`, `unauthorized` | `MondayAuthError` |\n| `rate limit`, `too many requests`, `complexity budget` | `MondayRateLimitError` |\n| `not found`, `does not exist`, `invalid board`, `invalid item` | `MondayNotFoundError` |\n| HTTP 401 | `MondayAuthError` |\n| HTTP 429 | `MondayRateLimitError` |\n| HTTP 5xx | `MondayNetworkError` |\n| Connection / timeout | `MondayNetworkError` |\n| Other GraphQL errors | `MondayError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` by default (2 for health check)\n- Back-off: 1s, 2s (doubles each attempt)\n- Skips retry on `MondayAuthError` — re-installing with a valid token is required\n- Retries on `MondayError`, `MondayNetworkError`, `MondayRateLimitError`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_item()` and `normalize_board()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "item-document",
+          "title": "Item ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(\\\"item:\\\" + item_id)[:16]>\",\n  \"type\": \"monday_item\",\n  \"title\": \"Design new logo [Marketing Board]\",\n  \"content\": \"Board: Marketing Board\\nItem: Design new logo\\nItem ID: 99001\\nstatus: In Progress\\nperson: Alice\",\n  \"metadata\": {\n    \"item_id\": \"99001\",\n    \"item_name\": \"Design new logo\",\n    \"board_id\": \"12345\",\n    \"board_name\": \"Marketing Board\",\n    \"column_values\": [{\"id\": \"status\", \"text\": \"In Progress\"}],\n    \"connector_id\": \"monday_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"monday\"\n  }\n}\n```"
+        },
+        {
+          "id": "board-document",
+          "title": "Board ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(\\\"board:\\\" + board_id)[:16]>\",\n  \"type\": \"monday_board\",\n  \"title\": \"Board: Marketing Board\",\n  \"content\": \"Board: Marketing Board\\nBoard ID: 12345\\nState: active\\nDescription: Marketing tasks\",\n  \"metadata\": {\n    \"board_id\": \"12345\",\n    \"board_name\": \"Marketing Board\",\n    \"description\": \"Marketing tasks\",\n    \"state\": \"active\",\n    \"connector_id\": \"monday_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"monday\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "Item IDs: `SHA-256(\"item:\" + item_id)[:16]` — stable across syncs regardless of column value changes.\n\nBoard IDs: `SHA-256(\"board:\" + board_id)[:16]` — stable regardless of board renames.\n\nBoth are 16 hex characters truncated from the SHA-256 digest, enabling upsert deduplication without maintaining a seen-ID list."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `MondayError` (base) in `exceptions.py`:\n\n```\nMondayError (base)\n├── MondayAuthError         — invalid/expired API token, unauthorized\n├── MondayNetworkError      — connectivity failures, aiohttp.ClientError, HTTP 5xx\n├── MondayRateLimitError    — HTTP 429, complexity budget exhausted\n└── MondayNotFoundError     — board/item not found, does not exist\n```\n\nCallers can catch the base `MondayError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `MondayAuthError: not authenticated` | Invalid or expired API token | Re-copy from Profile → Developers → My Access Tokens |\n| `MondayAuthError: invalid api key` | Token from deactivated account | Generate token from an active account |\n| `MondayRateLimitError` | Rate limit or complexity budget exceeded | Connector retries automatically with exponential back-off |\n| `MondayNetworkError` | Connection failure to api.monday.com | Check network connectivity |\n| `MondayNotFoundError: board X not found` | Board deleted or access revoked | Re-run sync; board is skipped |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (101 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/monday_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 101 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
