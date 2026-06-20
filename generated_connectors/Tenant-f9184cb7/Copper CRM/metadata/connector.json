@@ -1,0 +1,38 @@
+{
+  "connector_type": "copper",
+  "display_name": "Copper CRM",
+  "provider": "copper",
+  "service": "copper",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync contacts, companies, opportunities, and tasks from Copper CRM (formerly ProsperWorks), the CRM built for Google Workspace.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Copper → System Settings → Integrations → API Keys"
+    },
+    {
+      "key": "user_email",
+      "label": "User Email",
+      "type": "string",
+      "required": true,
+      "help": "The email address of the Copper account holder associated with this API key"
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["people", "companies", "opportunities", "tasks", "activity_types"],
+  "api_base": "https://api.copper.com/developer_api/v1/",
+  "auth_headers": {
+    "X-PW-AccessToken": "{api_key}",
+    "X-PW-Application": "developer_api",
+    "X-PW-UserEmail": "{user_email}"
+  },
+  "pagination": {
+    "strategy": "page_number",
+    "default_page_size": 200,
+    "max_page_size": 200
+  }
+}
