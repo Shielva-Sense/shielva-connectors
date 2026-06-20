@@ -1,0 +1,20 @@
+{
+  "connector_type": "trello",
+  "display_name": "Trello",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "token",
+      "label": "Token",
+      "type": "password",
+      "required": true
+    }
+  ]
+}
