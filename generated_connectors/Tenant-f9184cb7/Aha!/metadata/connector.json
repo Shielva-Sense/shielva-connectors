@@ -1,0 +1,36 @@
+{
+  "connector_type": "aha",
+  "name": "aha",
+  "display_name": "Aha!",
+  "description": "Connect to Aha! to sync features, releases, ideas, and goals from your product roadmaps.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Aha! API key from Settings → Security → API Key."
+    },
+    {
+      "key": "subdomain",
+      "label": "Aha! Subdomain (e.g. mycompany)",
+      "type": "string",
+      "required": true,
+      "description": "The subdomain of your Aha! account (e.g. 'mycompany' for mycompany.aha.io)."
+    }
+  ],
+  "capabilities": [
+    "list_products",
+    "list_features",
+    "list_goals",
+    "list_releases",
+    "list_ideas",
+    "health_check",
+    "sync"
+  ],
+  "provider": "Aha!",
+  "service": "Aha!",
+  "category": "product_management"
+}
