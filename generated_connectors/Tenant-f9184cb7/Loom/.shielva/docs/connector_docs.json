@@ -1,0 +1,92 @@
+{
+  "title": "Loom Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Loom connector** integrates with Loom workspaces via the Loom API v1. It enables Shielva to sync videos (with transcripts), folders, and workspaces in real-time.\n\nThis connector uses **Bearer token** authentication — an API key generated from Loom Account Settings → Integrations → API.\n\n**Key capabilities:**\n- List all videos via `GET /videos` with `next_page` cursor pagination\n- Fetch individual video metadata via `GET /videos/{id}`\n- Retrieve video transcripts via `GET /videos/{id}/transcript` (falls back to description if unavailable)\n- List folder hierarchy via `GET /folders`\n- List workspaces via `GET /workspaces`\n- Stable document IDs via sha256(\"video:\"+id)[:16] for deduplication across syncs\n- Exponential-backoff retry (max 3 attempts) — skips retry on AuthError and NotFoundError",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`loom` — registered in ACP as **Loom**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Loom (Loom API v1 — `https://www.loom.com/v1/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls `GET /me` to verify API key; returns user name/email in message |\n| `sync()` | Paginates all videos, fetches transcripts best-effort, normalizes folders + workspaces |\n| `list_videos()` | Paginated `GET /videos` — follows next_page cursor until exhausted |\n| `list_folders(folder_id?)` | `GET /folders` or `GET /folders/{id}` |\n| `list_workspaces()` | `GET /workspaces` |\n| `get_video(video_id)` | `GET /videos/{id}` for a single video |\n| `get_video_transcript(video_id)` | `GET /videos/{id}/transcript` — empty dict if unavailable |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Bearer token** authentication — a Loom API key sent in the `Authorization` header on every request.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — generate at Loom → Account Settings → Integrations → API."
+        },
+        {
+          "id": "auth-header",
+          "title": "Auth Header",
+          "content": "`Authorization: Bearer {api_key}` — set on every HTTP request."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Loom API key from Account Settings → Integrations → API |"
+        }
+      ]
+    },
+    {
+      "id": "resources",
+      "title": "Resources Synced",
+      "content": "The connector syncs three resource types from the Loom API.",
+      "children": [
+        {
+          "id": "videos",
+          "title": "Videos",
+          "content": "**Endpoint:** `GET /videos` (paginated via `next_page` cursor)\n\nEach video document includes:\n- Title and description\n- Share URL and status (processing / transcoding / ready / error)\n- Duration (seconds)\n- Folder ID and Workspace ID\n- Created and updated timestamps\n- **Transcript** (when available) as the primary content body\n\n**Stable ID:** `sha256(\"video:\" + id)[:16]`\n**Document type:** `loom_video`"
+        },
+        {
+          "id": "folders",
+          "title": "Folders",
+          "content": "**Endpoint:** `GET /folders` or `GET /folders/{id}`\n\nEach folder document includes:\n- Folder name\n- Parent folder ID (if nested)\n- Workspace ID\n- Created timestamp\n\n**Stable ID:** `sha256(\"folder:\" + id)[:16]`\n**Document type:** `loom_folder`"
+        },
+        {
+          "id": "workspaces",
+          "title": "Workspaces",
+          "content": "**Endpoint:** `GET /workspaces`\n\nEach workspace document includes:\n- Workspace name\n- Member count\n- Created timestamp\n\n**Stable ID:** `sha256(\"workspace:\" + id)[:16]`\n**Document type:** `loom_workspace`"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "The Loom API uses **cursor-based pagination** via the `next_page` token.\n\nThe connector follows this pattern:\n1. Initial request: `GET /videos?limit=50`\n2. If response includes `next_page`, pass it as `?next_page={cursor}` on the next call\n3. Continue until `next_page` is absent or null\n\nAll pages are accumulated into a single result list before normalization."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector maps Loom API HTTP status codes to typed exceptions:\n\n| Status | Exception | Retry? |\n|--------|-----------|--------|\n| 401 | `LoomAuthError` | No — re-auth required |\n| 403 | `LoomAuthError` | No — permission denied |\n| 404 | `LoomNotFoundError` | No — resource absent |\n| 429 | `LoomRateLimitError` | Yes (up to 3 attempts, exponential backoff) |\n| 5xx | `LoomNetworkError` | Yes (up to 3 attempts, exponential backoff) |\n| Network | `LoomNetworkError` | Yes (up to 3 attempts, exponential backoff) |\n\nTranscript fetch errors are **best-effort** — a `LoomNotFoundError` on transcript simply means the connector uses the video description as content instead of crashing the sync."
+    },
+    {
+      "id": "document-ids",
+      "title": "Stable Document IDs",
+      "content": "Every synced document receives a **stable 16-character ID** computed as:\n\n```\nsha256(\"<resource_type>:<resource_id>\")[:16]\n```\n\nExamples:\n- Video: `sha256(\"video:vid-abc123\")[:16]`\n- Folder: `sha256(\"folder:folder-xyz\")[:16]`\n- Workspace: `sha256(\"workspace:ws-123\")[:16]`\n\nThis ensures the same Loom resource always maps to the same Shielva document ID, enabling safe incremental syncs without duplication."
+    },
+    {
+      "id": "rate-limits",
+      "title": "Rate Limits",
+      "content": "Loom enforces API rate limits per key:\n\n| Plan | Limit |\n|------|-------|\n| Standard | ~60 requests/minute |\n| Enterprise | Higher limits (contact Loom) |\n\nThe connector automatically retries on `429` with exponential backoff (1s → 2s → 4s). For workspaces with large video libraries, schedule syncs during off-peak hours."
+    }
+  ]
+}
