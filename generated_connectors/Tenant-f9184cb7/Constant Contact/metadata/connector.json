@@ -1,0 +1,120 @@
+{
+  "connector_type": "constant_contact",
+  "connector_id": "constant_contact",
+  "name": "Constant Contact",
+  "provider": "Constant Contact",
+  "service": "Constant Contact",
+  "version": "1.0.0",
+  "description": "Sync Constant Contact contacts, email campaigns, and contact lists into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "auth_url": "https://authz.constantcontact.com/oauth2/default/v1/authorize",
+  "token_url": "https://authz.constantcontact.com/oauth2/default/v1/token",
+  "scopes": "contact_data campaign_data account_read",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Constant Contact OAuth2 Client ID",
+      "help": "Found in your Constant Contact Developer portal under the application settings."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Constant Contact OAuth2 Client Secret",
+      "help": "Found in your Constant Contact Developer portal under the application settings."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-app.com/oauth/callback",
+      "help": "Must match the redirect URI registered in your Constant Contact application."
+    }
+  ],
+  "features": [
+    "oauth2",
+    "retry",
+    "cursor_pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_id"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Configure",
+      "description": "Validate client_id and client_secret are present.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return Constant Contact OAuth2 authorization URL.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /v3/account/summary and return HEALTHY/DEGRADED/OFFLINE with organization name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of contacts and email campaigns with cursor-based pagination.",
+      "category": "sync"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Cursor-paginated list of Constant Contact contacts.",
+      "category": "contacts",
+      "endpoint": "GET /v3/contacts"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Retrieve a single contact by ID.",
+      "category": "contacts",
+      "endpoint": "GET /v3/contacts/{contact_id}"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Cursor-paginated list of email campaigns.",
+      "category": "campaigns",
+      "endpoint": "GET /v3/emails"
+    },
+    {
+      "id": "list_contact_lists",
+      "name": "List Contact Lists",
+      "description": "Cursor-paginated list of contact lists.",
+      "category": "lists",
+      "endpoint": "GET /v3/contact_lists"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "contacts",
+    "campaigns",
+    "lists"
+  ],
+  "apis": [
+    { "name": "Install / Configure", "id": "install", "category": "auth" },
+    { "name": "Authorize", "id": "authorize", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Records", "id": "sync", "category": "sync" },
+    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
+    { "name": "Get Contact", "id": "get_contact", "category": "contacts" },
+    { "name": "List Campaigns", "id": "list_campaigns", "category": "campaigns" },
+    { "name": "List Contact Lists", "id": "list_contact_lists", "category": "lists" }
+  ]
+}
