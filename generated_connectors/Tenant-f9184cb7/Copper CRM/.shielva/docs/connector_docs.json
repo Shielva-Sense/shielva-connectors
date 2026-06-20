@@ -1,0 +1,86 @@
+{
+  "title": "Copper CRM Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Shielva Copper CRM connector facilitates the synchronization of key customer relationship management data from Copper CRM, a CRM platform designed for Google Workspace users. This connector is capable of syncing contacts (people), companies, opportunities, and tasks. While the connector supports the concept of `activity_types`, the primary `sync` operation focuses on retrieving people, companies, opportunities, and tasks. It is primarily used by organizations leveraging Copper CRM to centralize their sales and customer data within the Shielva platform for further processing and analysis."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "To get started with the Copper CRM connector, follow these steps:\n\n1.  **Install the Connector**: Initiate the installation process for the Copper CRM connector within your Shielva environment.\n2.  **Authenticate**: Provide the required authentication credentials:\n    *   **API Key**: Your Copper API key.\n    *   **User Email**: The email address of the Copper account holder associated with the API key.\n3.  **Perform First Sync**: Once authenticated, trigger a full synchronization to pull all available people, companies, opportunities, and tasks into Shielva.\n\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def main():\n    config = {\n        \"api_key\": \"YOUR_COPPER_API_KEY\",\n        \"user_email\": \"your.email@example.com\"\n    }\n    connector = CopperConnector(tenant_id=\"your-tenant-id\", connector_id=\"copper-001\", config=config)\n\n    # 1. Install and validate credentials\n    install_result = await connector.install()\n    if install_result.success:\n        print(f\"Connector installed successfully. Account details: {install_result.details}\")\n    else:\n        print(f\"Connector installation failed: {install_result.error}\")\n        return\n\n    # 2. Perform a full sync\n    sync_result = await connector.sync()\n    if sync_result.status == \"SUCCESS\":\n        print(f\"Sync completed. Total synced: {sync_result.total_synced} records.\")\n        print(f\"Resources synced: {sync_result.resource_counts}\")\n    else:\n        print(f\"Sync failed: {sync_result.error}\")\n\n    await connector.close()\n\nif __name__ == \"__main__\":\n    asyncio.run(main())\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Copper CRM connector uses an API Key-based authentication method. Authentication is performed by including three specific headers in every API request:\n\n*   `X-PW-AccessToken`: Your Copper API Key.\n*   `X-PW-Application`: Set to `developer_api`.\n*   `X-PW-UserEmail`: The email address of the Copper user associated with the provided API Key.\n\nTo obtain your API Key:\n1.  Log in to your Copper CRM account.\n2.  Navigate to **System Settings**.\n3.  Go to **Integrations**.\n4.  Select **API Keys**.\n5.  Generate or retrieve your API Key from this section.\n\nEnsure the `User Email` provided during configuration matches the Copper account holder for whom the API Key was generated."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Copper CRM connector requires the following configuration fields:\n\n| Field        | Type     | Required | Description                                                                                             |\n| :----------- | :------- | :------- | :------------------------------------------------------------------------------------------------------ |\n| `api_key`    | `password` | Yes      | Your Copper API Key. This can be found in Copper \u2192 System Settings \u2192 Integrations \u2192 API Keys.           |\n| `user_email` | `string` | Yes      | The email address of the Copper account holder associated with this API key.                            |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "children": [
+        {
+          "id": "api-methods-install",
+          "title": "install",
+          "content": "Validates the provided `api_key` and `user_email` by attempting to fetch account details from Copper. If successful, it marks the connector as installed.\n\n**Parameters**:\nNone.\n\n**Returns**:\nAn `InstallResult` object indicating success or failure, along with any error messages or account details.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_install():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    result = await connector.install()\n    print(f\"Install success: {result.success}, Error: {result.error}, Details: {result.details}\")\n    await connector.close()\n\nasyncio.run(run_install())\n```"
+        },
+        {
+          "id": "api-methods-health-check",
+          "title": "health_check",
+          "content": "Verifies that the connector can successfully connect to the Copper API using the configured credentials by making a `GET /account` request.\n\n**Parameters**:\nNone.\n\n**Returns**:\nA `HealthCheckResult` object indicating if the connector is healthy and a descriptive message.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_health_check():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    result = await connector.health_check()\n    print(f\"Healthy: {result.healthy}, Message: {result.message}\")\n    await connector.close()\n\nasyncio.run(run_health_check())\n```"
+        },
+        {
+          "id": "api-methods-close",
+          "title": "close",
+          "content": "Closes the underlying HTTP client session, releasing network resources. It is important to call this method when the connector is no longer needed.\n\n**Parameters**:\nNone.\n\n**Returns**:\nNone.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_close():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    # ... perform operations ...\n    await connector.close()\n    print(\"Connector HTTP session closed.\")\n\nasyncio.run(run_close())\n```"
+        },
+        {
+          "id": "api-methods-sync",
+          "title": "sync",
+          "content": "Initiates a full synchronization of all supported resources from Copper CRM, including people, companies, opportunities, and tasks. It paginates through each resource type, normalizes the records, and returns a summary of the sync operation.\n\n**Parameters**:\n`**kwargs` (currently unused).\n\n**Returns**:\nA `SyncResult` object detailing the sync status, total records synced, and counts per resource type.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_sync():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    sync_result = await connector.sync()\n    print(f\"Sync Status: {sync_result.status}\")\n    print(f\"Total Synced: {sync_result.total_synced}\")\n    print(f\"Resource Counts: {sync_result.resource_counts}\")\n    if sync_result.error:\n        print(f\"Error: {sync_result.error}\")\n    await connector.close()\n\nasyncio.run(run_sync())\n```"
+        },
+        {
+          "id": "api-methods-list-people",
+          "title": "list_people",
+          "content": "Retrieves all people (contacts) from Copper CRM, paginating through results, and returns them as a list of normalized dictionaries.\n\n**Parameters**:\n`**kwargs` (currently unused).\n\n**Returns**:\n`list[dict[str, Any]]` representing normalized person records.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_list_people():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    people = await connector.list_people()\n    print(f\"Found {len(people)} people. First person: {people[0] if people else 'N/A'}\")\n    await connector.close()\n\nasyncio.run(run_list_people())\n```"
+        },
+        {
+          "id": "api-methods-list-companies",
+          "title": "list_companies",
+          "content": "Retrieves all companies from Copper CRM, paginating through results, and returns them as a list of normalized dictionaries.\n\n**Parameters**:\n`**kwargs` (currently unused).\n\n**Returns**:\n`list[dict[str, Any]]` representing normalized company records.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_list_companies():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    companies = await connector.list_companies()\n    print(f\"Found {len(companies)} companies. First company: {companies[0] if companies else 'N/A'}\")\n    await connector.close()\n\nasyncio.run(run_list_companies())\n```"
+        },
+        {
+          "id": "api-methods-list-opportunities",
+          "title": "list_opportunities",
+          "content": "Retrieves all opportunities from Copper CRM, paginating through results, and returns them as a list of normalized dictionaries.\n\n**Parameters**:\n`**kwargs` (currently unused).\n\n**Returns**:\n`list[dict[str, Any]]` representing normalized opportunity records.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_list_opportunities():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    opportunities = await connector.list_opportunities()\n    print(f\"Found {len(opportunities)} opportunities. First opportunity: {opportunities[0] if opportunities else 'N/A'}\")\n    await connector.close()\n\nasyncio.run(run_list_opportunities())\n```"
+        },
+        {
+          "id": "api-methods-list-tasks",
+          "title": "list_tasks",
+          "content": "Retrieves all tasks from Copper CRM, paginating through results, and returns them as a list of normalized dictionaries.\n\n**Parameters**:\n`**kwargs` (currently unused).\n\n**Returns**:\n`list[dict[str, Any]]` representing normalized task records.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_list_tasks():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    tasks = await connector.list_tasks()\n    print(f\"Found {len(tasks)} tasks. First task: {tasks[0] if tasks else 'N/A'}\")\n    await connector.close()\n\nasyncio.run(run_list_tasks())\n```"
+        },
+        {
+          "id": "api-methods-get-person",
+          "title": "get_person",
+          "content": "Fetches a single person (contact) record from Copper CRM by its unique Copper ID and returns it as a normalized dictionary.\n\n**Parameters**:\n*   `person_id` (`int`): The unique identifier of the person in Copper CRM.\n\n**Returns**:\n`dict[str, Any]` representing the normalized person record.\n\n**Example**:\n```python\nfrom copper_connector.connector import CopperConnector\nimport asyncio\n\nasync def run_get_person():\n    config = {\"api_key\": \"YOUR_KEY\", \"user_email\": \"your.email@example.com\"}\n    connector = CopperConnector(config=config)\n    person_id_to_fetch = 12345 # Replace with an actual Copper person ID\n    try:\n        person = await connector.get_person(person_id_to_fetch)\n        print(f\"Fetched person: {person['name']} (ID: {person['id']})\")\n    except Exception as e:\n        print(f\"Failed to fetch person {person_id_to_fetch}: {e}\")\n    await connector.close()\n\nasyncio.run(run_get_person())\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The Copper CRM connector handles specific exceptions to provide clear feedback on operational failures:\n\n*   **`CopperAuthError`**:\n    *   **Meaning**: Indicates that the provided API Key or User Email is invalid or lacks the necessary permissions to access the Copper CRM API. This typically corresponds to HTTP 401 Unauthorized or 403 Forbidden responses from the Copper API.\n    *   **Connector Action**: The `install`, `health_check`, and `sync` methods will return a failed result (`InstallResult(success=False)`, `HealthCheckResult(healthy=False)`, `SyncResult(status=SyncStatus.FAILED)`) with an error message detailing the authentication failure.\n*   **`CopperError`**:\n    *   **Meaning**: A general error indicating an issue with the Copper API request or response that is not specifically an authentication failure. This could encompass various HTTP client errors (e.g., 4xx client errors other than auth, 5xx server errors).\n    *   **Connector Action**: The `install`, `health_check`, and `sync` methods will return a failed result with an error message indicating a general failure.\n*   **`CopperNetworkError`**:\n    *   **Meaning**: Indicates a problem with network connectivity, such as a timeout or an inability to reach the Copper API endpoint.\n    *   **Connector Action**: While the underlying `CopperHTTPClient` and `with_retry` helper are designed to handle transient network issues, persistent network errors would typically be caught as a `CopperError` at the connector's top-level `install`, `health_check`, or `sync` methods after retries are exhausted.\n*   **`CopperRateLimitError`**:\n    *   **Meaning**: Indicates that the connector has exceeded the Copper API's rate limits.\n    *   **Connector Action**: The `with_retry` helper function, used by all pagination and single-resource fetch methods, includes logic to handle rate limiting by retrying requests after a delay. If retries are exhausted, this would typically result in a `CopperError` being propagated to the top-level connector methods."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "*   **Authentication Failed (`CopperAuthError`)**:\n    *   **Problem**: The connector fails to install or sync with an \"Authentication failed\" error.\n    *   **Solution**:\n        1.  **Verify API Key**: Double-check that the `api_key` provided in the configuration is correct and has not expired. Ensure there are no leading or trailing spaces.\n        2.  **Verify User Email**: Confirm that the `user_email` exactly matches the email address of the Copper user account associated with the API key.\n        3.  **Check Permissions**: Ensure the Copper user account linked to the API key has the necessary permissions to access the resources (people, companies, opportunities, tasks) that the connector is trying to sync.\n        4.  **API Key Location**: Re-check the API Key location in Copper: `System Settings \u2192 Integrations \u2192 API Keys`.\n*   **Sync or Health Check Failed (`CopperError`)**:\n    *   **Problem**: The connector reports a general failure during `install`, `health_check`, or `sync` without a specific authentication error.\n    *   **Solution**:\n        1.  **Network Connectivity**: Verify that the Shielva environment has outbound network access to `https://api.copper.com`.\n        2.  **Copper API Status**: Check the official Copper API status page for any ongoing service disruptions.\n        3.  **Review Logs**: Examine the connector's detailed logs for more specific error messages from the Copper API, which might indicate issues like invalid request parameters or server-side problems.\n*   **Rate Limiting Issues**:\n    *   **Problem**: Sync operations are slow or fail intermittently, potentially with messages related to too many requests.\n    *   **Solution**: The connector implements internal retry logic with exponential backoff for rate-limited requests. If you consistently encounter rate limit issues, consider reducing the frequency of sync operations or contacting Copper support to inquire about higher rate limits for your API key, if applicable."
+    }
+  ]
+}
