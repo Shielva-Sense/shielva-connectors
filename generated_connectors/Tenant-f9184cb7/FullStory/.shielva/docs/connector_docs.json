@@ -1,0 +1,75 @@
+{
+  "connector_type": "fullstory",
+  "display_name": "FullStory",
+  "version": "1.0.0",
+  "description": "FullStory digital experience analytics connector — syncs session recordings, users, and segments. Provides direct access to custom events per user via the FullStory REST API v2.",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "FullStory is a digital experience analytics platform that captures session recordings, heatmaps, and user behavior data. This connector reads users, user segments, and provides access to session recordings and custom events from the FullStory REST API v2."
+    },
+    {
+      "id": "auth",
+      "title": "Authentication",
+      "content": "Authentication uses a Bearer token passed in the Authorization header (Authorization: Bearer {api_key}). Obtain your API key from FullStory Settings → Integrations → API Keys. The key is verified via a GET /v2/org call during install."
+    },
+    {
+      "id": "install_fields",
+      "title": "Required Install Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "description": "Your FullStory API Bearer token. Found under Settings → Integrations → API Keys."
+        }
+      ]
+    },
+    {
+      "id": "capabilities",
+      "title": "Capabilities",
+      "items": [
+        {"name": "sync", "description": "Full sync of users and segments"},
+        {"name": "health_check", "description": "Validate credentials via GET /v2/org"},
+        {"name": "list_sessions", "description": "List session recordings, optionally filtered by user UID"},
+        {"name": "get_session", "description": "Retrieve a single session recording by ID"},
+        {"name": "list_users", "description": "List all FullStory users (paginated)"},
+        {"name": "get_user", "description": "Retrieve a single user by UID"},
+        {"name": "list_segments", "description": "List all user segments"},
+        {"name": "list_events", "description": "List custom events for a specific user UID"}
+      ]
+    },
+    {
+      "id": "resources",
+      "title": "Resources Synced",
+      "items": [
+        {"name": "users", "description": "Identified users and their custom properties"},
+        {"name": "segments", "description": "User segments defined in the FullStory project"},
+        {"name": "sessions", "description": "Session recordings (per-user, targeted retrieval)"},
+        {"name": "events", "description": "Custom events per user (targeted retrieval)"}
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "FullStory uses cursor-based pagination. Responses include a nextPageToken field. Pass pageToken=<token> in subsequent requests. The connector exposes the cursor parameter on all list methods."
+    },
+    {
+      "id": "rate_limits",
+      "title": "Rate Limits",
+      "content": "FullStory enforces per-organization rate limits on REST API v2. The connector retries automatically on 429 responses using exponential backoff with jitter (base 1s, max 30s). Auth errors are not retried."
+    },
+    {
+      "id": "api_reference",
+      "title": "API Reference",
+      "links": [
+        {"label": "FullStory REST API v2", "url": "https://developer.fullstory.com/"},
+        {"label": "FullStory Authentication", "url": "https://developer.fullstory.com/#section/Authentication"},
+        {"label": "FullStory Sessions API", "url": "https://developer.fullstory.com/#tag/Sessions"},
+        {"label": "FullStory Users API", "url": "https://developer.fullstory.com/#tag/Users"}
+      ]
+    }
+  ]
+}
