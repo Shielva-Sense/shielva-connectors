@@ -1,0 +1,22 @@
+{
+  "connector_type": "drift",
+  "display_name": "Drift",
+  "provider": "drift",
+  "service": "drift",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false}
+  ],
+  "scopes": ["conversation_read", "contact_read"],
+  "capabilities": ["sync", "health_check", "oauth2"],
+  "oauth": {
+    "authorization_url": "https://dev.drift.com/authorize",
+    "token_url": "https://driftapi.com/auth/token",
+    "scopes": ["conversation_read", "contact_read"]
+  },
+  "resources": ["conversations", "contacts", "accounts", "messages"],
+  "api_base": "https://driftapi.com"
+}
