@@ -1,0 +1,68 @@
+{
+  "title": "Freshservice Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Freshservice** connector integrates Shielva with the [Freshservice REST API v2](https://api.freshservice.com/) to sync IT service management data into your Shielva knowledge base.\n\nFreshservice is Freshworks' enterprise ITSM platform, used by IT teams for incident management, asset tracking, change management, and service delivery. This connector syncs **6 resource domains** — Tickets, Assets (CMDB), Agents, Groups, Service Catalog Items, and Changes — and normalises all data to Shielva's `ConnectorDocument` schema.\n\n**Key capabilities:**\n- Full and incremental ITSM ticket sync with category, sub-category, and tag enrichment\n- CMDB asset sync (laptops, servers, network devices, software licenses)\n- Agent listing with contact details and availability status\n- Change request sync (planned, emergency, standard) with risk and timeline metadata\n- HTTP Basic auth: API key as username, literal 'X' as password (Freshservice standard)\n- Link-header pagination support for large datasets\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid credentials"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Freshservice connector running in under 5 minutes.\n\n### 1. Get your API Key\n\n1. Log in to your Freshservice account.\n2. Click your **avatar** (top-right) → **Profile Settings**.\n3. Scroll to **Your API Key** and copy it.\n\n### 2. Find your subdomain\n\nIf you access Freshservice at `https://mycompany.freshservice.com`, your subdomain is `mycompany`.\n\n### 3. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Freshservice**.\n2. Enter your **API Key** and **Subdomain**.\n3. Click **Connect**.\n\nThe connector calls `GET /api/v2/agents?per_page=1` to validate credentials.\n\n### 4. Run a sync\n\n```python\nasync with FreshserviceConnector(config={\"api_key\": \"YOUR_KEY\", \"subdomain\": \"mycompany\"}) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_itsm_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Freshservice connector uses **API Key authentication** via HTTP Basic Auth.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | From Profile Settings → Your API Key |\n| Subdomain | `subdomain` | string | Yes | Your Freshservice subdomain (e.g. `mycompany`) |\n\n### How it works\n\nFreshservice uses HTTP Basic Auth where the API key is the username and the literal string `X` is the password:\n\n```\nAuthorization: Basic base64(api_key:X)\n```\n\nThe `FreshserviceHTTPClient` injects this via `aiohttp.BasicAuth` automatically.\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /api/v2/agents?per_page=1`. A `401` or `403` sets `auth_status=INVALID_CREDENTIALS`. Any network failure sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- The API key is stored encrypted in the Shielva vault and never logged.\n- Minimum permission required: read access to Tickets, Assets, Changes, and Agents.\n- Admin-level agent accounts have all required permissions by default."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Freshservice connector requires two install fields.\n\n### Install fields\n\n```json\n{\n  \"api_key\": \"7zYBMqNXJkRGD1pE2owH\",\n  \"subdomain\": \"mycompany\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `per_page` | `100` | Results per page for list operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |\n| `order_by` | `updated_at` | Ticket sort field (incremental sync) |\n| `order_type` | `desc` | Ticket sort direction |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes methods across 4 resource domains.",
+      "children": [
+        {
+          "id": "tickets",
+          "title": "Tickets",
+          "content": "Fetch ITSM tickets (incidents, service requests, problems).\n\n### `list_tickets(page, per_page, updated_since)`\nReturns one page of tickets. Empty list = end of pagination.\n\n```python\ntickets = await connector.list_tickets(page=1, per_page=100)\n```\n\n**Freshservice endpoint:** `GET /api/v2/tickets`\n\n---\n\n### `get_ticket(ticket_id)`\nFetch a single ticket by ID.\n\n```python\nticket = await connector.get_ticket(101)\n```\n\n**Freshservice endpoint:** `GET /api/v2/tickets/{id}`\n\n---\n\n### Normalized ticket document\n\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256('ticket:' + ticket_id)[:16] |\n| `title` | `Ticket #{id}: {subject}` |\n| `content` | subject + description + category + tags |\n| `source_url` | `https://{subdomain}.freshservice.com/helpdesk/tickets/{id}` |\n| `metadata.ticket_id` | ticket.id |\n| `metadata.status` | ticket.status (1=Open, 2=Pending, 3=Resolved, 4=Closed) |\n| `metadata.priority` | ticket.priority (1=Low, 2=Medium, 3=High, 4=Urgent) |\n| `metadata.type` | ticket.type |\n| `metadata.category` | ticket.category |\n| `metadata.tags` | ticket.tags |"
+        },
+        {
+          "id": "assets",
+          "title": "Assets (CMDB)",
+          "content": "Fetch CMDB configuration items from the Freshservice asset database.\n\n### `list_assets(page, per_page)`\nReturns one page of assets. Empty list = end of pagination.\n\n```python\nassets = await connector.list_assets(page=1)\n```\n\n**Freshservice endpoint:** `GET /api/v2/assets`\n\n---\n\n### Normalized asset document\n\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256('asset:' + asset_id)[:16] |\n| `title` | `Asset: {name}` |\n| `content` | name, type, description, serial number, asset tag, location, department, user, state |\n| `source_url` | `https://{subdomain}.freshservice.com/cmdb/items/{id}` |\n| `metadata.asset_type` | asset.asset_type_name |\n| `metadata.serial_number` | asset.serial_number |\n| `metadata.asset_tag` | asset.asset_tag |\n| `metadata.location` | asset.location_name |\n| `metadata.state` | asset.state |"
+        },
+        {
+          "id": "agents",
+          "title": "Agents",
+          "content": "List IT support agents in the Freshservice account.\n\n### `list_agents(page, per_page)`\nReturns one page of agents. Empty list = end of pagination.\n\n```python\nagents = await connector.list_agents(page=1)\n```\n\n**Freshservice endpoint:** `GET /api/v2/agents`\n\n---\n\n### Normalized agent document\n\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256('agent:' + agent_id)[:16] |\n| `title` | `Agent: {name}` |\n| `content` | name, email, phone, job title, department, availability |\n| `metadata.email` | agent.contact.email or agent.email |\n| `metadata.job_title` | agent.job_title |\n| `metadata.available` | agent.available |"
+        },
+        {
+          "id": "changes",
+          "title": "Changes",
+          "content": "Fetch change requests (planned, emergency, standard).\n\n### `list_changes(page, per_page, updated_since)`\nReturns one page of changes. Empty list = end of pagination.\n\n```python\nchanges = await connector.list_changes(page=1)\n```\n\n**Freshservice endpoint:** `GET /api/v2/changes`\n\n---\n\n### Normalized change document\n\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256('change:' + change_id)[:16] |\n| `title` | `Change #{id}: {subject}` |\n| `content` | subject, description, change type, risk, category, planned dates |\n| `source_url` | `https://{subdomain}.freshservice.com/changes/{id}` |\n| `metadata.change_type` | change.change_type (Planned, Emergency, Standard) |\n| `metadata.risk` | change.risk |\n| `metadata.planned_start_date` | change.planned_start_date |\n| `metadata.planned_end_date` | change.planned_end_date |"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Incremental Ingestion",
+      "content": "The `sync()` method syncs tickets, assets, agents, and changes in sequence with full pagination.\n\n### How sync works\n\n1. **Tickets:** pages with `per_page=100`; stops when API returns `[]`.\n2. **Assets:** same pagination pattern.\n3. **Agents:** same pagination pattern.\n4. **Changes:** same pagination pattern.\n\nEach resource calls `_ingest_document(doc, kb_id)` when `kb_id` is provided (wired by Shielva runtime).\n\nIf a resource category fails (e.g., assets API returns a 500), the sync continues with the remaining resources and returns `SyncStatus.PARTIAL`.\n\n### Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | `False` | If `True`, fetches all records regardless of date |\n| `since` | `datetime\\|None` | `None` | If set (and `full=False`), passes as `updated_since` filter on tickets and changes |\n| `kb_id` | str | `\"\"` | Knowledge base ID to ingest into; skipped if empty |\n\n### Usage\n\n```python\n# Full sync — all ITSM resources\nresult = await connector.sync(full=True, kb_id=\"kb_itsm\")\n\n# Incremental — only records updated since last run\nfrom datetime import datetime, timezone\nresult = await connector.sync(since=datetime(2026, 6, 1, tzinfo=timezone.utc))\n\nprint(result.status)             # 'completed' or 'partial'\nprint(result.documents_found)    # total records seen\nprint(result.documents_synced)   # successfully normalised\nprint(result.documents_failed)   # normalisation failures\n```"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception hierarchy\n\n```\nFreshserviceError (base)\n├── FreshserviceAuthError       — 401 / 403: invalid or missing API key\n├── FreshserviceRateLimitError  — 429: too many requests (includes retry_after)\n├── FreshserviceNotFoundError   — 404: resource not found\n└── FreshserviceNetworkError    — 5xx / connection errors / timeouts\n```\n\n### Retry behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `FreshserviceRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts |\n| `FreshserviceNetworkError` (5xx / timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `FreshserviceAuthError` (401 / 403) | No | Fail-fast — check API key |\n| `FreshserviceNotFoundError` (404) | No | Fail-fast — check resource ID |\n\n### Rate limits\n\nFreshservice API rate limits vary by plan. The `retry_after` field on `FreshserviceRateLimitError` carries the `Retry-After` header value in seconds when provided by Freshservice."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their fixes.\n\n### `health=OFFLINE` after install\n\n- Verify the **subdomain** is entered as `mycompany` only (no `https://`, no `.freshservice.com`).\n- Re-copy the **API Key** from Profile Settings → Your API Key.\n- Ensure your Freshservice account is active.\n\n### `FreshserviceAuthError: 401 Unauthorized`\n\nThe stored API key was reset or is incorrect. Regenerate in Freshservice → Profile Settings → Your API Key, then update the connector in Shielva ACP.\n\n### `FreshserviceAuthError: 403 Forbidden`\n\nThe agent account does not have permission to read the requested resource. Ask a Freshservice Admin to verify role and permissions.\n\n### `FreshserviceRateLimitError: 429 Too Many Requests`\n\nThe connector retries automatically. If persistent, reduce sync frequency or upgrade your Freshservice plan.\n\n### Sync returns 0 documents\n\nRun with `full=True` to bypass the date filter. Create a test ticket in Freshservice and re-run sync.\n\n### Unit tests fail with `ModuleNotFoundError: aiohttp`\n\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\ncd /Users/vivekvarshavaishvik/Documents/client_dir/freshservice_connector\npython -m pytest tests/ -v\n```"
+    }
+  ]
+}
