@@ -1,0 +1,73 @@
+{
+  "title": "SmartRecruiters ATS Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **SmartRecruiters** connector integrates Shielva with the [SmartRecruiters REST API v1](https://dev.smartrecruiters.com/) to sync ATS data — job postings, candidates, and users — into the Shielva knowledge base.\n\nSmartRecruiters is a leading talent acquisition platform. This connector reads all job postings and candidates from your SmartRecruiters account, normalizes each record into a `ConnectorDocument` with a stable SHA-256-derived ID, and makes the data available for search, analysis, and automation within Shielva.\n\n**Key capabilities:**\n- List and fetch all job postings, candidates, users, and departments\n- Full sync with automatic offset pagination via `limit` + `offset` + `totalFound`\n- X-SmartToken header authentication\n- Stable document IDs for deduplication across syncs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the SmartRecruiters connector running in minutes.\n\n### 1. Generate an API Token\n\n1. Log in to SmartRecruiters\n2. Go to **Admin → Apps & Integrations → API**\n3. Click **Generate Token**\n4. Name it (e.g. \"Shielva Integration\") and enable read access for Jobs, Candidates, Users, and Departments\n5. Copy the token — it is shown only once\n\n### 2. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → SmartRecruiters**\n2. Click **Connect**\n3. Enter your **API Token**\n4. Click **Install** — status changes to **Connected** immediately on success\n\n### 3. Run Your First Sync\n\n```python\nresult = await connector.sync()\nprint(f\"Synced {result.documents_synced} documents\")\n# Synced 284 documents\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The SmartRecruiters connector uses the **X-SmartToken** HTTP header for authentication.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token (X-SmartToken) | `api_token` | password | Yes | From SmartRecruiters Admin → Apps & Integrations → API |\n\n### Auth Mechanism\n\nEvery request sends:\n```\nX-SmartToken: <api_token>\n```\n\nThis is NOT HTTP Basic Auth and NOT a Bearer token. The `X-SmartToken` header is set directly on the `aiohttp.ClientSession`.\n\n### Validation\n\n`install()` and `health_check()` both call `GET /v1/companies/me` to verify the token and retrieve the company ID needed for job listing.\n\n### Required SmartRecruiters Permissions\n\nThe API token must have read access for:\n- Company (health check + company ID for job endpoints)\n- Job postings\n- Candidates\n- Users\n- Departments\n\n### Security\n\n- The API token is stored encrypted in the Shielva vault — never logged\n- All requests use HTTPS to `api.smartrecruiters.com`\n- Rotate the token in SmartRecruiters Admin and update in Shielva ACP if compromised"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"api_token\": \"your_smartrecruiters_api_token\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `SR_BASE_URL` | `https://api.smartrecruiters.com` | SmartRecruiters API base URL |\n| `SYNC_PAGE_SIZE` | `100` | Records per page during sync |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 public API methods plus the sync engine.",
+      "children": [
+        {
+          "id": "list-jobs",
+          "title": "list_jobs(status?)",
+          "content": "List job postings (single page, up to 100 results).\n\n```python\njobs = await connector.list_jobs()\njobs = await connector.list_jobs(status=\"PUBLIC\")\n# Returns: [{\"id\": \"job-001\", \"name\": \"Senior Engineer\", \"status\": \"PUBLIC\", ...}]\n```\n\n**Endpoint:** `GET /v1/companies/{company_id}/postings?limit=100&offset=0`"
+        },
+        {
+          "id": "get-job",
+          "title": "get_job(job_id)",
+          "content": "Return a single job posting by ID.\n\n```python\njob = await connector.get_job(\"job-001\")\n# Returns: {\"id\": \"job-001\", \"name\": \"Senior Engineer\", \"status\": \"PUBLIC\", ...}\n```\n\n**Endpoint:** `GET /v1/companies/{company_id}/postings/{job_id}`"
+        },
+        {
+          "id": "list-candidates",
+          "title": "list_candidates()",
+          "content": "List candidates (single page, up to 100 results).\n\n```python\ncandidates = await connector.list_candidates()\n# Returns: [{\"id\": \"cand-001\", \"firstName\": \"Alice\", \"lastName\": \"Smith\", ...}]\n```\n\n**Endpoint:** `GET /v1/candidates?limit=100&offset=0`"
+        },
+        {
+          "id": "get-candidate",
+          "title": "get_candidate(candidate_id)",
+          "content": "Return a single candidate by ID.\n\n```python\ncandidate = await connector.get_candidate(\"cand-001\")\n# Returns: {\"id\": \"cand-001\", \"firstName\": \"Alice\", \"lastName\": \"Smith\", ...}\n```\n\n**Endpoint:** `GET /v1/candidates/{candidate_id}`"
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "List users (single page, up to 100 results).\n\n```python\nusers = await connector.list_users()\n# Returns: [{\"id\": \"user-001\", \"firstName\": \"Carol\", \"role\": \"ADMINISTRATOR\", ...}]\n```\n\n**Endpoint:** `GET /v1/users?limit=100&offset=0`"
+        },
+        {
+          "id": "list-departments",
+          "title": "list_departments()",
+          "content": "Return all departments.\n\n```python\ndepartments = await connector.list_departments()\n# Returns: [{\"id\": \"dept-1\", \"label\": \"Engineering\"}, ...]\n```\n\n**Endpoint:** `GET /v1/configuration/departments`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync",
+      "content": "The `sync()` method fetches all job postings and candidates from SmartRecruiters, normalizes them into `ConnectorDocument` objects, and optionally ingests them into the Shielva knowledge base.\n\n```python\nresult = await connector.sync(kb_id=\"kb_abc123\")\nprint(result.status)           # SyncStatus.COMPLETED\nprint(result.documents_found)  # Total records fetched\nprint(result.documents_synced) # Successfully normalized + ingested\nprint(result.documents_failed) # Records that failed normalization or ingestion\n```\n\n### Document ID Scheme\n\n| Resource | ID Formula |\n|----------|------------|\n| Job posting | `SHA-256(\"job:\" + job_id)[:16]` |\n| Candidate | `SHA-256(\"candidate:\" + candidate_id)[:16]` |\n| User | `SHA-256(\"user:\" + user_id)[:16]` |\n\nIDs are stable across syncs — the same SmartRecruiters record always produces the same Shielva document ID, enabling deduplication.\n\n### Pagination\n\nPagination uses `limit` (records per page) and `offset` (starting position). The connector continues fetching pages until `offset >= totalFound` or an empty `items` list is returned.\n\n### Error Handling\n\n- If jobs fail to fetch: returns `SyncStatus.FAILED`\n- If candidates fail after jobs succeed: returns `SyncStatus.PARTIAL` with partial counts\n- Individual document ingest failures increment `documents_failed` without stopping the sync"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\nThe API token is invalid or revoked.\n\n- Verify the token in **SmartRecruiters → Admin → Apps & Integrations → API**\n- Generate a new token if the current one was rotated\n\n### 403 Forbidden\n\nThe token lacks permissions for the requested endpoint.\n\n- Check the token's scope covers Jobs, Candidates, Users, and Departments\n\n### 429 Rate Limited\n\nThe connector retries automatically with exponential backoff, honouring the `Retry-After` header. For large accounts, sync may take longer.\n\n### No Job Postings Returned\n\n- Confirm the company has active postings\n- Internal/draft postings may require extended token scope\n\n### Health Check Passes, Sync Finds Nothing\n\n- The company may have no published job postings yet\n- Confirm the token has the correct company scope"
+    }
+  ]
+}
