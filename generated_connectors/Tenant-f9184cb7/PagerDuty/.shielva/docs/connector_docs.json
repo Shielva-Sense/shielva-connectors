@@ -1,0 +1,87 @@
+{
+  "title": "PagerDuty Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The PagerDuty connector syncs incident management and on-call scheduling data from PagerDuty into the Shielva knowledge base. It is designed for engineering and DevOps teams who need visibility into active and historical incidents, monitored service definitions, on-call rotations, and user accounts from within Shielva.\n\n**Key capabilities:**\n- Syncs **incidents** (all statuses and urgencies, with offset-based pagination, 100 per page)\n- Syncs **services** (monitored service metadata and status)\n- Syncs **users** (team members with contact methods and roles)\n- Syncs **schedules** (on-call rotation calendars with timezone info)\n- Fetches individual **incident alerts** for drill-down analysis\n- Authenticates via a single **REST API Key** — no OAuth flow required\n- Retries automatically on transient failures (`PagerDutyNetworkError`) and 429 rate-limit responses (`PagerDutyRateLimitError`) via `with_retry()`\n- Pagination style: offset-based — iterates while `more == True` in each response\n- Pagination page size: `SYNC_PAGE_SIZE = 100` records per request\n- API base: `https://api.pagerduty.com/`\n- API version header: `Accept: application/vnd.pagerduty+json;version=2`\n- Rate limit: 60 requests/minute per API key"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "**Step 1 — Generate a PagerDuty REST API Key**\n\n1. Log in to PagerDuty at `https://app.pagerduty.com`.\n2. Click your avatar (top-right) → **My Profile**.\n3. Select the **User Settings** tab.\n4. Scroll to **API Access Keys** and click **Create New API Key**.\n5. Enter a description (e.g. `Shielva Connector`). Read-only access is sufficient.\n6. Copy the key — it is only shown once.\n\n**Step 2 — Install the connector**\n\nProvide the `api_key` in the Shielva connector configuration UI, then call `install()`:\n\n```python\nimport asyncio\nfrom connector import PagerDutyConnector\n\nasync def main():\n    connector = PagerDutyConnector(\n        tenant_id=\"acme\",\n        connector_id=\"pagerduty-prod\",\n        config={\"api_key\": \"u+YOUR_API_KEY_HERE\"},\n    )\n    result = await connector.install()\n    print(result.health)       # ConnectorHealth.HEALTHY\n    print(result.auth_status)  # AuthStatus.CONNECTED\n    print(result.message)      # \"PagerDuty connector installed successfully.\"\n\nasyncio.run(main())\n```\n\n**Step 3 — Verify the connection**\n\n```python\nhealth = await connector.health_check()\nprint(health.health)      # ConnectorHealth.HEALTHY\nprint(health.message)     # \"PagerDuty API reachable.\"\n```\n\n**Step 4 — Run your first sync**\n\n```python\nsync_result = await connector.sync(kb_id=\"kb-acme-incidents\")\nprint(f\"Found: {sync_result.documents_found}\")\nprint(f\"Synced: {sync_result.documents_synced}\")\nprint(f\"Failed: {sync_result.documents_failed}\")\nprint(f\"Status: {sync_result.status}\")\n# Status: SyncStatus.COMPLETED\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** API Key (`AUTH_TYPE = \"api_key\"`)\n\nPagerDuty uses a token-based API key transmitted as a request header. No OAuth consent flow or token refresh is required.\n\n**Request headers sent on every API call:**\n```\nAuthorization: Token token={api_key}\nAccept: application/vnd.pagerduty+json;version=2\n```\n\n**How to obtain an API key:**\n1. Log in to PagerDuty at `https://app.pagerduty.com`\n2. Navigate to **My Profile → User Settings → API Access Keys**\n3. Click **Create New API Key**\n4. Set a description and choose **Read-only** (the connector only reads data — full access is not needed)\n5. Copy the generated key immediately — it is not shown again after closing the dialog\n\n**Alternatively (account-level key):** Go to **Configuration → API Access** (requires account admin) to create a key that is not tied to a specific user.\n\n**Key validation:**\n- `install()` checks that `api_key` is non-empty; does **not** make a live API call\n- `health_check()` performs live validation by calling `GET /abilities`, which is the lightest PagerDuty endpoint\n\n**Rate limit:** 60 requests/minute per API key. The connector uses `with_retry()` with exponential backoff on `PagerDutyRateLimitError` (HTTP 429). The `retry_after` field on the exception carries the delay in seconds."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The following fields are accepted in the `config` dictionary passed to `PagerDutyConnector(config=...)`.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `api_key` | `password` | Yes | PagerDuty REST API Key. Sent as `Authorization: Token token={api_key}`. Generate at My Profile → User Settings → API Access Keys. |\n\n**Example config dict:**\n```python\nconfig = {\n    \"api_key\": \"u+yourPagerDutyRestApiKeyHere\"\n}\n```\n\n**Internal constants (not user-configurable):**\n\n| Constant | Value | Description |\n|----------|-------|-------------|\n| `SYNC_PAGE_SIZE` | `100` | Records fetched per paginated API call |\n| `CONNECTOR_TYPE` | `\"pagerduty\"` | Connector type identifier registered in Shielva |\n| `AUTH_TYPE` | `\"api_key\"` | Authentication method |\n| API base URL | `https://api.pagerduty.com/` | PagerDuty REST API v2 base |\n| API version header | `application/vnd.pagerduty+json;version=2` | Required `Accept` header |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods on `PagerDutyConnector` are async. Use `async with PagerDutyConnector(...) as c:` or call `await c.aclose()` manually to release resources.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that the `api_key` field is present in `config`. Does **not** make a live API call — credential presence is the only check at install time.\n\n**Signature:**\n```python\nasync def install(self) -> InstallResult\n```\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| Key present | `HEALTHY` | `CONNECTED` | `api_key` is non-empty |\n| Key missing | `OFFLINE` | `MISSING_CREDENTIALS` | `api_key` was not provided |\n\n**Example:**\n```python\nconnector = PagerDutyConnector(\n    tenant_id=\"acme\",\n    connector_id=\"pd-1\",\n    config={\"api_key\": \"u+abc123\"},\n)\nresult = await connector.install()\n# result.health == ConnectorHealth.HEALTHY\n# result.message == \"PagerDuty connector installed successfully.\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Verifies live connectivity to the PagerDuty API by calling `GET /abilities`. This endpoint returns the account's enabled feature set and is the lightest available probe.\n\n**Signature:**\n```python\nasync def health_check(self) -> HealthCheckResult\n```\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| API reachable | `HEALTHY` | `CONNECTED` | `GET /abilities` returns 200 |\n| Auth rejected | `DEGRADED` | `INVALID_CREDENTIALS` | `PagerDutyAuthError` (401/403) |\n| Network error | `DEGRADED` | `FAILED` | `PagerDutyNetworkError` or unexpected exception |\n| No key configured | `OFFLINE` | `MISSING_CREDENTIALS` | `api_key` is empty |\n\n**Example:**\n```python\nhealth = await connector.health_check()\nif health.health == ConnectorHealth.HEALTHY:\n    print(\"PagerDuty is reachable\")\nelse:\n    print(f\"Problem ({health.auth_status}): {health.message}\")\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs incidents and services from PagerDuty into the Shielva knowledge base. Iterates both resource types with automatic offset-based pagination. When `kb_id` is provided, each normalized document is forwarded to `_ingest_document()` (wired by the Shielva runtime).\n\n**Signature:**\n```python\nasync def sync(self, kb_id: str = \"\", **kwargs: Any) -> SyncResult\n```\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When provided, each normalized document is ingested. |\n| `**kwargs` | `Any` | — | Forwarded to internal list calls (e.g. `statuses`, `urgencies` for incidents). |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (0 failures), `PARTIAL` (some failures), or `FAILED` |\n| `documents_found` | `int` | Total records retrieved from PagerDuty |\n| `documents_synced` | `int` | Records successfully normalized and ingested |\n| `documents_failed` | `int` | Records that failed normalization or ingestion |\n| `message` | `str` | Populated only when `PagerDutyError` aborts a resource type |\n\n**Example:**\n```python\nresult = await connector.sync(kb_id=\"kb-acme-ops\")\nprint(result.status)             # SyncStatus.COMPLETED\nprint(result.documents_found)    # e.g. 312\nprint(result.documents_synced)   # e.g. 312\n```"
+        },
+        {
+          "id": "method-list-incidents",
+          "title": "list_incidents()",
+          "content": "Fetches all incidents with automatic offset-based pagination (100 per page). Continues iterating until PagerDuty's `more` flag is `False` or a page returns no results.\n\n**Signature:**\n```python\nasync def list_incidents(\n    self,\n    statuses: list[str] | None = None,\n    urgencies: list[str] | None = None,\n    **kwargs: Any,\n) -> list[ConnectorDocument]\n```\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `statuses` | `list[str] \\| None` | `None` | Filter by PagerDuty status values: `\"triggered\"`, `\"acknowledged\"`, `\"resolved\"`. |\n| `urgencies` | `list[str] \\| None` | `None` | Filter by urgency: `\"high\"` or `\"low\"`. |\n| `**kwargs` | `Any` | — | Additional PagerDuty query parameters forwarded to the HTTP client. |\n\n**Returns:** `list[ConnectorDocument]` — normalized incident documents with `connector_id` and `tenant_id` stamped.\n\n**Example:**\n```python\n# Only triggered high-urgency incidents\nincidents = await connector.list_incidents(\n    statuses=[\"triggered\"],\n    urgencies=[\"high\"],\n)\nfor doc in incidents:\n    print(doc.id, doc.title)\n```"
+        },
+        {
+          "id": "method-get-incident",
+          "title": "get_incident()",
+          "content": "Fetches a single raw incident by its PagerDuty incident ID. Unwraps the `incident` key from the API response.\n\n**Signature:**\n```python\nasync def get_incident(self, incident_id: str) -> dict[str, Any]\n```\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|-----------|------|----------|-------------|\n| `incident_id` | `str` | Yes | PagerDuty incident ID (e.g. `\"P1234AB\"`). |\n\n**Returns:** `dict[str, Any]` — raw PagerDuty incident object (the `\"incident\"` envelope key is unwrapped).\n\n**Example:**\n```python\nincident = await connector.get_incident(\"P1234AB\")\nprint(incident[\"title\"], incident[\"status\"])  # e.g. \"Database down\", \"triggered\"\n```"
+        },
+        {
+          "id": "method-list-incident-alerts",
+          "title": "list_incident_alerts()",
+          "content": "Returns all alerts associated with a specific incident. Useful for correlating individual monitoring signals to an incident.\n\n**Signature:**\n```python\nasync def list_incident_alerts(self, incident_id: str) -> list[dict[str, Any]]\n```\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|-----------|------|----------|-------------|\n| `incident_id` | `str` | Yes | PagerDuty incident ID. |\n\n**Returns:** `list[dict[str, Any]]` — raw alert dicts from the `\"alerts\"` array in the PagerDuty response.\n\n**Example:**\n```python\nalerts = await connector.list_incident_alerts(\"P1234AB\")\nfor alert in alerts:\n    print(alert[\"id\"], alert[\"status\"])\n```"
+        },
+        {
+          "id": "method-list-services",
+          "title": "list_services()",
+          "content": "Fetches all PagerDuty services with automatic offset-based pagination.\n\n**Signature:**\n```python\nasync def list_services(self) -> list[ConnectorDocument]\n```\n\n**Returns:** `list[ConnectorDocument]` — normalized service documents.\n\n**Example:**\n```python\nservices = await connector.list_services()\nfor svc in services:\n    print(svc.id, svc.title)\n```"
+        },
+        {
+          "id": "method-list-users",
+          "title": "list_users()",
+          "content": "Fetches all PagerDuty user accounts with automatic offset-based pagination.\n\n**Signature:**\n```python\nasync def list_users(self) -> list[ConnectorDocument]\n```\n\n**Returns:** `list[ConnectorDocument]` — normalized user documents.\n\n**Example:**\n```python\nusers = await connector.list_users()\nfor user in users:\n    print(user.id, user.title)\n```"
+        },
+        {
+          "id": "method-list-schedules",
+          "title": "list_schedules()",
+          "content": "Fetches all PagerDuty on-call rotation schedules with automatic offset-based pagination.\n\n**Signature:**\n```python\nasync def list_schedules(self) -> list[ConnectorDocument]\n```\n\n**Returns:** `list[ConnectorDocument]` — normalized schedule documents.\n\n**Example:**\n```python\nschedules = await connector.list_schedules()\nfor sched in schedules:\n    print(sched.id, sched.title)\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions are defined in `exceptions.py` and inherit from `PagerDutyError`. Each carries `.message`, `.status_code`, and `.code` attributes.\n\n| Exception | HTTP Status | `code` | Description |\n|-----------|-------------|--------|-------------|\n| `PagerDutyError` | Any | — | Base exception. Catch for any PagerDuty error. |\n| `PagerDutyAuthError` | 401, 403 | — | Invalid or revoked API key. Causes `INVALID_CREDENTIALS` auth status. Auth errors are **not retried**. |\n| `PagerDutyRateLimitError` | 429 | `rate_limit` | Too many requests. Carries `retry_after` float (seconds). Retried automatically by `with_retry()`. |\n| `PagerDutyNotFoundError` | 404 | `resource_missing` | The incident, service, schedule, or user was not found. Constructed with `resource` and `resource_id` args. |\n| `PagerDutyNetworkError` | 5xx / timeout | — | Transient failure — connection error, DNS failure, or server 5xx. Retried with exponential backoff. |\n\n**How the connector handles errors:**\n- `install()` — checks field presence only; does not raise exceptions\n- `health_check()` — catches `PagerDutyAuthError` → `DEGRADED/INVALID_CREDENTIALS`; catches `PagerDutyNetworkError` → `DEGRADED/FAILED`\n- `sync()` — a `PagerDutyError` on an entire resource fetch returns `SyncResult(status=FAILED)`; individual document normalization failures increment `documents_failed` and the sync continues\n- All HTTP calls are wrapped in `with_retry()` which handles 429 backoff automatically"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "**`health_check()` returns `INVALID_CREDENTIALS` / `DEGRADED`**\n- The `api_key` is invalid or has been revoked in PagerDuty.\n- Go to **My Profile → User Settings → API Access Keys**, verify the key is still listed, and regenerate if needed.\n- Update the connector configuration with the new key.\n\n**`install()` returns `MISSING_CREDENTIALS`**\n- The `api_key` field was empty or absent in the config dict.\n- Ensure `config={\"api_key\": \"u+...\"}` is passed to the constructor.\n\n**`sync()` returns `status=PARTIAL` with `documents_failed > 0`**\n- Some individual documents failed during normalization. This usually means unexpected `None` values or missing required fields in the raw PagerDuty response.\n- The sync is not aborted — all remaining documents continue to be processed.\n- Review the `message` field on `SyncResult` for context.\n\n**`sync()` returns `status=FAILED`**\n- The entire incidents or services list call failed (not a single document).\n- Check network connectivity from the Shielva host to `https://api.pagerduty.com/`.\n- Verify the API key has permission to list the failing resource type.\n\n**Syncing a large account is slow**\n- The connector fetches 100 records per request and PagerDuty enforces 60 req/min. On accounts with thousands of incidents, automatic backoff on 429 responses will slow the sync.\n- Consider passing `statuses=[\"triggered\", \"acknowledged\"]` or `urgencies=[\"high\"]` to `list_incidents()` to reduce volume.\n\n**`PagerDutyNetworkError` during health check**\n- `with_retry()` retries up to 3 times on transient failures. If it still fails, verify outbound HTTPS connectivity to `https://api.pagerduty.com/` from the Shielva host.\n- Check for proxy or firewall rules that may block the PagerDuty API domain."
+    }
+  ]
+}
