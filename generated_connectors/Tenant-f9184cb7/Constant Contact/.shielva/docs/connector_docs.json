@@ -1,0 +1,166 @@
+{
+  "title": "Constant Contact Connector Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "1. Overview",
+      "content": "The Constant Contact connector syncs contacts, email campaigns, and contact lists from a Constant Contact account into the Shielva knowledge base. It uses the Constant Contact v3 API with OAuth 2.0 Authorization Code flow. Resources are normalized into ConnectorDocument objects with stable, SHA-256 content-addressable IDs. The connector supports cursor-based pagination for all list endpoints, per-item error isolation during sync, and exponential-backoff retry on network and rate-limit errors.",
+      "children": [
+        {
+          "id": "what-this-connector-does",
+          "title": "1.1 What This Connector Does",
+          "content": "The `ConstantContactConnector` class connects to the Constant Contact v3 API via OAuth 2.0 to read contacts, email campaigns, and contact lists from the user's Constant Contact account. It performs cursor-based paginated fetches starting from each resource endpoint.\n\nEach resource is normalized into a `ConnectorDocument` and can be ingested into the Shielva knowledge base. Features include:\n- Full cursor-based pagination via `_links.next.href` cursor extraction\n- Per-item error isolation (individual normalization failures are counted without aborting the batch)\n- Exponential-backoff retry on 429 and network errors via `with_retry()`\n- Multi-tenant ID namespacing via SHA-256 stable IDs (`SHA-256('contact:{contact_id}')[:16]`)\n- Zero retry on auth errors — these require human intervention",
+          "children": []
+        },
+        {
+          "id": "connector-identity",
+          "title": "1.2 Connector Identity",
+          "content": "| Field | Value |\n|-------|-------|\n| Provider | Constant Contact |\n| Service | Constant Contact |\n| Connector Class | `ConstantContactConnector` |\n| Auth Type | OAuth 2.0 (`oauth2`) |\n| Sync Resources | Contacts, Email Campaigns |\n| Current Version | 1.0.0 |\n| `CONNECTOR_TYPE` | `\"constant_contact\"` |\n| `CONNECTOR_NAME` | `\"Constant Contact\"` |\n| `AUTH_URL` | `\"https://authz.constantcontact.com/oauth2/default/v1/authorize\"` |\n| `TOKEN_URL` | `\"https://authz.constantcontact.com/oauth2/default/v1/token\"` |\n| `SCOPES` | `\"contact_data campaign_data account_read\"` |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "2. Authentication",
+      "content": "Authentication uses OAuth 2.0 Authorization Code flow. The connector requires a `client_id` and `client_secret` from a Constant Contact Developer application.",
+      "children": [
+        {
+          "id": "oauth-flow",
+          "title": "2.1 OAuth Flow",
+          "content": "The OAuth flow issues an access token and refresh token with the requested scopes. The `authorize()` method returns the authorization URL string. After the user authorizes, Constant Contact redirects with a code that is exchanged for tokens.\n\n- Required scopes: `contact_data`, `campaign_data`, `account_read`\n- Auth URI: `https://authz.constantcontact.com/oauth2/default/v1/authorize`\n- Token URI: `https://authz.constantcontact.com/oauth2/default/v1/token`\n\nTokens are stored in the connector config as `access_token`, `refresh_token`, and `token_expires_at`.",
+          "children": []
+        },
+        {
+          "id": "install-fields",
+          "title": "2.2 Install Fields",
+          "content": "| Field | Required | Type | Description |\n|-------|----------|------|-------------|\n| `client_id` | Yes | string | Constant Contact API Key (Client ID) from the Developer Portal |\n| `client_secret` | Yes | password | Constant Contact Client Secret from the Developer Portal |\n| `redirect_uri` | No | string | Must match the redirect URI registered in your Constant Contact application |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "methods",
+      "title": "3. Connector Methods",
+      "content": "The connector exposes the following methods:",
+      "children": [
+        {
+          "id": "install",
+          "title": "3.1 install()",
+          "content": "Validates that `client_id` and `client_secret` are present. Does not make any API calls. Returns `InstallResult` with `AuthStatus.PENDING` on success, directing the user to complete OAuth authorization. Returns `AuthStatus.MISSING_CREDENTIALS` with `ConnectorHealth.OFFLINE` if either credential is absent.",
+          "children": []
+        },
+        {
+          "id": "authorize",
+          "title": "3.2 authorize()",
+          "content": "Returns the Constant Contact OAuth2 authorization URL as a string. The URL includes `client_id`, `response_type=code`, and the scopes `contact_data campaign_data account_read`. Optionally includes `redirect_uri` and `state` parameters.",
+          "children": []
+        },
+        {
+          "id": "health_check",
+          "title": "3.3 health_check()",
+          "content": "Calls `GET /v3/account/summary` to verify connectivity and token validity. Returns `HealthCheckResult` with:\n- `HEALTHY` + `CONNECTED` when the API responds successfully; populates `organization_name`\n- `DEGRADED` + `TOKEN_EXPIRED` on 401/403\n- `DEGRADED` + `FAILED` on network errors or other connector errors\n- `OFFLINE` + `MISSING_CREDENTIALS` when no access token is present",
+          "children": []
+        },
+        {
+          "id": "sync",
+          "title": "3.4 sync()",
+          "content": "Performs a full sync of contacts and email campaigns using cursor-based pagination. Each resource is normalized and counted. Returns `SyncResult` with:\n- `COMPLETED` when all resources synced without failures\n- `PARTIAL` when some resources failed normalization\n- `FAILED` when a fatal exception (e.g., network error) aborts the sync\n\nThe sync engine fetches all pages by following `_links.next.href` cursor values.",
+          "children": []
+        },
+        {
+          "id": "list-contacts",
+          "title": "3.5 list_contacts()",
+          "content": "Returns a page of contacts as `List[ConnectorDocument]`. Accepts optional `cursor` for pagination and `limit` (default 500). Each document has `type='contact'` and a stable ID derived from `SHA-256('contact:{contact_id}')[:16]`.",
+          "children": []
+        },
+        {
+          "id": "list-campaigns",
+          "title": "3.6 list_campaigns()",
+          "content": "Returns a page of email campaigns as `List[ConnectorDocument]`. Accepts optional `cursor` for pagination. Each document has `type='email_campaign'` and a stable ID derived from `SHA-256('campaign:{campaign_id}')[:16]`.",
+          "children": []
+        },
+        {
+          "id": "list-contact-lists",
+          "title": "3.7 list_contact_lists()",
+          "content": "Returns a page of contact lists as `List[ConnectorDocument]`. Accepts optional `cursor` for pagination. Each document has `type='contact_list'` and a stable ID derived from `SHA-256('list:{list_id}')[:16]`.",
+          "children": []
+        },
+        {
+          "id": "get-contact",
+          "title": "3.8 get_contact(contact_id)",
+          "content": "Fetches and normalizes a single contact by its `contact_id`. Returns a `ConnectorDocument` with `type='contact'`.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "4. Normalizers",
+      "content": "All normalization functions live in `helpers/utils.py`. They take raw API response dicts and return `ConnectorDocument` objects with stable, SHA-256 content-addressable IDs.",
+      "children": [
+        {
+          "id": "normalize-contact",
+          "title": "4.1 normalize_contact(c, connector_id, tenant_id)",
+          "content": "Converts a Constant Contact contact API dict to a `ConnectorDocument`.\n\n- `id` = `SHA-256('contact:{contact_id}')[:16]`\n- `type` = `'contact'`\n- `title` = `'{first_name} {last_name}'`\n- `content` = human-readable text (name, email, phone, company, job title, timestamps)\n- `metadata` includes: `contact_id`, `email`, `phone`, `company_name`, `job_title`, `created_at`, `updated_at`, `list_memberships`",
+          "children": []
+        },
+        {
+          "id": "normalize-campaign",
+          "title": "4.2 normalize_campaign(c, connector_id, tenant_id)",
+          "content": "Converts a Constant Contact email campaign API dict to a `ConnectorDocument`.\n\n- `id` = `SHA-256('campaign:{campaign_id}')[:16]`\n- `type` = `'email_campaign'`\n- `title` = campaign name\n- `content` = human-readable text (name, status, type, timestamps)\n- `metadata` includes: `campaign_id`, `name`, `status`, `campaign_type`, `created_at`, `updated_at`, `campaign_activities`",
+          "children": []
+        },
+        {
+          "id": "normalize-list",
+          "title": "4.3 normalize_list(l, connector_id, tenant_id)",
+          "content": "Converts a Constant Contact contact list API dict to a `ConnectorDocument`.\n\n- `id` = `SHA-256('list:{list_id}')[:16]`\n- `type` = `'contact_list'`\n- `title` = list name\n- `content` = human-readable text (name, description, status, member count, timestamps)\n- `metadata` includes: `list_id`, `name`, `description`, `status`, `created_at`, `updated_at`, `membership_count`",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "5. HTTP Client",
+      "content": "The `ConstantContactHTTPClient` in `client/http_client.py` handles all raw API calls. It uses `aiohttp` and accepts Bearer tokens. All endpoints return raw parsed JSON dicts.",
+      "children": [
+        {
+          "id": "endpoints",
+          "title": "5.1 Endpoints",
+          "content": "| Method | Path | Description |\n|--------|------|-------------|\n| `get_account_info()` | `GET /v3/account/summary` | Account details for health check |\n| `get_contacts(cursor, limit)` | `GET /v3/contacts` | Contacts with cursor pagination |\n| `get_contact(contact_id)` | `GET /v3/contacts/{contact_id}` | Single contact |\n| `get_contact_lists(cursor)` | `GET /v3/contact_lists` | Contact lists with cursor pagination |\n| `get_email_campaigns(cursor)` | `GET /v3/emails` | Email campaigns with cursor pagination |\n| `get_campaign_activity(activity_id)` | `GET /v3/emails/activities/{id}` | Single campaign activity |\n| `get_campaign_reports(cursor)` | `GET /v3/reports/email_reports/campaign_sends` | Campaign send reports |\n| `refresh_token()` | `POST token_url` | Refresh the OAuth access token |",
+          "children": []
+        },
+        {
+          "id": "cursor-extraction",
+          "title": "5.2 Cursor Extraction",
+          "content": "Constant Contact uses cursor-based pagination. The next page cursor is embedded in `_links.next.href` as the `cursor` query parameter.\n\n```python\nlinks = {\"next\": {\"href\": \"https://api.cc.email/v3/contacts?cursor=abc123&limit=500\"}}\ncursor = ConstantContactHTTPClient._extract_cursor(links)\n# cursor == \"abc123\"\n```\n\nThe `_extract_cursor()` static method parses this URL and returns the cursor string, or `None` when there are no more pages.",
+          "children": []
+        },
+        {
+          "id": "error-mapping",
+          "title": "5.3 Error Mapping",
+          "content": "| HTTP Status | Exception |\n|-------------|----------|\n| 401, 403 | `ConstantContactAuthError` |\n| 404 | `ConstantContactNotFoundError` |\n| 429 | `ConstantContactRateLimitError` (with `retry_after`) |\n| 5xx | `ConstantContactError` (server error) |\n| Network error | `ConstantContactNetworkError` |",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "retry",
+      "title": "6. Retry Logic",
+      "content": "The `with_retry()` helper in `helpers/utils.py` implements exponential backoff with jitter.\n\n- Max attempts: 3\n- Base delay: 1.0 s\n- Backoff factor: 2.0 (1s → 2s → 4s)\n- Jitter: up to 0.5 s random\n- Max delay: 30 s\n- Auth errors (`ConstantContactAuthError`) are NOT retried — they require human action\n- Rate limit errors respect the `Retry-After` header when present",
+      "children": []
+    },
+    {
+      "id": "exceptions",
+      "title": "7. Exception Hierarchy",
+      "content": "```\nConstantContactError (base)\n├── ConstantContactAuthError        (401/403 — not retried)\n├── ConstantContactNetworkError     (timeouts, connection failures — retried)\n├── ConstantContactNotFoundError    (404 — not retried)\n└── ConstantContactRateLimitError   (429 — retried with Retry-After)\n```\n\nAll exceptions carry `.message`, `.status_code`, and `.code` attributes. `ConstantContactRateLimitError` additionally carries `.retry_after`.",
+      "children": []
+    },
+    {
+      "id": "tests",
+      "title": "8. Test Suite",
+      "content": "The test suite at `tests/test_connector.py` contains 123 tests. All tests use `unittest.mock.AsyncMock` — zero real network I/O.\n\nRun with:\n```bash\ncd /path/to/constant_contact_connector\npython -m pytest tests/ -v\n```\n\nTest categories:\n- Exception classes (8 tests)\n- Models (7 tests)\n- Normalizers (22 tests)\n- with_retry (6 tests)\n- HTTP client cursor extraction (5 tests)\n- HTTP client auth headers (3 tests)\n- HTTP client _raise_for_status (6 tests)\n- HTTP client endpoints (10 tests)\n- Connector attributes (8 tests)\n- install() (5 tests)\n- authorize() (7 tests)\n- health_check() (6 tests)\n- sync() (7 tests)\n- list_contacts() (4 tests)\n- list_campaigns() (3 tests)\n- list_contact_lists() (3 tests)\n- get_contact() (3 tests)\n- Lifecycle (4 tests)\n- Multi-tenant isolation (3 tests)",
+      "children": []
+    }
+  ]
+}
