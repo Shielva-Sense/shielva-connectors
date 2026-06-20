@@ -1,0 +1,172 @@
+{
+  "title": "Smartsheet Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Smartsheet connector** integrates with Smartsheet via the Smartsheet REST API 2.0. It enables Shielva to sync sheets, rows, workspaces, reports, and folders — making your work management data searchable and actionable in the Shielva knowledge base.\n\nThis connector uses API token authentication (`Authorization: Bearer {token}`), granting read access to all sheets, workspaces, and reports accessible to the token owner.\n\n**Key capabilities:**\n- List all sheets (page-based pagination, 100 per page)\n- Fetch a single sheet with columns and rows\n- List all rows on a sheet (page-based pagination, 500 per page)\n- List all workspaces (includeAll=true)\n- List all reports (paginated)\n- List top-level folders\n- Full sync: sheets → rows + workspaces + reports → normalized ConnectorDocuments\n- Stable document IDs via SHA-256(\"sheet:\"|\"row:\"|\"workspace:\"|\"report:\" + id)[:16] for deduplication",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`smartsheet` — registered in ACP as **Smartsheet**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Smartsheet (REST API 2.0 — `https://api.smartsheet.com/2.0/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_token presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls GET /users/me to verify token; returns authenticated user display name |\n| `sync()` | Lists all sheets, fetches all rows per sheet, plus workspaces and reports; normalizes to ConnectorDocuments |\n| `list_sheets(**kwargs)` | Page-based sheet list (totalPages + pageNumber pagination) |\n| `list_rows(sheet_id, **kwargs)` | Page-based row list for a given sheet |\n| `list_workspaces()` | All workspaces via includeAll=true |\n| `list_reports()` | Paginated report list |\n| `get_sheet(sheet_id)` | Single sheet with columns and rows |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **API token authentication** — a long-lived token tied to the Smartsheet user account.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — obtain the token from **Account → Apps & Integrations → API Access → Generate new access token**."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | Smartsheet API access token from Account → Apps & Integrations → API Access |"
+        },
+        {
+          "id": "auth-headers",
+          "title": "Auth Headers",
+          "content": "Every request to `https://api.smartsheet.com/2.0/` includes:\n\n```\nAuthorization: Bearer {api_token}\nContent-Type: application/json\n```\n\nNote: Smartsheet **requires** the `Bearer` prefix — unlike some other API-key providers that use the raw token."
+        },
+        {
+          "id": "token-security",
+          "title": "Token Security",
+          "content": "Smartsheet API tokens do not expire unless manually deleted. Shielva stores the token AES-256-GCM encrypted at rest via the vault. The token can be deleted and regenerated at any time from Account → Apps & Integrations → API Access."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description | Required |\n|-----|-------------|----------|\n| `api_token` | Smartsheet API access token | Yes |"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "The Smartsheet REST API 2.0 uses **page-based pagination** for list endpoints.",
+      "children": [
+        {
+          "id": "sheets-pagination",
+          "title": "Sheets Pagination",
+          "content": "GET /sheets returns `totalPages` and `pageNumber` fields. The connector iterates pages until `pageNumber >= totalPages`. Default page size: 100."
+        },
+        {
+          "id": "rows-pagination",
+          "title": "Rows Pagination",
+          "content": "GET /sheets/{id}/rows returns `totalPages` and `pageNumber` fields. Default page size: 500 rows per page."
+        },
+        {
+          "id": "workspaces-pagination",
+          "title": "Workspaces",
+          "content": "GET /workspaces?includeAll=true — all workspaces returned in a single response (no pagination needed)."
+        },
+        {
+          "id": "reports-pagination",
+          "title": "Reports Pagination",
+          "content": "GET /reports returns `totalPages` and `pageNumber`. The connector fetches all pages at 100 per page."
+        }
+      ]
+    },
+    {
+      "id": "normalization",
+      "title": "Document Normalization",
+      "content": "Every Smartsheet resource is normalized into a `ConnectorDocument` before ingestion.",
+      "children": [
+        {
+          "id": "normalize-sheet",
+          "title": "normalize_sheet",
+          "content": "**Input:** Raw sheet dict from GET /sheets or GET /sheets/{id}.\n\n**Output:** `ConnectorDocument` with:\n- `id`: `sha256(\"sheet:\" + str(sheet_id))[:16]`\n- `title`: `\"Sheet: {name}\"`\n- `content`: Name, ID, access level, total row count, created/modified, permalink\n- `type`: `\"smartsheet_sheet\"`\n- `metadata`: sheet_id, name, permalink, access_level, created_at, modified_at, total_row_count, source"
+        },
+        {
+          "id": "normalize-row",
+          "title": "normalize_row",
+          "content": "**Input:** Raw row dict + parent sheet_id.\n\n**Output:** `ConnectorDocument` with:\n- `id`: `sha256(\"row:\" + str(row_id))[:16]`\n- `title`: `\"Row {rowNumber} (Sheet {sheet_id})\"`\n- `content`: Row number, row ID, sheet ID, cell displayValues, created/modified, raw cells JSON\n- `type`: `\"smartsheet_row\"`\n- `metadata`: row_id, row_number, sheet_id, cells (raw list), created_at, modified_at, source"
+        },
+        {
+          "id": "normalize-workspace",
+          "title": "normalize_workspace",
+          "content": "**Input:** Raw workspace dict from GET /workspaces.\n\n**Output:** `ConnectorDocument` with:\n- `id`: `sha256(\"workspace:\" + str(id))[:16]`\n- `title`: `\"Workspace: {name}\"`\n- `type`: `\"smartsheet_workspace\"`\n- `metadata`: workspace_id, name, access_level, source"
+        },
+        {
+          "id": "normalize-report",
+          "title": "normalize_report",
+          "content": "**Input:** Raw report dict from GET /reports.\n\n**Output:** `ConnectorDocument` with:\n- `id`: `sha256(\"report:\" + str(id))[:16]`\n- `title`: `\"Report: {name}\"`\n- `type`: `\"smartsheet_report\"`\n- `metadata`: report_id, name, access_level, created_at, modified_at, source"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are mapped to typed exceptions in `exceptions.py`.",
+      "children": [
+        {
+          "id": "exception-hierarchy",
+          "title": "Exception Hierarchy",
+          "content": "```\nSmartsheetError (base)\n├── SmartsheetAuthError       — HTTP 401/403 (invalid or expired token)\n├── SmartsheetNetworkError    — Connection timeout, DNS failure, HTTP 5xx\n├── SmartsheetNotFoundError   — HTTP 404 (sheet/resource not found)\n└── SmartsheetRateLimitError  — HTTP 429 (rate limit exceeded)\n```"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry(fn, max_attempts=3, base_delay=1.0)` — exponential back-off (1s, 2s, 4s). Auth errors are never retried — they require re-installing with a valid token. All other `SmartsheetError` subclasses and generic exceptions are retried up to `max_attempts` times."
+        },
+        {
+          "id": "http-error-mapping",
+          "title": "HTTP Error Mapping",
+          "content": "| HTTP Status | Exception |\n|-------------|----------|\n| 200, 201 | — (success) |\n| 401, 403 | `SmartsheetAuthError` |\n| 404 | `SmartsheetNotFoundError` |\n| 429 | `SmartsheetRateLimitError` |\n| 400–499 | `SmartsheetError` |\n| 500+ | `SmartsheetNetworkError` |"
+        }
+      ]
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "The `sync()` method performs a full snapshot sync across all resource types.",
+      "children": [
+        {
+          "id": "sync-order",
+          "title": "Sync Order",
+          "content": "1. Fetch all sheets (paginated)\n2. For each sheet: normalize sheet → sync, then fetch all rows → normalize each row → sync\n3. Fetch all workspaces → normalize each → sync\n4. Fetch all reports → normalize each → sync\n\nFailures on individual sheets or rows are counted as `documents_failed` but do not abort the sync. Auth errors abort immediately."
+        },
+        {
+          "id": "sync-status",
+          "title": "Sync Status",
+          "content": "| Status | Condition |\n|--------|----------|\n| `COMPLETED` | Zero documents_failed |\n| `PARTIAL` | At least one document_failed |\n| `FAILED` | Top-level exception (auth error, sheets list failure) |"
+        }
+      ]
+    },
+    {
+      "id": "api-reference",
+      "title": "API Reference",
+      "content": "Key Smartsheet REST API 2.0 endpoints used by this connector.",
+      "children": [
+        {
+          "id": "endpoints",
+          "title": "Endpoints",
+          "content": "| Method | Endpoint | Purpose |\n|--------|----------|---------|\n| GET | /users/me | Health check — returns authenticated user |\n| GET | /sheets | List all sheets (paginated) |\n| GET | /sheets/{id} | Fetch single sheet with columns and rows |\n| GET | /sheets/{id}/rows | Fetch rows for a sheet (paginated) |\n| GET | /workspaces | List all workspaces (includeAll=true) |\n| GET | /reports | List all reports (paginated) |\n| GET | /home/folders | List top-level home folders |"
+        }
+      ]
+    }
+  ]
+}
