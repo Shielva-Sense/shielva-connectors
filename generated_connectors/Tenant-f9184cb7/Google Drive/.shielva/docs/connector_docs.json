@@ -1,0 +1,92 @@
+{
+  "title": "Google Drive Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Google Drive connector integrates with the **Google Drive API v3** to sync files and shared drives into the Shielva knowledge base. It is designed for teams that store documentation, design assets, spreadsheets, and other content in Google Drive and need that content searchable and indexed in Shielva.\n\n**Key capabilities:**\n- Full file listing with automatic pagination via `nextPageToken`\n- Folder and shared drive enumeration\n- Single-file metadata retrieval by file ID\n- Drive query language support for filtered file searches (e.g. `name contains 'report'`, `mimeType = 'application/pdf'`)\n- Export of Google Workspace documents (Docs, Sheets, Slides) to binary formats such as `text/plain` or `application/pdf`\n- File permission inspection per file ID\n- OAuth2 with `access_type=offline` — Google issues a refresh token so the connector never requires re-authorization just because an access token expired\n- SHA-256 stable document IDs for idempotent ingestion into the knowledge base\n- Automatic retry with up to 3 attempts per API call on transient failures\n- Multi-tenant: every normalized document is stamped with `connector_id` and `tenant_id`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### Prerequisites\n- A Google Cloud project with the **Google Drive API** enabled (Google Cloud Console → APIs & Services → Library)\n- OAuth 2.0 credentials of type **Web Application** created under APIs & Services → Credentials\n- The Shielva redirect URI added to the OAuth client's **Authorized redirect URIs**\n\n### Step 1 — Install the connector\n\nProvide your OAuth2 credentials:\n\n```python\nimport asyncio\nfrom connector import GoogleDriveConnector\n\nconnector = GoogleDriveConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"gdrive-01\",\n    config={\n        \"client_id\": \"xxxxxxxxxxxx-xxxxxxxx.apps.googleusercontent.com\",\n        \"client_secret\": \"GOCSPX-...\",\n        \"redirect_uri\": \"https://app.shielva.ai/connectors/callback\",\n    },\n)\nresult = asyncio.run(connector.install())\nprint(result.health, result.message)\n# ConnectorHealth.HEALTHY  Connector installed — complete OAuth to connect\n```\n\n### Step 2 — Authorize with Google\n\n```python\nauth_url = asyncio.run(connector.authorize())\n# Redirect the user's browser to auth_url.\n# After consent, Google calls back with ?code=...\n```\n\n### Step 3 — Exchange the authorization code\n\n```python\ntoken_data = asyncio.run(connector.exchange_code(auth_code=\"4/0AfGeNi...\"))\n# token_data contains access_token and refresh_token — store both.\n```\n\n### Step 4 — Verify connectivity\n\n```python\nhealth = asyncio.run(connector.health_check())\nprint(health.health, health.user_email)\n# ConnectorHealth.HEALTHY  user@example.com\n```\n\n### Step 5 — Run your first sync\n\n```python\nresult = asyncio.run(connector.sync(kb_id=\"my-knowledge-base\"))\nprint(f\"{result.status}: {result.documents_synced}/{result.documents_found} files synced\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **OAuth 2.0 Authorization Code flow** with `access_type=offline` so Google issues a long-lived refresh token alongside the short-lived (1-hour) access token.\n\n### Flow\n\n1. **Install** — provide `client_id` and `client_secret` (validated for presence only; no network call at this stage).\n2. **Authorize** — call `authorize()` to generate the Google consent URL. Parameters embedded:\n   - `response_type=code`\n   - `scope=https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly`\n   - `access_type=offline` — triggers refresh token issuance\n   - `prompt=consent` — forces Google to re-issue the refresh token even for previously authorized apps\n3. **Exchange** — after user consent, Google redirects to `redirect_uri?code=...`. Call `exchange_code(auth_code)` to POST to `https://oauth2.googleapis.com/token` and receive `access_token` + `refresh_token`.\n4. **Auto-refresh** — when the access token expires, the internal `_do_refresh_token()` method posts the stored `refresh_token` to the token endpoint to obtain a new `access_token` silently.\n\n### Endpoints\n\n| Step | Method | URL |\n|------|--------|-----|\n| Authorization redirect | GET (browser) | `https://accounts.google.com/o/oauth2/v2/auth` |\n| Token exchange / refresh | POST | `https://oauth2.googleapis.com/token` |\n\n### OAuth2 scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `https://www.googleapis.com/auth/drive.readonly` | Read all files, file content, and shared drives |\n| `https://www.googleapis.com/auth/drive.metadata.readonly` | Read file metadata only (used for listing and health check) |\n\n### Required config keys\n\n| Key | Description |\n|-----|-------------|\n| `client_id` | Found in Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Client ID |\n| `client_secret` | Found alongside `client_id`; format starts with `GOCSPX-` |\n| `redirect_uri` | Must exactly match one Authorized Redirect URI registered in the Google Cloud Console OAuth client |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Pass all fields in the `config` dict when constructing `GoogleDriveConnector`.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `client_id` | string | Yes | OAuth2 Client ID from Google Cloud Console → APIs & Services → Credentials. Format: `xxxxxxxxxxxx-xxxxxxxx.apps.googleusercontent.com` |\n| `client_secret` | password | Yes | OAuth2 Client Secret found alongside `client_id`. Format starts with `GOCSPX-`. Stored encrypted by Shielva. |\n| `redirect_uri` | string | No | The OAuth2 redirect URI registered in Google Cloud Console. Defaults to the Shielva platform callback (`https://app.shielva.ai/connectors/callback`) if omitted. |\n| `access_token` | string | No | Populated automatically after `exchange_code()`. Pass to resume an already-authorized session. |\n| `refresh_token` | string | No | Populated automatically after `exchange_code()`. Used internally to refresh expired access tokens. |\n| `base_url` | string | No | Override the Drive API base URL. Defaults to `https://www.googleapis.com/drive/v3`. Useful for pointing at a mock server in tests. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are `async` and must be awaited. `GoogleDriveConnector` inherits from `BaseConnector` and adds Drive-specific file and folder operations.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present in config. Makes **no network request** — credential presence is sufficient at install time. Full connectivity is confirmed after OAuth authorization.\n\n**Returns:** `InstallResult`\n- `health`: `ConnectorHealth.HEALTHY` if credentials present, `OFFLINE` if missing\n- `auth_status`: `AuthStatus.CONNECTED` or `AuthStatus.MISSING_CREDENTIALS`\n- `connector_id`: echoed from constructor\n- `message`: `'Connector installed — complete OAuth to connect'` on success\n\n```python\nconnector = GoogleDriveConnector(\n    tenant_id=\"tenant-abc\",\n    connector_id=\"gdrive-01\",\n    config={\"client_id\": \"...\", \"client_secret\": \"...\"},\n)\nresult = await connector.install()\n# InstallResult(health=HEALTHY, auth_status=CONNECTED,\n#   message='Connector installed — complete OAuth to connect')\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Calls `GET /about?fields=user,storageQuota` against the Drive API to verify the access token is valid and the API is reachable. Retries up to 2 times on transient errors.\n\n**Returns:** `HealthCheckResult`\n- `health`: `HEALTHY`, `DEGRADED`, or `OFFLINE`\n- `auth_status`: `CONNECTED`, `TOKEN_EXPIRED`, or `FAILED`\n- `user_email`: Google account email of the authenticated user\n- `storage_quota`: dict with `limit`, `usage`, and `usageInDrive` keys (bytes as strings)\n\n```python\nhealth = await connector.health_check()\nif health.health.value == \"healthy\":\n    print(f\"Connected as {health.user_email}\")\n    print(f\"Drive usage: {health.storage_quota.get('usageInDrive')} bytes\")\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Pages through all files in Drive using `nextPageToken` until exhausted (page size 100, up to 3 retries per page). Each file is normalized via `normalize_file()` into a `ConnectorDocument` with a SHA-256 stable ID and ingested into the knowledge base.\n\n**Parameters:**\n- `kb_id` (str, optional) — Knowledge base ID to ingest documents into\n- `full` (bool, optional) — Reserved; currently performs a full scan regardless\n- `webhook_url` (str, optional) — Reserved for future webhook-based ingest\n\n**Returns:** `SyncResult`\n- `status`: `SyncStatus.COMPLETED` (zero failures) or `PARTIAL` (some failures) or `FAILED`\n- `documents_found`: total files discovered across all pages\n- `documents_synced`: successfully normalized and ingested\n- `documents_failed`: files that raised an exception during normalization\n- `message`: summary string\n\n```python\nresult = await connector.sync(kb_id=\"kb-production\")\nprint(f\"{result.status}: {result.documents_synced}/{result.documents_found} synced\")\n# SyncStatus.COMPLETED: 342/342 synced\n```"
+        },
+        {
+          "id": "method-list-files",
+          "title": "list_files()",
+          "content": "Lists Drive files with optional query filter. Returns the raw Drive API response dict, including `nextPageToken` for caller-driven pagination.\n\n**Parameters:**\n- `page_size` (int, default `100`) — number of files per page (Drive max is 1000)\n- `page_token` (str, optional) — token from a previous response's `nextPageToken`\n- `query` (str, optional) — Drive query string, e.g. `\"mimeType='application/pdf'\"` or `\"name contains 'spec'\"`\n\n**Returns:** `Dict` — `{\"files\": [...], \"nextPageToken\": \"...\"}`\n\n```python\npage = await connector.list_files(\n    page_size=50,\n    query=\"mimeType='application/pdf' and trashed=false\",\n)\nfor f in page[\"files\"]:\n    print(f[\"id\"], f[\"name\"], f[\"mimeType\"])\nnext_token = page.get(\"nextPageToken\")\n```"
+        },
+        {
+          "id": "method-list-folders",
+          "title": "list_folders()",
+          "content": "Lists only Drive folders by applying a `mimeType = 'application/vnd.google-apps.folder'` filter internally.\n\n**Parameters:**\n- `page_size` (int, default `100`)\n- `page_token` (str, optional)\n\n**Returns:** `Dict` — `{\"files\": [...], \"nextPageToken\": \"...\"}`\n\n```python\npage = await connector.list_folders()\nfor folder in page[\"files\"]:\n    print(folder[\"id\"], folder[\"name\"])\n```"
+        },
+        {
+          "id": "method-list-shared-drives",
+          "title": "list_shared_drives()",
+          "content": "Lists all shared drives (formerly Team Drives) accessible to the authenticated user.\n\n**Parameters:**\n- `page_size` (int, default `100`)\n- `page_token` (str, optional)\n\n**Returns:** `Dict` — `{\"drives\": [...], \"nextPageToken\": \"...\"}`\n\n```python\ndrives = await connector.list_shared_drives()\nfor drive in drives[\"drives\"]:\n    print(drive[\"id\"], drive[\"name\"])\n```"
+        },
+        {
+          "id": "method-get-file",
+          "title": "get_file()",
+          "content": "Retrieves full metadata for a single Drive file using `fields=*`.\n\n**Parameters:**\n- `file_id` (str, required) — the Drive file ID (visible in the file's URL after `/d/`)\n\n**Returns:** `Dict` — complete file resource from the Drive API\n\n```python\nmeta = await connector.get_file(\n    file_id=\"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\"\n)\nprint(meta[\"name\"], meta[\"mimeType\"], meta[\"modifiedTime\"])\n```"
+        },
+        {
+          "id": "method-search-files",
+          "title": "search_files()",
+          "content": "Searches Drive files using a Drive query string. Returns a flat list (not a paginated dict). Fetches only the first page up to `page_size`.\n\n**Parameters:**\n- `query` (str, required) — Drive query string\n- `page_size` (int, default `100`)\n\n**Returns:** `List[Dict]`\n\n```python\nresults = await connector.search_files(\n    query=\"name contains 'Q4 Report' and trashed=false\"\n)\nfor f in results:\n    print(f[\"id\"], f[\"name\"])\n```"
+        },
+        {
+          "id": "method-get-permissions",
+          "title": "get_permissions()",
+          "content": "Lists all sharing permissions for a Drive file.\n\n**Parameters:**\n- `file_id` (str, required)\n\n**Returns:** `Dict` — Drive permissions list resource\n\n```python\nperms = await connector.get_permissions(file_id=\"1BxiMVs0XRA5...\")\nfor p in perms.get(\"permissions\", []):\n    print(p.get(\"emailAddress\"), p[\"role\"])\n```"
+        },
+        {
+          "id": "method-export-file",
+          "title": "export_file()",
+          "content": "Exports a Google Workspace file (Docs, Sheets, Slides, Drawings) to a specified MIME type and returns raw bytes. Only works for native Google file types — binary uploads have their own content and do not need exporting.\n\n**Parameters:**\n- `file_id` (str, required) — Drive file ID of a Google Workspace document\n- `mime_type` (str, required) — export target, e.g. `\"text/plain\"`, `\"application/pdf\"`, `\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"`\n\n**Returns:** `bytes`\n\n```python\npdf_bytes = await connector.export_file(\n    file_id=\"1BxiMVs0XRA5...\",\n    mime_type=\"application/pdf\",\n)\nwith open(\"document.pdf\", \"wb\") as fh:\n    fh.write(pdf_bytes)\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Typed exceptions are defined in `exceptions.py`. All public methods wrap HTTP calls with `with_retry()` from `helpers/utils.py`.\n\n### Exception classes\n\n| Exception | HTTP status | Meaning | Connector behaviour |\n|-----------|-------------|---------|---------------------|\n| `GoogleDriveAuthError` | 401 | Access token invalid or expired | `health_check()` returns `DEGRADED / TOKEN_EXPIRED`; triggers `_do_refresh_token()` or prompts re-authorization |\n| `GoogleDriveError` | 4xx / 5xx | API-level error (quota, file not found, server error) | `health_check()` returns `DEGRADED / FAILED`; individual file failures in `sync()` increment `documents_failed` without aborting the sync |\n\n### Retry behaviour\n`with_retry()` retries on network-level errors and 5xx responses using exponential back-off. `GoogleDriveAuthError` (401) is **never retried** — it surfaces immediately so the caller can refresh or re-authorize.\n\n### Missing access token\nIf `health_check()` is called before OAuth is completed, it returns `OFFLINE / MISSING_CREDENTIALS` with message `'No access token — complete OAuth authorization first'`.\n\n### sync() isolation\nIndividual file normalization failures inside `sync()` increment `documents_failed` but do not abort the sync. The final `SyncStatus` is `PARTIAL` when `documents_failed > 0` and `COMPLETED` when zero failures occurred."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `install()` returns `MISSING_CREDENTIALS`\n**Cause:** `client_id` or `client_secret` is empty or not provided in `config`.\n**Fix:** Retrieve both values from Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Client ID and pass them in config.\n\n### `health_check()` returns `TOKEN_EXPIRED` (`GoogleDriveAuthError`)\n**Cause:** The stored `access_token` has expired (Google access tokens expire after 1 hour).\n**Fix:** Internally `_do_refresh_token()` will obtain a new token using the stored refresh token. If the refresh token itself is missing or revoked, re-run the OAuth flow (`authorize()` → `exchange_code()`).\n\n### `health_check()` returns `OFFLINE` — `No access token`\n**Cause:** OAuth was never completed — no `access_token` is in config.\n**Fix:** Call `authorize()`, redirect the user to the URL, then call `exchange_code()` with the `code` callback parameter.\n\n### `exchange_code()` fails with `redirect_uri_mismatch`\n**Cause:** The `redirect_uri` in config does not exactly match any Authorized Redirect URI registered in Google Cloud Console.\n**Fix:** Open Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Client ID → Authorized redirect URIs and add the exact URI used.\n\n### Google Drive API returns `Access Not Configured`\n**Cause:** The Google Drive API has not been enabled in the Google Cloud project.\n**Fix:** Google Cloud Console → APIs & Services → Library → search \"Google Drive API\" → Enable.\n\n### `sync()` has high `documents_failed` count\n**Cause:** File normalization is failing for certain file types (e.g. files in Trash, or missing required metadata fields).\n**Fix:** Inspect connector logs for exception details. To exclude trashed files, apply the query filter `trashed=false` inside `_collect_all_files()`.\n\n### Shared drive files not appearing in sync\n**Cause:** `files.list` excludes shared drives by default.\n**Fix:** Use `list_shared_drives()` to enumerate shared drives, then call `list_files()` with `driveId` and `includeItemsFromAllDrives=true` via the `query` argument.\n\n### `export_file()` fails with 403 on a non-Google file\n**Cause:** `export_file()` only works for native Google Workspace file types (Docs, Sheets, Slides, Drawings).\n**Fix:** Use `get_file()` to retrieve binary files directly; use `export_file()` only for files whose `mimeType` begins with `application/vnd.google-apps.`."
+    }
+  ]
+}
