@@ -1,0 +1,121 @@
+{
+  "connector_type": "zendesk_sell",
+  "display_name": "Zendesk Sell",
+  "provider": "zendesk",
+  "service": "zendesk_sell",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync Zendesk Sell (formerly Base CRM) contacts, leads, deals, notes, tasks, and pipelines into the Shielva knowledge base via the Zendesk Sell REST API v3.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Zendesk Sell OAuth application Client ID",
+      "help": "Find your Client ID in Zendesk Sell Settings → OAuth → Registered Applications."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Zendesk Sell OAuth application Client Secret",
+      "help": "Copy the Client Secret from your registered OAuth application in Zendesk Sell."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.com/oauth/callback",
+      "help": "The URI Zendesk Sell will redirect to after authorization. Must match the URI registered in your OAuth application."
+    }
+  ],
+  "oauth": {
+    "authorization_url": "https://api.getbase.com/oauth2/authorize",
+    "token_url": "https://api.getbase.com/oauth2/token",
+    "scopes": ["read"],
+    "grant_type": "authorization_code"
+  },
+  "scopes": ["read"],
+  "capabilities": ["sync", "health_check", "oauth2"],
+  "resources": ["contacts", "leads", "deals", "notes", "tasks", "pipelines"],
+  "features": [
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_ids",
+    "oauth2"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate OAuth access token by calling GET /users/self.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "OAuth2 Authorization URL",
+      "description": "Build and return the Zendesk Sell OAuth 2.0 authorization URL for the user to approve access.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /users/self and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Zendesk Sell contacts, leads, deals, notes, tasks, and pipelines into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of Zendesk Sell contacts.",
+      "category": "contacts",
+      "endpoint": "GET /v3/contacts"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Paginated list of Zendesk Sell leads.",
+      "category": "leads",
+      "endpoint": "GET /v3/leads"
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Paginated list of Zendesk Sell deals.",
+      "category": "deals",
+      "endpoint": "GET /v3/deals"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "Paginated list of Zendesk Sell notes.",
+      "category": "notes",
+      "endpoint": "GET /v3/notes"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Paginated list of Zendesk Sell tasks.",
+      "category": "tasks",
+      "endpoint": "GET /v3/tasks"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "Retrieve all sales pipelines.",
+      "category": "pipelines",
+      "endpoint": "GET /v3/pipelines"
+    }
+  ]
+}
