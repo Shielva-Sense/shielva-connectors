@@ -1,0 +1,175 @@
+{
+  "connector": "salesloft",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Salesloft connector syncs people, cadences, calls, emails, and accounts from Salesloft into the Shielva knowledge base using the Salesloft REST API v2. Authentication uses OAuth2 Authorization Code flow with Bearer token injection. The connector implements page-based pagination (page + per_page following metadata.paging.next_page), exponential backoff retry, circuit breaker, and stable SHA-256 source IDs to ensure reliable, idempotent data ingestion."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2",
+          "title": "OAuth2 Authorization Code",
+          "content": "Salesloft uses OAuth2 Authorization Code flow. Register an OAuth app at https://developers.salesloft.com to get a Client ID and Client Secret. After install(), call authorize() to get the authorization URL, redirect the user there, and exchange the returned code for tokens at https://accounts.salesloft.com/oauth/token.",
+          "steps": [
+            "Log into your Salesloft account.",
+            "Navigate to Settings → Integrations → API or https://developers.salesloft.com.",
+            "Create an OAuth application and copy the Client ID and Client Secret.",
+            "Configure the connector with client_id and client_secret.",
+            "Call install() to validate credentials.",
+            "Call authorize() to get the OAuth2 URL and redirect the user.",
+            "Exchange the authorization code for access_token + refresh_token.",
+            "Store access_token, refresh_token, token_expires_at in the connector config."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "Client ID",
+          "type": "string",
+          "required": true,
+          "description": "OAuth application Client ID from the Salesloft developer portal. Required."
+        },
+        {
+          "key": "client_secret",
+          "label": "Client Secret",
+          "type": "password",
+          "required": true,
+          "description": "OAuth application Client Secret from the Salesloft developer portal. Required."
+        },
+        {
+          "key": "redirect_uri",
+          "label": "Redirect URI",
+          "type": "string",
+          "required": false,
+          "description": "Optional redirect URI registered with your OAuth application."
+        }
+      ]
+    },
+    {
+      "id": "methods",
+      "title": "Connector Methods",
+      "methods": [
+        {
+          "id": "install",
+          "name": "install()",
+          "description": "Validates that client_id and client_secret are present. Returns InstallResult with PENDING auth_status — the user must complete OAuth2 authorization before the connector becomes operational.",
+          "returns": "InstallResult"
+        },
+        {
+          "id": "authorize",
+          "name": "authorize()",
+          "description": "Builds and returns the Salesloft OAuth2 authorization URL. The URL includes response_type=code, client_id, scope=read, redirect_uri (if set), and state=connector_id.",
+          "returns": "str (authorization URL)"
+        },
+        {
+          "id": "health_check",
+          "name": "health_check()",
+          "description": "Pings GET /v2/me.json and returns HEALTHY (with name + email), DEGRADED (transient error), or OFFLINE (auth failure or missing token). Increments or resets the circuit breaker.",
+          "returns": "HealthCheckResult"
+        },
+        {
+          "id": "sync",
+          "name": "sync(full, since, kb_id)",
+          "description": "Fetches all people, cadences, and calls using paginated requests. Normalizes each record into a ConnectorDocument and optionally ingests into the knowledge base. Returns SyncResult with COMPLETED, PARTIAL, or FAILED status.",
+          "returns": "SyncResult"
+        },
+        {
+          "id": "list_people",
+          "name": "list_people(page, per_page)",
+          "description": "Paginated list of Salesloft people via GET /v2/people.json.",
+          "returns": "dict with 'data' list and 'metadata.paging'"
+        },
+        {
+          "id": "list_cadences",
+          "name": "list_cadences(page, per_page)",
+          "description": "Paginated list of Salesloft cadences via GET /v2/cadences.json.",
+          "returns": "dict with 'data' list and 'metadata.paging'"
+        },
+        {
+          "id": "list_calls",
+          "name": "list_calls(page, per_page)",
+          "description": "Paginated list of Salesloft call activities via GET /v2/activities/calls.json.",
+          "returns": "dict with 'data' list and 'metadata.paging'"
+        },
+        {
+          "id": "list_emails",
+          "name": "list_emails(page, per_page)",
+          "description": "Paginated list of Salesloft email activities via GET /v2/activities/emails.json.",
+          "returns": "dict with 'data' list and 'metadata.paging'"
+        },
+        {
+          "id": "list_accounts",
+          "name": "list_accounts(page, per_page)",
+          "description": "Paginated list of Salesloft accounts (companies) via GET /v2/accounts.json.",
+          "returns": "dict with 'data' list and 'metadata.paging'"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Salesloft uses page-based pagination. Every list endpoint accepts 'page' (1-indexed) and 'per_page' parameters. The response includes 'metadata.paging.next_page' — when present and non-null, it holds the integer page number of the next batch. The connector's _fetch_all_pages() helper follows next_page until exhausted."
+    },
+    {
+      "id": "error_handling",
+      "title": "Error Handling",
+      "exceptions": [
+        {
+          "class": "SalesloftError",
+          "description": "Base exception. All connector errors inherit from this. Carries message, status_code, code."
+        },
+        {
+          "class": "SalesloftAuthError",
+          "description": "Raised on 401 or 403 responses. Auth errors are never retried — they require re-authorization."
+        },
+        {
+          "class": "SalesloftRateLimitError",
+          "description": "Raised on 429 responses. Carries retry_after seconds from the Retry-After header. with_retry() honours this value."
+        },
+        {
+          "class": "SalesloftNotFoundError",
+          "description": "Raised on 404 responses. Carries the resource type and identifier."
+        },
+        {
+          "class": "SalesloftNetworkError",
+          "description": "Raised on transient network failures (timeout, connection error). Retried with exponential backoff."
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Each record type has a dedicated normalizer that produces a ConnectorDocument with a stable 16-character SHA-256 source_id.",
+      "normalizers": [
+        {
+          "function": "normalize_person",
+          "source_id": "sha256('person:' + str(id))[:16]",
+          "object_type": "person",
+          "key_fields": ["name", "email", "title", "company", "phone", "city", "state", "country"]
+        },
+        {
+          "function": "normalize_cadence",
+          "source_id": "sha256('cadence:' + str(id))[:16]",
+          "object_type": "cadence",
+          "key_fields": ["name", "cadence_type", "tags", "draft", "shared", "owner_guid"]
+        },
+        {
+          "function": "normalize_call",
+          "source_id": "sha256('call:' + str(id))[:16]",
+          "object_type": "call",
+          "key_fields": ["duration", "disposition", "sentiment", "direction", "to_number", "from_number", "recording_url", "notes"]
+        }
+      ]
+    }
+  ]
+}
