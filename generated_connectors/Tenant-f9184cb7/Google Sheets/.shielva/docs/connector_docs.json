@@ -1,0 +1,73 @@
+{
+  "title": "Google Sheets Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Google Sheets** connector integrates Shielva with the [Google Sheets API v4](https://developers.google.com/sheets/api) and [Google Drive API v3](https://developers.google.com/drive/api) to sync spreadsheet row data into the Shielva knowledge base.\n\nThis connector reads all Google Sheets files accessible to the authorized OAuth account, fetches every sheet's data row by row, and normalizes each row into a `ConnectorDocument` with a stable SHA-256-derived ID. One document is produced per data row, plus one document per spreadsheet for metadata.\n\n**Key capabilities:**\n- List all accessible Google Sheets via Drive API\n- Fetch spreadsheet metadata and sheet names\n- Read cell values for any sheet range\n- Full sync over all accessible spreadsheets\n- Normalize rows with stable IDs for deduplication\n- OAuth 2.0 authentication with read-only scopes"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Google Sheets connector running in minutes.\n\n### 1. Create OAuth Credentials in Google Cloud\n\n1. Go to [Google Cloud Console](https://console.cloud.google.com)\n2. Enable **Google Sheets API** and **Google Drive API**\n3. Create an **OAuth 2.0 Client ID** (Web application type)\n4. Add your Shielva redirect URI to the authorized redirect URIs\n5. Copy the **Client ID** and **Client Secret**\n\n### 2. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Google Sheets**\n2. Click **Connect**\n3. Enter your `client_id`, `client_secret`, and optionally `redirect_uri`\n4. Click **Install** — status shows **Pending**\n5. Click **Authorize with Google** to complete the OAuth flow\n\n### 3. Verify\n\nAfter authorization, the health check calls `/oauth2/v2/userinfo` and displays the connected email. Status changes to **Connected**.\n\n### 4. Run Your First Sync\n\n```python\nresult = await connector.sync(full=True)\nprint(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Google Sheets connector uses **OAuth 2.0** with read-only scopes.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| OAuth Client ID | `client_id` | string | Yes | From Google Cloud Console |\n| OAuth Client Secret | `client_secret` | password | Yes | From Google Cloud Console |\n| Redirect URI | `redirect_uri` | string | No | Must match Google Cloud Console |\n\n### Required Scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `https://www.googleapis.com/auth/spreadsheets.readonly` | Read spreadsheet data |\n| `https://www.googleapis.com/auth/drive.readonly` | List accessible Sheets files |\n\n### Flow\n\n1. `install()` validates credentials. With no `access_token` present it returns `PENDING`.\n2. The Shielva runtime initiates the OAuth redirect with the configured `client_id` and `redirect_uri`.\n3. After the user grants access, the runtime exchanges the authorization code for tokens and stores them.\n4. Subsequent calls use `access_token` from the connector config.\n5. `health_check()` calls `/oauth2/v2/userinfo` to verify the token is still valid.\n\n### Security\n\n- Tokens stored encrypted in the Shielva vault — never logged\n- Connector requests read-only scopes only — cannot write to spreadsheets\n- `client_secret` never transmitted to the browser"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"client_id\": \"your-client-id.apps.googleusercontent.com\",\n  \"client_secret\": \"your-client-secret\",\n  \"redirect_uri\": \"https://your-shielva-instance/oauth/callback/google_sheets\"\n}\n```\n\n### Runtime Config (set by OAuth flow)\n\n```json\n{\n  \"access_token\": \"ya29.a0...\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `SHEETS_BASE_URL` | `https://sheets.googleapis.com/v4` | Sheets API base |\n| `DRIVE_BASE_URL` | `https://www.googleapis.com/drive/v3` | Drive API base |\n| `PAGE_SIZE` | `100` | Files per page for Drive listing |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 4 public API methods plus the sync engine.",
+      "children": [
+        {
+          "id": "list-spreadsheets",
+          "title": "list_spreadsheets()",
+          "content": "List all Google Sheets files accessible to the authorized account.\n\n```python\nfiles = await connector.list_spreadsheets(page_size=100)\n# Returns: [{\"id\": \"...\", \"name\": \"Employee Data\", \"modifiedTime\": \"...\"}]\n```\n\nPaginates automatically through all pages using `nextPageToken`.\n\n**Drive endpoint:** `GET /drive/v3/files?q=mimeType='application/vnd.google-apps.spreadsheet'`"
+        },
+        {
+          "id": "get-spreadsheet",
+          "title": "get_spreadsheet(spreadsheet_id)",
+          "content": "Return spreadsheet metadata including all sheet names.\n\n```python\nspreadsheet = await connector.get_spreadsheet(\"1BxiMVs0XRA5...\")\n# Returns: {\"spreadsheetId\": \"...\", \"properties\": {\"title\": \"...\"}, \"sheets\": [...]}\n```\n\n**Sheets endpoint:** `GET /v4/spreadsheets/{id}`"
+        },
+        {
+          "id": "get-sheet-values",
+          "title": "get_sheet_values(spreadsheet_id, sheet_title)",
+          "content": "Return all cell values for a named sheet (columns A–Z).\n\n```python\nvalues = await connector.get_sheet_values(\"1BxiMVs0XRA5...\", \"Sheet1\")\n# Returns: {\"values\": [[\"Name\", \"Email\"], [\"Alice\", \"alice@example.com\"]]}\n```\n\nSheet names with spaces are automatically quoted in the range (e.g. `'My Sheet'!A:Z`).\n\n**Sheets endpoint:** `GET /v4/spreadsheets/{id}/values/{range}`"
+        },
+        {
+          "id": "get-spreadsheet-data",
+          "title": "get_spreadsheet_data(spreadsheet_id)",
+          "content": "Return full structured data for all sheets in a spreadsheet.\n\n```python\ndata = await connector.get_spreadsheet_data(\"1BxiMVs0XRA5...\")\n# Returns: {\"Sheet1\": [{\"Name\": \"Alice\", \"Email\": \"alice@example.com\"}, ...]}\n```\n\nThe first row of each sheet is treated as the header row. Returns a dict mapping sheet title to a list of row dicts (header → value)."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Document Schema",
+      "content": "### How sync() works\n\n1. Lists all Google Sheets files accessible via the Drive API (paginated)\n2. For each spreadsheet, fetches metadata via Sheets API\n3. For each sheet in the spreadsheet, fetches all values in range `A:Z`\n4. The first row is treated as headers; subsequent rows become `ConnectorDocument` entries\n5. One additional `ConnectorDocument` per spreadsheet captures metadata (title, sheet names)\n\n### Usage\n\n```python\n# Full sync of all accessible spreadsheets\nresult = await connector.sync(full=True, kb_id=\"my_kb\")\n\nprint(result.status)            # SyncStatus.COMPLETED\nprint(result.documents_found)   # total docs produced\nprint(result.documents_synced)  # docs successfully ingested\nprint(result.documents_failed)  # docs that failed ingestion\n```\n\n### Document Schema\n\n**Row document** (`type = google_sheet_row`):\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(f\"{spreadsheet_id}:{sheet_title}:{row_index}\")[:16]` |\n| `title` | `\"{sheet_title} — Row {row_number}\"` |\n| `content` | Tab-separated `\"header: value\"` pairs for non-empty cells |\n| `source_url` | `https://docs.google.com/spreadsheets/d/{spreadsheet_id}` |\n| `metadata.spreadsheet_id` | Spreadsheet ID |\n| `metadata.sheet_title` | Sheet name |\n| `metadata.row_index` | 0-based row index within data rows |\n| `metadata.row_number` | 1-based UI row number (header = 1, first data = 2) |\n| `metadata.headers` | List of column headers |\n| `metadata.values_dict` | Dict of header → cell value (non-empty cells only) |\n\n**Spreadsheet document**:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(spreadsheet_id)[:16]` |\n| `title` | Spreadsheet title |\n| `content` | Comma-separated list of sheet names |\n| `metadata.sheet_names` | List of all sheet titles |\n| `metadata.sheet_count` | Number of sheets |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nGoogleSheetsError (base)\n├── GoogleSheetsAuthError      — 401/403: invalid or expired OAuth token\n├── GoogleSheetsNetworkError   — timeouts, connection errors, 5xx\n├── GoogleSheetsRateLimitError — 429: too many requests\n└── GoogleSheetsNotFoundError  — 404: spreadsheet or range not found\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `GoogleSheetsRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts; honours `Retry-After` header |\n| `GoogleSheetsNetworkError` (5xx, timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `GoogleSheetsAuthError` (401/403) | No | Immediate failure — re-authorize |\n| `GoogleSheetsNotFoundError` (404) | No | Immediate failure — check spreadsheet ID |\n\n### Error Mapping\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `GoogleSheetsAuthError` |\n| 403 | `GoogleSheetsAuthError` |\n| 404 | `GoogleSheetsNotFoundError` |\n| 429 | `GoogleSheetsRateLimitError` |\n| 5xx | `GoogleSheetsNetworkError` |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Token Expired\n\nGoogle OAuth access tokens expire after 1 hour. Re-authorize via **ACP → Integrations → Google Sheets → Re-authorize**. If a refresh token is configured, Shielva renews automatically.\n\n---\n\n### 403 Missing Scope or API Not Enabled\n\n- Verify both **Google Sheets API** and **Google Drive API** are enabled in Google Cloud Console → APIs & Services → Library\n- Re-authorize to grant the latest scopes\n- Check that the OAuth consent screen includes both required scopes\n\n---\n\n### Spreadsheet Not Found in Sync\n\nThe spreadsheet must be shared with (or owned by) the Google account used to authorize the connector. Private spreadsheets not shared with the account will not appear.\n\n---\n\n### Rate Limit (429)\n\nGoogle Sheets API default quota is 300 read requests per minute per project. The connector retries automatically with exponential backoff. For high-volume syncs, request a quota increase in Google Cloud Console.\n\n---\n\n### 'This app isn't verified' Warning\n\nYour OAuth consent screen is in testing mode and the account is not listed as a test user. Either add the account as a test user or publish the consent screen (requires Google verification for external users).\n\n---\n\n### Empty Sync Result\n\nIf `documents_found == 0` and you have spreadsheets, check:\n1. The authorized account has access to the spreadsheets (they appear in Google Drive)\n2. The OAuth scopes include `drive.readonly`\n3. The health check shows **Connected** (not Degraded)"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "### Unit Tests (66 tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/google_sheets_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 66 passed\n```\n\nAll HTTP calls are mocked via `AsyncMock` — no Google account required.\n\n**Coverage:**\n- `install()` — missing creds, pending (no token), success with token, invalid token, network error\n- `health_check()` — no token, healthy, auth error, network error, generic error\n- `sync()` — no token, empty drive, one spreadsheet, kb_id ingestion, drive list failure, pagination, empty sheet, headers-only\n- `list_spreadsheets()` — single page, multi-page, empty\n- `get_spreadsheet()` — success, not found, auth error\n- `get_sheet_values()` — success, empty, sheet name with spaces\n- `get_spreadsheet_data()` — full, empty sheet, no sheets\n- `normalize_sheet_rows()` — basic, stable IDs, 16-char IDs, empty cells, empty row, short row, metadata structure, source URL\n- `normalize_spreadsheet()` — basic, stable ID, no sheets, missing title, metadata\n- `with_retry()` — success, transient retry, auth no-retry, exhausted, rate limit\n- Exception hierarchy and attributes\n- Connector model: type, config parsing, defaults, context manager, aclose\n- `ConnectorDocument` defaults and metadata isolation"
+    }
+  ]
+}
