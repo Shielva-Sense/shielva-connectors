@@ -1,0 +1,124 @@
+{
+  "connector_type": "looker",
+  "connector_id": "looker",
+  "name": "Looker",
+  "provider": "Google",
+  "service": "Looker",
+  "version": "1.0.0",
+  "description": "Sync Looks and Dashboards from your Google Looker (BI / data exploration platform) instance into the Shielva knowledge base using the Looker REST API 4.0.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Looker Instance URL (e.g. https://mycompany.looker.com:19999)",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://mycompany.looker.com:19999",
+      "help": "The base URL of your Looker instance including port 19999 (e.g. https://mycompany.looker.com:19999)."
+    },
+    {
+      "key": "client_id",
+      "label": "API Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "your_client_id",
+      "help": "The API3 Client ID from Looker Admin → Users → Edit User → API3 Keys."
+    },
+    {
+      "key": "client_secret",
+      "label": "API Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "••••••••••••••••",
+      "help": "The API3 Client Secret paired with the Client ID. Only shown once at key creation time."
+    }
+  ],
+  "features": [
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "oauth2_client_credentials"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate that base_url, client_id, and client_secret are present.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Login via client credentials and call /user to confirm identity, returning HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Content",
+      "description": "Login then fetch Looks and Dashboards; normalize each to ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_looks",
+      "name": "List Looks",
+      "description": "Return all saved Looks.",
+      "category": "looks",
+      "endpoint": "GET /api/4.0/looks"
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "Return all dashboards.",
+      "category": "dashboards",
+      "endpoint": "GET /api/4.0/dashboards"
+    },
+    {
+      "id": "list_models",
+      "name": "List LookML Models",
+      "description": "Return all LookML models.",
+      "category": "models",
+      "endpoint": "GET /api/4.0/lookml_models"
+    },
+    {
+      "id": "get_look",
+      "name": "Get Look",
+      "description": "Return a single Look by ID. Raises LookerNotFoundError if not found.",
+      "category": "looks",
+      "endpoint": "GET /api/4.0/looks/{look_id}"
+    },
+    {
+      "id": "get_dashboard",
+      "name": "Get Dashboard",
+      "description": "Return a single dashboard by ID. Raises LookerNotFoundError if not found.",
+      "category": "dashboards",
+      "endpoint": "GET /api/4.0/dashboards/{dashboard_id}"
+    },
+    {
+      "id": "run_look",
+      "name": "Run Look",
+      "description": "Execute a Look and return its data in the specified format.",
+      "category": "looks",
+      "endpoint": "GET /api/4.0/looks/{look_id}/run/{result_format}"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "looks",
+    "dashboards",
+    "models"
+  ],
+  "apis": [
+    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Content", "id": "sync", "category": "sync" },
+    { "name": "List Looks", "id": "list_looks", "category": "looks" },
+    { "name": "List Dashboards", "id": "list_dashboards", "category": "dashboards" },
+    { "name": "List LookML Models", "id": "list_models", "category": "models" },
+    { "name": "Get Look", "id": "get_look", "category": "looks" },
+    { "name": "Get Dashboard", "id": "get_dashboard", "category": "dashboards" },
+    { "name": "Run Look", "id": "run_look", "category": "looks" }
+  ]
+}
