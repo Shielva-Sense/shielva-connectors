@@ -1,0 +1,20 @@
+{
+  "connector_type": "asana",
+  "display_name": "Asana",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true
+    },
+    {
+      "key": "workspace_gid",
+      "label": "Workspace GID (optional)",
+      "type": "string",
+      "required": false
+    }
+  ]
+}
