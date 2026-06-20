@@ -1,0 +1,108 @@
+{
+  "title": "Stripe Payments Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Stripe Payments** connector integrates Shielva with the [Stripe API](https://stripe.com/docs/api) to provide full access to Stripe's payments infrastructure.\n\nStripe is the gold-standard payments platform used by millions of businesses to accept and manage online payments. This connector exposes **28 APIs** across 9 resource domains — Balances, Customers, Charges, Payment Intents, Subscriptions, Products & Prices, Invoices, Refunds, Events, and Webhooks — enabling real-time payment data ingestion, customer management, and financial reporting inside Shielva workflows.\n\n**Key capabilities:**\n- Query live account balances and transaction history\n- Full CRUD for customers, subscriptions, and invoices\n- Create and manage payment intents and refunds\n- Subscribe to Stripe events via webhook management\n- Circuit-breaker and retry logic for production resilience\n- All data normalized to Shielva's canonical event and customer schemas"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Stripe Payments connector running in under 5 minutes.\n\n### 1. Obtain a Stripe API Key\n\n1. Log in to the [Stripe Dashboard](https://dashboard.stripe.com)\n2. Go to **Developers → API keys**\n3. Copy your **Secret key** — it starts with `sk_test_` (test mode) or `sk_live_` (production)\n\n> **Tip:** Always use `sk_test_...` during development. The connector works identically in both modes.\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Stripe**\n2. Click **Connect**\n3. Enter your Secret API Key in the `api_key` field\n4. Click **Install**\n\nThe connector will verify the key against `GET https://api.stripe.com/v1/balance` and set status to `ONLINE` on success.\n\n### 3. Verify\n\n```python\n# Health check — should return status=ONLINE\nresult = connector.health_check()\nassert result['health'] == 'ONLINE'\n```\n\n### 4. Run Your First Sync\n\n```python\n# Incremental sync — fetches all events since last run\nevents = await connector.sync(config={}, state={\"last_sync\": \"2026-01-01T00:00:00Z\"})\nprint(f\"Ingested {len(events)} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Stripe Payments connector uses **API Key authentication** — specifically Stripe's Secret API Key passed as an HTTP Bearer token.\n\n### Credential\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Secret API Key | `api_key` | password | Yes | Stripe secret key (`sk_test_...` or `sk_live_...`) |\n\n### How it works\n\nEvery request to the Stripe API includes the key in the `Authorization` header:\n\n```\nAuthorization: Bearer sk_test_4eC39HqLyjWDarjtT7pr...\n```\n\nThe connector's `StripeHTTPClient` injects this header automatically — no manual header management needed.\n\n### Key Prefixes\n\n| Prefix | Environment | Use |\n|--------|-------------|-----|\n| `sk_test_` | Test | Development & CI — no real charges |\n| `sk_live_` | Production | Real money — protect carefully |\n| `rk_test_` / `rk_live_` | Restricted | Scoped keys — not recommended for this connector |\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /v1/balance`. A `401` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any other error sets `health=DEGRADED`.\n\n### Security\n\n- The key is stored encrypted in the Shielva vault and never logged\n- Use the minimum-scope key needed (full secret key is required for write operations)\n- Rotate keys in the Stripe Dashboard under Developers → API keys → Roll key"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Stripe Payments connector has minimal configuration — the only required field is the API key.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"sk_test_4eC39HqLyjWDarjtT7pr...\"\n}\n```\n\n### Internal Defaults\n\nThese are set inside the connector and do not need to be configured:\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://api.stripe.com/v1` | Stripe API base URL |\n| `API_VERSION` | `2023-10-16` | Stripe API version (sent as `Stripe-Version` header) |\n| `PAGE_SIZE` | `100` | Results per page for list operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |\n\n### Circuit Breaker\n\nThe connector uses a circuit breaker pattern:\n\n| State | Behavior |\n|-------|----------|\n| CLOSED | Normal operation |\n| OPEN | After 5 consecutive failures — all calls raise `StripeCircuitOpenError` |\n| HALF_OPEN | After 60s cooldown — one probe request allowed; success closes, failure reopens |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 28 API methods across 9 resource domains. All list methods support automatic pagination.",
+      "children": [
+        {
+          "id": "balance",
+          "title": "Balance",
+          "content": "Retrieve the current balances and transaction history for the Stripe account.\n\n### `get_balance()`\nReturns the live balance available and pending for each currency.\n\n```python\nbalance = await connector.get_balance()\n# Returns: {\"available\": [{\"amount\": 10000, \"currency\": \"usd\"}], \"pending\": [...]}\n```\n\n**Stripe endpoint:** `GET /v1/balance`\n\n---\n\n### `list_balance_transactions()`\nReturns a paginated list of all balance transactions (charges, refunds, transfers, fees).\n\n```python\ntxns = await connector.list_balance_transactions()\n# Returns list of transaction objects with amount, type, fee, net, created, description\n```\n\n**Stripe endpoint:** `GET /v1/balance_transactions`"
+        },
+        {
+          "id": "customers",
+          "title": "Customers",
+          "content": "Full CRUD for Stripe customer objects.\n\n### `list_customers()`\nReturns all customers with pagination.\n```python\ncustomers = await connector.list_customers()\n```\n**Stripe endpoint:** `GET /v1/customers`\n\n---\n\n### `get_customer(customer_id)`\nFetch a single customer by ID.\n```python\ncustomer = await connector.get_customer(\"cus_ABC123\")\n```\n**Stripe endpoint:** `GET /v1/customers/{customer_id}`\n\n---\n\n### `create_customer(email, name, metadata)`\nCreate a new customer record.\n```python\ncustomer = await connector.create_customer(\n    email=\"alice@example.com\",\n    name=\"Alice Smith\",\n    metadata={\"tenant_id\": \"t_123\"}\n)\n```\n**Stripe endpoint:** `POST /v1/customers`\n\n---\n\n### `update_customer(customer_id, **kwargs)`\nUpdate an existing customer's fields.\n```python\nresult = await connector.update_customer(\"cus_ABC123\", email=\"new@example.com\")\n```\n**Stripe endpoint:** `POST /v1/customers/{customer_id}`\n\n---\n\n### `delete_customer(customer_id)`\nPermanently delete a customer and cancel their active subscriptions.\n```python\nresult = await connector.delete_customer(\"cus_ABC123\")\n# Returns: {\"id\": \"cus_ABC123\", \"object\": \"customer\", \"deleted\": true}\n```\n**Stripe endpoint:** `DELETE /v1/customers/{customer_id}`"
+        },
+        {
+          "id": "charges",
+          "title": "Charges",
+          "content": "Retrieve charge records from the account.\n\n### `list_charges()`\nReturns paginated list of charges.\n```python\ncharges = await connector.list_charges()\n```\n**Stripe endpoint:** `GET /v1/charges`\n\n---\n\n### `get_charge(charge_id)`\nFetch a single charge by ID.\n```python\ncharge = await connector.get_charge(\"ch_1234\")\n```\n**Stripe endpoint:** `GET /v1/charges/{charge_id}`"
+        },
+        {
+          "id": "payment-intents",
+          "title": "Payment Intents",
+          "content": "Create and retrieve Payment Intents — Stripe's recommended way to collect payments.\n\n### `list_payment_intents()`\nReturns all payment intents.\n```python\npayment_intents = await connector.list_payment_intents()\n```\n**Stripe endpoint:** `GET /v1/payment_intents`\n\n---\n\n### `get_payment_intent(payment_intent_id)`\nFetch a single payment intent.\n```python\npi = await connector.get_payment_intent(\"pi_1234\")\n```\n**Stripe endpoint:** `GET /v1/payment_intents/{id}`\n\n---\n\n### `create_payment_intent(amount, currency, **kwargs)`\nCreate a new payment intent.\n```python\npi = await connector.create_payment_intent(\n    amount=2000,      # in cents\n    currency=\"usd\",\n    payment_method_types=[\"card\"]\n)\n# client_secret returned for frontend confirmation\n```\n**Stripe endpoint:** `POST /v1/payment_intents`\n\n> **Note:** `amount` is in the smallest currency unit (cents for USD)."
+        },
+        {
+          "id": "subscriptions",
+          "title": "Subscriptions",
+          "content": "Manage recurring subscriptions.\n\n### `list_subscriptions()`\nReturns all subscriptions across all customers.\n```python\nsubs = await connector.list_subscriptions()\n```\n**Stripe endpoint:** `GET /v1/subscriptions`\n\n---\n\n### `get_subscription(subscription_id)`\nFetch a single subscription.\n```python\nsub = await connector.get_subscription(\"sub_1234\")\n```\n**Stripe endpoint:** `GET /v1/subscriptions/{id}`\n\n---\n\n### `cancel_subscription(subscription_id)`\nCancel a subscription immediately.\n```python\nresult = await connector.cancel_subscription(\"sub_1234\")\n# status will be \"canceled\"\n```\n**Stripe endpoint:** `DELETE /v1/subscriptions/{id}`"
+        },
+        {
+          "id": "products-prices",
+          "title": "Products & Prices",
+          "content": "Access the product catalog and pricing configuration.\n\n### `list_products()`\n```python\nproducts = await connector.list_products()\n```\n**Stripe endpoint:** `GET /v1/products`\n\n### `get_product(product_id)`\n```python\nprod = await connector.get_product(\"prod_1234\")\n```\n**Stripe endpoint:** `GET /v1/products/{id}`\n\n### `list_prices()`\n```python\nprices = await connector.list_prices()\n```\n**Stripe endpoint:** `GET /v1/prices`\n\n### `get_price(price_id)`\n```python\nprice = await connector.get_price(\"price_1234\")\n```\n**Stripe endpoint:** `GET /v1/prices/{id}`"
+        },
+        {
+          "id": "invoices",
+          "title": "Invoices",
+          "content": "Access invoice records for subscriptions and one-off charges.\n\n### `list_invoices()`\n```python\ninvoices = await connector.list_invoices()\n```\n**Stripe endpoint:** `GET /v1/invoices`\n\n### `get_invoice(invoice_id)`\n```python\ninvoice = await connector.get_invoice(\"in_1234\")\n```\n**Stripe endpoint:** `GET /v1/invoices/{id}`"
+        },
+        {
+          "id": "refunds",
+          "title": "Refunds",
+          "content": "Create and list refunds for charges.\n\n### `create_refund(charge_id, amount=None)`\nRefund a charge fully or partially.\n```python\n# Full refund\nrefund = await connector.create_refund(\"ch_1234\")\n\n# Partial refund of $5.00\nrefund = await connector.create_refund(\"ch_1234\", amount=500)\n```\n**Stripe endpoint:** `POST /v1/refunds`\n\n> `amount` is optional — omit for a full refund, provide cents for partial.\n\n### `list_refunds()`\n```python\nrefunds = await connector.list_refunds()\n```\n**Stripe endpoint:** `GET /v1/refunds`"
+        },
+        {
+          "id": "events",
+          "title": "Events",
+          "content": "Read Stripe's event log for audit trails and incremental sync.\n\n### `list_events()`\nReturns the full Stripe event log (used by `sync()` for incremental ingestion).\n```python\nevents = await connector.list_events()\n```\n**Stripe endpoint:** `GET /v1/events`\n\n### `get_event(event_id)`\n```python\nevent = await connector.get_event(\"evt_1234\")\n```\n**Stripe endpoint:** `GET /v1/events/{id}`"
+        },
+        {
+          "id": "webhooks",
+          "title": "Webhook Endpoints",
+          "content": "Manage Stripe webhook endpoint registrations programmatically.\n\n### `list_webhooks()`\n```python\nwebhooks = await connector.list_webhooks()\n```\n**Stripe endpoint:** `GET /v1/webhook_endpoints`\n\n### `create_webhook(url, enabled_events)`\n```python\nwh = await connector.create_webhook(\n    url=\"https://my-app.example.com/stripe/webhook\",\n    enabled_events=[\"payment_intent.succeeded\", \"customer.subscription.deleted\"]\n)\n# Returns webhook object including the signing secret (shown only once)\n```\n**Stripe endpoint:** `POST /v1/webhook_endpoints`\n\n### `delete_webhook(webhook_id)`\n```python\nresult = await connector.delete_webhook(\"we_1234\")\n```\n**Stripe endpoint:** `DELETE /v1/webhook_endpoints/{id}`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Incremental Ingestion",
+      "content": "The `sync()` method implements incremental event ingestion using Stripe's event log.\n\n### How sync works\n\n1. Reads `state.last_sync` (ISO 8601 timestamp) from the stored connector state\n2. Calls `GET /v1/events` with `created[gte]={last_sync_epoch}` and `limit=100`\n3. Follows the `has_more` cursor for pagination\n4. Normalizes each event through `StripeNormalizer.normalize_event()`\n5. Calls `ingest_batch()` to write normalized records to Shielva storage\n6. Updates `state.last_sync` to the current timestamp\n\n### Usage\n\n```python\n# First run — fetches all events\nresult = await connector.sync(config={}, state={})\n\n# Subsequent runs — only fetches new events since last sync\nresult = await connector.sync(config={}, state={\"last_sync\": \"2026-06-01T00:00:00Z\"})\n\nprint(result[\"records_ingested\"])  # number of events processed\nprint(result[\"state\"])             # updated state for next run\n```\n\n### Normalized Event Schema\n\nAll Stripe events are normalized to:\n\n| Field | Source | Description |\n|-------|--------|-------------|\n| `id` | `event.id` | Stripe event ID (`evt_...`) |\n| `type` | `event.type` | Event type (e.g. `payment_intent.succeeded`) |\n| `created` | `event.created` | Unix timestamp |\n| `livemode` | `event.livemode` | `true` for production events |\n| `api_version` | `event.api_version` | Stripe API version used |\n| `data` | `event.data.object` | The affected resource |\n\n### Recommended Schedule\n\nRun sync every 5–15 minutes for near-real-time data. The Stripe event log retains events for 30 days."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception Hierarchy\n\n```\nStripeError (base)\n├── StripeAuthError          — 401: invalid or missing API key\n├── StripeRateLimitError     — 429: too many requests\n├── StripeNotFoundError      — 404: resource not found\n├── StripeServerError        — 5xx: Stripe service error\n├── StripeValidationError    — 400: invalid request parameters\n└── StripeCircuitOpenError   — circuit breaker open (no request sent)\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `StripeRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts |\n| `StripeServerError` (5xx) | Yes | Exponential backoff, up to 3 attempts |\n| `StripeAuthError` (401) | No | Immediate failure — check API key |\n| `StripeNotFoundError` (404) | No | Immediate failure — check resource ID |\n| `StripeValidationError` (400) | No | Immediate failure — fix request params |\n\n### Circuit Breaker\n\nAfter 5 consecutive failures (of any type), the circuit opens:\n```python\ntry:\n    result = await connector.get_balance()\nexcept StripeCircuitOpenError:\n    # Circuit is open — wait 60s before retrying\n    print(\"Stripe connector circuit open — backing off\")\n```\n\nThe circuit automatically enters HALF_OPEN after 60 seconds and allows one probe request."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their fixes.\n\n### `health=OFFLINE` after install\n\n**Cause:** Invalid or expired API key.\n\n**Fix:** Verify the key in the [Stripe Dashboard](https://dashboard.stripe.com/apikeys). Ensure you're using the *secret* key (`sk_...`), not the publishable key (`pk_...`). Re-run install with the correct key.\n\n---\n\n### `StripeAuthError: 401 Unauthorized`\n\n**Cause:** The stored API key was rotated or revoked in Stripe.\n\n**Fix:** Generate a new key in the Stripe Dashboard → Developers → API keys → Create secret key. Update the connector via ACP → Integrations → Stripe → Edit credentials.\n\n---\n\n### `StripeRateLimitError: 429 Too Many Requests`\n\n**Cause:** Stripe's default rate limit is ~100 read requests/second per account.\n\n**Fix:** The connector retries automatically with exponential backoff. If this is persistent, reduce sync frequency or contact Stripe to increase your rate limits.\n\n---\n\n### `StripeCircuitOpenError` in logs\n\n**Cause:** 5 consecutive failures caused the circuit breaker to open.\n\n**Fix:** The circuit auto-resets after 60 seconds. Check the Stripe Status page (https://status.stripe.com) for outages. Check the Terminal logs in SAD for the underlying error before the circuit opened.\n\n---\n\n### Unit tests fail with `ModuleNotFoundError: shared`\n\n**Cause:** `sys.path` not set correctly for the test environment.\n\n**Fix:** The root `conftest.py` adds the connector directory to `sys.path`. Ensure you run tests from the connector root:\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/stripe_payments_connector\npytest tests/test_connector.py -v\n```\n\n---\n\n### Sync returns 0 records on first run\n\n**Cause:** No events exist in the Stripe account (new or empty test account).\n\n**Fix:** Create a test payment in the Stripe Dashboard, or use the Stripe CLI to trigger events:\n```bash\nstripe trigger payment_intent.succeeded\n```\n\n---\n\n### `asyncio_mode` warning in pytest\n\n**Cause:** `pytest-asyncio` version mismatch.\n\n**Fix:** Ensure `pytest.ini` sets `asyncio_mode = auto` (already configured). Upgrade if needed:\n```bash\npip install pytest-asyncio --upgrade\n```"
+    },
+    {
+      "id": "data-models",
+      "title": "Data Models",
+      "content": "Key Python models used by the connector (`models.py`).\n\n### `StripeCustomer`\n\n```python\n@dataclass\nclass StripeCustomer:\n    id: str           # cus_...\n    email: str\n    name: str\n    created: int      # Unix timestamp\n    metadata: dict\n    livemode: bool\n```\n\n### `StripeEvent`\n\n```python\n@dataclass\nclass StripeEvent:\n    id: str           # evt_...\n    type: str         # e.g. \"payment_intent.succeeded\"\n    created: int\n    livemode: bool\n    api_version: str\n    data: dict        # event.data.object\n```\n\n### Normalizer\n\nThe `StripeNormalizer` class in `helpers/normalizer.py` converts raw Stripe API responses to these models:\n\n```python\nnormalizer = StripeNormalizer()\ncustomer = normalizer.normalize_customer(raw_api_response)\nevent = normalizer.normalize_event(raw_event)\n```"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with a full test suite.\n\n### Unit Tests (38 tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/stripe_payments_connector\npytest tests/test_connector.py -v\n# Expected: 38 passed in < 5 seconds\n```\n\nAll HTTP calls are mocked via `AsyncMock` — no Stripe account required.\n\n**Coverage:**\n- `install()` — success, missing key, invalid key (401), circuit open\n- `health_check()` — success, invalid key, 5xx error\n- `sync()` — empty, 2 events, pagination, partial failure\n- Balance, Customers (CRUD), Charges, Payment Intents, Subscriptions\n- Refunds (partial + full), Events, Webhooks\n- Circuit breaker state machine\n- Normalizer field validation\n\n### Integration Tests (real Stripe API)\n\n```bash\nexport STRIPE_API_KEY=\"sk_test_...\"\npytest tests/test_integration.py -v\n```\n\nTests skip gracefully when `STRIPE_API_KEY` is not set.\n\n**Write-gated tests** (create/delete operations) require:\n```bash\nexport STRIPE_ALLOW_WRITES=\"true\"\n```"
+    }
+  ]
+}
