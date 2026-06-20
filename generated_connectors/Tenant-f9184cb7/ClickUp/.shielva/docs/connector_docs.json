@@ -1,0 +1,162 @@
+{
+  "title": "ClickUp Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "connector_type": "clickup",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **ClickUp connector** integrates with ClickUp workspaces via the ClickUp API v2 using a **Personal API Token** (api_key auth). It enables Shielva to sync tasks and lists across all authorized ClickUp workspaces.\n\n**Key capabilities:**\n- Sync all workspaces (teams), spaces, folders, lists, and tasks\n- Full task content including status, priority, assignees, tags, and description\n- Page-based task pagination to handle large workspaces\n- Stable document IDs via `sha256('<type>:<id>')[:16]` for deduplication across syncs\n- Retry with exponential backoff on transient errors (skips retry on auth failures)",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`clickup` — registered in ACP as **ClickUp**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "ClickUp — API v2 base URL: `https://api.clickup.com/api/v2/`"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key via `GET /user`; returns HEALTHY/CONNECTED or OFFLINE/error |\n| `health_check()` | Calls `GET /user`; returns username/email in message |\n| `sync()` | Hierarchical walk: teams → spaces → folders → lists → tasks (page-based pagination) |\n| `list_teams()` | Returns all authorized ClickUp workspaces (teams) |\n| `list_spaces(team_id)` | Returns all spaces in a workspace |\n| `list_folders(space_id)` | Returns all folders in a space |\n| `list_lists(space_id, folder_id)` | Returns lists in a space or folder |\n| `list_tasks(list_id, include_closed)` | Returns all tasks in a list (auto-paginates) |\n| `get_task(task_id)` | Returns a single task by ID |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses a **Personal API Token** for authentication. The token is sent as the raw value of the `Authorization` header — no `Bearer` prefix.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — generate at ClickUp Settings → Apps → API Token → Generate."
+        },
+        {
+          "id": "auth-header",
+          "title": "Authorization Header",
+          "content": "```\nAuthorization: pk_abc123...\n```\nClickUp Personal API Tokens start with `pk_`. The header value is the raw token — no `Bearer ` prefix."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Personal API Token | `api_key` | password | Yes | ClickUp Personal API Token (starts with `pk_`) |"
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Pass the token in the connector `config` dict:",
+      "children": [
+        {
+          "id": "config-example",
+          "title": "Config Example",
+          "content": "```python\nfrom connector import ClickUpConnector\n\nconn = ClickUpConnector(\n    tenant_id=\"Tenant-abc123\",\n    connector_id=\"conn_clickup_001\",\n    config={\"api_key\": \"pk_your_token_here\"},\n)\n```"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "HTTP client methods map directly to ClickUp API v2 endpoints.",
+      "children": [
+        {
+          "id": "user",
+          "title": "get_authorized_user()",
+          "content": "`GET /user` — Retrieves the authenticated user. Used by `install()` and `health_check()`.\n\nReturns: `{\"user\": {\"id\": ..., \"username\": ..., \"email\": ...}}`"
+        },
+        {
+          "id": "teams",
+          "title": "get_teams()",
+          "content": "`GET /team` — Lists all authorized workspaces.\n\nReturns: `{\"teams\": [{\"id\": ..., \"name\": ...}, ...]}`"
+        },
+        {
+          "id": "spaces",
+          "title": "get_spaces(team_id) / get_space(space_id)",
+          "content": "`GET /team/{team_id}/space?archived=false` — Lists spaces in a workspace.\n`GET /space/{space_id}` — Retrieves a single space."
+        },
+        {
+          "id": "folders",
+          "title": "get_folders(space_id)",
+          "content": "`GET /space/{space_id}/folder?archived=false` — Lists folders in a space."
+        },
+        {
+          "id": "lists",
+          "title": "get_lists(space_id, folder_id)",
+          "content": "`GET /folder/{folder_id}/list` — Lists in a folder.\n`GET /space/{space_id}/list` — Folderless lists in a space.\n\nExactly one of `space_id` or `folder_id` must be provided."
+        },
+        {
+          "id": "tasks",
+          "title": "get_tasks(list_id, page, archived, include_closed)",
+          "content": "`GET /list/{list_id}/task?page={page}&archived={bool}&include_closed={bool}`\n\nPagination: page-based (`?page=0`, `?page=1`, …). Stop when `tasks` is empty or `last_page: true`."
+        },
+        {
+          "id": "task",
+          "title": "get_task(task_id)",
+          "content": "`GET /task/{task_id}` — Retrieves a single task by ID."
+        },
+        {
+          "id": "members",
+          "title": "get_members(list_id)",
+          "content": "`GET /list/{list_id}/member` — Lists members of a list."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "All ClickUp resources are normalized into `ConnectorDocument` with stable IDs.",
+      "children": [
+        {
+          "id": "id-scheme",
+          "title": "Stable ID Scheme",
+          "content": "| Resource | Stable ID formula |\n|----------|-------------------|\n| Task | `sha256('task:' + task_id)[:16]` |\n| List | `sha256('list:' + list_id)[:16]` |"
+        },
+        {
+          "id": "document-types",
+          "title": "Document Types",
+          "content": "| Type string | Resource | Source |\n|-------------|----------|--------|\n| `task` | Task from any list | `clickup` |\n| `task_list` | Task list (inside folder or folderless) | `clickup` |"
+        },
+        {
+          "id": "task-fields",
+          "title": "Task Fields Synced",
+          "content": "name, description, status, priority, list_id, list_name, space_id, folder_name, url, date_created, date_updated, assignees (usernames), tags"
+        },
+        {
+          "id": "list-fields",
+          "title": "List Fields Synced",
+          "content": "name, folder_name, space_id, space_name, archived, task_count, due_date"
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "The connector uses a typed exception hierarchy.",
+      "children": [
+        {
+          "id": "exception-types",
+          "title": "Exception Types",
+          "content": "| Exception | Trigger | Retried? | Fields |\n|-----------|---------|----------|--------|\n| `ClickUpError` | Base — any API error | Yes | `message`, `status_code`, `code` |\n| `ClickUpAuthError` | 401, 403 | No | inherits base |\n| `ClickUpNotFoundError` | 404 | No | `resource`, `resource_id` |\n| `ClickUpRateLimitError` | 429 | Yes | `retry_after` |\n| `ClickUpNetworkError` | Connection error, timeout, 5xx | Yes | inherits base |"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and fixes.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Symptom | Cause | Fix |\n|---------|-------|-----|\n| `install` returns OFFLINE / invalid_credentials | Wrong or expired API token | Regenerate at ClickUp Settings → Apps |\n| `health_check` returns DEGRADED | Network error or API downtime | Check status.clickup.com |\n| Tasks missing from sync | Private space | Ensure the token owner has access |\n| Rate limit errors (429) | Too many API calls | Connector retries automatically — reduce sync frequency |\n| `sync` returns 0 documents | No tasks in workspace | Confirm lists have tasks in ClickUp |"
+        }
+      ]
+    }
+  ]
+}
