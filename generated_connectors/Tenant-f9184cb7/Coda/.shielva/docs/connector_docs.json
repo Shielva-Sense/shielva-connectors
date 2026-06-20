@@ -1,0 +1,82 @@
+{
+  "title": "Coda Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Coda connector for Shielva enables you to seamlessly integrate your Coda workspace with the Shielva platform. This connector facilitates the synchronization of your Coda content, including Docs, Pages, Tables, and Rows, making them discoverable and usable within Shielva. It supports `sync` and `health_check` capabilities, ensuring your Coda data is always up-to-date and accessible."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "To get started with the Coda connector, follow these steps:\n\n1.  **Install the Connector:**\n    Provide your Coda API token during the connector installation process. This token grants the connector access to your Coda workspace.\n\n    ```json\n    {\n      \"connector_type\": \"coda\",\n      \"config\": {\n        \"api_token\": \"YOUR_CODA_API_TOKEN\"\n      }\n    }\n    ```\n\n2.  **Authenticate:**\n    The connector will automatically attempt to authenticate using the provided `api_token`. A successful authentication will transition the connector to a `HEALTHY` state.\n\n3.  **Perform Your First Sync:**\n    Once installed and authenticated, initiate a synchronization to pull your Coda content into Shielva.\n\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    sync_result = await connector.sync()\n    print(sync_result)\n    ```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Coda connector uses API Key authentication.\n\n**API Key Authentication**\nTo authenticate the Coda connector, you must provide an `api_token`. This token is used to authorize all requests made to the Coda API.\n\n*   **How to obtain your API Token:**\n    1.  Log in to your Coda account.\n    2.  Navigate to your [API Settings](https://coda.io/account) page.\n    3.  Generate a new API token or use an existing one.\n    4.  Ensure the token has sufficient permissions to read Docs, Pages, Tables, and Rows in your Coda workspace.\n\n*   **Authentication Flow:**\n    When you install the connector, you provide the `api_token` in the configuration. The connector then uses this token in the `Authorization` header for all API requests, formatted as `Authorization: Bearer {api_token}`. The `health_check` method validates this token by calling the `/whoami` endpoint."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Coda connector requires the following configuration field:\n\n| Field       | Type     | Required | Description                                                                                             |\n| :---------- | :------- | :------- | :------------------------------------------------------------------------------------------------------ |\n| `api_token` | `password` | `true`     | Your Coda API token. Generate one at [https://coda.io/account](https://coda.io/account) under 'API Settings'. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `CodaConnector` class provides the following public methods for managing your Coda integration.",
+      "children": [
+        {
+          "id": "api-methods-install",
+          "title": "`install()`",
+          "content": "Validates the presence of the `api_token` in the connector's configuration. This method is called during the initial setup of the connector.\n\n*   **Parameters:** None\n*   **Returns:** A `ConnectorStatus` (or `InstallResult`) object indicating the health and authentication status of the connector. If `api_token` is missing, it returns `AuthStatus.MISSING_CREDENTIALS`.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    status = await connector.install()\n    print(status.message)\n    # Expected output: \"Connector installed \u2014 API token present\"\n    ```"
+        },
+        {
+          "id": "api-methods-health-check",
+          "title": "`health_check()`",
+          "content": "Performs a health check by calling the Coda API's `/whoami` endpoint to validate the `api_token` and retrieve user information.\n\n*   **Parameters:** None\n*   **Returns:** A `ConnectorStatus` (or `HealthCheckResult`) object. If successful, it returns `AuthStatus.CONNECTED` and `ConnectorHealth.HEALTHY`. If the token is invalid, it returns `AuthStatus.INVALID_CREDENTIALS`.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    status = await connector.health_check()\n    print(status.message)\n    # Expected output: \"Connected \u2014 user: Test User\"\n    ```"
+        },
+        {
+          "id": "api-methods-sync",
+          "title": "`sync()`",
+          "content": "Initiates a full synchronization of all accessible Coda content, including Docs, Pages, Tables, and Rows. The connector walks through the Coda hierarchy: Docs \u2192 Pages (per doc) + Tables (per doc) \u2192 Rows (per table). Each item is normalized and ingested into Shielva.\n\n*   **Parameters:**\n    *   `full` (bool, optional): If `True`, performs a full sync. Defaults to `False`.\n    *   `since` (Any, optional): Not explicitly used in the provided `sync` logic for incremental sync.\n    *   `kb_id` (str, optional): The Knowledge Base ID to ingest documents into. Defaults to an empty string.\n*   **Returns:** A `SyncResult` object detailing the number of documents found, synced, and failed, along with the overall sync status (`COMPLETED`, `PARTIAL`, or `FAILED`).\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    sync_result = await connector.sync(kb_id=\"my-knowledge-base\")\n    print(f\"Sync Status: {sync_result.status}\")\n    print(f\"Documents Synced: {sync_result.documents_synced}\")\n    ```"
+        },
+        {
+          "id": "api-methods-list-docs",
+          "title": "`list_docs()`",
+          "content": "Retrieves a list of all accessible Coda Docs. This method handles cursor-based pagination automatically.\n\n*   **Parameters:** None\n*   **Returns:** `List[Dict[str, Any]]` - A list of raw Coda doc objects.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    docs = await connector.list_docs()\n    for doc in docs:\n        print(f\"Doc ID: {doc.get('id')}, Name: {doc.get('name')}\")\n    ```"
+        },
+        {
+          "id": "api-methods-list-pages",
+          "title": "`list_pages(doc_id: str)`",
+          "content": "Retrieves a list of all pages within a specified Coda Doc. This method handles cursor-based pagination automatically.\n\n*   **Parameters:**\n    *   `doc_id` (str): The ID of the Coda Doc.\n*   **Returns:** `List[Dict[str, Any]]` - A list of raw Coda page objects.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    pages = await connector.list_pages(\"AbCdEfGh\") # Replace with actual doc_id\n    for page in pages:\n        print(f\"Page ID: {page.get('id')}, Name: {page.get('name')}\")\n    ```"
+        },
+        {
+          "id": "api-methods-list-tables",
+          "title": "`list_tables(doc_id: str)`",
+          "content": "Retrieves a list of all tables within a specified Coda Doc. This method handles cursor-based pagination automatically.\n\n*   **Parameters:**\n    *   `doc_id` (str): The ID of the Coda Doc.\n*   **Returns:** `List[Dict[str, Any]]` - A list of raw Coda table objects.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    tables = await connector.list_tables(\"AbCdEfGh\") # Replace with actual doc_id\n    for table in tables:\n        print(f\"Table ID: {table.get('id')}, Name: {table.get('name')}\")\n    ```"
+        },
+        {
+          "id": "api-methods-list-rows",
+          "title": "`list_rows(doc_id: str, table_id: str)`",
+          "content": "Retrieves a list of all rows within a specified Coda Table. This method handles cursor-based pagination automatically.\n\n*   **Parameters:**\n    *   `doc_id` (str): The ID of the Coda Doc containing the table.\n    *   `table_id` (str): The ID of the Coda Table.\n*   **Returns:** `List[Dict[str, Any]]` - A list of raw Coda row objects.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    rows = await connector.list_rows(\"AbCdEfGh\", \"tAbCdEfGh\") # Replace with actual doc_id and table_id\n    for row in rows:\n        print(f\"Row ID: {row.get('id')}, Name: {row.get('name')}\")\n    ```"
+        },
+        {
+          "id": "api-methods-get-doc",
+          "title": "`get_doc(doc_id: str)`",
+          "content": "Retrieves a single Coda Doc by its ID.\n\n*   **Parameters:**\n    *   `doc_id` (str): The ID of the Coda Doc.\n*   **Returns:** `Dict[str, Any]` - The raw Coda doc object.\n*   **Example:**\n    ```python\n    from connector import CodaConnector\n\n    connector = CodaConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"your-connector-id\",\n        config={\"api_token\": \"YOUR_CODA_API_TOKEN\"}\n    )\n    doc = await connector.get_doc(\"AbCdEfGh\") # Replace with actual doc_id\n    print(f\"Retrieved Doc: {doc.get('name')}\")\n    ```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The Coda connector implements specific error handling for common Coda API issues.\n\n*   **`CodaAuthError`**:\n    *   **Meaning:** Indicates that the provided `api_token` is invalid or lacks the necessary permissions. This typically results from an expired, revoked, or incorrect token.\n    *   **Connector Action:** During `health_check`, this error sets the connector's `auth_status` to `INVALID_CREDENTIALS` and `health` to `DEGRADED`.\n    *   **Example:** If `health_check` encounters `CodaAuthError`, the status message will reflect the authentication failure.\n\n*   **General `Exception` during `health_check`**:\n    *   **Meaning:** Catches any other unexpected errors during the `health_check` process, such as network issues or API service unavailability.\n    *   **Connector Action:** Sets the connector's `auth_status` to `FAILED` and `health` to `DEGRADED`.\n\n*   **Errors during `sync`**:\n    *   **Meaning:** The `sync` method is designed to be resilient. If an error occurs while processing a specific Coda Doc, Page, Table, or Row, that individual item will be marked as failed, but the sync process will attempt to continue with other items.\n    *   **Connector Action:**\n        *   Individual item failures increment `documents_failed`.\n        *   If one or more items fail but others succeed, the overall `SyncResult` status will be `PARTIAL`.\n        *   If a critical error occurs that prevents the entire sync process from proceeding (e.g., an issue with listing all docs), the overall `SyncResult` status will be `FAILED`.\n\n*   **Retry Mechanism:**\n    The connector uses a `with_retry` helper for all Coda API calls (`get_who_am_i`, `get_docs`, `get_pages`, `get_tables`, `get_rows`, `get_doc`). This mechanism automatically retries failed API requests up to 3 times (or 2 for `get_who_am_i` in `health_check`), which helps mitigate transient network issues or temporary API unavailability."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Here are some common issues and their solutions when using the Coda connector:\n\n*   **Issue: Connector reports `AuthStatus.MISSING_CREDENTIALS` during installation.**\n    *   **Cause:** The `api_token` field was not provided in the connector configuration during installation.\n    *   **Fix:** Ensure you include the `api_token` in your connector configuration.\n        ```json\n        {\n          \"connector_type\": \"coda\",\n          \"config\": {\n            \"api_token\": \"YOUR_CODA_API_TOKEN\"\n          }\n        }\n        ```\n\n*   **Issue: Connector reports `AuthStatus.INVALID_CREDENTIALS` during `health_check` or `sync`.**\n    *   **Cause:** The provided `api_token` is incorrect, expired, or does not have the necessary permissions to access Coda resources.\n    *   **Fix:**\n        1.  Verify your `api_token` by navigating to your [Coda API Settings](https://coda.io/account).\n        2.  Generate a new API token if the existing one is compromised or expired.\n        3.  Ensure the token has read access to the Coda Docs, Pages, Tables, and Rows you intend to sync.\n        4.  Update the `api_token` in your connector configuration.\n\n*   **Issue: `sync` operation completes with `SyncStatus.PARTIAL`.**\n    *   **Cause:** Some individual Coda items (Docs, Pages, Tables, or Rows) failed to sync due to specific errors, but the overall sync process continued for other items.\n    *   **Fix:** Review the connector logs for detailed error messages related to specific `doc_id`, `page_id`, `table_id`, or `row_id`. These logs will indicate why particular items failed (e.g., permission issues for a specific doc, malformed data). Address the underlying issue in Coda or adjust permissions.\n\n*   **Issue: `sync` operation fails entirely with `SyncStatus.FAILED`.**\n    *   **Cause:** A critical error occurred that prevented the connector from performing the sync, such as a persistent network issue, an invalid `api_token` that wasn't caught earlier, or a fundamental problem with accessing the Coda API.\n    *   **Fix:**\n        1.  Check your network connectivity.\n        2.  Run `health_check` to confirm the `api_token` is still valid and the connector can reach the Coda API.\n        3.  Review the connector logs for the root cause of the failure.\n\n*   **Issue: Experiencing slow syncs or frequent API errors.**\n    *   **Cause:** You might be encountering Coda API rate limits. The Coda API has a rate limit of 10 requests per second per token.\n    *   **Fix:** The connector implements a `with_retry` mechanism to handle transient errors and potential rate limit spikes. If issues persist, consider if your usage pattern is hitting the rate limit consistently. There is no direct configuration to adjust rate limiting within the connector, as it relies on Coda's API behavior and the built-in retry logic."
+    }
+  ]
+}
