@@ -1,0 +1,34 @@
+{
+  "connector_type": "figma",
+  "display_name": "Figma",
+  "provider": "Figma",
+  "service": "Figma",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Figma to sync design files, projects, components, styles, and comments via the Figma REST API using a Personal Access Token.",
+  "homepage_url": "https://www.figma.com",
+  "docs_url": "https://www.figma.com/developers/api",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Generate from Figma → Account Settings → Security → Personal access tokens"
+    },
+    {
+      "key": "team_id",
+      "label": "Team ID (optional)",
+      "type": "string",
+      "required": false,
+      "help": "Found in your Figma team URL: figma.com/files/team/{team_id}/..."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["files", "projects", "components", "styles", "comments", "versions"],
+  "rate_limits": {
+    "requests_per_minute": 100,
+    "notes": "Figma enforces ~100 req/min per token. The connector will receive 429 on breach and retries with exponential backoff."
+  },
+  "auth_notes": "Uses Personal Access Token (PAT) via the X-Figma-Token header. The PAT grants access to all files and teams the Figma account can see."
+}
