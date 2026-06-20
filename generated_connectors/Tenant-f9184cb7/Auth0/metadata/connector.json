@@ -1,0 +1,32 @@
+{
+  "connector_type": "auth0",
+  "display_name": "Auth0",
+  "provider": "auth0",
+  "service": "auth0",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "domain",
+      "label": "Auth0 Domain (e.g. myapp.auth0.com)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["users", "roles", "clients", "connections", "logs"],
+  "description": "Sync Auth0 tenant users, roles, applications (clients), identity connections, and audit log events via the Auth0 Management API v2 using OAuth 2.0 Machine-to-Machine client credentials.",
+  "docs_url": "https://auth0.com/docs/api/management/v2"
+}
