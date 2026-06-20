@@ -1,0 +1,49 @@
+{
+  "connector_type": "mixpanel",
+  "display_name": "Mixpanel",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "username",
+      "label": "Service Account Username",
+      "type": "string",
+      "required": true,
+      "description": "Mixpanel Service Account Username. Created in Project Settings → Service Accounts."
+    },
+    {
+      "key": "secret",
+      "label": "Service Account Secret",
+      "type": "password",
+      "required": true,
+      "description": "Mixpanel Service Account Secret. Generated at service account creation — shown only once."
+    },
+    {
+      "key": "project_id",
+      "label": "Project ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Mixpanel Project ID. Found in Project Settings → Project ID."
+    },
+    {
+      "key": "region",
+      "label": "Region (US or EU)",
+      "type": "string",
+      "required": false,
+      "description": "Data residency region. Use 'EU' for EU data residency projects. Defaults to 'US'."
+    }
+  ],
+  "provider": "Mixpanel",
+  "service": "Mixpanel",
+  "connector_name": "Mixpanel",
+  "service_slug": "mixpanel",
+  "category": "analytics",
+  "capabilities": [
+    "query_events",
+    "list_funnels",
+    "query_funnel",
+    "query_segmentation",
+    "health_check",
+    "sync"
+  ]
+}
