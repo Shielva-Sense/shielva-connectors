@@ -1,0 +1,28 @@
+{
+  "connector_type": "bugsnag",
+  "display_name": "Bugsnag",
+  "provider": "Bugsnag",
+  "service": "Bugsnag",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "auth_token",
+      "label": "Personal Auth Token",
+      "type": "password",
+      "required": true,
+      "help": "Your Bugsnag Personal Auth Token. Find it at Settings → My account → Personal auth token."
+    },
+    {
+      "key": "organization_slug",
+      "label": "Organization Slug",
+      "type": "string",
+      "required": true,
+      "help": "The slug of your Bugsnag organization. Find it in the URL after /organizations/ or in Settings → Organization."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["projects", "errors", "releases", "collaborators"],
+  "pagination": "x_next_page_link_header",
+  "description": "Syncs Bugsnag projects, errors (crash reports), and releases into the Shielva knowledge base for AI-powered error analysis and incident response."
+}
