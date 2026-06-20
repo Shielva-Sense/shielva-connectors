@@ -1,0 +1,28 @@
+{
+  "connector_type": "rollbar",
+  "display_name": "Rollbar",
+  "provider": "Rollbar",
+  "service": "Rollbar",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Project Access Token (read)",
+      "type": "password",
+      "required": true,
+      "help": "Your Rollbar project-level read access token. Find it at Project Settings → Access Tokens."
+    },
+    {
+      "key": "account_access_token",
+      "label": "Account Access Token",
+      "type": "password",
+      "required": false,
+      "help": "Optional account-level access token for account-wide operations."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["items", "occurrences", "deploys"],
+  "pagination": "page_offset",
+  "description": "Syncs Rollbar error items, occurrences (raw instances), and deploys into the Shielva knowledge base for AI-powered error analysis and incident response."
+}
