@@ -1,0 +1,146 @@
+{
+  "connector_type": "docusign",
+  "connector_id": "docusign",
+  "name": "DocuSign",
+  "provider": "DocuSign",
+  "service": "docusign",
+  "version": "1.0.0",
+  "description": "Connects to DocuSign eSignature REST API v2.1 to sync envelopes, retrieve documents, and manage recipients inside the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "oauth": {
+    "auth_url": "https://account.docusign.com/oauth/auth",
+    "token_url": "https://account.docusign.com/oauth/token",
+    "scopes": ["signature", "extended"],
+    "grant_type": "authorization_code",
+    "userinfo_url": "https://account.docusign.com/oauth/userinfo"
+  },
+  "install_fields": [
+    {
+      "key": "integration_key",
+      "label": "Integration Key (Client ID)",
+      "type": "string",
+      "required": true,
+      "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "help": "The DocuSign Integration Key (Client ID) from your app in the DocuSign Developer Center or Admin Console."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your DocuSign OAuth Client Secret",
+      "help": "The OAuth Client Secret associated with your Integration Key."
+    },
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "help": "Your DocuSign Account ID. If left blank, it will be retrieved automatically from /oauth/userinfo after authorization."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.ai/oauth/callback/docusign",
+      "help": "The OAuth2 redirect URI registered in your DocuSign app. Defaults to the Shielva callback URL."
+    },
+    {
+      "key": "is_sandbox",
+      "label": "Use Sandbox",
+      "type": "boolean",
+      "required": false,
+      "help": "Use the DocuSign sandbox (demo) environment. Set to false for production. Defaults to true."
+    }
+  ],
+  "capabilities": ["sync", "health_check", "authorize", "list_envelopes", "get_envelope"],
+  "features": [
+    "oauth2",
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "token_refresh"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate Credentials",
+      "description": "Validate that integration_key and client_secret are present. Returns PENDING_OAUTH if OAuth has not been completed yet.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Get Authorization URL",
+      "description": "Return the DocuSign OAuth2 Authorization Code Grant URL. The user must open this URL to grant consent.",
+      "category": "auth"
+    },
+    {
+      "id": "handle_oauth_callback",
+      "name": "Handle OAuth Callback",
+      "description": "Exchange the authorization code for tokens and fetch account_id + base_uri from /oauth/userinfo.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /accounts/{account_id} and return HEALTHY, DEGRADED, or OFFLINE with account name.",
+      "category": "health",
+      "endpoint": "GET /accounts/{account_id}"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Envelopes",
+      "description": "Fetch completed envelopes from the past 30 days and ingest them into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_envelopes",
+      "name": "List Envelopes",
+      "description": "Paginated list of envelopes with optional from_date and status filter.",
+      "category": "envelopes",
+      "endpoint": "GET /accounts/{account_id}/envelopes"
+    },
+    {
+      "id": "get_envelope",
+      "name": "Get Envelope",
+      "description": "Retrieve a single envelope by ID.",
+      "category": "envelopes",
+      "endpoint": "GET /accounts/{account_id}/envelopes/{envelope_id}"
+    },
+    {
+      "id": "list_envelope_documents",
+      "name": "List Envelope Documents",
+      "description": "List all documents attached to an envelope.",
+      "category": "envelopes",
+      "endpoint": "GET /accounts/{account_id}/envelopes/{envelope_id}/documents"
+    },
+    {
+      "id": "list_envelope_recipients",
+      "name": "List Envelope Recipients",
+      "description": "List all recipients (signers, carbon copies, etc.) for an envelope.",
+      "category": "envelopes",
+      "endpoint": "GET /accounts/{account_id}/envelopes/{envelope_id}/recipients"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "envelopes"
+  ],
+  "apis": [
+    { "name": "Install / Validate Credentials", "id": "install", "category": "auth" },
+    { "name": "Get Authorization URL", "id": "authorize", "category": "auth" },
+    { "name": "Handle OAuth Callback", "id": "handle_oauth_callback", "category": "auth" },
+    { "name": "Health Check", "id": "health_check", "category": "health" },
+    { "name": "Sync Envelopes", "id": "sync", "category": "sync" },
+    { "name": "List Envelopes", "id": "list_envelopes", "category": "envelopes" },
+    { "name": "Get Envelope", "id": "get_envelope", "category": "envelopes" },
+    { "name": "List Envelope Documents", "id": "list_envelope_documents", "category": "envelopes" },
+    { "name": "List Envelope Recipients", "id": "list_envelope_recipients", "category": "envelopes" }
+  ]
+}
