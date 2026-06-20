@@ -1,0 +1,34 @@
+{
+  "connector_type": "whatsapp",
+  "name": "WhatsApp Business",
+  "display_name": "WhatsApp Business",
+  "description": "Connect to WhatsApp Business (Meta Cloud API) to sync message templates and phone number data.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "phone_number_id",
+      "label": "Phone Number ID",
+      "type": "string",
+      "required": true,
+      "description": "WhatsApp Business phone number ID from Meta Business Suite."
+    },
+    {
+      "key": "access_token",
+      "label": "System User Access Token",
+      "type": "password",
+      "required": true,
+      "description": "Meta System User permanent access token with whatsapp_business_management permission."
+    },
+    {
+      "key": "waba_id",
+      "label": "WhatsApp Business Account ID",
+      "type": "string",
+      "required": true,
+      "description": "WhatsApp Business Account (WABA) ID from Meta Business Suite."
+    }
+  ],
+  "capabilities": ["list_templates", "get_template", "list_phone_numbers", "get_waba", "sync"],
+  "provider": "meta",
+  "category": "messaging"
+}
