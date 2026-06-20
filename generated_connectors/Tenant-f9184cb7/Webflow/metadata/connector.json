@@ -1,0 +1,47 @@
+{
+  "connector_type": "webflow",
+  "display_name": "Webflow",
+  "name": "Webflow",
+  "description": "Connect to Webflow to sync sites, CMS collections, items, and pages via the Webflow REST API v2.",
+  "provider": "webflow",
+  "service": "webflow",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "OAuth2 Client ID from your Webflow App registration."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "OAuth2 Client Secret from your Webflow App registration."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "description": "OAuth2 callback URL registered with your Webflow App. Must match exactly."
+    }
+  ],
+  "oauth": {
+    "authorization_url": "https://webflow.com/oauth/authorize",
+    "token_url": "https://api.webflow.com/oauth/access_token",
+    "scopes": ["sites:read", "cms:read", "pages:read", "forms:read"],
+    "response_type": "code",
+    "grant_type": "authorization_code"
+  },
+  "scopes": ["sites:read", "cms:read", "pages:read", "forms:read"],
+  "capabilities": ["sync", "health_check", "oauth2", "list_sites", "list_collections", "list_items", "list_pages"],
+  "resources": ["sites", "collections", "items", "pages"],
+  "api_base": "https://api.webflow.com/v2/",
+  "api_version": "2.0.0",
+  "category": "cms",
+  "documentation_url": "https://developers.webflow.com/v2.0.0/reference"
+}
