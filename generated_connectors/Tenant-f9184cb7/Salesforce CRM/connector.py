@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlencode
 
 from client import SalesforceHTTPClient
 from exceptions import SalesforceAuthError, SalesforceError, SalesforceNetworkError
@@ -27,6 +28,10 @@ try:
     _BASE = BaseConnector
 except ImportError:
     _BASE = object  # standalone / test mode
+
+CONNECTOR_TYPE = "salesforce"
+AUTH_TYPE = "oauth2"
+SALESFORCE_API_VERSION = "v58.0"
 
 SYNC_PAGE_SIZE = 100
 CIRCUIT_BREAKER_THRESHOLD = 5
@@ -100,10 +105,43 @@ class SalesforceConnector(_BASE):  # type: ignore[misc]
             access_token=self._access_token,
         )
 
+    def _auth_base_url(self) -> str:
+        """Return the Salesforce OAuth base URL (sandbox vs production)."""
+        if self.config.get("sandbox"):
+            return "https://test.salesforce.com"
+        return "https://login.salesforce.com"
+
     # ── Auth & health ─────────────────────────────────────────────────────────
+
+    async def authorize(self) -> dict[str, Any]:
+        """Build and return the Salesforce OAuth 2.0 authorization URL."""
+        client_id = self._client_id or self.config.get("client_id", "")
+        redirect_uri = self.config.get("redirect_uri", "https://app.shielva.ai/oauth/callback/salesforce")
+        base = self._auth_base_url()
+        params = urlencode({
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "api refresh_token offline_access",
+        })
+        auth_url = f"{base}/services/oauth2/authorize?{params}"
+        return {"auth_url": auth_url, "redirect_uri": redirect_uri}
 
     async def install(self) -> InstallResult:
         """Validate OAuth credentials by pinging the Salesforce REST API root."""
+        if not self._client_id:
+            return InstallResult(
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message="client_id is required",
+            )
+        if not self._client_secret:
+            return InstallResult(
+                health=ConnectorHealth.OFFLINE,
+                auth_status=AuthStatus.MISSING_CREDENTIALS,
+                message="client_secret is required",
+            )
+        # If access_token + instance_url are present, do a live ping validation
         if not self._access_token or not self._instance_url:
             return InstallResult(
                 health=ConnectorHealth.OFFLINE,
@@ -324,7 +362,17 @@ class SalesforceConnector(_BASE):  # type: ignore[misc]
         """List Accounts via SOQL."""
         soql = (
             f"SELECT Id, Name, Industry, Type, Phone, Website, BillingCity, "
-            f"BillingCountry, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT {limit}"
+            f"BillingCountry, CreatedDate FROM Account ORDER BY LastModifiedDate DESC NULLS LAST LIMIT {limit}"
+        )
+        return await self.query(soql)
+
+    # ── Cases ─────────────────────────────────────────────────────────────────
+
+    async def list_cases(self, limit: int = 100) -> dict[str, Any]:
+        """List Cases via SOQL."""
+        soql = (
+            f"SELECT Id, CaseNumber, Subject, Status, Priority, Origin, "
+            f"Description, CreatedDate FROM Case ORDER BY LastModifiedDate DESC NULLS LAST LIMIT {limit}"
         )
         return await self.query(soql)
 

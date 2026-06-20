@@ -1,0 +1,244 @@
+{
+  "connector_type": "salesforce",
+  "name": "Salesforce",
+  "provider": "Salesforce",
+  "version": "1.0.0",
+  "auth_type": "oauth2",
+  "title": "Salesforce CRM Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Salesforce CRM connector syncs Leads, Contacts, and Opportunities from your Salesforce org into the Shielva knowledge base using the Salesforce REST API v57.0. It supports full and incremental sync, arbitrary SOQL queries, direct SObject retrieval, and exposes list methods for all major CRM objects. Authentication is handled via OAuth 2.0 Connected App credentials."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication (OAuth 2.0)",
+      "content": "The connector uses OAuth 2.0 via a Salesforce Connected App. You must provide a client_id (Consumer Key), client_secret (Consumer Secret), and instance_url. After authorization, Shielva stores the access_token and refresh_token securely. The connector pings the Salesforce REST API root on install() to validate credentials. Auth errors (401/403) are raised as SalesforceAuthError and are not retried — they require re-authorization.",
+      "auth_type": "oauth2",
+      "oauth_scopes": ["api", "refresh_token", "offline_access"],
+      "oauth_auth_url": "https://login.salesforce.com/services/oauth2/authorize",
+      "oauth_token_url": "https://login.salesforce.com/services/oauth2/token"
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "content": "The following fields are required when installing the connector.",
+      "fields": [
+        {
+          "key": "client_id",
+          "label": "Connected App Client ID",
+          "type": "text",
+          "required": true,
+          "description": "Consumer Key from your Salesforce Connected App (Setup → App Manager → Connected App → Manage Consumer Details)."
+        },
+        {
+          "key": "client_secret",
+          "label": "Connected App Client Secret",
+          "type": "secret",
+          "required": true,
+          "description": "Consumer Secret from your Salesforce Connected App."
+        },
+        {
+          "key": "redirect_uri",
+          "label": "Callback URL",
+          "type": "string",
+          "required": false,
+          "description": "OAuth redirect/callback URL registered in your Salesforce Connected App."
+        },
+        {
+          "key": "sandbox",
+          "label": "Use Sandbox",
+          "type": "boolean",
+          "required": false,
+          "description": "Enable to authenticate against test.salesforce.com instead of login.salesforce.com."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine (SOQL + Pagination)",
+      "content": "The sync() method fetches Leads, Contacts, and Opportunities using SOQL queries. In full-sync mode (full=True), all records are fetched up to SYNC_PAGE_SIZE (100) per page. In incremental mode (full=False, since=<datetime>), a WHERE CreatedDate >= <since> clause is added. Pagination follows the nextRecordsUrl returned by the Salesforce API using query_more(). Each page result is normalized to ConnectorDocument via the appropriate normalizer function and optionally pushed to the knowledge base via _ingest_document(). The with_retry wrapper provides exponential backoff (base 1s, max 30s, max 3 attempts) for transient errors. SalesforceAuthError is never retried.",
+      "soql_templates": {
+        "leads_full": "SELECT Id, FirstName, LastName, Company, Email, Phone, Status, LeadSource, CreatedDate FROM Lead ORDER BY CreatedDate DESC LIMIT {limit}",
+        "leads_since": "SELECT Id, FirstName, LastName, Company, Email, Phone, Status, LeadSource, CreatedDate FROM Lead WHERE CreatedDate >= {since} ORDER BY CreatedDate DESC LIMIT {limit}",
+        "contacts_full": "SELECT Id, FirstName, LastName, Account.Name, Email, Phone, Title, CreatedDate FROM Contact ORDER BY CreatedDate DESC LIMIT {limit}",
+        "contacts_since": "SELECT Id, FirstName, LastName, Account.Name, Email, Phone, Title, CreatedDate FROM Contact WHERE CreatedDate >= {since} ORDER BY CreatedDate DESC LIMIT {limit}",
+        "opportunities_full": "SELECT Id, Name, StageName, Amount, CloseDate, Account.Name, Probability, CreatedDate FROM Opportunity ORDER BY CreatedDate DESC LIMIT {limit}",
+        "opportunities_since": "SELECT Id, Name, StageName, Amount, CloseDate, Account.Name, Probability, CreatedDate FROM Opportunity WHERE CreatedDate >= {since} ORDER BY CreatedDate DESC LIMIT {limit}"
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "content": "All methods are async and return typed results.",
+      "methods": [
+        {
+          "name": "authorize()",
+          "signature": "async def authorize() -> dict[str, Any]",
+          "description": "Builds and returns the Salesforce OAuth 2.0 authorization URL. Uses test.salesforce.com when sandbox=True. Returns {auth_url, redirect_uri}."
+        },
+        {
+          "name": "install()",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates client_id and client_secret are present. If access_token + instance_url are also set, pings the Salesforce REST API root to confirm connectivity. Returns ConnectorHealth.HEALTHY + AuthStatus.CONNECTED on success."
+        },
+        {
+          "name": "health_check()",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings the Salesforce REST API root. Returns HEALTHY, DEGRADED (network issue, circuit closed), or OFFLINE (auth failure or circuit open)."
+        },
+        {
+          "name": "sync(full, since, kb_id)",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Syncs Leads, Contacts, and Opportunities. full=True fetches all records. since=<datetime> applies incremental filter. kb_id routes normalized documents to the knowledge base."
+        },
+        {
+          "name": "query(soql)",
+          "signature": "async def query(soql: str) -> dict[str, Any]",
+          "description": "Executes an arbitrary SOQL query via GET /services/data/v57.0/query?q={soql}."
+        },
+        {
+          "name": "list_objects()",
+          "signature": "async def list_objects() -> dict[str, Any]",
+          "description": "Lists all available SObject types in the org via GET /services/data/v57.0/sobjects/."
+        },
+        {
+          "name": "get_object(object_type, record_id)",
+          "signature": "async def get_object(object_type: str, record_id: str) -> dict[str, Any]",
+          "description": "Retrieves a single SObject record by type and ID via GET /services/data/v57.0/sobjects/{type}/{id}."
+        },
+        {
+          "name": "list_leads(limit)",
+          "signature": "async def list_leads(limit: int = 100) -> dict[str, Any]",
+          "description": "Lists Leads ordered by CreatedDate descending via SOQL."
+        },
+        {
+          "name": "list_contacts(limit)",
+          "signature": "async def list_contacts(limit: int = 100) -> dict[str, Any]",
+          "description": "Lists Contacts ordered by CreatedDate descending via SOQL."
+        },
+        {
+          "name": "list_opportunities(limit)",
+          "signature": "async def list_opportunities(limit: int = 100) -> dict[str, Any]",
+          "description": "Lists Opportunities ordered by CreatedDate descending via SOQL."
+        },
+        {
+          "name": "list_accounts(limit)",
+          "signature": "async def list_accounts(limit: int = 100) -> dict[str, Any]",
+          "description": "Lists Accounts ordered by LastModifiedDate descending via SOQL."
+        },
+        {
+          "name": "list_cases(limit)",
+          "signature": "async def list_cases(limit: int = 100) -> dict[str, Any]",
+          "description": "Lists Cases ordered by LastModifiedDate descending via SOQL."
+        },
+        {
+          "name": "aclose()",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient. Safe to call multiple times. Also used as the async context manager exit."
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model (ConnectorDocument shape per object type)",
+      "content": "Each Salesforce record is normalized to a ConnectorDocument with the following structure.",
+      "shapes": [
+        {
+          "object_type": "Lead",
+          "source_id": "<Salesforce Lead Id>",
+          "title": "Salesforce Lead: <FirstName LastName> — <Company>",
+          "content": "Lead ID: ...\nName: ...\nCompany: ...\nEmail: ...\nPhone: ...\nStatus: ...\nLead Source: ...\nCreated: ...",
+          "source_url": "https://<instance_url>/lightning/r/Lead/<Id>/view",
+          "metadata_keys": ["object_type", "name", "company", "email", "status", "lead_source", "created_date"]
+        },
+        {
+          "object_type": "Contact",
+          "source_id": "<Salesforce Contact Id>",
+          "title": "Salesforce Contact: <FirstName LastName> — <Account.Name>",
+          "content": "Contact ID: ...\nName: ...\nTitle: ...\nAccount: ...\nEmail: ...\nPhone: ...\nCreated: ...",
+          "source_url": "https://<instance_url>/lightning/r/Contact/<Id>/view",
+          "metadata_keys": ["object_type", "name", "account", "email", "title", "created_date"]
+        },
+        {
+          "object_type": "Opportunity",
+          "source_id": "<Salesforce Opportunity Id>",
+          "title": "Salesforce Opportunity: <Name> — <StageName>",
+          "content": "Opportunity ID: ...\nName: ...\nStage: ...\nAmount: ...\nClose Date: ...\nAccount: ...\nProbability: ...%\nCreated: ...",
+          "source_url": "https://<instance_url>/lightning/r/Opportunity/<Id>/view",
+          "metadata_keys": ["object_type", "name", "stage", "amount", "close_date", "account", "probability", "created_date"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "All exceptions inherit from SalesforceError which carries message, status_code, and code attributes.",
+      "exceptions": [
+        {
+          "name": "SalesforceError",
+          "description": "Base exception. Attributes: message (str), status_code (int), code (str)."
+        },
+        {
+          "name": "SalesforceAuthError",
+          "description": "Raised on 401 or 403 responses. Not retried by with_retry."
+        },
+        {
+          "name": "SalesforceRateLimitError",
+          "description": "Raised on 429. Carries retry_after (float seconds). with_retry honours this delay."
+        },
+        {
+          "name": "SalesforceNotFoundError",
+          "description": "Raised on 404. Message is '<resource> <resource_id> not found'."
+        },
+        {
+          "name": "SalesforceNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError."
+        },
+        {
+          "name": "SalesforceServerError",
+          "description": "Raised on 5xx responses."
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "entries": [
+        {
+          "error": "INVALID_SESSION_ID (401)",
+          "cause": "access_token expired or revoked",
+          "fix": "Re-authorize the connector in the Shielva dashboard"
+        },
+        {
+          "error": "insufficient_scope (403)",
+          "cause": "Connected App missing required OAuth scopes",
+          "fix": "Edit the Connected App in Salesforce Setup and add api, refresh_token, offline_access scopes"
+        },
+        {
+          "error": "Instance URL mismatch",
+          "cause": "The instance_url provided does not match the org that issued the OAuth token",
+          "fix": "Verify the URL in Salesforce Setup → My Domain and update the connector config"
+        },
+        {
+          "error": "Rate limits (429)",
+          "cause": "Exceeding Salesforce API call limits",
+          "fix": "The connector retries with exponential backoff honouring the Retry-After header; reduce sync frequency if persistent"
+        },
+        {
+          "error": "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY",
+          "cause": "API user lacks read permission on CRM objects",
+          "fix": "Assign the API user a Profile or Permission Set with Read access on Lead, Contact, Opportunity, Account"
+        },
+        {
+          "error": "No records returned",
+          "cause": "Connected App not approved for org-wide access",
+          "fix": "In Salesforce Setup → Connected Apps OAuth Usage, click Install next to your app"
+        }
+      ]
+    }
+  ]
+}
