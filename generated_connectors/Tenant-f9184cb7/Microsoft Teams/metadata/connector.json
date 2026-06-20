@@ -1,0 +1,53 @@
+{
+  "connector_type": "microsoft_teams",
+  "name": "Microsoft Teams",
+  "provider": "Microsoft",
+  "service": "microsoft_teams",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Application (client) ID",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true
+    },
+    {
+      "key": "tenant_hint",
+      "label": "Azure AD Tenant (optional)",
+      "type": "string",
+      "required": false
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI (optional)",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "authorize",
+    "list_teams",
+    "list_channels",
+    "list_channel_messages"
+  ],
+  "description": "Sync teams, channels, and messages from Microsoft Teams.",
+  "oauth": {
+    "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    "scopes": [
+      "https://graph.microsoft.com/Team.ReadBasic.All",
+      "https://graph.microsoft.com/Channel.ReadBasic.All",
+      "https://graph.microsoft.com/ChannelMessage.Read.All",
+      "offline_access"
+    ]
+  }
+}
