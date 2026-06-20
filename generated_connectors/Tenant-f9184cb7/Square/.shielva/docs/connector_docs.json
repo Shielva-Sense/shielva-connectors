@@ -5,271 +5,74 @@
     {
       "id": "overview",
       "title": "Overview",
-      "content": "The Square connector syncs payments, orders, customers, and catalog items from your Square account into the Shielva knowledge base using the Square REST API v2. It implements OAuth 2.0 authorization, cursor-based pagination, exponential backoff retry, and a circuit breaker for reliable throttle-safe data ingestion. Payment amounts are normalized from Square's smallest-currency-unit format (cents) to float. Payments receive a stable SHA-256-derived ID."
+      "content": "The **Square connector** integrates Shielva with the square platform via its public API. It is implemented as `SquareConnector`, a subclass of `BaseConnector`, and is responsible for two complementary capabilities: **ingesting data** from Square into the Shielva knowledge base as `NormalizedDocument` records, and **exposing direct API methods** that downstream Shielva workflows can call to read or mutate live Square resources.\n\nSync Square payments, orders, customers, and catalog items into the Shielva knowledge base.\n\n### Business problem solved\n\nTeams using Square typically have valuable data trapped behind an API: customer records, conversations, configuration, analytics, files. Wiring each of those into a search index, an LLM context window, or an automation by hand requires writing the same authentication, pagination, retry, and normalization code repeatedly. This connector packages all of that \u2014 authentication (OAUTH2), paginated sync, error mapping, exception hierarchy, document normalization \u2014 behind a small, stable interface so application code never touches the underlying REST endpoints directly.\n\n### Connector identity\n\n| Field | Value |\n|-------|-------|\n| Provider | `square` |\n| Service | `square` |\n| Connector class | `SquareConnector` |\n| Connector type | `square` |\n| Auth type | `oauth2` |\n| Version | `1.0.0` |\n| SDK package | `requests` |",
+      "children": []
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Square connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import SquareConnector\n\nconfig = {\n    \"application_id\": \"<text>\"\n    \"application_secret\": \"<secret>\"\n    \"redirect_uri\": \"<text>\"\n}\n\nconnector = SquareConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"square_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_payments`\n\n```python\nresult = await connector.list_payments()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Square data into Shielva.",
+      "children": []
     },
     {
       "id": "authentication",
       "title": "Authentication",
-      "subsections": [
-        {
-          "id": "oauth2",
-          "title": "OAuth 2.0 (required)",
-          "content": "Square uses OAuth 2.0 exclusively for third-party integrations. You must create an application in the Square Developer Dashboard, obtain an Application ID and Application Secret, then redirect users through the OAuth2 authorization flow to receive an access_token.",
-          "auth_url": "https://connect.squareup.com/oauth2/authorize",
-          "token_url": "https://connect.squareup.com/oauth2/token",
-          "scopes": [
-            "MERCHANT_PROFILE_READ",
-            "PAYMENTS_READ",
-            "ORDERS_READ",
-            "CUSTOMERS_READ",
-            "ITEMS_READ"
-          ],
-          "steps": [
-            "Log in to developer.squareup.com and create a new application.",
-            "Copy the Application ID (sq0idp-...) and Application Secret (sq0csp-...) from the Credentials tab.",
-            "Register your OAuth Redirect URI in the OAuth tab of your app.",
-            "Enter Application ID and Application Secret in Shielva and call authorize() to get the authorization URL.",
-            "Complete the OAuth flow in the browser — the access_token is stored by Shielva."
-          ]
-        }
-      ]
+      "content": "This connector uses **OAuth 2.0 authorization code flow** to authenticate against square. Shielva exchanges an authorization code for an access token + refresh token pair and stores them in the connector `config`. The access token is sent on every API call as a `Bearer` header; the refresh token is used automatically when the access token expires.\n\n### Obtaining OAuth credentials\n\n1. Sign in to the square developer / admin portal.\n2. Create a new OAuth application (sometimes called a *Client*, *Integration*, or *App*).\n3. Register the Shielva OAuth callback URL as an authorized redirect URI: `https://<your-shielva-host>/oauth/callback`.\n4. Copy the **Client ID** and **Client Secret** the provider issues. These are the values you will paste into the `client_id` / `client_secret` install fields.\n\n### Token lifecycle\n\n- `initialize()` validates credentials with a lightweight call (e.g. fetching the current user / account profile) and raises a connector-specific `AuthError` subclass if the credentials are rejected.\n- `health_check()` re-runs the same validation on demand. Use it to detect a revoked / expired credential without triggering a full sync.\n- For OAuth flows, expired access tokens are refreshed automatically on the next API call; you do not need to handle 401 retry manually.\n\n### Troubleshooting authentication\n\n| Symptom | Likely cause | Fix |\n|---------|--------------|-----|\n| `401 Unauthorized` | Credential typo, key revoked, or wrong account | Regenerate the key and re-install |\n| `403 Forbidden` | Missing scope / insufficient role | Grant the scopes listed above, then re-authorize |\n| `429 Too Many Requests` | Auth endpoint hit the rate limit | Built-in retry handles this \u2014 see Error Handling |",
+      "children": []
     },
     {
-      "id": "install_fields",
-      "title": "Install Fields",
-      "fields": [
-        {
-          "key": "application_id",
-          "label": "Square Application ID",
-          "type": "text",
-          "required": true,
-          "placeholder": "sq0idp-...",
-          "description": "Square application ID from the Credentials tab of your Developer Dashboard app."
-        },
-        {
-          "key": "application_secret",
-          "label": "Square Application Secret",
-          "type": "secret",
-          "required": true,
-          "placeholder": "sq0csp-...",
-          "description": "Square application secret from the Credentials tab. Treat as a password — never expose it."
-        },
-        {
-          "key": "redirect_uri",
-          "label": "OAuth Redirect URI",
-          "type": "text",
-          "required": false,
-          "placeholder": "https://your-app.com/oauth/callback",
-          "description": "OAuth redirect URI. Must match a URI registered in your Square application. Optional — omit when not needed."
-        }
-      ]
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `application_id` | Square Application ID | `text` | \u2705 | Your Square application ID. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials. |\n| `application_secret` | Square Application Secret | `secret` | \u2705 | Your Square application secret. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials. |\n| `redirect_uri` | OAuth Redirect URI | `text` | \u2014 | Optional OAuth redirect URI. Must match the URI registered in your Square application. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
     },
     {
-      "id": "sync_engine",
-      "title": "Sync Engine",
-      "content": "The sync() method performs a full paginated sync of Square payments and customers. For each resource type it fetches all pages using Square's cursor-based pagination (cursor field in the response body). Each raw API record is passed through a normalizer that converts it into a ConnectorDocument and optionally ingests it into the Shielva knowledge base. Orders require a location_id and are available via list_orders() but are not part of the automatic sync.",
-      "pagination": {
-        "mechanism": "cursor-based (cursor field in response body)",
-        "page_size": 100,
-        "payments_endpoint": "GET /v2/payments?limit=100&cursor={cursor}",
-        "customers_endpoint": "GET /v2/customers?limit=100&cursor={cursor}",
-        "orders_endpoint": "POST /v2/orders/search with cursor in request body"
-      },
-      "retry": {
-        "max_attempts": 3,
-        "backoff": "exponential with jitter",
-        "base_delay_s": 1.0,
-        "max_delay_s": 30.0,
-        "auth_errors_retried": false,
-        "rate_limit_honours_retry_after": true
-      },
-      "circuit_breaker": {
-        "failure_threshold": 5,
-        "recovery_timeout_s": 60,
-        "states": ["closed", "open", "half-open"]
-      }
-    },
-    {
-      "id": "api_methods",
+      "id": "api-methods",
       "title": "API Methods",
-      "methods": [
-        {
-          "id": "install",
-          "signature": "async def install() -> InstallResult",
-          "description": "Validates application_id and application_secret are present. If an access_token is stored (post-OAuth flow), probes GET /merchants/me and returns HEALTHY + CONNECTED on success. Without an access_token, returns HEALTHY + CONNECTED and instructs the caller to run authorize().",
-          "category": "auth"
-        },
-        {
-          "id": "authorize",
-          "signature": "def authorize() -> str",
-          "description": "Returns the Square OAuth2 authorization URL. The URL includes the application_id, requested scopes, response_type=code, and optionally redirect_uri. Redirect the user to this URL to initiate the OAuth flow.",
-          "category": "auth"
-        },
-        {
-          "id": "health_check",
-          "signature": "async def health_check() -> HealthCheckResult",
-          "description": "Probes GET /merchants/me. Returns HEALTHY with the merchant business name, DEGRADED on transient errors (circuit not open), or OFFLINE on auth failure or open circuit. Updates the circuit breaker state.",
-          "category": "health"
-        },
-        {
-          "id": "sync",
-          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
-          "description": "Paginated full sync of payments and customers. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
-          "category": "sync"
-        },
-        {
-          "id": "list_payments",
-          "signature": "async def list_payments(cursor: str | None = None, limit: int = 100) -> dict",
-          "description": "Returns a paginated page of Square payments.",
-          "endpoint": "GET /v2/payments",
-          "category": "payments"
-        },
-        {
-          "id": "get_payment",
-          "signature": "async def get_payment(payment_id: str) -> dict",
-          "description": "Returns a single Square payment by ID.",
-          "endpoint": "GET /v2/payments/{payment_id}",
-          "category": "payments"
-        },
-        {
-          "id": "list_orders",
-          "signature": "async def list_orders(location_id: str, cursor: str | None = None, limit: int = 100) -> dict",
-          "description": "Searches orders for a specific location using Square's Orders Search API.",
-          "endpoint": "POST /v2/orders/search",
-          "category": "orders"
-        },
-        {
-          "id": "list_customers",
-          "signature": "async def list_customers(cursor: str | None = None, limit: int = 100) -> dict",
-          "description": "Returns a paginated page of Square customers.",
-          "endpoint": "GET /v2/customers",
-          "category": "customers"
-        },
-        {
-          "id": "get_customer",
-          "signature": "async def get_customer(customer_id: str) -> dict",
-          "description": "Returns a single Square customer by ID.",
-          "endpoint": "GET /v2/customers/{customer_id}",
-          "category": "customers"
-        },
-        {
-          "id": "list_catalog_items",
-          "signature": "async def list_catalog_items(cursor: str | None = None, types: str = 'ITEM') -> dict",
-          "description": "Returns a paginated list of Square catalog objects. Use the types parameter to filter (e.g., 'ITEM', 'CATEGORY', 'ITEM,CATEGORY').",
-          "endpoint": "GET /v2/catalog/list",
-          "category": "catalog"
-        },
-        {
-          "id": "aclose",
-          "signature": "async def aclose() -> None",
-          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
-          "category": "lifecycle"
-        }
-      ]
+      "content": "`SquareConnector` exposes the following public methods. All methods are `async` \u2014 call them with `await` from an async context, or wrap them with `asyncio.run()` from synchronous code.\n\n### `install`\n\n```python\nasync def install() -> InstallResult\n```\n\nValidate application_id/application_secret are present.\n\n**Returns:** `InstallResult`\n\n**Example**\n\n```python\nresult = await connector.install()\n```\n\n### `authorize`\n\n```python\ndef authorize() -> str\n```\n\nReturn the Square OAuth2 authorization URL for the configured app.\n\n**Returns:** `str`\n\n**Example**\n\n```python\nresult = await connector.authorize()\n```\n\n### `health_check`\n\n```python\nasync def health_check() -> HealthCheckResult\n```\n\nProbe GET /merchants/me and return current health with merchant name.\n\n**Returns:** `HealthCheckResult`\n\n**Example**\n\n```python\nresult = await connector.health_check()\n```\n\n### `sync`\n\n```python\nasync def sync(full, since, kb_id) -> SyncResult\n```\n\nSync Square payments, orders (skipped without a location_id), and customers.\n\n**Parameters**\n\n- `full` \u2014 see source for the expected shape\n- `since` \u2014 see source for the expected shape\n- `kb_id` \u2014 see source for the expected shape\n\n**Returns:** `SyncResult`\n\n**Example**\n\n```python\nresult = await connector.sync(full, since, kb_id)\n```\n\n### `list_payments`\n\n```python\nasync def list_payments(cursor, limit) -> dict[str, Any]\n```\n\nCalls the underlying `list_payments` operation against the Square API.\n\n**Parameters**\n\n- `cursor` \u2014 see source for the expected shape\n- `limit` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.list_payments(cursor, limit)\n```\n\n### `get_payment`\n\n```python\nasync def get_payment(payment_id) -> dict[str, Any]\n```\n\nCalls the underlying `get_payment` operation against the Square API.\n\n**Parameters**\n\n- `payment_id` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.get_payment(payment_id)\n```\n\n### `list_orders`\n\n```python\nasync def list_orders(location_id, cursor, limit) -> dict[str, Any]\n```\n\nCalls the underlying `list_orders` operation against the Square API.\n\n**Parameters**\n\n- `location_id` \u2014 see source for the expected shape\n- `cursor` \u2014 see source for the expected shape\n- `limit` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.list_orders(location_id, cursor, limit)\n```\n\n### `list_customers`\n\n```python\nasync def list_customers(cursor, limit) -> dict[str, Any]\n```\n\nCalls the underlying `list_customers` operation against the Square API.\n\n**Parameters**\n\n- `cursor` \u2014 see source for the expected shape\n- `limit` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.list_customers(cursor, limit)\n```\n\n### `get_customer`\n\n```python\nasync def get_customer(customer_id) -> dict[str, Any]\n```\n\nCalls the underlying `get_customer` operation against the Square API.\n\n**Parameters**\n\n- `customer_id` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.get_customer(customer_id)\n```\n\n### `list_catalog_items`\n\n```python\nasync def list_catalog_items(cursor, types) -> dict[str, Any]\n```\n\nCalls the underlying `list_catalog_items` operation against the Square API.\n\n**Parameters**\n\n- `cursor` \u2014 see source for the expected shape\n- `types` \u2014 see source for the expected shape\n\n**Returns:** `dict[str, Any]`\n\n**Example**\n\n```python\nresult = await connector.list_catalog_items(cursor, types)\n```\n\n### `aclose`\n\n```python\nasync def aclose() -> None\n```\n\nCalls the underlying `aclose` operation against the Square API.\n\n**Returns:** `None`\n\n**Example**\n\n```python\nresult = await connector.aclose()\n```",
+      "children": []
     },
     {
-      "id": "data_model",
+      "id": "data-model",
       "title": "Data Model",
-      "description": "Square resources are normalized into ConnectorDocument instances before being ingested into the Shielva knowledge base.",
-      "connector_document": {
-        "fields": [
-          { "name": "source_id", "type": "str", "description": "For payments: SHA-256('payment:' + payment_id)[:16]. For customers: Square customer ID." },
-          { "name": "title", "type": "str", "description": "Human-readable title including resource type, ID/name, status, and amount." },
-          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the resource's properties." },
-          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
-          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
-          { "name": "source_url", "type": "str", "description": "For payments: the receipt_url from Square. For customers: empty string." },
-          { "name": "metadata", "type": "dict", "description": "Resource-specific properties map. Always includes object_type key." }
-        ]
-      },
-      "normalizers": [
-        {
-          "function": "normalize_payment(record, connector_id, tenant_id)",
-          "object_type": "payment",
-          "title_format": "Square payment: {id} — {status} {amount} {currency}",
-          "stable_id": "SHA-256('payment:' + payment_id)[:16]",
-          "amount_normalization": "Square amount_money.amount (integer cents) divided by 100 to float",
-          "metadata_keys": ["object_type", "payment_id", "status", "amount", "currency", "source_type", "location_id", "order_id", "created_at", "updated_at"]
-        },
-        {
-          "function": "normalize_customer(record, connector_id, tenant_id)",
-          "object_type": "customer",
-          "title_format": "Square customer: {given_name} {family_name} <{email_address}>",
-          "metadata_keys": ["object_type", "customer_id", "name", "email", "phone", "reference_id", "created_at", "updated_at"]
-        }
-      ]
+      "content": "Every record this connector emits into the Shielva knowledge base is a `ConnectorDocument` \u2014 a normalized envelope with a stable `source_id`, a resource type discriminator, and a payload of provider-specific fields. The shape per resource is documented below; the contract is enforced by the `normalize_*` helpers in `helpers/utils.py` (or `helpers/normalizer.py`).\n\n### Envelope fields (shared)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `source_id` | `str` | SHA-256-derived 16-char ID, stable across resyncs |\n| `resource_type` | `str` | Discriminator: `message`, `contact`, `event`, etc. |\n| `payload` | `dict` | Provider-native fields, untouched JSON-safe values |\n| `created_at` | `str` | RFC 3339 timestamp from the provider |\n| `updated_at` | `str` | RFC 3339 timestamp from the provider |\n| `tenant_id` | `str` | Multi-tenant scope \u2014 never `None` for stored records |\n\n### Resource models\n\n#### `InstallResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `connector_id` | `str` |\n| `message` | `str` |\n\n#### `HealthCheckResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `message` | `str` |\n| `merchant_name` | `str` |\n\n#### `SyncResult`\n\n| Field | Type |\n|-------|------|\n| `status` | `SyncStatus` |\n| `documents_found` | `int` |\n| `documents_synced` | `int` |\n| `documents_failed` | `int` |\n| `message` | `str` |\n\n#### `ConnectorDocument`\n\nNormalized document emitted by the connector into the knowledge base.\n\n| Field | Type |\n|-------|------|\n| `source_id` | `str` |\n| `title` | `str` |\n| `content` | `str` |\n| `connector_id` | `str` |\n| `tenant_id` | `str` |\n| `source_url` | `str` |\n| `metadata` | `dict[str, Any]` |\n\n\n### `source_id` determinism\n\nAll resource IDs are computed by SHA-256-hashing the provider's stable identifier (e.g. message ID, contact ID, event UUID) plus the resource type, then truncating to 16 characters. This guarantees that re-syncing the same resource produces the same Shielva document ID \u2014 enabling idempotent ingestion and incremental updates without duplicates.",
+      "children": []
     },
     {
-      "id": "exceptions",
-      "title": "Exception Hierarchy",
-      "exceptions": [
-        {
-          "name": "SquareError",
-          "description": "Base exception. Carries message, status_code, and code.",
-          "http_status": null
-        },
-        {
-          "name": "SquareAuthError",
-          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
-          "http_status": [401, 403]
-        },
-        {
-          "name": "SquareRateLimitError",
-          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
-          "http_status": 429
-        },
-        {
-          "name": "SquareNotFoundError",
-          "description": "Raised on 404 Not Found. Carries resource name and resource ID.",
-          "http_status": 404
-        },
-        {
-          "name": "SquareNetworkError",
-          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
-          "http_status": null
-        },
-        {
-          "name": "SquareServerError",
-          "description": "Raised on 5xx responses from Square. Retried.",
-          "http_status": "5xx"
-        }
-      ]
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Square, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: circuit_breaker, error_handling, normalizer, oauth2, pagination, rate_limiting, retry.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `SquareError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nSquareError(Exception)\n  SquareAuthError(SquareError)\n  SquareRateLimitError(SquareError)\n  SquareNotFoundError(SquareError)\n  SquareNetworkError(SquareError)\n  SquareServerError(SquareError)\n```\n\n### When each is raised\n\n- **`SquareError`** \u2014 Base exception for all Square connector errors.\n- **`SquareAuthError`** \u2014 Raised when Square rejects the token (401/403).\n- **`SquareRateLimitError`** \u2014 Raised on 429 Too Many Requests from Square.\n- **`SquareNotFoundError`** \u2014 Raised when a requested Square resource does not exist (404).\n- **`SquareNetworkError`** \u2014 Raised on transient network failures (timeouts, connection errors).\n- **`SquareServerError`** \u2014 Raised on 5xx responses from Square.\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd square_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **117** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `SQUARE_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
     },
     {
       "id": "troubleshooting",
       "title": "Troubleshooting",
-      "items": [
-        {
-          "problem": "401 Unauthorized",
-          "cause": "The access_token has expired or been revoked.",
-          "solution": "Re-run the OAuth flow by calling authorize() and completing the Square authorization in the browser to obtain a fresh access_token."
-        },
-        {
-          "problem": "403 Forbidden — missing scope",
-          "cause": "The OAuth application does not have one or more required scopes (PAYMENTS_READ, ORDERS_READ, CUSTOMERS_READ, ITEMS_READ, MERCHANT_PROFILE_READ).",
-          "solution": "In the Square Developer Dashboard, update your application's OAuth scopes and re-authorize."
-        },
-        {
-          "problem": "429 Too Many Requests",
-          "cause": "Square per-application rate limit exceeded.",
-          "solution": "The connector retries automatically with exponential backoff, honouring the Retry-After header. For large data sets, schedule syncs during off-peak hours."
-        },
-        {
-          "problem": "Connector health is DEGRADED",
-          "cause": "Transient network errors have tripped the circuit breaker (5 consecutive failures).",
-          "solution": "Resolve the underlying network or auth issue, then trigger a health check to reset the circuit breaker."
-        },
-        {
-          "problem": "documents_failed > 0 in sync result",
-          "cause": "One or more Square records returned unexpected data causing normalization to fail.",
-          "solution": "Check connector logs for which record IDs failed. Inspect those records in the Square Dashboard."
-        },
-        {
-          "problem": "list_orders returns empty results",
-          "cause": "The location_id passed to list_orders does not match any active Square location for the merchant.",
-          "solution": "Call the Square Locations API (GET /v2/locations) to retrieve valid location IDs and use one of those."
-        }
-      ]
+      "content": "The most common failure modes for the Square connector and how to resolve them.\n\n| Symptom | Probable cause | Resolution |\n|---------|----------------|------------|\n| `401 Unauthorized` on every call | API key revoked, OAuth token expired without a valid refresh token, or wrong account | Re-run the install flow with fresh credentials; check the provider audit log for forced revocation |\n| `403 Forbidden` on specific endpoints | Authenticated identity lacks the required scope or role | Grant the missing scope (see **Authentication**), then re-authorize |\n| `404 Not Found` for resources that should exist | Tenant / workspace ID mismatch \u2014 credentials belong to a different scope | Verify the workspace ID in `install_fields` matches the credential's scope |\n| `429 Too Many Requests` storm | Sync running concurrently with another integration that shares the rate-limit bucket | Stagger sync schedules; the connector already retries with backoff but cannot exceed the provider's per-account quota |\n| Sync returns `PARTIAL` status | One or more resource types failed (see `SyncResult.errors`) | Re-run sync; if the same resource fails repeatedly, inspect the error in the audit log and open an issue |\n| `CircuitBreakerOpen` raised | 5 consecutive failures tripped the breaker | Wait 30s \u2014 the breaker self-heals \u2014 or call `health_check()` to force a probe |\n| Connector loads but `health_check()` reports `unhealthy` | Credentials present but invalid | Inspect `health.error` for the upstream message; usually a typo'd key or revoked grant |\n| `MissingConfigError` at startup | Required `install_field` not supplied | Re-install via the UI and fill the highlighted field |\n\n### Diagnostic checklist\n\n1. `await connector.health_check()` \u2014 quickest probe; returns the upstream's verbatim error if the credentials are bad.\n2. Check the connector audit entries in shielva-sop \u2014 every API call is logged with `outcome` (`Success`/`Denied`/`Failure`) and a `correlation_id`.\n3. Reproduce the failing call in isolation with `curl` against the provider API using the same credentials \u2014 if curl also fails, the credentials are the problem, not the connector.\n4. Inspect `connector.metrics` if you have observability enabled \u2014 request counts, error rates, and p99 latency per method are exported.",
+      "children": []
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Square account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Square against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Square propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `SquareConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Square connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Square connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
     }
   ]
 }
