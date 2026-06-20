@@ -1,0 +1,63 @@
+{
+  "title": "Freshworks CRM Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Freshworks CRM** connector integrates Shielva with the [Freshworks CRM REST API v2](https://developer.freshsales.io/api/) to sync contacts, deals, and sales accounts into your Shielva knowledge base.\n\nFreshworks CRM (formerly Freshsales) is a full-featured CRM platform used by sales teams to manage customer relationships, pipelines, and account data. This connector exposes **9 API methods** across 3 resource domains — Contacts, Deals, and Accounts — and normalises all data to Shielva's `ConnectorDocument` schema for downstream search and AI workflows.\n\n**Key capabilities:**\n- Full sync of contacts, deals, and accounts with page-based pagination\n- Token-based authentication: `Authorization: Token token={api_key}`\n- Stable document IDs via SHA-256 prefix keyed on resource type + ID\n- Typed exception hierarchy with automatic retry (exponential backoff, 3 attempts)\n- Auth errors never retried — fail-fast on invalid credentials\n- Multi-page support via Freshworks CRM `meta.total_pages` response envelope"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Freshworks CRM connector running in under 5 minutes.\n\n### 1. Get your API Key\n\n1. Log in to your Freshworks CRM account.\n2. Click your **avatar** (top-right) → **Profile Settings**.\n3. Navigate to the **API Settings** tab and copy your API Key.\n\n### 2. Find your domain\n\nYour domain is the subdomain in your Freshworks CRM URL: if you access `https://acme.myfreshworks.com`, your domain is `acme`.\n\n### 3. Install\n\nIn the Shielva integration builder:\n1. Navigate to **Integrations → Freshworks CRM**.\n2. Enter your **Domain** (just the subdomain, e.g. `acme`) and **API Key**.\n3. Click **Install**.\n\nThe connector calls `GET /selector/owners` to validate credentials and returns the number of owners found on success.\n\n### 4. Run a sync\n\n```python\nasync with FreshworksCRMConnector(config={\"domain\": \"acme\", \"api_key\": \"YOUR_KEY\"}) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_crm_001\")\n    print(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Freshworks CRM connector uses **Token-based API Key authentication**.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Domain | `domain` | string | Yes | Your Freshworks CRM subdomain, e.g. `acme` from `acme.myfreshworks.com` |\n| API Key | `api_key` | password | Yes | From Profile Settings → API Settings |\n\n### How it works\n\nEvery API request sends the API key in the Authorization header:\n\n```\nAuthorization: Token token={api_key}\n```\n\nThis is **not** HTTP Basic Auth and is **not** Bearer auth. The exact format `Token token=` is required by the Freshworks CRM API.\n\n### Install validation\n\nDuring `install()`, the connector calls `GET /crm/sales/api/v2/selector/owners`. A `401` or `403` response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network failure sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Security\n\n- The API key is stored encrypted in the Shielva vault and never logged.\n- API keys can be found and regenerated in Freshworks CRM under Profile Settings → API Settings.\n- Admin access is not required — Agent access is sufficient for read-only sync."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Freshworks CRM connector requires two install fields.\n\n### Install fields\n\n```json\n{\n  \"domain\": \"acme\",\n  \"api_key\": \"YOUR_FRESHWORKS_CRM_API_KEY\"\n}\n```\n\n### Base URL construction\n\nThe connector builds the base URL as:\n```\nhttps://{domain}.myfreshworks.com/crm/sales/api/v2\n```\n\nIf you provide a full hostname (e.g. `acme.myfreshworks.com`) or a full URL (e.g. `https://acme.myfreshworks.com`), the client handles it correctly. Bare subdomains (e.g. `acme`) are automatically expanded.\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `per_page` | `100` | Results per page for list operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 9 API methods across 3 resource domains.",
+      "children": [
+        {
+          "id": "contacts",
+          "title": "Contacts",
+          "content": "Fetch CRM contacts (individuals).\n\n### `list_contacts(page, per_page)`\nReturns one page of contacts from `POST /contacts/filters`.\n\n```python\ncontacts = await connector.list_contacts(page=1, per_page=100)\n# Returns: list of contact dicts\n```\n\n**Freshworks CRM endpoint:** `POST /crm/sales/api/v2/contacts/filters`\n\n**Response envelope:**\n```json\n{\"contacts\": [...], \"meta\": {\"total_pages\": 5, \"current_page\": 1}}\n```\n\n---\n\n### `get_contact(contact_id)`\nFetch a single contact by ID.\n\n```python\ncontact = await connector.get_contact(101)\n# Single-record responses are unwrapped from {\"contact\": {...}}\n```\n\n**Freshworks CRM endpoint:** `GET /crm/sales/api/v2/contacts/{id}`"
+        },
+        {
+          "id": "deals",
+          "title": "Deals",
+          "content": "Fetch CRM deals (opportunities) from the pipeline.\n\n### `list_deals(page, per_page)`\nReturns one page of deals from `POST /deals/filters`.\n\n```python\ndeals = await connector.list_deals(page=1)\n```\n\n**Freshworks CRM endpoint:** `POST /crm/sales/api/v2/deals/filters`\n\n**Response envelope:**\n```json\n{\"deals\": [...], \"meta\": {\"total_pages\": 3, \"current_page\": 1}}\n```\n\n---\n\n### `get_deal(deal_id)`\nFetch a single deal by ID.\n\n```python\ndeal = await connector.get_deal(201)\n```\n\n**Freshworks CRM endpoint:** `GET /crm/sales/api/v2/deals/{id}`"
+        },
+        {
+          "id": "accounts",
+          "title": "Accounts",
+          "content": "Fetch CRM sales accounts (companies).\n\n### `list_accounts(page, per_page)`\nReturns one page of accounts from `POST /sales_accounts/filters`.\n\n```python\naccounts = await connector.list_accounts(page=1)\n```\n\n**Freshworks CRM endpoint:** `POST /crm/sales/api/v2/sales_accounts/filters`\n\n**Response envelope:**\n```json\n{\"sales_accounts\": [...], \"meta\": {\"total_pages\": 2, \"current_page\": 1}}\n```\n\n---\n\n### `get_account(account_id)`\nFetch a single account by ID.\n\n```python\naccount = await connector.get_account(301)\n```\n\n**Freshworks CRM endpoint:** `GET /crm/sales/api/v2/sales_accounts/{id}`"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Ingestion",
+      "content": "The `sync()` method syncs contacts, deals, and accounts in sequence with full pagination.\n\n### How sync works\n\n1. **Contacts:** pages from `page=1` with `per_page=100`; stops when `current_page >= total_pages` or response is empty.\n2. **Deals:** same pagination pattern.\n3. **Accounts:** same pagination pattern.\n4. Each normalised document calls `_ingest_document(doc, kb_id)` when `kb_id` is provided.\n\n### Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `full` | bool | `False` | Reserved for future incremental filtering; currently syncs all records |\n| `kb_id` | str | `\"\"` | Knowledge base ID to ingest into; skipped if empty |\n\n### Normalized document schema\n\n**Contact:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"contact:\" + contact_id)[:16] |\n| `title` | `Contact: {display_name}` |\n| `content` | name, email, phone, job title, company, LinkedIn |\n| `source_url` | `https://{domain}.myfreshworks.com/crm/sales/contacts/{id}` |\n\n**Deal:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"deal:\" + deal_id)[:16] |\n| `title` | `Deal: {name}` |\n| `content` | name, amount, stage, probability, expected close, account ID |\n| `source_url` | `https://{domain}.myfreshworks.com/crm/sales/deals/{id}` |\n\n**Account:**\n| Field | Source |\n|-------|--------|\n| `source_id` | sha256(\"account:\" + account_id)[:16] |\n| `title` | `Account: {name}` |\n| `content` | name, website, phone, industry, employees, revenue |\n| `source_url` | `https://{domain}.myfreshworks.com/crm/sales/sales-accounts/{id}` |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector raises typed exceptions from `exceptions.py` for all error conditions.\n\n### Exception hierarchy\n\n```\nFreshworksCRMError (base)\n├── FreshworksCRMAuthError       — 401 / 403: invalid or missing API key\n├── FreshworksCRMRateLimitError  — 429: too many requests (includes retry_after)\n├── FreshworksCRMNotFoundError   — 404: resource not found\n└── FreshworksCRMNetworkError    — 5xx / connection errors / timeouts\n```\n\n### Retry behaviour\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `FreshworksCRMRateLimitError` (429) | Yes | Uses `Retry-After` header if present, else exponential backoff |\n| `FreshworksCRMNetworkError` (5xx / timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `FreshworksCRMAuthError` (401 / 403) | No | Fail-fast — check API key |\n| `FreshworksCRMNotFoundError` (404) | No | Fail-fast — check resource ID |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common issues and their fixes.\n\n### `health=OFFLINE` after install\n\n**Cause:** Invalid API key or wrong domain.\n\n**Fix:**\n- Check domain is just the subdomain (e.g. `acme`, not `acme.myfreshworks.com`).\n- Re-copy the API key from Profile Settings → API Settings.\n\n---\n\n### `FreshworksCRMAuthError: Authentication failed`\n\n**Cause:** Stored API key was revoked or is incorrect.\n\n**Fix:** Regenerate in Freshworks CRM → Profile Settings → API Settings. Update connector via Shielva ACP → Integrations → Freshworks CRM → Edit.\n\n---\n\n### `FreshworksCRMRateLimitError: 429 Too Many Requests`\n\n**Cause:** Freshworks CRM API rate limit exceeded.\n\n**Fix:** The connector retries automatically with exponential backoff. If persistent, reduce sync frequency or upgrade your Freshworks CRM plan.\n\n---\n\n### Sync returns 0 documents\n\n**Cause:** CRM account is empty, or no records match the current filter.\n\n**Fix:** Run with `full=True`. Verify your CRM account contains contacts, deals, or accounts."
+    }
+  ]
+}
