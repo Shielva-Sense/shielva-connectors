@@ -1,0 +1,44 @@
+{
+  "connector_type": "workday",
+  "name": "Workday",
+  "display_name": "Workday",
+  "provider": "Workday",
+  "service": "workday",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync workers, organizations, and HR data from Workday.",
+  "category": "hr",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "description": "The OAuth 2.0 Client ID from your Workday API Client configuration."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "The OAuth 2.0 Client Secret from your Workday API Client configuration."
+    },
+    {
+      "key": "hostname",
+      "label": "Workday Hostname",
+      "type": "string",
+      "required": true,
+      "placeholder": "wd2-impl-services1.workday.com",
+      "description": "Your Workday API hostname (e.g. 'wd2-impl-services1.workday.com')."
+    },
+    {
+      "key": "tenant",
+      "label": "Tenant Name",
+      "type": "string",
+      "required": true,
+      "description": "Your Workday tenant name (the subdomain in your Workday URL)."
+    }
+  ],
+  "capabilities": ["sync", "health_check", "list_workers", "list_organizations", "list_locations"],
+  "resources": ["workers", "organizations", "jobProfiles", "locations"]
+}
