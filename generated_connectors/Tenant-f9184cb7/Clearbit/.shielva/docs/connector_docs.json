@@ -1,0 +1,163 @@
+{
+  "title": "Clearbit Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Clearbit connector** integrates with the Clearbit B2B data enrichment API. It enables Shielva to look up rich company and person data by domain or email and normalize results into ConnectorDocuments for the knowledge base.\n\nThis connector uses **HTTP Basic Auth** — the `api_key` as the username with an **empty password** on every request.\n\n**Key capabilities:**\n- Validate credentials via `enrich_company('clearbit.com')` on install and health check\n- Enrich a company by domain → normalized `ConnectorDocument` (type=company)\n- Enrich a person by email → normalized `ConnectorDocument` (type=person)\n- Combined person + company lookup in a single API call\n- Company name autocomplete (unauthenticated)\n- IP-based company reveal\n- Automatic retry with exponential back-off\n- Stable document IDs via `SHA-256(prefix:key)[:16]` for deduplication\n\n**Important:** Clearbit is a **lookup-based API**, not a list/bulk API. `sync()` returns 0 documents by design — data is fetched on-demand via the enrichment methods.",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`clearbit` — registered in ACP as **Clearbit**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Clearbit / HubSpot (Clearbit B2B Enrichment REST API)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates `api_key` via `enrich_company('clearbit.com')`; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Same ping; 404 on the test domain is still HEALTHY (auth passed) |\n| `sync()` | Returns COMPLETED with 0 documents — Clearbit has no bulk list endpoint |\n| `enrich_company(domain)` | GET company.clearbit.com/v2/companies/find — returns ConnectorDocument |\n| `enrich_person(email)` | GET person.clearbit.com/v2/people/find — returns ConnectorDocument |\n| `combined_lookup(email)` | GET person.clearbit.com/v2/combined/find — person + company in one call |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **HTTP Basic Auth**. The `api_key` is sent as the username and an **empty string** as the password in a standard `Authorization: Basic base64(api_key:)` header on every request (except the unauthenticated autocomplete endpoint). This is managed by `aiohttp.BasicAuth(api_key, '')`.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — find your API key in Clearbit Dashboard → Settings → API Keys."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Clearbit secret API key (begins with `sk-`) |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Credential Validation",
+          "content": "The connector validates the key by calling `GET company.clearbit.com/v2/companies/find?domain=clearbit.com`. A 401 or 403 returns `INVALID_CREDENTIALS`. A 404 (company not in Clearbit's database) is treated as HEALTHY because the auth header was accepted. A network error returns `FAILED`."
+        },
+        {
+          "id": "credential-security",
+          "title": "Credential Security",
+          "content": "The `api_key` is stored AES-256-GCM encrypted at rest via the Shielva vault. It never appears in log output."
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `ClearbitHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the API key and establishes the connector.\n\n**Steps:**\n1. Check `api_key` is non-empty → MISSING_CREDENTIALS if not.\n2. Call `get_account_status()` (enrich clearbit.com) via `with_retry`.\n3. On 404 (not in database but auth accepted) → still HEALTHY/CONNECTED.\n4. On success → create fresh http_client.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Clearbit')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` — missing key\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` — network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nPings Clearbit by enriching clearbit.com and returns health.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED)` — success or 404\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` — network error"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, **kwargs) -> SyncResult`\n\nClearbit is a lookup-based enrichment API with no bulk list endpoint. `sync()` returns `COMPLETED` with 0 documents and an explanatory message. Enrichment data is retrieved on-demand via `enrich_company()`, `enrich_person()`, and `combined_lookup()`.\n\n**Returns:** `SyncResult(status=COMPLETED, documents_found=0, documents_synced=0, documents_failed=0)`"
+        },
+        {
+          "id": "enrich-company",
+          "title": "enrich_company()",
+          "content": "**Signature:** `async def enrich_company(self, domain: str) -> ConnectorDocument`\n\nEnriches a company by domain.\n\n**Parameters:**\n- `domain` — Company domain (e.g. `stripe.com`)\n\n**Returns:** Normalized `ConnectorDocument` with type=company, stable ID = SHA-256('company:'+domain)[:16]\n\n**Raises:**\n- `ClearbitNotFoundError` if no company found\n- `ClearbitAuthError` if API key rejected"
+        },
+        {
+          "id": "enrich-person",
+          "title": "enrich_person()",
+          "content": "**Signature:** `async def enrich_person(self, email: str) -> ConnectorDocument`\n\nEnriches a person by email.\n\n**Parameters:**\n- `email` — Person's work email (e.g. `alex@stripe.com`)\n\n**Returns:** Normalized `ConnectorDocument` with type=person, stable ID = SHA-256('person:'+email)[:16]\n\n**Raises:**\n- `ClearbitNotFoundError` if no person found\n- `ClearbitAuthError` if API key rejected"
+        },
+        {
+          "id": "combined-lookup",
+          "title": "combined_lookup()",
+          "content": "**Signature:** `async def combined_lookup(self, email: str) -> ConnectorDocument`\n\nPerforms a combined person + company lookup in a single API call.\n\n**Parameters:**\n- `email` — Person's work email\n\n**Returns:** Normalized `ConnectorDocument` with type=combined, stable ID = SHA-256('combined:'+email)[:16]. Contains both person and company metadata.\n\n**Raises:**\n- `ClearbitNotFoundError` if no data found\n- `ClearbitAuthError` if API key rejected"
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `ClearbitHTTPClient` (`client/http_client.py`) using `aiohttp.ClientSession`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Clearbit API Call | Auth |\n|--------|------------------|------|\n| `enrich_company(domain)` | `GET company.clearbit.com/v2/companies/find` | Basic Auth |\n| `enrich_person(email)` | `GET person.clearbit.com/v2/people/find` | Basic Auth |\n| `combined_lookup(email)` | `GET person.clearbit.com/v2/combined/find` | Basic Auth |\n| `search_companies(query)` | `GET autocomplete.clearbit.com/v1/companies/suggest` | None |\n| `reveal_ip(ip)` | `GET reveal.clearbit.com/v1/companies/find` | Basic Auth |\n| `get_account_status()` | `enrich_company('clearbit.com')` | Basic Auth |"
+        },
+        {
+          "id": "error-mapping",
+          "title": "Error Mapping",
+          "content": "HTTP status codes are mapped to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 202 Accepted | `ClearbitNotFoundError` (enrichment pending — IS retried) |\n| 401 | `ClearbitAuthError` |\n| 403 | `ClearbitAuthError` |\n| 404 | `ClearbitNotFoundError` |\n| 422 | `ClearbitError` |\n| 429 | `ClearbitRateLimitError` (with retry_after) |\n| Connection/timeout | `ClearbitNetworkError` |\n| 5xx | `ClearbitError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` (configurable)\n- Back-off: base 1s × 2^attempt + random jitter (0–0.5s), capped at 30s\n- Skips retry on `ClearbitAuthError` — credential fix is needed\n- For `ClearbitRateLimitError`: honours `Retry-After` header if > 0, otherwise uses back-off formula\n- Retries on all other `ClearbitError` subclasses including `ClearbitNotFoundError` (202 pending)"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_company()`, `normalize_person()`, and `normalize_combined()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "company-document",
+          "title": "Company ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('company:clearbit.com')[:16]>\",\n  \"title\": \"Company: Clearbit\",\n  \"content\": \"Company: Clearbit\\nDomain: clearbit.com\\nIndustry: Software\\nLocation: San Francisco, United States\",\n  \"source_url\": \"https://clearbit.com/companies/clearbit.com\",\n  \"metadata\": {\n    \"type\": \"company\",\n    \"name\": \"Clearbit\",\n    \"domain\": \"clearbit.com\",\n    \"industry\": \"Software\",\n    \"location\": \"San Francisco, United States\",\n    \"employees\": 250,\n    \"founded_year\": 2012\n  }\n}\n```"
+        },
+        {
+          "id": "person-document",
+          "title": "Person ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('person:alex@stripe.com')[:16]>\",\n  \"title\": \"Person: Alex Johnson\",\n  \"content\": \"Person: Alex Johnson\\nEmail: alex@stripe.com\\nTitle: Software Engineer\\nCompany: Stripe\",\n  \"metadata\": {\n    \"type\": \"person\",\n    \"name\": \"Alex Johnson\",\n    \"email\": \"alex@stripe.com\",\n    \"title\": \"Software Engineer\",\n    \"company\": \"Stripe\"\n  }\n}\n```"
+        },
+        {
+          "id": "combined-document",
+          "title": "Combined ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256('combined:alex@stripe.com')[:16]>\",\n  \"title\": \"Combined: Alex Johnson @ Clearbit\",\n  \"content\": \"Person: Alex Johnson\\nEmail: alex@stripe.com\\nTitle: Software Engineer\\nCompany: Clearbit\\nCompany domain: clearbit.com\\nIndustry: Software\",\n  \"metadata\": {\n    \"type\": \"combined\",\n    \"person_name\": \"Alex Johnson\",\n    \"email\": \"alex@stripe.com\",\n    \"title\": \"Software Engineer\",\n    \"company_name\": \"Clearbit\",\n    \"company_domain\": \"clearbit.com\",\n    \"industry\": \"Software\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "All stable IDs are `SHA-256(prefix + ':' + key)[:16]` where prefix is one of `company`, `person`, or `combined`. The same domain or email always produces the same Shielva document ID across enrichment calls, enabling upsert deduplication."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `ClearbitError` (base) in `exceptions.py`:\n\n```\nClearbitError (base)\n├── ClearbitAuthError            — 401, 403 responses\n├── ClearbitNetworkError         — connectivity failures, timeouts\n├── ClearbitNotFoundError        — 404 Not Found + 202 Pending (resource, identifier attrs)\n└── ClearbitRateLimitError       — 429 Too Many Requests (has retry_after attr)\n```\n\nCallers can catch the base `ClearbitError` or specific subclasses for finer control."
+      },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `api_key is required` | No key provided | Enter the API Key in the install form |\n| `401 Unauthorized` | Invalid API key | Verify key in Clearbit → Settings → API Keys |\n| `403 Forbidden` | Wrong project / no access | Confirm you're using the correct account's key |\n| `404 Not Found` for domain/email | No Clearbit data for this entity | Expected for unknown domains/emails; not an error |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| 202 Accepted | Enrichment queued asynchronously | Connector retries; may take a few seconds |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (105 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/clearbit_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 105 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
