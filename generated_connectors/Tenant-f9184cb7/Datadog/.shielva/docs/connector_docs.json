@@ -1,0 +1,97 @@
+{
+  "title": "Datadog Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Datadog connector syncs monitors, dashboards, hosts, and events from Datadog's v1 and v2 APIs into the Shielva knowledge base. It is used by infrastructure, SRE, and DevOps teams who want AI-powered analysis of alerting posture, dashboard coverage, host inventory, and recent events across their Datadog organization.\n\n**Key capabilities:**\n- Sync all monitors with tag-based filtering and automatic pagination (up to 20 pages × 100 monitors)\n- Sync all dashboards from the dashboards list endpoint\n- Sync host inventory with offset pagination (up to 20 pages × 100 hosts)\n- Sync recent events from the last 24 hours (configurable time range, up to 5 pages)\n- Query log events via the v2 Logs Search API with cursor-based pagination\n- Search available metric names by prefix\n- List all service check results\n- Multi-site support: US (`datadoghq.com`), EU (`datadoghq.eu`), US3 (`us3.datadoghq.com`)\n- Automatic retry on transient failures via `with_retry()`\n\n**Auth model:** Dual-key — `DD-API-KEY` + `DD-APPLICATION-KEY` headers on every request.\n\n**Resources synced:** `monitors`, `dashboards`, `hosts`, `events`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Obtain your Datadog API Key and Application Key\n\n1. Log in to your Datadog organization.\n2. Go to **Organization Settings → API Keys** and copy an existing key or create a new one.\n3. Go to **Organization Settings → Application Keys** and copy an existing key or create a new one.\n\n### 2. Identify your Datadog site\n\n| Site | Value |\n|---|---|\n| US (default) | `datadoghq.com` |\n| EU | `datadoghq.eu` |\n| US3 | `us3.datadoghq.com` |\n\n### 3. Install the connector\n\n```python\nimport asyncio\nfrom connector import DatadogConnector\n\nasync def main():\n    connector = DatadogConnector(\n        tenant_id=\"your-tenant-id\",\n        connector_id=\"datadog-prod\",\n        config={\n            \"api_key\": \"your_dd_api_key\",\n            \"app_key\": \"your_dd_application_key\",\n            \"site\": \"datadoghq.com\",  # omit to default to US\n        },\n    )\n    result = await connector.install()\n    print(result.health)       # ConnectorHealth.HEALTHY\n    print(result.auth_status)  # AuthStatus.CONNECTED\n    print(result.message)      # \"Connected to Datadog (datadoghq.com)\"\n\nasyncio.run(main())\n```\n\n### 4. Run a health check\n\n```python\nhealth = await connector.health_check()\nprint(health.health)    # ConnectorHealth.HEALTHY\nprint(health.message)   # \"Connected to Datadog (datadoghq.com)\"\n```\n\n### 5. Sync all observability data\n\n```python\nasync with DatadogConnector(\n    tenant_id=\"t1\",\n    connector_id=\"dd-prod\",\n    config={\"api_key\": \"...\", \"app_key\": \"...\"},\n) as connector:\n    result = await connector.sync(kb_id=\"my-kb-id\")\n    print(f\"Found: {result.documents_found}, Synced: {result.documents_synced}\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** `api_key` (dual-key)\n\nDatadog requires **two keys** sent as headers on every request:\n\n```\nDD-API-KEY: {api_key}\nDD-APPLICATION-KEY: {app_key}\n```\n\n### Validation endpoint\n\n`GET https://api.{site}/api/v1/validate`\n\nBoth `install()` and `health_check()` call this endpoint. A `200` response confirms both keys are valid. A `403` raises `DatadogAuthError`.\n\n### Key differences\n\n| Key | Purpose | Where to find |\n|---|---|---|\n| `api_key` | Identifies the Datadog organization; used for sending data and querying the API | Organization Settings → API Keys |\n| `app_key` | Grants read access to organization data; scoped to the user who created it | Organization Settings → Application Keys |\n\n### Site routing\n\nThe `site` config field controls the API base URL:\n\n```\nhttps://api.{site}/api/v1/...\nhttps://api.{site}/api/v2/...\n```\n\nIf `site` is omitted or empty, the connector defaults to `datadoghq.com`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Fields provided during connector installation (from `metadata/connector.json`):\n\n| Field | Type | Required | Description |\n|---|---|---|---|\n| `api_key` | `password` | Yes | Datadog API Key. Sent as `DD-API-KEY` header on every request. Found in Organization Settings → API Keys. |\n| `app_key` | `password` | Yes | Datadog Application Key. Sent as `DD-APPLICATION-KEY` header. Found in Organization Settings → Application Keys. |\n| `site` | `string` | No | Datadog site region. Options: `datadoghq.com` (US, default), `datadoghq.eu` (EU), `us3.datadoghq.com` (US3). |\n\n**Runtime pagination caps (set in `connector.py`, not configurable via install fields):**\n\n| Constant | Value | Description |\n|---|---|---|\n| `_MAX_MONITOR_PAGES` | `20` | Maximum pages fetched for monitors (20 × 100 = 2000 monitors max) |\n| `_MAX_HOST_PAGES` | `20` | Maximum pages fetched for hosts (20 × 100 = 2000 hosts max) |\n| `_MAX_EVENT_PAGES` | `5` | Maximum pages fetched for events per sync |\n| `_EVENT_WINDOW_S` | `86400` | Default event sync window in seconds (24 hours) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The `DatadogConnector` class exposes the following public async methods.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates `api_key` and `app_key` are present, then calls `GET /api/v1/validate` to confirm both keys are accepted by Datadog.\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | `message` |\n|---|---|---|---|\n| `api_key` missing | `OFFLINE` | `MISSING_CREDENTIALS` | `\"api_key is required\"` |\n| `app_key` missing | `OFFLINE` | `MISSING_CREDENTIALS` | `\"app_key is required\"` |\n| Keys rejected (403) | `OFFLINE` | `INVALID_CREDENTIALS` | Datadog error message |\n| Unexpected error | `OFFLINE` | `FAILED` | Exception message |\n| Success | `HEALTHY` | `CONNECTED` | `\"Connected to Datadog (datadoghq.com)\"` |\n\n```python\nfrom connector import DatadogConnector\n\nconnector = DatadogConnector(\n    tenant_id=\"t1\",\n    connector_id=\"dd-prod\",\n    config={\"api_key\": \"abc\", \"app_key\": \"xyz\", \"site\": \"datadoghq.com\"},\n)\nresult = await connector.install()\nprint(result.connector_id)  # \"dd-prod\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /api/v1/validate` and returns the current connector health. Distinguishes between auth errors and transient network failures.\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` |\n|---|---|---|\n| Either key missing | `OFFLINE` | `MISSING_CREDENTIALS` |\n| Auth rejected | `OFFLINE` | `INVALID_CREDENTIALS` |\n| Network error | `DEGRADED` | `FAILED` |\n| Success | `HEALTHY` | `CONNECTED` |\n\n```python\nresult = await connector.health_check()\nprint(result.health)    # ConnectorHealth.HEALTHY\nprint(result.message)   # \"Connected to Datadog (datadoghq.com)\"\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs monitors, dashboards, hosts, and events (last 24 hours) from Datadog. Each resource type is synced independently — a failure on one type does not abort the others.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `full` | `bool` | `False` | Reserved for future full/incremental mode distinction (currently ignored) |\n| `since` | `Any` | `None` | Reserved for incremental sync start time (currently ignored) |\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When non-empty, documents are ingested via `_ingest_document()`. |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|---|---|---|\n| `status` | `SyncStatus` | `COMPLETED` if zero failures; `PARTIAL` if any failed or nothing was found |\n| `documents_found` | `int` | Total monitors + dashboards + hosts + events discovered |\n| `documents_synced` | `int` | Successfully normalized and ingested |\n| `documents_failed` | `int` | Documents that raised exceptions during normalization or ingestion |\n\n```python\nresult = await connector.sync(kb_id=\"kb-123\")\nprint(result.status)           # SyncStatus.COMPLETED\nprint(result.documents_found)  # e.g. 215\n```\n\n**Sync order:** monitors → dashboards → hosts → events. Failures in any resource type are swallowed (`except DatadogError: pass`) so the remaining types still sync."
+        },
+        {
+          "id": "method-list-monitors",
+          "title": "list_monitors()",
+          "content": "Fetches all monitors with automatic page-by-page pagination up to `_MAX_MONITOR_PAGES = 20` pages.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `tags` | `list[str] \\| None` | `None` | Optional tag filters, e.g. `[\"env:prod\", \"team:infra\"]` |\n| `page_size` | `int` | `100` | Monitors per page (Datadog max: 1000) |\n\n**Returns:** `list[dict[str, Any]]` — raw Datadog monitor objects\n\n```python\nmonitors = await connector.list_monitors(tags=[\"env:prod\"])\nfor m in monitors:\n    print(m[\"name\"], m[\"overall_state\"])\n```"
+        },
+        {
+          "id": "method-get-monitor",
+          "title": "get_monitor()",
+          "content": "Retrieves a single Datadog monitor by its numeric ID.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `monitor_id` | `int` | Datadog monitor ID |\n\n**Returns:** `dict[str, Any]` — raw Datadog monitor object\n\n```python\nmonitor = await connector.get_monitor(monitor_id=12345)\nprint(monitor[\"name\"], monitor[\"type\"])\n```"
+        },
+        {
+          "id": "method-list-dashboards",
+          "title": "list_dashboards()",
+          "content": "Fetches all dashboards from the Datadog dashboards list endpoint (`GET /api/v1/dashboard`).\n\n**Returns:** `list[dict[str, Any]]` — raw Datadog dashboard summary objects\n\n```python\ndashboards = await connector.list_dashboards()\nfor d in dashboards:\n    print(d[\"id\"], d[\"title\"])\n```"
+        },
+        {
+          "id": "method-list-hosts",
+          "title": "list_hosts()",
+          "content": "Fetches all hosts with offset pagination up to `_MAX_HOST_PAGES = 20` pages.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `count` | `int` | `100` | Hosts per page |\n\n**Returns:** `list[dict[str, Any]]` — raw Datadog host objects from the `host_list` field\n\n```python\nhosts = await connector.list_hosts(count=50)\nfor h in hosts:\n    print(h[\"host_name\"], h[\"up\"])\n```"
+        },
+        {
+          "id": "method-list-events",
+          "title": "list_events()",
+          "content": "Fetches events from Datadog for the last 24 hours by default, or for a custom Unix timestamp range. Paginates up to `_MAX_EVENT_PAGES = 5` pages.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `start` | `int \\| None` | `now - 86400` | Start Unix timestamp (seconds) |\n| `end` | `int \\| None` | `now` | End Unix timestamp (seconds) |\n\n**Returns:** `list[dict[str, Any]]` — raw Datadog event objects\n\n```python\nimport time\nevents = await connector.list_events(\n    start=int(time.time()) - 3600,  # last 1 hour\n    end=int(time.time()),\n)\nfor e in events:\n    print(e[\"title\"], e[\"priority\"])\n```"
+        },
+        {
+          "id": "method-query-logs",
+          "title": "query_logs()",
+          "content": "Searches Datadog log events via the v2 Logs Search API (`POST /api/v2/logs/events/search`). Handles cursor-based pagination automatically up to `limit` events.\n\n**Parameters:**\n\n| Parameter | Type | Default | Description |\n|---|---|---|---|\n| `query` | `str` | required | Datadog log search query, e.g. `'service:api status:error'` |\n| `from_ts` | `int \\| None` | `now - 86400` | Start epoch timestamp (seconds) |\n| `to_ts` | `int \\| None` | `now` | End epoch timestamp (seconds) |\n| `limit` | `int` | `100` | Maximum number of log events to return (max 1000) |\n\n**Returns:** `list[dict[str, Any]]` — Datadog v2 log event objects\n\n```python\nlogs = await connector.query_logs(\n    query=\"service:payments status:error\",\n    limit=200,\n)\nfor log in logs:\n    print(log[\"attributes\"][\"message\"])\n```"
+        },
+        {
+          "id": "method-get-metrics-list",
+          "title": "get_metrics_list()",
+          "content": "Searches available Datadog metric names by a query prefix string.\n\n**Parameters:**\n\n| Parameter | Type | Description |\n|---|---|---|\n| `q` | `str` | Metric name prefix or search string, e.g. `'system'` or `'aws.ec2'` |\n\n**Returns:** `list[str]` — metric name strings matching the query\n\n```python\nmetrics = await connector.get_metrics_list(q=\"aws.ec2\")\nprint(metrics)  # [\"aws.ec2.cpu_utilization\", \"aws.ec2.network_in\", ...]\n```"
+        },
+        {
+          "id": "method-list-service-checks",
+          "title": "list_service_checks()",
+          "content": "Lists all Datadog service check results.\n\n**Returns:** `list[dict[str, Any]]` — service check result dicts\n\n```python\nchecks = await connector.list_service_checks()\nfor c in checks:\n    print(c[\"check\"], c[\"status\"])\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector defines a dedicated exception hierarchy in `exceptions.py`. All exceptions carry `.message`, `.status_code`, and `.code` attributes.\n\n| Exception | HTTP Status | `.code` | Meaning |\n|---|---|---|---|\n| `DatadogError` | varies | varies | Base class for all Datadog connector errors |\n| `DatadogAuthError` | 401 / 403 | — | API key or Application key rejected by Datadog |\n| `DatadogRateLimitError` | 429 | `rate_limit` | Too many requests; `.retry_after` (float, seconds) indicates backoff duration |\n| `DatadogNotFoundError` | 404 | `resource_missing` | The requested monitor, dashboard, or resource does not exist |\n| `DatadogNetworkError` | 5xx / timeout | — | Transient network failure or Datadog API 5xx error |\n\n### How the connector handles each error\n\n- **`DatadogAuthError`** — caught in `install()` and `health_check()`, returned as `AuthStatus.INVALID_CREDENTIALS` and `ConnectorHealth.OFFLINE`.\n- **`DatadogNetworkError`** — caught in `health_check()` and returned as `ConnectorHealth.DEGRADED`. In `sync()`, `with_retry()` retries transient failures automatically.\n- **`DatadogError` in sync resource loops** — caught with `except DatadogError: pass`. A failure syncing monitors does not prevent dashboards, hosts, or events from syncing.\n- **`DatadogRateLimitError`** — raised on 429. The `with_retry()` helper is expected to honour `retry_after` before re-attempting."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `AuthStatus.MISSING_CREDENTIALS` on install\n\n**Cause:** `api_key` or `app_key` (or both) are absent from the config.\n\n**Fix:** Provide both keys:\n```python\nconfig = {\n    \"api_key\": \"your_dd_api_key\",\n    \"app_key\": \"your_dd_app_key\",\n    \"site\": \"datadoghq.com\",  # optional\n}\n```\n\n### `AuthStatus.INVALID_CREDENTIALS` — 403 from Datadog\n\n**Cause:** One or both keys are wrong, revoked, or belong to a different Datadog site than the one configured.\n\n**Fix:**\n1. Confirm both keys in **Datadog → Organization Settings**.\n2. Verify the `site` matches your Datadog region (EU orgs must use `datadoghq.eu`).\n3. Application Keys are user-scoped — ensure the key owner still has the required permissions.\n\n### API calls succeed but monitors/dashboards return empty\n\n**Cause:** The Application Key may lack read permissions, or your organization has no monitors/dashboards.\n\n**Fix:** Confirm the Application Key owner has at least `Read` access in Datadog IAM settings. Test directly:\n```bash\ncurl -H \"DD-API-KEY: your_key\" -H \"DD-APPLICATION-KEY: your_app_key\" \\\n     \"https://api.datadoghq.com/api/v1/monitor\"\n```\n\n### Events return empty\n\n**Cause:** No events were emitted in the last 24 hours, or the event time window is incorrect.\n\n**Fix:** Pass explicit `start` and `end` Unix timestamps to `list_events()` to extend the window.\n\n### Wrong site — SSL or 404 errors on validate\n\n**Cause:** The `site` config value does not match your Datadog organization's region.\n\n**Fix:** Check your Datadog dashboard URL. EU orgs use `app.datadoghq.eu`, US3 orgs use `us3.datadoghq.com`. Set `site` accordingly.\n\n### `DatadogRateLimitError` — 429 Too Many Requests\n\n**Cause:** Datadog rate limits were hit. The v1 API enforces per-key rate limits.\n\n**Fix:** The `with_retry()` helper handles backoff automatically. Reduce sync frequency or increase `page_size` to reduce the number of API calls per sync."
+    }
+  ]
+}
