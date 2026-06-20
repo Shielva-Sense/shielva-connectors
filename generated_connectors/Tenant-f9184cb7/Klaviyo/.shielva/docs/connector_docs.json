@@ -1,0 +1,215 @@
+{
+  "title": "Klaviyo Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Klaviyo connector** integrates with Klaviyo via the REST API v2024-02-15. It enables Shielva to sync profiles, campaigns, lists, and segments from your Klaviyo account into the knowledge base.\n\nThis connector uses **Private API Key** authentication — a single `pk_...` key sent as the `Klaviyo-API-Key` Authorization header on every request.\n\n**Key capabilities:**\n- Validate the API key via `GET /accounts` on install and health check\n- Sync all profiles with cursor-based pagination (handles audiences of any size)\n- Sync email campaigns, subscriber lists, and segments\n- Stable document IDs via SHA-256(resource_id)[:16] for deduplication across syncs\n- Automatic retry with exponential back-off for transient errors and rate limits\n- Circuit breaker (threshold: 5 failures, 60s recovery) for health degradation detection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`klaviyo` — registered in ACP as **Klaviyo**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Klaviyo, Inc. (Klaviyo REST API v2024-02-15 — `https://a.klaviyo.com/api/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key format (must start with 'pk_') and calls GET /accounts; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Calls GET /accounts to verify key; returns account organization name in message |\n| `sync()` | Fetches all profiles (cursor-paginated) + campaigns + lists; normalizes to ConnectorDocuments |\n| `list_profiles(page_size, cursor)` | Cursor-paginated GET /profiles |\n| `get_profile(profile_id)` | GET /profiles/{profile_id} for a single profile |\n| `list_lists(page_size)` | GET /lists — all subscriber lists |\n| `get_list(list_id)` | GET /lists/{list_id} for a single list |\n| `list_campaigns(page_size)` | GET /campaigns — email campaigns |\n| `list_segments(page_size)` | GET /segments — audience segments |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Private API Key** authentication. The key is sent as `Authorization: Klaviyo-API-Key {api_key}` on every request.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — create a Private API key in Klaviyo at Account → Settings → API Keys. The key starts with `pk_`."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Private API Key | `api_key` | password | Yes | Klaviyo Private API key starting with 'pk_' |"
+        },
+        {
+          "id": "key-scopes",
+          "title": "Required Key Scopes",
+          "content": "| Scope | Permission | Purpose |\n|-------|------------|--------|\n| Profiles | Read | Sync subscriber profiles |\n| Campaigns | Read | Sync email campaigns |\n| Lists | Read | Sync subscriber lists |\n| Segments | Read | Sync audience segments |\n| Accounts | Read | Validate key on install and health check |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Key Validation",
+          "content": "The connector validates the key in two steps:\n1. **Format check** — the key must start with `pk_`. Public keys (`pk_` prefix with different structure) or test tokens are rejected with INVALID_CREDENTIALS before any network call.\n2. **API validation** — `GET /accounts` is called. A 401/403 response returns INVALID_CREDENTIALS. Any 5xx or network error returns FAILED."
+        },
+        {
+          "id": "token-security",
+          "title": "Key Security",
+          "content": "Private API keys do not expire unless manually revoked. Shielva stores the key AES-256-GCM encrypted at rest via the vault. Keys can be regenerated at any time from Klaviyo → Account → Settings → API Keys."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `api_key` | Klaviyo Private API key (pk_...) |"
+        },
+        {
+          "id": "api-version",
+          "title": "API Version",
+          "content": "All requests include `revision: 2024-02-15` as required by the Klaviyo API. Changing this header would alter response schemas and is not supported without a connector update."
+        },
+        {
+          "id": "headers",
+          "title": "Request Headers",
+          "content": "Every request includes:\n```\nAuthorization: Klaviyo-API-Key {api_key}\nrevision: 2024-02-15\nAccept: application/json\nContent-Type: application/json\n```"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `KlaviyoHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the API key and establishes the connector.\n\n**Steps:**\n1. Check `api_key` is non-empty → MISSING_CREDENTIALS if not.\n2. Check `api_key` starts with `pk_` → INVALID_CREDENTIALS if not.\n3. Call `GET /accounts` via `with_retry`.\n4. Extract `organization_name` from first account in response.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Klaviyo — Acme Corp')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` — no key\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` — wrong prefix or 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` — network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nPings `GET /accounts` and returns health with account name.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Klaviyo — Acme Corp')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error (circuit breaker not open)\n- `HealthCheckResult(health=OFFLINE, auth_status=FAILED)` on network error (circuit breaker open)"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across three resource types:\n1. **Profiles** — cursor-paginated via `links.next`, normalized via `normalize_profile()`\n2. **Campaigns** — single page (no cursor required for typical account sizes), normalized via `normalize_campaign()`\n3. **Lists** — single page, normalized to simple ConnectorDocuments\n\nCampaign and list failures are non-fatal — profile sync is the primary resource.\n\n**Parameters:**\n- `full` — reserved (all syncs are full by default)\n- `since` — reserved for future incremental support\n- `kb_id` — knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some normalizations fail; `FAILED` when profile API call fails."
+        },
+        {
+          "id": "list-profiles",
+          "title": "list_profiles()",
+          "content": "**Signature:** `async def list_profiles(self, page_size=100, cursor=None) -> dict`\n\nSingle-page call to `GET /profiles`. For multi-page iteration, call repeatedly with the cursor extracted from `links.next`.\n\n**Parameters:**\n- `page_size` — records per page (max 100)\n- `cursor` — opaque cursor string from previous page's `links.next`\n\n**Returns:** JSON:API response with `data` list and `links` object."
+        },
+        {
+          "id": "get-profile",
+          "title": "get_profile()",
+          "content": "**Signature:** `async def get_profile(self, profile_id: str) -> dict`\n\nFetches a single profile via `GET /profiles/{profile_id}`.\n\n**Returns:** JSON:API response with `data` containing the profile resource.\n\n**Raises:** `KlaviyoNotFoundError` if the profile does not exist."
+        },
+        {
+          "id": "list-lists",
+          "title": "list_lists()",
+          "content": "**Signature:** `async def list_lists(self, page_size=100) -> dict`\n\nFetches subscriber lists via `GET /lists`.\n\n**Returns:** JSON:API response with `data` list of list resources."
+        },
+        {
+          "id": "get-list",
+          "title": "get_list()",
+          "content": "**Signature:** `async def get_list(self, list_id: str) -> dict`\n\nFetches a single list via `GET /lists/{list_id}`.\n\n**Returns:** JSON:API response with `data` containing the list resource."
+        },
+        {
+          "id": "list-campaigns",
+          "title": "list_campaigns()",
+          "content": "**Signature:** `async def list_campaigns(self, page_size=100) -> dict`\n\nFetches email campaigns via `GET /campaigns` (filtered to channel=email).\n\n**Returns:** JSON:API response with `data` list of campaign resources."
+        },
+        {
+          "id": "list-segments",
+          "title": "list_segments()",
+          "content": "**Signature:** `async def list_segments(self, page_size=100) -> dict`\n\nFetches audience segments via `GET /segments`.\n\n**Returns:** JSON:API response with `data` list of segment resources."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `KlaviyoHTTPClient` (`client/http_client.py`) using `httpx.AsyncClient`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Klaviyo API Call | Description |\n|--------|-----------------|-------------|\n| `get_accounts()` | `GET /accounts` | Validate key; returns account list |\n| `list_profiles(page_size, cursor)` | `GET /profiles` | Profiles with cursor pagination |\n| `get_profile(profile_id)` | `GET /profiles/{id}` | Single profile |\n| `list_lists(page_size)` | `GET /lists` | All subscriber lists |\n| `get_list(list_id)` | `GET /lists/{id}` | Single list |\n| `list_campaigns(page_size)` | `GET /campaigns` | Email campaigns |\n| `list_segments(page_size)` | `GET /segments` | Audience segments |"
+        },
+        {
+          "id": "pagination",
+          "title": "Pagination",
+          "content": "Klaviyo uses cursor-based pagination. All list responses include:\n```json\n{\n  \"data\": [...],\n  \"links\": {\n    \"self\": \"https://a.klaviyo.com/api/profiles?page[size]=100\",\n    \"next\": \"https://a.klaviyo.com/api/profiles?page[size]=100&page[cursor]=WzE2MjQ...\"\n  }\n}\n```\n`links.next` is `null` when there are no more pages. The connector extracts the `page[cursor]` query param from the next URL via `_extract_cursor()`."
+        },
+        {
+          "id": "error-mapping",
+          "title": "Error Mapping",
+          "content": "HTTP status codes are mapped to typed exceptions:\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `KlaviyoAuthError` |\n| 403 | `KlaviyoAuthError` |\n| 404 | `KlaviyoNotFoundError` |\n| 429 | `KlaviyoRateLimitError` (with retry_after) |\n| Connection/timeout | `KlaviyoNetworkError` |\n| 5xx | `KlaviyoServerError` |\n| Other 4xx | `KlaviyoError` |"
+        },
+        {
+          "id": "json-api-errors",
+          "title": "JSON:API Error Format",
+          "content": "Klaviyo returns errors in JSON:API format:\n```json\n{\n  \"errors\": [\n    {\n      \"id\": \"...\",\n      \"status\": \"401\",\n      \"code\": \"not_authenticated\",\n      \"title\": \"Not Authenticated\",\n      \"detail\": \"The request is not authenticated.\"\n    }\n  ]\n}\n```\nThe HTTP client extracts `errors[0].detail` (falling back to `errors[0].title`) as the error message."
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` (configurable)\n- Back-off: base 1s × 2^attempt + random jitter (0–0.5s), capped at 30s\n- Skips retry on `KlaviyoAuthError` — re-installing with a valid key is required\n- For `KlaviyoRateLimitError`: honours `Retry-After` header if > 0, otherwise uses back-off formula\n- Retries on all other `KlaviyoError` and `KlaviyoNetworkError` subclasses"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_profile()` and `normalize_campaign()` in `helpers/utils.py`, and `_normalize_list()` in `connector.py`.",
+      "children": [
+        {
+          "id": "profile-document",
+          "title": "Profile ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(profile_id)[:16]>\",\n  \"title\": \"Klaviyo profile: Jane Doe <jane@example.com>\",\n  \"content\": \"Profile ID: profile_abc123\\nName: Jane Doe\\nEmail: jane@example.com\\nPhone: +15551234567\\nCreated: 2024-01-15T10:00:00+00:00\\nLocation: San Francisco, CA, US\",\n  \"source_url\": \"https://www.klaviyo.com/profile/profile_abc123\",\n  \"metadata\": {\n    \"profile_id\": \"profile_abc123\",\n    \"email\": \"jane@example.com\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Doe\",\n    \"phone_number\": \"+15551234567\",\n    \"created\": \"2024-01-15T10:00:00+00:00\",\n    \"updated\": \"2024-06-01T09:00:00+00:00\",\n    \"location\": {\"city\": \"San Francisco\", \"region\": \"CA\", \"country\": \"US\"}\n  }\n}\n```"
+        },
+        {
+          "id": "campaign-document",
+          "title": "Campaign ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(campaign_id)[:16]>\",\n  \"title\": \"Klaviyo campaign: Summer Sale 2024\",\n  \"content\": \"Campaign ID: campaign_xyz789\\nName: Summer Sale 2024\\nStatus: sent\\nScheduled at: 2024-07-01T12:00:00+00:00\",\n  \"source_url\": \"https://www.klaviyo.com/campaign/campaign_xyz789\",\n  \"metadata\": {\n    \"campaign_id\": \"campaign_xyz789\",\n    \"name\": \"Summer Sale 2024\",\n    \"status\": \"sent\",\n    \"scheduled_at\": \"2024-07-01T12:00:00+00:00\",\n    \"created_at\": \"2024-06-25T08:00:00+00:00\",\n    \"updated_at\": \"2024-07-01T12:00:00+00:00\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `source_id` field is `SHA-256(klaviyo_resource_id)` truncated to 16 hex characters. This is stable across syncs — the same Klaviyo profile or campaign always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists."
+        },
+        {
+          "id": "json-api-unwrapping",
+          "title": "JSON:API Unwrapping",
+          "content": "Normalizers handle both wrapped responses (top-level API response with `{\"data\": {...}}`) and unwrapped resources (items from a `data` list during pagination). The normalizer inspects the structure and extracts attributes accordingly."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `KlaviyoError` (base) in `exceptions.py`:\n\n```\nKlaviyoError (base)\n├── KlaviyoAuthError          — 401, 403 responses\n│   └── KlaviyoInvalidKeyError — key format invalid or explicitly rejected\n├── KlaviyoNetworkError       — connectivity failures, timeouts\n├── KlaviyoRateLimitError     — 429 Too Many Requests (has retry_after attr)\n├── KlaviyoNotFoundError      — 404 Not Found\n└── KlaviyoServerError        — 5xx responses\n```\n\nCallers can catch the base `KlaviyoError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `api_key is required` | No key provided | Enter the Private API key in the install form |\n| `must start with 'pk_'` | Wrong key type | Use a Private API key, not a public key |\n| `401 Unauthorized` | Invalid or revoked key | Regenerate the key in Klaviyo → Settings → API Keys |\n| `403 Forbidden` | Insufficient key scope | Recreate the key with required scopes (Profiles, Campaigns, Lists, Segments — Read) |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| No profiles returned | Empty account | Verify the account has subscribers |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (47 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/klaviyo_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 47 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
