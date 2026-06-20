@@ -1,0 +1,32 @@
+{
+  "connector_type": "rippling",
+  "name": "Rippling",
+  "provider": "Rippling",
+  "service": "rippling",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "rpl_...",
+      "help": "Generate from Rippling: Settings → API → Create API Key"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_employees",
+    "list_departments",
+    "list_teams",
+    "list_roles",
+    "list_leaves"
+  ],
+  "description": "Sync employee, HR, and organizational data from Rippling.",
+  "long_description": "Connect Shielva to Rippling to sync your HR data — employees, departments, teams, roles, and leave requests — into your knowledge base for AI-powered search and analysis.",
+  "icon": "https://www.rippling.com/favicon.ico",
+  "docs_url": "https://developer.rippling.com/docs",
+  "categories": ["hr", "payroll", "it-management"]
+}
