@@ -1,0 +1,103 @@
+{
+  "title": "SendGrid Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **SendGrid** connector integrates Shielva with the [SendGrid Web API v3](https://docs.sendgrid.com/api-reference) to sync email activity stats, marketing contacts, templates, lists, segments, and suppression data.\n\nSendGrid (by Twilio) is one of the world's largest email delivery platforms, used by developers and marketers to send transactional and marketing email at scale. This connector exposes **11 capabilities**: install, health check, sync, get_stats, list_contacts, get_contact, list_lists, list_segments, list_templates, get_template, and list_suppressions.\n\n**Key capabilities:**\n- Validate API key on install\n- Query daily/weekly/monthly email delivery stats (last 30 days by default)\n- List and paginate marketing contacts with token-based pagination\n- List marketing lists and segments\n- Sync all email templates (dynamic or legacy generations)\n- Retrieve single contacts and templates by ID\n- List global or group-specific suppression emails\n- Full sync loop for contacts + templates with optimistic retry"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The SendGrid connector uses **API Key authentication** — the key is passed as an HTTP Bearer token in every request.\n\n### Credential\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | SendGrid API Key from Settings → API Keys |\n\n### How it works\n\nEvery request to the SendGrid API includes:\n\n```\nAuthorization: Bearer SG.xxxxxxxxxxxxxxxxxxxxx\n```\n\nThe `SendGridHTTPClient` injects this header automatically via `aiohttp.ClientSession` base headers.\n\n### Scopes Required\n\n| Scope | Purpose |\n|-------|---------|\n| `stats.read` | get_stats() and health_check() |\n| `marketing.contacts.read` | list_contacts(), get_contact(), sync() contacts |\n| `marketing.lists.read` | list_lists() |\n| `marketing.segments.read` | list_segments() |\n| `templates.read` | list_templates(), get_template(), sync() templates |\n| `suppression.read` | list_suppressions() |\n\n### Key Types\n\n**Full Access** key — simplest option, covers all scopes.\n**Restricted key** — use minimum scopes listed above for least-privilege.\n\nSendGrid API keys always begin with `SG.`\n\n> Keys are stored encrypted in the Shielva vault and never logged. Rotate via SendGrid Dashboard → Settings → API Keys if compromised."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The SendGrid connector has minimal configuration — only the API key is required.\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"SG.xxxxxxxxxxxxx\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `BASE_URL` | `https://api.sendgrid.com/v3` | SendGrid API base URL |\n| `SYNC_PAGE_SIZE` | `1000` | Results per page for sync operations |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s base, 2× factor, +0.5s jitter |\n| `get_stats default window` | Last 30 days | Used when no dates are provided |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 11 methods. All use `with_retry()` with exponential backoff (skips retry on auth errors).",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the API key is present and initialises the HTTP client.\n\n```python\nresult = await connector.install()\n# result.health       → ConnectorHealth.HEALTHY | OFFLINE\n# result.auth_status  → AuthStatus.CONNECTED | MISSING_CREDENTIALS\n# result.connector_id → connector ID\n# result.message      → human-readable status string\n```\n\nReturns `HEALTHY / CONNECTED` when `api_key` is present, `OFFLINE / MISSING_CREDENTIALS` if absent."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Calls `GET /stats` for today to verify the API key works.\n\n```python\nresult = await connector.health_check()\n# result.health  → HEALTHY | DEGRADED | OFFLINE\n# result.message → 'SendGrid API is reachable' on success\n```\n\n**SendGrid endpoint:** `GET /stats?start_date=today&end_date=today`\n\nReturns `OFFLINE / INVALID_CREDENTIALS` on 401/403. Returns `DEGRADED / FAILED` on network errors."
+        },
+        {
+          "id": "sync",
+          "title": "sync(**kwargs)",
+          "content": "Performs a full sync of marketing contacts and email templates.\n\n```python\n# Basic sync\nresult = await connector.sync()\n\n# With knowledge base ingestion\nresult = await connector.sync(kb_id=\"kb-prod-001\")\n\nprint(result.documents_found)   # contacts + templates found\nprint(result.documents_synced)  # successfully normalized\nprint(result.documents_failed)  # normalization errors\nprint(result.status)            # COMPLETED | PARTIAL | FAILED\n```\n\n**Flow:**\n1. Paginates through all marketing contacts (`GET /marketing/contacts`)\n2. Supports both `_metadata.next` and `next_page_token` pagination keys\n3. Fetches all templates (`GET /templates?generations=dynamic`)\n4. Normalizes each to `ConnectorDocument`\n5. Ingests to knowledge base if `kb_id` provided\n\nReturns `COMPLETED` on zero failures, `PARTIAL` if some items failed, `FAILED` if contacts endpoint is unreachable."
+        },
+        {
+          "id": "list-contacts",
+          "title": "list_contacts(page_size=1000)",
+          "content": "Returns a list of contact dicts from the first page.\n\n```python\ncontacts = await connector.list_contacts(page_size=500)\n# Returns: list[dict] — each contact: {id, email, first_name, last_name, created_at, updated_at, list_ids}\n```\n\n**SendGrid endpoint:** `GET /marketing/contacts?page_size={n}`"
+        },
+        {
+          "id": "get-contact",
+          "title": "get_contact(contact_id)",
+          "content": "Returns a single contact dict by ID.\n\n```python\ncontact = await connector.get_contact(\"contact-uuid-abc123\")\n# Returns full contact object\n```\n\n**SendGrid endpoint:** `GET /marketing/contacts/{id}`\n\nRaises `SendGridNotFoundError` if the contact does not exist."
+        },
+        {
+          "id": "list-lists",
+          "title": "list_lists()",
+          "content": "Returns a list of marketing list dicts.\n\n```python\nlists = await connector.list_lists()\n# Returns: list[dict] — each list: {id, name, contact_count}\n```\n\n**SendGrid endpoint:** `GET /marketing/lists?page_size=100`"
+        },
+        {
+          "id": "list-segments",
+          "title": "list_segments()",
+          "content": "Returns a list of segment dicts.\n\n```python\nsegments = await connector.list_segments()\n# Returns: list[dict] — each segment: {id, name, contacts_count, created_at}\n```\n\n**SendGrid endpoint:** `GET /marketing/segments/2.0?page_size=100`"
+        },
+        {
+          "id": "list-templates",
+          "title": "list_templates(generations='dynamic')",
+          "content": "Returns a list of email template dicts.\n\n```python\ntemplates = await connector.list_templates(generations=\"dynamic\")\n# generations: 'dynamic' | 'legacy' | 'dynamic,legacy'\n# Returns: list[dict] — each: {id, name, generation, versions: [...]}\n```\n\n**SendGrid endpoint:** `GET /templates?generations={g}&page_size=10`"
+        },
+        {
+          "id": "get-template",
+          "title": "get_template(template_id)",
+          "content": "Returns a single template dict with full version details.\n\n```python\ntemplate = await connector.get_template(\"d-xxxxxxxxxxxxxxxxxxxx\")\n# Returns full template object\n```\n\n**SendGrid endpoint:** `GET /templates/{id}`\n\nRaises `SendGridNotFoundError` if the template does not exist."
+        },
+        {
+          "id": "get-stats",
+          "title": "get_stats(start_date=None, end_date=None)",
+          "content": "Returns email delivery statistics. Defaults to the last 30 days when dates are not provided.\n\n```python\n# Last 30 days (default)\nstats = await connector.get_stats()\n\n# Explicit date range\nstats = await connector.get_stats(start_date=\"2026-06-01\", end_date=\"2026-06-30\")\n# Returns: list[dict] — [{\"date\": \"YYYY-MM-DD\", \"stats\": [{\"metrics\": {...}}]}]\n```\n\n**SendGrid endpoint:** `GET /stats?start_date=&end_date=&aggregated_by=day`"
+        },
+        {
+          "id": "list-suppressions",
+          "title": "list_suppressions(group_id=None, page_size=100)",
+          "content": "Returns a list of suppressed email addresses.\n\n```python\n# Global suppressions\nsuppressions = await connector.list_suppressions()\n\n# Group-specific\nsuppressions = await connector.list_suppressions(group_id=12345)\n# Returns: list[dict] — [{email, created, reason}]\n```\n\n**SendGrid endpoints:**\n- Global: `GET /asm/suppressions/global?limit={n}`\n- By group: `GET /asm/groups/{group_id}/suppressions`"
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "The `SendGridHTTPClient` in `client/http_client.py` is the sole owner of HTTP I/O.\n\n### Methods\n\n| Method | Endpoint | Returns |\n|--------|----------|---------|\n| `get_stats(start, end, agg)` | `GET /stats` | `list[dict]` |\n| `list_contacts(page_size, page_token)` | `GET /marketing/contacts` | `dict` |\n| `get_contact(contact_id)` | `GET /marketing/contacts/{id}` | `dict` |\n| `list_lists(page_size)` | `GET /marketing/lists` | `dict` |\n| `list_segments(page_size)` | `GET /marketing/segments/2.0` | `dict` |\n| `list_templates(generations, page_size)` | `GET /templates` | `dict` |\n| `get_template(template_id)` | `GET /templates/{id}` | `dict` |\n| `list_suppressions(group_id, page_size)` | `GET /asm/suppressions/global` or `/asm/groups/{id}/suppressions` | `list[dict]` |\n\n### Error Mapping (`_raise_for_status`)\n\n| HTTP Status | Exception |\n|------------|----------|\n| 401 | `SendGridAuthError` |\n| 403 | `SendGridAuthError` |\n| 404 | `SendGridNotFoundError` |\n| 429 | `SendGridRateLimitError` |\n| 5xx | `SendGridNetworkError` |\n| Other 4xx | `SendGridError` |"
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "All synced items are normalized to `ConnectorDocument`.\n\n### Contact Document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('contact:{id}')[:16]` |\n| `title` | `SendGrid contact: {first_name} {last_name}` |\n| `content` | Contact ID, email, name, created/updated, list IDs |\n| `source_url` | `https://mc.sendgrid.com/contacts` |\n| `metadata.object_type` | `'contact'` |\n| `metadata.sendgrid_id` | raw SendGrid contact UUID |\n| `metadata.email` | contact email |\n| `metadata.first_name` | first name |\n| `metadata.last_name` | last name |\n| `metadata.created_at` | ISO 8601 creation timestamp |\n| `metadata.updated_at` | ISO 8601 update timestamp |\n| `metadata.list_ids` | list of marketing list UUIDs |\n\n### Template Document\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('template:{id}')[:16]` |\n| `title` | `SendGrid template: {name}` |\n| `content` | Template ID, name, generation, active version ID |\n| `source_url` | `https://mc.sendgrid.com/dynamic-templates/{id}` |\n| `metadata.object_type` | `'email_template'` |\n| `metadata.sendgrid_id` | raw SendGrid template ID |\n| `metadata.name` | template name |\n| `metadata.generation` | `'legacy'` or `'dynamic'` |\n| `metadata.active_version_id` | ID of the version where `active=1` |\n| `metadata.version_count` | total number of versions |"
+    },
+    {
+      "id": "exceptions",
+      "title": "Exceptions",
+      "content": "All exceptions inherit from `SendGridError`.\n\n```\nSendGridError (base)                — status_code, code, message\n├── SendGridAuthError               — 401/403: invalid or insufficient-scope key\n├── SendGridNetworkError            — 5xx or connection error\n├── SendGridNotFoundError           — 404: resource not found (resource, resource_id in message)\n└── SendGridRateLimitError          — 429: rate limited; retry_after float field\n```\n\n### Retry Policy\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `SendGridRateLimitError` (429) | Yes | Up to 3 attempts; honours `retry_after` when set |\n| `SendGridNetworkError` (5xx) | Yes | Exponential backoff (1s, 2s, 4s) + jitter |\n| `SendGridAuthError` (401/403) | No | Immediate failure — check API key and scopes |\n| `SendGridNotFoundError` (404) | No | Immediate failure — check resource ID |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\n**Cause:** API key is invalid or revoked.\n**Fix:** Create a new key in SendGrid → Settings → API Keys. Update credentials in Shielva.\n\n---\n\n### 403 Forbidden on contacts, templates, or stats\n\n**Cause:** API key missing required scopes.\n**Fix:** Create a Full Access key, or add the specific scopes listed in Authentication.\n\n---\n\n### Contacts list is empty after sync\n\n**Cause:** Marketing Campaigns not enabled, or no contacts added yet.\n**Fix:** Enable Marketing Campaigns in SendGrid. Free accounts have a 2,000-contact limit.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Exceeded SendGrid's rate limits.\n**Fix:** The connector retries automatically with exponential backoff. Reduce sync frequency if persistent.\n\n---\n\n### Templates not appearing\n\n**Cause:** Dynamic templates may not be available on your plan.\n**Fix:** Use `generations='legacy'` for legacy plan accounts.\n\n---\n\n### Segments endpoint returns 404\n\n**Cause:** Marketing Campaigns v2 segments require an upgraded account.\n**Fix:** Verify your SendGrid plan supports the `/marketing/segments/2.0` API."
+    }
+  ]
+}
