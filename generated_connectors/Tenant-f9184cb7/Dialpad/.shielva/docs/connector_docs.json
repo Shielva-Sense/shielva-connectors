@@ -1,0 +1,82 @@
+{
+  "connector": "dialpad",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Dialpad connector syncs call logs and contacts from Dialpad into the Shielva knowledge base using the Dialpad REST API v2. It uses OAuth 2.0 for authentication and implements cursor-based pagination, exponential backoff retry, and a circuit breaker to ensure reliable, throttle-safe data ingestion. Each document receives a stable SHA-256-based ID for idempotent syncs."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "oauth2",
+          "title": "OAuth 2.0",
+          "content": "The connector uses Dialpad OAuth 2.0 with the authorization code flow. Create an OAuth App in the Dialpad Developer Portal, configure the required scopes (calls, contacts, users), and provide the Client ID and Client Secret in Shielva. The connector generates the authorization URL via authorize(), exchanges the code for tokens, and can refresh the access token using the stored refresh_token.",
+          "auth_url": "https://dialpad.com/oauth2/authorize",
+          "token_url": "https://dialpad.com/oauth2/token",
+          "steps": [
+            "Sign in to developers.dialpad.com → My Apps → Create App.",
+            "Note the Client ID and Client Secret from OAuth Credentials.",
+            "Add scopes: calls, contacts, users.",
+            "Set the Redirect URI to your Shielva OAuth callback.",
+            "Enter the Client ID and Client Secret in Shielva.",
+            "Complete the OAuth consent flow to receive an access_token."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync",
+      "content": "The sync() method fetches call logs (GET /api/v2/call) and contacts (GET /api/v2/contacts) using cursor-based pagination. Each record is normalized into a ConnectorDocument with a stable SHA-256 source_id before ingestion. Partial failures result in SyncStatus.PARTIAL; a fetch error before any records are processed returns SyncStatus.FAILED."
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "All list endpoints use cursor-based pagination. Each response includes a 'cursor' field; the connector follows pages automatically until cursor is empty or absent."
+    },
+    {
+      "id": "retry",
+      "title": "Retry & Rate Limiting",
+      "content": "All API calls are wrapped in with_retry() with exponential backoff (base 1s, factor 2x, max 30s, 3 attempts). Auth errors (401/403) are not retried. Rate-limit errors (429) honour the Retry-After header. A CircuitBreaker (5-failure threshold, 60s recovery) prevents cascading failures during health checks."
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "subsections": [
+        {
+          "id": "call_log",
+          "title": "Call Log",
+          "content": "normalize_call_log(c) → ConnectorDocument. source_id = SHA-256('call:' + str(c['id']))[:16]. type = 'call_log'. Metadata includes direction, duration, started_at, ended_at, from_number, to_number, status, target_name."
+        },
+        {
+          "id": "contact",
+          "title": "Contact",
+          "content": "normalize_contact(c) → ConnectorDocument. source_id = SHA-256('contact:' + str(c['id']))[:16]. type = 'contact'. Metadata includes display_name, email, phone, company, job_title."
+        },
+        {
+          "id": "user",
+          "title": "User",
+          "content": "normalize_user(u) → ConnectorDocument. source_id = SHA-256('user:' + str(u['id']))[:16]. type = 'user'. Metadata includes display_name, email, state, office_id, is_admin."
+        }
+      ]
+    },
+    {
+      "id": "methods",
+      "title": "Available Methods",
+      "items": [
+        { "id": "install", "signature": "async install() -> InstallResult", "description": "Validate client_id and client_secret. Probe API if access_token is present." },
+        { "id": "authorize", "signature": "authorize() -> str", "description": "Return OAuth2 authorization URL with response_type=code, client_id, scope, and optional redirect_uri." },
+        { "id": "health_check", "signature": "async health_check() -> HealthCheckResult", "description": "Ping GET /api/v2/users/me. Returns user name/email on success. Updates circuit breaker." },
+        { "id": "sync", "signature": "async sync(**kwargs) -> SyncResult", "description": "Sync call logs + contacts. Pass kb_id kwarg to ingest into knowledge base." },
+        { "id": "list_users", "signature": "async list_users() -> list[dict]", "description": "Return all users via cursor pagination." },
+        { "id": "list_call_logs", "signature": "async list_call_logs(started_after=None) -> list[dict]", "description": "Return all call logs. Optional started_after ISO timestamp filter." },
+        { "id": "list_contacts", "signature": "async list_contacts() -> list[dict]", "description": "Return all contacts via cursor pagination." },
+        { "id": "list_departments", "signature": "async list_departments() -> list[dict]", "description": "Return all departments via cursor pagination." }
+      ]
+    }
+  ]
+}
