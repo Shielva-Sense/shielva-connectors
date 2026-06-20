@@ -1,0 +1,336 @@
+{
+  "title": "Google Gmail Connector Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "1. Overview",
+      "content": "",
+      "children": [
+        {
+          "id": "what-this-connector-does",
+          "title": "1.1 What This Connector Does",
+          "content": "The `GmailConnector` integrates Shielva with the **Google Gmail API v1**. It reads, searches, modifies, and sends email messages from an authenticated Gmail account, normalizing each message into a `NormalizedDocument` for indexing in the Shielva knowledge base.\n\nThe connector solves the problem of surfacing email knowledge without manual export: it handles the full OAuth2 lifecycle, fetches message bodies and headers, and tracks sync progress via the Gmail History API so only new messages are fetched on subsequent runs.\n\nCompared to calling the Gmail API directly, the connector adds:\n- Automatic OAuth2 token refresh before expiry via `on_token_refresh()`\n- Incremental sync via `historyId` cursor (avoids re-fetching the entire inbox on every run)\n- Retry logic (`with_retry()`, max 3 attempts) on transient failures\n- Multi-tenant isolation: one `connector_id` per account, tokens and metadata scoped to `tenant_id`\n- Normalized document output (`NormalizedDocument`) compatible with Shielva's indexing pipeline"
+        },
+        {
+          "id": "connector-identity",
+          "title": "1.2 Connector Identity",
+          "content": "| Field | Value |\n|-------|-------|\n| Provider | Google |\n| Service | Gmail |\n| Connector Class | `GmailConnector` |\n| Base Class | `BaseConnector` (`shared.base_connector`) |\n| Auth Type | OAuth2 Authorization Code (`oauth2_code`) |\n| Sync Type | Full + Incremental (Gmail History API `historyId` cursor) |\n| Current Version | 1.1.0 |\n| `CONNECTOR_TYPE` constant | `google_gmail_connector` |\n| `CONNECTOR_NAME` constant | `Google Gmail` |\n| `AUTH_TYPE` constant | `oauth2_code` |"
+        },
+        {
+          "id": "target-audience",
+          "title": "1.3 Target Audience",
+          "content": "- **Developers** integrating this connector into Shielva workflows or extending its method surface\n- **Platform administrators** deploying or upgrading connectors across tenants\n- **QA engineers** running `python3 -m pytest tests/ -v` and validating coverage thresholds\n- **End users** configuring the connector via the CMS UI (OAuth consent, credential entry)"
+        },
+        {
+          "id": "key-capabilities",
+          "title": "1.4 Key Capabilities",
+          "content": "| Capability | Supported | Notes |\n|-----------|-----------|-------|\n| Full Sync | Yes | Page-token scan of `GET /users/me/messages?q=in:inbox`, `max_results=500` per page |\n| Incremental Sync | Yes | Gmail History API (`GET /users/me/history?startHistoryId=...&historyTypes=messageAdded`); `historyId` persisted via `set_metadata` / `get_metadata` |\n| Webhook / Real-time | No | Polling only; Gmail push notifications not implemented |\n| OAuth2 Token Refresh | Yes | `on_token_refresh()` invoked automatically by `ensure_token()` when access token is near expiry |\n| Rate Limit Handling | Yes | `with_retry()` wrapper, max 3 retries; default quota 250 req/min configurable via `rate_limit_per_min` |\n| Pagination | Yes | `nextPageToken` cursor on both `list_messages` and `list_history` |\n| Multi-account | Yes | Each CMS installation has its own `connector_id`; tokens scoped by `tenant_id + connector_id` |\n| Bulk Operations | No | Messages fetched individually via `GET /users/me/messages/{id}`; no batch-get endpoint |"
+        },
+        {
+          "id": "architecture-diagram",
+          "title": "1.5 Architecture Diagram",
+          "content": "```\nCMS UI → Shielva Gateway → ConnectorService\n                                  ↓\n                  connector.py (GmailConnector)\n                  ├── client/http_client.py     (GmailHTTPClient)\n                  ├── helpers/normalizer.py     (normalize_message)\n                  └── helpers/utils.py          (with_retry, build_mime_message, base64url_encode)\n                                  ↓\n                  shared/base_connector.py (BaseConnector)\n                  ├── ensure_token() / on_token_refresh()\n                  ├── set_metadata() / get_metadata()\n                  └── ingest_document() / ingest_batch()\n                                  ↓\n                  Redis  (encrypted token store)\n                  MongoDB (sync state / metadata: last_history_id)\n                                  ↕\n                  Gmail API (gmail.googleapis.com / oauth2.googleapis.com)\n```"
+        }
+      ]
+    },
+    {
+      "id": "prerequisites",
+      "title": "2. Prerequisites",
+      "content": "",
+      "children": [
+        {
+          "id": "required-accounts-and-access",
+          "title": "2.1 Required Accounts & Access",
+          "content": "- [ ] Active Google account or Google Workspace account whose Gmail inbox will be synced\n- [ ] Permission to create OAuth 2.0 credentials in Google Cloud Console (Project Owner or OAuth Config Editor role)\n- [ ] Shielva platform tenant account with Integration Builder access"
+        },
+        {
+          "id": "provider-developer-console-setup",
+          "title": "2.2 Provider Developer Console Setup",
+          "content": "1. Go to **https://console.cloud.google.com** and sign in\n2. Create a new project (suggested name: `Shielva Integration`) or select an existing one\n3. Navigate to **APIs & Services → Library** and enable **Gmail API**\n4. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**\n5. Set **Application type** to **Web application**\n6. Under **Authorized redirect URIs** add: `https://{your-shielva-domain}/api/v1/oauth/callback`\n7. Click **Create** — copy the generated `client_id` and `client_secret`\n8. If this is a new project, configure the **OAuth consent screen** (External or Internal) and add the three required Gmail scopes listed in section 2.3\n\n> **Important:** The `client_secret` must be treated as a secret. Never commit it to source control. Store it only in the Shielva CMS credential store."
+        },
+        {
+          "id": "required-oauth-scopes",
+          "title": "2.3 Required OAuth Scopes / API Permissions",
+          "content": "| Scope | Purpose | Minimum Required |\n|-------|---------|------------------|\n| `https://www.googleapis.com/auth/gmail.readonly` | Read and list all Gmail messages and threads | Yes |\n| `https://www.googleapis.com/auth/gmail.modify` | Add/remove labels via `modify_message()` (mark as read, star, archive) | Yes |\n| `https://www.googleapis.com/auth/gmail.send` | Send email via `send_email()` / `post_email()`; create drafts via `add_email()` | Required for send/draft operations |\n\nAll three scopes are listed in `GmailConnector.REQUIRED_SCOPES` and are the default value of the `scopes` config field."
+        },
+        {
+          "id": "network-and-firewall-requirements",
+          "title": "2.4 Network & Firewall Requirements",
+          "content": "| Direction | Protocol | Host | Port | Purpose |\n|-----------|----------|------|------|---------|\n| Outbound | HTTPS | `gmail.googleapis.com` | 443 | Gmail REST API (list, get, modify, send, history) |\n| Outbound | HTTPS | `oauth2.googleapis.com` | 443 | OAuth2 token exchange (`/token`) and refresh |\n| Outbound | HTTPS | `accounts.google.com` | 443 | OAuth2 authorization redirect (`/o/oauth2/auth`) |\n\nNo inbound ports are required. All connections are initiated by the connector service."
+        }
+      ]
+    },
+    {
+      "id": "installation-and-configuration",
+      "title": "3. Installation & Configuration",
+      "content": "",
+      "children": [
+        {
+          "id": "install-via-cms",
+          "title": "3.1 Install via CMS",
+          "content": "1. Navigate to **CMS > Integrations > Google > Gmail**\n2. Click **\"New Connector\"** and enter a display name\n3. Fill in the required credentials:\n   - `client_id`: OAuth 2.0 Client ID from Google Cloud Console\n   - `client_secret`: OAuth 2.0 Client Secret from Google Cloud Console\n4. Optionally override defaults for: `scopes`, `auth_url`, `token_url`, `base_url`, `rate_limit_per_min`, `pagination_type`, `api_version`\n5. Click **\"Save & Authorize\"** — the platform calls `install()` which validates credentials and calls `save_config()`, then redirects to Google's consent screen at `https://accounts.google.com/o/oauth2/auth`\n6. Grant the requested Gmail permissions\n7. Google redirects back with `?code=...`; the platform calls `authorize(auth_code=..., state=...)` to exchange the code for tokens\n8. Connector status transitions: `MISSING_CREDENTIALS` → `PENDING` (after `install()`) → `CONNECTED` (after `authorize()`)\n\nRun a **Health Check** to confirm connectivity before triggering a sync."
+        },
+        {
+          "id": "configuration-schema",
+          "title": "3.2 Configuration Schema",
+          "content": "All fields defined in `metadata/connector.json` under `install_fields`:\n\n```json\n{\n  \"client_id\": {\n    \"type\": \"string\",\n    \"required\": true,\n    \"label\": \"OAuth2 Client ID\",\n    \"placeholder\": \"Enter your Google OAuth2 Client ID\",\n    \"help\": \"Found in Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs\"\n  },\n  \"client_secret\": {\n    \"type\": \"secret\",\n    \"required\": true,\n    \"label\": \"OAuth2 Client Secret\",\n    \"help\": \"Found alongside the Client ID in Google Cloud Console\"\n  },\n  \"scopes\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send\"\n  },\n  \"auth_url\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"https://accounts.google.com/o/oauth2/auth\"\n  },\n  \"token_url\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"https://oauth2.googleapis.com/token\"\n  },\n  \"base_url\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"https://gmail.googleapis.com/gmail/v1\"\n  },\n  \"rate_limit_per_min\": {\n    \"type\": \"number\",\n    \"required\": false,\n    \"default\": 250,\n    \"help\": \"Maximum Gmail API requests per minute (Google standard quota: 250)\"\n  },\n  \"pagination_type\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"page_token\",\n    \"help\": \"Only 'page_token' is supported by the Gmail API\"\n  },\n  \"api_version\": {\n    \"type\": \"string\",\n    \"required\": false,\n    \"default\": \"v1\"\n  }\n}\n```"
+        },
+        {
+          "id": "environment-variables",
+          "title": "3.3 Environment Variables",
+          "content": "| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `REQUEST_TIMEOUT` | No | `60` | HTTP request timeout in seconds for `GmailHTTPClient` calls |\n| `MAX_RETRIES` | No | `3` | Max retry attempts passed to `with_retry()` for transient failures |\n\nConfig values (`base_url`, `rate_limit_per_min`, etc.) are provided via the CMS config form, not environment variables. The connector service itself must have outbound HTTPS access to `gmail.googleapis.com` and `oauth2.googleapis.com`."
+        },
+        {
+          "id": "token-storage",
+          "title": "3.4 Token Storage",
+          "content": "Tokens are **never** stored in files, instance variables, or logs. All credentials flow through `BaseConnector.set_token()` / `ensure_token()` which stores them encrypted in Redis.\n\n```python\n# After OAuth exchange in authorize():\nawait self.set_token(token_info)  # TokenInfo persisted via BaseConnector\n\n# Before each API call in _get_valid_token():\ntoken_info = await self.ensure_token()  # auto-refreshes if near expiry\naccess_token = token_info.access_token\n```\n\n- **Redis key pattern:** `connector:{tenant_id}:{connector_id}:tokens`\n- **Fields stored in `TokenInfo`:** `access_token`, `refresh_token`, `expires_at`, `token_type`, `scopes`\n- `on_token_refresh()` is invoked automatically by `ensure_token()` when the access token is near expiry; it POSTs to `config[\"token_url\"]` (default `https://oauth2.googleapis.com/token`) with `grant_type=refresh_token`\n- If no `refresh_token` is available, `on_token_refresh()` raises `RefreshError`, which `health_check()` catches and returns as `ConnectorHealth.OFFLINE` / `AuthStatus.EXPIRED`"
+        }
+      ]
+    },
+    {
+      "id": "api-reference",
+      "title": "4. API Reference",
+      "content": "",
+      "children": [
+        {
+          "id": "baseconnector-interface",
+          "title": "4.1 BaseConnector Interface",
+          "content": "All methods below implement the `BaseConnector` abstract interface. Each is `async`.\n\n---\n\n#### `install() -> ConnectorStatus`\n\nValidates that `client_id` and `client_secret` are present in `self.config`, calls `save_config()`, and returns a `ConnectorStatus`. Does **not** call the Gmail API. Called once by the platform during CMS install, before the OAuth flow.\n\n**Behaviour:**\n- `client_id` or `client_secret` empty → logs `gmail.install.missing_credentials`, returns `ConnectorHealth.OFFLINE` / `AuthStatus.MISSING_CREDENTIALS`\n- Both present → calls `save_config({\"client_id\": ..., \"client_secret\": ...})`, logs `gmail.install.ok`, returns `ConnectorHealth.HEALTHY` / `AuthStatus.PENDING`\n\n**Returns:**\n```json\n{\"connector_id\": \"...\", \"health\": \"HEALTHY\", \"auth_status\": \"PENDING\", \"message\": \"Connector installed \\u2014 complete OAuth to connect\"}\n```\n\n---\n\n#### `authorize(auth_code: str, state: str = None) -> TokenInfo`\n\nExchanges an OAuth2 authorization code for access and refresh tokens. Called by the platform after the user completes Google's consent screen.\n\n**Parameters:**\n| Name | Type | Required | Description |\n|------|------|----------|-------------|\n| `auth_code` | `str` | Yes | Authorization code from Google OAuth callback (`?code=...`) |\n| `state` | `str` | No | OAuth state param; used as `redirect_uri` if it starts with `http` |\n\n**Behaviour:** POSTs to `config[\"token_url\"]` (default `https://oauth2.googleapis.com/token`) with `grant_type=authorization_code`. Stores the returned `TokenInfo` via `set_token()`. If the provider response omits `scope`, falls back to `GmailConnector.REQUIRED_SCOPES`.\n\n**Returns:** `TokenInfo` with `access_token`, `refresh_token`, `expires_at`, `token_type`, `scopes`.\n\n**Raises:** `GmailAuthError` if the code is invalid or already used.\n\n---\n\n#### `health_check() -> ConnectorStatus`\n\nVerifies Gmail API connectivity by calling `GmailHTTPClient.get_profile()` (`GET /users/me/profile`). Auto-refreshes the token via `_get_valid_token()` before the call. **Never raises** — always returns a `ConnectorStatus`.\n\n**Status mapping:**\n| Exception Caught | `health` | `auth_status` |\n|-----------------|----------|---------------|\n| None (success) | `HEALTHY` | `CONNECTED` |\n| `GmailAuthError` | `DEGRADED` | `TOKEN_EXPIRED` |\n| `RefreshError` | `OFFLINE` | `EXPIRED` |\n| `GmailConnectorError` | `DEGRADED` | `CONNECTED` |\n\n---\n\n#### `sync(since: datetime = None, full: bool = False, kb_id: str = None, webhook_url: str = None) -> SyncResult`\n\nSyncs Gmail messages into the Shielva knowledge base. Uses the History API for incremental sync when a `last_history_id` checkpoint exists in MongoDB; falls back to a full page-token scan when `full=True` or no checkpoint is stored.\n\n**Parameters:**\n| Name | Type | Required | Default | Description |\n|------|------|----------|---------|-------------|\n| `since` | `datetime` | No | `None` | Reserved; not currently used for filtering |\n| `full` | `bool` | No | `False` | Force a full re-scan regardless of stored `last_history_id` |\n| `kb_id` | `str` | No | `None` | Knowledge base ID passed to `ingest_document()` |\n| `webhook_url` | `str` | No | `None` | Webhook URL passed to `ingest_document()` for real-time delivery |\n\n**Returns:** `SyncResult` — status is `COMPLETED` when `documents_failed == 0`, `PARTIAL` when some messages fail, `FAILED` when the outer sync throws.\n\n**Never raises** — all exceptions are caught and returned as `status=FAILED`."
+        },
+        {
+          "id": "connector-specific-methods",
+          "title": "4.1.1 Connector-Specific Methods",
+          "content": "#### `list_emails(query: str = \"\", max_results: int = 500, page_token: Optional[str] = None) -> Dict[str, Any]`\n\nLists Gmail message stubs matching a Gmail search query. Delegates to `GmailHTTPClient.list_messages()` with `with_retry(max_retries=3)`.\n\n**Parameters:**\n| Name | Type | Required | Default | Description |\n|------|------|----------|---------|-------------|\n| `query` | `str` | No | `\"\"` | Gmail search query (e.g. `\"in:inbox\"`, `\"from:boss@example.com is:unread\"`) |\n| `max_results` | `int` | No | `500` | Max message stubs per response page |\n| `page_token` | `str` | No | `None` | `nextPageToken` from a previous response |\n\n**Returns:** Raw Gmail API dict: `{\"messages\": [{\"id\": \"...\", \"threadId\": \"...\"}, ...], \"nextPageToken\": \"...\", \"resultSizeEstimate\": 500}`\n\n**Raises:** `GmailConnectorError` on API errors.\n\n---\n\n#### `get_email(message_id: str) -> NormalizedDocument`\n\nFetches a full Gmail message by ID via `GmailHTTPClient.get_message()` and returns it as a `NormalizedDocument` produced by `normalize_message(raw, connector_id, tenant_id)`.\n\n**Parameters:**\n| Name | Type | Required | Description |\n|------|------|----------|-------------|\n| `message_id` | `str` | Yes | Gmail message ID (e.g. `\"msg123\"`) |\n\n**Returns:** `NormalizedDocument` with `id` namespaced as `{connector_id}_{message_id}`, `source_id=message_id`, `title` from Subject header, `author` from From header, `content` from decoded body, `connector_id`, `tenant_id`.\n\n**Raises:** `GmailConnectorError` if the message is not found or inaccessible.\n\n---\n\n#### `modify_message(message_id: str, add_labels: Optional[List[str]] = None, remove_labels: Optional[List[str]] = None) -> Dict[str, Any]`\n\nAdds or removes Gmail label IDs on a message via `POST /users/me/messages/{id}/modify`. Common system labels: `STARRED`, `UNREAD`, `INBOX`, `TRASH`, `SPAM`.\n\n**Parameters:**\n| Name | Type | Required | Description |\n|------|------|----------|-------------|\n| `message_id` | `str` | Yes | Gmail message ID |\n| `add_labels` | `List[str]` | No | Label IDs to add (e.g. `[\"STARRED\"]`) |\n| `remove_labels` | `List[str]` | No | Label IDs to remove (e.g. `[\"UNREAD\"]`) |\n\n**Returns:** Raw API response dict with updated `labelIds`.\n**Raises:** `GmailConnectorError` on failure.\n\n---\n\n#### `read_email(message_id: str) -> Dict[str, Any]`\n\nReturns the raw Gmail API message object for `message_id`. Unlike `get_email()`, does **not** normalize — returns the full dict including `payload`, `headers`, `body.data`, `historyId`, `internalDate`.\n\n**Parameters:**\n| Name | Type | Required | Description |\n|------|------|----------|-------------|\n| `message_id` | `str` | Yes | Gmail message ID |\n\n**Returns:** Raw Gmail API message dict.\n**Raises:** `GmailAuthError` on token expiry; `GmailConnectorError` on other errors.\n\n---\n\n#### `send_email(to: str, subject: str, body: str, cc: Optional[str] = None, bcc: Optional[str] = None) -> Dict[str, Any]`\n\nSends an email via `POST /users/me/messages/send`. Builds an RFC 2822 MIMEText message via `build_mime_message()`, base64url-encodes it without `=` padding via `base64url_encode()`, then calls `GmailHTTPClient.execute_send_message()` directly (no retry — non-idempotent).\n\n**Requires** the `https://www.googleapis.com/auth/gmail.send` scope.\n\n**Parameters:**\n| Name | Type | Required | Description |\n|------|------|----------|-------------|\n| `to` | `str` | Yes | Recipient email address |\n| `subject` | `str` | Yes | Email subject line |\n| `body` | `str` | Yes | Plain-text email body |\n| `cc` | `str` | No | CC recipient address |\n| `bcc` | `str` | No | BCC recipient address |\n\n**Returns:** `{\"id\": \"sent1\", \"threadId\": \"thread1\", \"labelIds\": [\"SENT\"]}`\n**Raises:** `PermissionError` if `gmail.send` scope is missing (403); `ValueError` on invalid recipient address (400).\n\n---\n\n#### `add_email(to: str, subject: str, body: str, cc: Optional[str] = None, bcc: Optional[str] = None) -> Dict[str, Any]`\n\nCreates a Gmail draft without sending. Uses the same MIME-building path as `send_email()`, then calls `GmailHTTPClient.execute_create_draft()` with `with_retry(max_retries=3)`.\n\n**Returns:** `{\"id\": \"draft1\", \"message\": {\"id\": \"msg456\", \"threadId\": \"t1\", \"labelIds\": [\"DRAFT\"]}}`\n**Raises:** `GmailConnectorError` on failure.\n\n---\n\n#### `post_email(to: str, subject: str, body: str, cc: Optional[str] = None, bcc: Optional[str] = None) -> Dict[str, Any]`\n\nPublic alias for `send_email()`. Delegates directly with no additional logic. Same parameters, same return value, same exceptions. Provided for API surface completeness."
+        },
+        {
+          "id": "data-models",
+          "title": "4.2 Data Models",
+          "content": "#### NormalizedDocument\nProduced by `normalize_message()` in `helpers/normalizer.py`:\n```json\n{\n  \"id\": \"{connector_id}_{message_id}\",\n  \"source_id\": \"msg123\",\n  \"title\": \"Subject header value\",\n  \"author\": \"From header value (e.g. sender@example.com)\",\n  \"content\": \"Decoded plain-text body\",\n  \"content_type\": \"text/plain\",\n  \"metadata\": {\n    \"thread_id\": \"thread456\",\n    \"label_ids\": [\"INBOX\"],\n    \"date\": \"Mon, 01 Jan 2024 12:00:00 +0000\",\n    \"to\": \"recipient@example.com\",\n    \"snippet\": \"Hello world\"\n  },\n  \"connector_id\": \"test-connector-001\",\n  \"tenant_id\": \"test-tenant-001\",\n  \"synced_at\": \"2026-06-17T00:00:00Z\"\n}\n```\n\n#### ConnectorStatus\n```json\n{\n  \"connector_id\": \"string\",\n  \"health\": \"HEALTHY | DEGRADED | OFFLINE\",\n  \"auth_status\": \"PENDING | CONNECTED | TOKEN_EXPIRED | EXPIRED | MISSING_CREDENTIALS\",\n  \"message\": \"Human-readable status message\"\n}\n```\n\n#### TokenInfo\n```json\n{\n  \"access_token\": \"ya29...\",\n  \"refresh_token\": \"1//0...\",\n  \"expires_at\": \"2026-06-17T13:00:00+00:00\",\n  \"token_type\": \"Bearer\",\n  \"scopes\": [\n    \"https://www.googleapis.com/auth/gmail.readonly\",\n    \"https://www.googleapis.com/auth/gmail.modify\",\n    \"https://www.googleapis.com/auth/gmail.send\"\n  ]\n}\n```\n\n#### SyncResult\n```json\n{\n  \"status\": \"COMPLETED | PARTIAL | FAILED\",\n  \"documents_found\": 150,\n  \"documents_synced\": 148,\n  \"documents_failed\": 2,\n  \"message\": \"Synced 148/150 messages\"\n}\n```"
+        },
+        {
+          "id": "error-reference",
+          "title": "4.3 Error Reference",
+          "content": "| Exception Class | HTTP Equiv | When Raised | Resolution |\n|----------------|-----------|-------------|------------|\n| `GmailAuthError` | 401 | Invalid, expired, or revoked access token | Re-authorize the connector in CMS |\n| `GmailAPIError` | 4xx/5xx | Gmail API returned a non-success HTTP status | Check logs; transient errors are retried up to 3× via `with_retry()` |\n| `GmailConnectorError` | 500 | General connector-level failure (network error, parse error) | Check connector logs; retry sync |\n| `RefreshError` (from `shared.base_connector`) | 401 | No refresh token available, or refresh POST failed | User must re-authorize via CMS OAuth flow |\n| `PermissionError` | 403 | `gmail.send` scope missing when calling `send_email()` or `post_email()` | Re-authorize with `gmail.send` scope checked |\n| `ValueError` | 400 | Invalid recipient address passed to `send_email()` | Verify the `to` address format |"
+        },
+        {
+          "id": "rate-limits",
+          "title": "4.4 Rate Limits",
+          "content": "Gmail API default quota: **250 requests per minute per user** (configurable via `rate_limit_per_min` config field, default `250`).\n\n| Endpoint Category | Limit | Window | Retry Strategy |\n|------------------|-------|--------|----------------|\n| `list_messages` / `list_history` | 250 req/min | 60s | `with_retry(max_retries=3)` |\n| `get_message` (per message) | 250 req/min | 60s | `with_retry(max_retries=3)` |\n| `execute_send_message` | 250 req/min | 60s | No retry (non-idempotent) |\n| `execute_create_draft` | 250 req/min | 60s | `with_retry(max_retries=3)` |\n| `execute_modify_message` | 250 req/min | 60s | `with_retry(max_retries=3)` |\n| Token exchange / refresh | Google-managed | — | `on_token_refresh()` called once per expiry event |\n\nThe `with_retry()` helper in `helpers/utils.py` handles retry logic for transient failures."
+        }
+      ]
+    },
+    {
+      "id": "methods-and-functionality-details",
+      "title": "5. Methods & Functionality Details",
+      "content": "",
+      "children": [
+        {
+          "id": "method-inventory",
+          "title": "5.1 Method Inventory",
+          "content": "Complete list of all methods in `connector.py`:\n\n| Method | Visibility | Async | Description |\n|--------|-----------|-------|-------------|\n| `install` | public | Yes | Validate `client_id`/`client_secret`, call `save_config()`, return `ConnectorStatus` |\n| `authorize` | public | Yes | Exchange OAuth2 authorization code for tokens; persist via `set_token()` |\n| `health_check` | public | Yes | Fetch `/users/me/profile`; return `ConnectorStatus`; never raises |\n| `sync` | public | Yes | Incremental or full sync of Gmail messages into knowledge base |\n| `list_emails` | public | Yes | List message stubs matching a Gmail query |\n| `get_email` | public | Yes | Fetch one message; return `NormalizedDocument` |\n| `modify_message` | public | Yes | Add/remove label IDs on a message |\n| `read_email` | public | Yes | Fetch one message; return raw Gmail API dict |\n| `send_email` | public | Yes | Build RFC 2822 MIME message and send via Gmail API |\n| `add_email` | public | Yes | Build MIME message and save as Gmail draft |\n| `post_email` | public | Yes | Public alias for `send_email()` |\n| `_get_valid_token` | private | Yes | Return valid access token string, refreshing if necessary via `ensure_token()` |\n| `on_token_refresh` | protected | Yes | POST to `token_url` with `refresh_token`; return new `TokenInfo` |\n| `_collect_all_message_ids` | private | Yes | Page through `/users/me/messages` collecting all IDs + latest `historyId` |\n| `_collect_history_ids` | private | Yes | Page through `/users/me/history` from a `startHistoryId`; return added message IDs |"
+        },
+        {
+          "id": "data-flow",
+          "title": "5.2 Data Flow",
+          "content": "```\nsync(full=True) called\n  ↓\n_get_valid_token() → ensure_token() → [on_token_refresh() if near expiry]\n  ↓\n_collect_all_message_ids(access_token)\n  ↓\n  while nextPageToken:\n    GmailHTTPClient.list_messages(\n        access_token, query=\"in:inbox\", max_results=500, page_token=pt)\n    collect message IDs, track latest historyId\n  ↓\nfor each message_id:\n    with_retry(lambda: GmailHTTPClient.get_message(access_token, msg_id), max_retries=3)\n    ↓\n    normalize_message(raw, connector_id, tenant_id) → NormalizedDocument\n    ↓\n    ingest_document(doc, kb_id=..., webhook_url=...)\n    [on exception] → log gmail.sync.message_failed, documents_failed += 1\n  ↓\nset_metadata(\"last_history_id\", latest_history_id)\n  ↓\nReturn SyncResult(COMPLETED|PARTIAL, documents_found, documents_synced, documents_failed)\n\n---\n\nsync(full=False) with checkpoint:\n  ↓\nget_metadata(\"last_history_id\") → last_history_id (str)\n  ↓\n_collect_history_ids(access_token, last_history_id)\n  ↓\n  while nextPageToken:\n    GmailHTTPClient.list_history(\n        access_token, start_history_id=last_history_id,\n        history_types=[\"messageAdded\"], max_results=500, page_token=pt)\n    extract history[].messagesAdded[].message.id\n  ↓\n[same per-message fetch + normalize + ingest loop]\n\n---\n\nError paths:\n[401 from Gmail API]  → raises GmailAuthError  → health_check: DEGRADED/TOKEN_EXPIRED\n[RefreshError]        →                          health_check: OFFLINE/EXPIRED\n[per-message error]   → logged, documents_failed += 1 → SyncResult.status = PARTIAL\n[outer exception]     → SyncResult.status = FAILED, message = str(exc)\n```"
+        },
+        {
+          "id": "incremental-sync-strategy",
+          "title": "5.3 Incremental Sync Strategy",
+          "content": "- **Cursor type:** Gmail `historyId` — an opaque monotonically increasing integer string assigned by Gmail to each mailbox event\n- **Cursor storage:** Persisted in MongoDB via `set_metadata(\"last_history_id\", value)` after each successful sync; read at sync start via `get_metadata(\"last_history_id\")`\n- **Full sync trigger:** `sync(full=True)` explicitly, or `get_metadata(\"last_history_id\")` returns `None` (first-ever sync)\n- **Incremental trigger:** `sync(full=False)` with a stored `last_history_id`; uses `GET /users/me/history?startHistoryId={id}&historyTypes=messageAdded`\n- **History type filter:** Only `messageAdded` events are collected — message deletions and label changes are not processed during incremental sync\n- **`historyId` tracking:** During full scan, the highest `historyId` seen across all `/messages` response pages and individual message objects is stored. During incremental scan, the stored checkpoint is updated after each successful message loop.\n- **Max records per page:** `500` (hardcoded in `_collect_all_message_ids` and `_collect_history_ids`; this is the Gmail API maximum)\n- **Resumability:** The `last_history_id` checkpoint is written only after the full message-fetching loop completes. An interrupted sync does not advance the cursor, so messages are not skipped on retry.\n- **History API `410 GONE`:** If the stored `historyId` is too old, the Gmail API returns 410. Recovery: clear the checkpoint and call `sync(full=True)` to re-scan from scratch."
+        },
+        {
+          "id": "authentication-flow",
+          "title": "5.4 Authentication Flow",
+          "content": "```\nFirst Install:\n  User submits client_id + client_secret in CMS\n    ↓\n  install() → validates credentials → save_config()\n             → ConnectorStatus(HEALTHY, PENDING)\n    ↓\n  CMS redirects user to:\n  https://accounts.google.com/o/oauth2/auth\n    ?client_id={client_id}\n    &redirect_uri={shielva-callback}\n    &scope=gmail.readonly%20gmail.modify%20gmail.send\n    &response_type=code\n    &access_type=offline\n    ↓\n  User grants permissions → Google redirects to Shielva with ?code=AUTH_CODE\n    ↓\n  authorize(auth_code=AUTH_CODE, state=redirect_uri)\n    → POST https://oauth2.googleapis.com/token\n      { grant_type: authorization_code, code: AUTH_CODE,\n        client_id, client_secret, redirect_uri }\n    → { access_token, refresh_token, expires_in, token_type, scope }\n    → set_token(TokenInfo(access_token, refresh_token, expires_at, ...))\n\nToken Refresh (automatic on every API call):\n  _get_valid_token() → ensure_token()\n    ↓\n  [if token near expiry] → on_token_refresh()\n    → POST https://oauth2.googleapis.com/token\n      { grant_type: refresh_token, refresh_token: stored_token,\n        client_id, client_secret }\n    → new access_token + updated expires_at stored via set_token()\n    ↓\n  [if RefreshError] → health_check returns OFFLINE/EXPIRED\n    → user must click Re-Authorize in CMS\n```"
+        }
+      ]
+    },
+    {
+      "id": "testing-guide",
+      "title": "6. Testing Guide",
+      "content": "",
+      "children": [
+        {
+          "id": "running-tests",
+          "title": "6.1 Running Tests",
+          "content": "```bash\n# From the connector directory:\ncd google_gmail_c996c4_connector\n\n# Run all unit tests:\npython3 -m pytest tests/ -v\n\n# With coverage report:\npython3 -m pytest tests/ -v --cov=. --cov-report=term-missing\n\n# Run tests matching a keyword (e.g. all install-related tests):\npython3 -m pytest tests/test_connector.py -k \"install\" -v\n\n# Run a single test:\npython3 -m pytest tests/test_connector.py::test_sync_full_success -v\n\n# Fail build if coverage drops below 80%:\npython3 -m pytest tests/ --cov=. --cov-fail-under=80\n```\n\n`pytest.ini` sets `asyncio_mode = auto` so all `async def` test functions are discovered and run automatically without `@pytest.mark.asyncio`."
+        },
+        {
+          "id": "test-matrix",
+          "title": "6.2 Test Matrix",
+          "content": "| Scenario | Test Method | Key Mocks |\n|----------|-------------|----------|\n| install — success | `test_install_success` | `save_config` (autouse) |\n| install — missing `client_id` | `test_install_missing_client_id` | autouse storage mocks |\n| install — missing `client_secret` | `test_install_missing_client_secret` | autouse storage mocks |\n| install — both missing | `test_install_missing_both_credentials` | autouse storage mocks |\n| authorize — success | `test_authorize_success` | `mock_http.post_form_data` |\n| authorize — no scope in response | `test_authorize_no_scope_in_response` | `mock_http.post_form_data` (scope omitted) |\n| authorize — invalid code | `test_authorize_error` | `mock_http.post_form_data → GmailAuthError` |\n| health_check — healthy | `test_health_check_healthy` | `mock_http.get_profile` |\n| health_check — 401 auth error | `test_health_check_auth_error` | `mock_http.get_profile → GmailAuthError` |\n| health_check — network error | `test_health_check_connector_error` | `mock_http.get_profile → GmailConnectorError` |\n| sync — full success | `test_sync_full_success` | `list_messages`, `get_message` |\n| sync — full paginated (2 pages) | `test_sync_full_paginated` | `list_messages` side_effect with `nextPageToken` |\n| sync — partial (message failure) | `test_sync_partial_on_message_failure` | `get_message` side_effect mix (1 ok, 1 raises) |\n| sync — empty inbox | `test_sync_empty_inbox` | `list_messages → {\"messages\": []}` |\n| list_emails — success | `test_list_emails_success` | `mock_http.list_messages` |\n| list_emails — empty | `test_list_emails_empty` | `mock_http.list_messages → []` |\n| list_emails — error | `test_list_emails_error` | `mock_http.list_messages → GmailConnectorError` |\n| get_email — success | `test_get_email_success` | `mock_http.get_message → SAMPLE_MESSAGE` |\n| get_email — returns NormalizedDocument | `test_get_email_returns_normalized_document` | `mock_http.get_message` |\n| get_email — error | `test_get_email_error` | `mock_http.get_message → GmailConnectorError` |\n| modify_message — add label | `test_modify_message_add_label` | `mock_http.execute_modify_message` |\n| modify_message — remove label | `test_modify_message_remove_label` | `mock_http.execute_modify_message` |\n| modify_message — error | `test_modify_message_error` | `mock_http.execute_modify_message → GmailConnectorError` |\n| read_email — returns raw dict | `test_read_email_returns_raw_dict` | `mock_http.get_message → SAMPLE_MESSAGE` |\n| read_email — auth error | `test_read_email_error` | `mock_http.get_message → GmailAuthError` |\n| send_email — success | `test_send_email_success` | `mock_http.execute_send_message` |\n| send_email — base64url no padding | `test_send_email_raw_is_base64url_no_padding` | `mock_http.execute_send_message` |\n| send_email — cc/bcc | `test_send_email_with_cc_bcc` | `mock_http.execute_send_message` |\n| send_email — 403 PermissionError | `test_send_email_permission_error_403` | `mock_http.execute_send_message → PermissionError` |\n| send_email — 400 ValueError | `test_send_email_value_error_400` | `mock_http.execute_send_message → ValueError` |\n| add_email — creates draft | `test_add_email_creates_draft` | `mock_http.execute_create_draft` |\n| add_email — with cc | `test_add_email_with_cc` | `mock_http.execute_create_draft` |\n| add_email — error | `test_add_email_error` | `mock_http.execute_create_draft → GmailConnectorError` |\n| post_email — delegates to send | `test_post_email_delegates_to_send_email` | `mock_http.execute_send_message` |\n| post_email — permission error | `test_post_email_permission_error` | `mock_http.execute_send_message → PermissionError` |\n| REQUIRED_SCOPES has gmail.send | `test_required_scopes_includes_gmail_send` | none |\n| REQUIRED_SCOPES has gmail.readonly | `test_required_scopes_includes_gmail_readonly` | none |\n| REQUIRED_SCOPES has gmail.modify | `test_required_scopes_includes_gmail_modify` | none |\n| NormalizedDocument has tenant_id | `test_normalized_document_has_tenant_id` | `mock_http.get_message` |\n| Document ID namespaced by connector | `test_normalized_document_id_namespaced_by_connector` | `mock_http.get_message` |\n| Different tenants = independent instances | `test_different_tenants_different_connector_instances` | none |\n| CONNECTOR_TYPE constant | `test_connector_type` | none |\n| AUTH_TYPE constant | `test_auth_type` | none |\n| REQUIRED_CONFIG_KEYS defined | `test_required_config_keys_defined` | none |"
+        },
+        {
+          "id": "mocking-pattern",
+          "title": "6.3 Mocking Pattern",
+          "content": "**Always patch where the name is USED, not where it is defined.**\n\nThe test fixtures in `conftest.py` avoid class-level patching entirely by replacing `connector.http_client` directly on the instance:\n\n```python\n# authed fixture (conftest.py):\n@pytest.fixture\ndef authed(connector, mock_http, valid_token):\n    connector._token_info = valid_token\n    connector._status.auth_status = AuthStatus.CONNECTED\n    connector.http_client = mock_http  # replaces GmailHTTPClient instance\n    return connector\n```\n\n`mock_http` is a `MagicMock` with `AsyncMock` methods covering all `GmailHTTPClient` calls:\n- `get_profile`, `list_messages`, `get_message`, `execute_modify_message`\n- `execute_send_message`, `execute_create_draft`, `list_history`, `post_form_data`\n\nThe `mock_storage` autouse fixture (also in `conftest.py`) patches all `BaseConnector` storage methods so no real Redis or MongoDB calls are made:\n```python\nmocker.patch.object(GmailConnector, \"set_token\", new_callable=AsyncMock)\nmocker.patch.object(GmailConnector, \"save_config\", new_callable=AsyncMock)\nmocker.patch.object(GmailConnector, \"ingest_document\", new_callable=AsyncMock)\nmocker.patch.object(GmailConnector, \"get_metadata\", new_callable=AsyncMock, return_value=None)\nmocker.patch.object(GmailConnector, \"set_metadata\", new_callable=AsyncMock)\n```\n\nStructlog is silenced via: `mocker.patch(\"connector.logger\")`"
+        },
+        {
+          "id": "async-test-setup",
+          "title": "6.4 Async Test Setup",
+          "content": "All tests calling async connector methods are `async def`. `pytest.ini` sets `asyncio_mode = auto` so no `@pytest.mark.asyncio` decorator is needed:\n\n```ini\n[pytest]\nasyncio_mode = auto\n```\n\nExample test:\n```python\nasync def test_sync_full_success(authed):\n    authed.http_client.list_messages.return_value = {\n        \"messages\": [{\"id\": \"msg1\"}, {\"id\": \"msg2\"}],\n        \"nextPageToken\": None,\n        \"historyId\": \"5000\",\n    }\n    authed.http_client.get_message.return_value = SAMPLE_MESSAGE\n\n    result = await authed.sync(full=True)\n\n    assert result.status == SyncStatus.COMPLETED\n    assert result.documents_found == 2\n    assert result.documents_synced == 2\n    assert result.documents_failed == 0\n```\n\n`SAMPLE_MESSAGE` in `conftest.py` is a realistic Gmail API message dict with `id`, `threadId`, `labelIds`, `snippet`, `historyId`, `internalDate`, and a `payload` with headers (Subject, From, To, Date) and a base64url-encoded body (`\"SGVsbG8gd29ybGQ\"` = `\"Hello world\"`)."
+        },
+        {
+          "id": "test-coverage-requirements",
+          "title": "6.5 Test Coverage Requirements",
+          "content": "| Area | Minimum Coverage | Target |\n|------|-----------------|--------|\n| `connector.py` — public methods | 90% | 100% |\n| `connector.py` — private helpers | 70% | 85% |\n| `exceptions.py` | 80% | 100% |\n| Overall | 80% | 90% |\n\nCoverage is enforced in CI:\n```bash\npython3 -m pytest tests/ --cov=. --cov-fail-under=80\n```\nA coverage drop below 80% fails the build."
+        },
+        {
+          "id": "integration-test",
+          "title": "6.6 Integration Test (Manual, Requires Real Credentials)",
+          "content": "These are **not automated** — run manually before each release:\n\n1. Set real Google OAuth credentials in your local environment:\n   ```bash\n   export TEST_CLIENT_ID=\"<your-google-client-id>\"\n   export TEST_CLIENT_SECRET=\"<your-google-client-secret>\"\n   ```\n2. Complete an OAuth flow manually to obtain a valid `access_token` and `refresh_token`\n3. Run: `pytest tests/integration/ -v -m integration`\n4. Verify in Gmail UI that:\n   - Messages are synced and appear in the knowledge base\n   - `modify_message()` label changes are reflected in Gmail\n   - `send_email()` sent messages appear in Sent folder\n   - `add_email()` drafts appear in Drafts folder\n5. Confirm no tokens appear in test output, logs, or tracebacks"
+        }
+      ]
+    },
+    {
+      "id": "configuration-reference",
+      "title": "7. Configuration Reference",
+      "content": "",
+      "children": [
+        {
+          "id": "full-config-schema",
+          "title": "7.1 Full Config Schema",
+          "content": "From `metadata/connector.json` `install_fields` array:\n\n| Key | Type | Required | Default | Description |\n|-----|------|----------|---------|-------------|\n| `client_id` | string | **Yes** | — | Google OAuth2 Client ID from Cloud Console |\n| `client_secret` | secret | **Yes** | — | Google OAuth2 Client Secret (never logged) |\n| `scopes` | string | No | `gmail.readonly gmail.modify gmail.send` (space-separated) | OAuth2 scopes to request |\n| `auth_url` | string | No | `https://accounts.google.com/o/oauth2/auth` | OAuth2 authorization endpoint |\n| `token_url` | string | No | `https://oauth2.googleapis.com/token` | OAuth2 token endpoint |\n| `base_url` | string | No | `https://gmail.googleapis.com/gmail/v1` | Gmail REST API base URL |\n| `rate_limit_per_min` | number | No | `250` | Max requests per minute (Google standard quota) |\n| `pagination_type` | string | No | `page_token` | Pagination strategy; only `page_token` supported |\n| `api_version` | string | No | `v1` | Gmail REST API version |\n\nAll keys in `GmailConnector.REQUIRED_CONFIG_KEYS`:\n```python\nREQUIRED_CONFIG_KEYS = [\n    \"client_id\", \"client_secret\", \"scopes\",\n    \"auth_url\", \"token_url\", \"base_url\",\n    \"rate_limit_per_min\", \"pagination_type\", \"api_version\",\n]\n```\n\nOnly `client_id` and `client_secret` are checked in `install()`. The remaining keys fall back to defaults if absent."
+        },
+        {
+          "id": "tuning-guide",
+          "title": "7.2 Tuning Guide",
+          "content": "| Goal | Setting to Change | Recommended Value |\n|------|------------------|-------------------|\n| Reduce API quota consumption | `rate_limit_per_min` | 50–100 |\n| Maximum throughput on high-quota accounts | `rate_limit_per_min` | 250 (Google standard max) |\n| Force a complete re-scan | Call `sync(full=True)` | — |\n| Test against a Gmail API proxy / mock server | `base_url` | `https://your-proxy/gmail/v1` |\n| Use a custom OAuth token endpoint (testing) | `token_url` | Custom URL |\n\n**Note:** `max_results=500` per page in `_collect_all_message_ids` and `_collect_history_ids` is hardcoded to the Gmail API maximum. Lowering it requires modifying the connector source."
+        },
+        {
+          "id": "multi-tenant-isolation",
+          "title": "7.3 Multi-Tenant Isolation",
+          "content": "Each connector instance is scoped to a single tenant and a single Gmail account:\n\n- `tenant_id` is provided by the Shielva auth context — never accepted from client input\n- `connector_id` is generated by the platform per CMS installation\n- Tokens stored in Redis under `connector:{tenant_id}:{connector_id}:tokens`\n- Sync metadata (`last_history_id`) stored in MongoDB scoped by `tenant_id` + `connector_id`\n- `NormalizedDocument.id` is namespaced as `{connector_id}_{gmail_message_id}` (verified in `test_normalized_document_id_namespaced_by_connector`)\n- `NormalizedDocument.tenant_id` is stamped on every document by `normalize_message()` (verified in `test_normalized_document_has_tenant_id`)\n\nNo cross-tenant data access is possible by design. Two tenants with separate connector installations cannot see each other's tokens, metadata, or documents."
+        }
+      ]
+    },
+    {
+      "id": "changelog",
+      "title": "8. Changelog",
+      "content": "Follows [Keep a Changelog](https://keepachangelog.com) format — newest first.\n\n### [Unreleased]\n\n#### Added\n- _(nothing pending)_\n\n---\n\n### [1.1.0]\n\n#### Added\n- `read_email(message_id)` — returns raw Gmail API message dict (distinct from `get_email()` which returns `NormalizedDocument`)\n- `add_email(to, subject, body, cc, bcc)` — creates a Gmail draft via `GmailHTTPClient.execute_create_draft()`\n- `post_email(to, subject, body, cc, bcc)` — public alias for `send_email()` for API surface completeness\n- `_collect_history_ids(access_token, start_history_id)` — incremental sync via Gmail History API (`messageAdded` events)\n- `_collect_all_message_ids(access_token)` — full page-token scan tracking latest `historyId`\n- Incremental sync checkpoint: `last_history_id` persisted via `set_metadata()` / `get_metadata()`\n- `_STATUS_MAP` class variable mapping HTTP status codes (401, 403, 429) to `(ConnectorHealth, AuthStatus)` pairs\n\n#### Changed\n- `sync()` accepts new parameters: `full: bool = False`, `kb_id: str = None`, `webhook_url: str = None`\n- `sync()` returns `SyncStatus.PARTIAL` (not `FAILED`) when only some individual messages fail\n\n---\n\n### [1.0.0] — Initial Release\n\n#### Added\n- `GmailConnector` class implementing `BaseConnector`\n- `install()` — credential validation and `save_config()`\n- `authorize()` — OAuth2 authorization code exchange with `TokenInfo` persistence\n- `on_token_refresh()` — automatic access token refresh via stored `refresh_token`\n- `health_check()` — live connectivity check via `/users/me/profile`; never raises\n- `sync()` — full page-token scan of inbox with `normalize_message()` normalization\n- `list_emails()` — raw message stub listing with Gmail query and pagination\n- `get_email()` — single message fetch returning `NormalizedDocument`\n- `modify_message()` — label add/remove via `/messages/{id}/modify`\n- `send_email()` — RFC 2822 MIME build + base64url encode + send via `/messages/send`\n- `with_retry()` — retry wrapper (max 3 attempts) used throughout all read operations\n- Structured logging via `structlog` throughout\n- Unit test suite in `tests/test_connector.py` with `conftest.py` fixtures\n- `metadata/connector.json` — complete method + install_fields schema",
+      "children": []
+    },
+    {
+      "id": "release-notes",
+      "title": "9. Release Notes",
+      "content": "",
+      "children": [
+        {
+          "id": "v1-1-0",
+          "title": "v1.1.0",
+          "content": "**Compatibility:** Shielva Integration Builder >= 1.0, Python >= 3.9\n\n**What's New:**\n- **Incremental sync** via the Gmail History API — only messages added since the last `historyId` checkpoint are fetched, dramatically reducing API quota usage on large mailboxes\n- **Three new public methods:** `read_email()` (raw dict), `add_email()` (draft creation), `post_email()` (send alias)\n- `sync()` now supports `kb_id` and `webhook_url` parameters for targeted ingestion routing\n- `SyncStatus.PARTIAL` returned when some (not all) messages fail, allowing partial progress visibility\n\n**Known Limitations:**\n- Webhook / push notification delivery not supported (polling only)\n- Full sync fetches only messages matching `in:inbox` (hardcoded query)\n- Message deletions and label changes not tracked during incremental sync (only `messageAdded` events)\n- `send_email()` does not retry (non-idempotent; duplicate sends would be disruptive)\n- Gmail History API `410 GONE` on stale `historyId` requires manual recovery via `sync(full=True)`\n\n**Migration from v1.0.0:**\n- No breaking changes to existing public method signatures\n- Callers of `sync()` may now pass `full=True` to force a complete re-scan"
+        },
+        {
+          "id": "v1-0-0",
+          "title": "v1.0.0 — Initial Release",
+          "content": "**Compatibility:** Shielva Integration Builder >= 1.0, Python >= 3.9\n\n**What's New:**\n- First production-ready version of the Google Gmail connector\n- Supports full inbox sync with `nextPageToken` pagination (500 messages per page)\n- OAuth2 with automatic token refresh via `on_token_refresh()`\n- 8 methods: `install`, `authorize`, `health_check`, `sync`, `list_emails`, `get_email`, `modify_message`, `send_email`\n\n**Known Limitations:**\n- Incremental sync not yet available (added in v1.1.0)\n- Draft creation and `post_email` alias not yet available (added in v1.1.0)\n\n**Breaking Changes:**\n- N/A (initial release)"
+        }
+      ]
+    },
+    {
+      "id": "verification-and-acceptance-criteria",
+      "title": "10. Verification & Acceptance Criteria",
+      "content": "",
+      "children": [
+        {
+          "id": "automated-checks",
+          "title": "10.1 Automated Checks (must all pass before merge)",
+          "content": "```bash\n# 1. Compile check — no syntax or import errors\npython3 -m py_compile connector.py exceptions.py\n\n# 2. Unit tests\npython3 -m pytest tests/ -v\n\n# 3. Coverage (fail if below 80%)\npython3 -m pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=80\n\n# 4. Linting\nruff check connector.py exceptions.py\n\n# 5. Metadata validation\npython3 -c \"import json; json.load(open('metadata/connector.json'))\"\n```"
+        },
+        {
+          "id": "manual-verification-steps",
+          "title": "10.2 Manual Verification Steps",
+          "content": "| Step | Action | Expected Result |\n|------|--------|-----------------|\n| 1 | Install connector with valid `client_id` + `client_secret` | `ConnectorStatus: HEALTHY / PENDING` |\n| 2 | Click \"Authorize\" | Google consent screen shown; redirect back to CMS; `auth_status: CONNECTED` |\n| 3 | Click \"Health Check\" | `health: HEALTHY`, `auth_status: CONNECTED` |\n| 4 | Run `sync(full=True)` | `SyncResult.status: COMPLETED`; messages ingested; `last_history_id` stored |\n| 5 | Run `sync(full=False)` immediately after | `documents_found` ≈ 0 (no new messages); checkpoint unchanged |\n| 6 | Revoke token at accounts.google.com | Next `health_check()` returns `health: DEGRADED, auth_status: TOKEN_EXPIRED` |\n| 7 | Re-authorize in CMS | New tokens stored; `health_check()` returns `HEALTHY` |\n| 8 | Set `base_url` to an invalid URL | `health_check()` returns `health: DEGRADED` with error message; no crash |\n| 9 | Call `send_email()` without `gmail.send` scope | `PermissionError` raised; no partial send |\n| 10 | Call `add_email()` | Draft appears in Gmail Drafts folder |"
+        },
+        {
+          "id": "performance-benchmarks",
+          "title": "10.3 Performance Benchmarks",
+          "content": "| Operation | Target Latency | Max Acceptable |\n|-----------|---------------|----------------|\n| `health_check()` | < 500ms | < 2000ms |\n| `authorize()` | < 2s | < 5s |\n| `on_token_refresh()` | < 1s | < 3s |\n| `get_email()` single message | < 1s | < 3s |\n| `send_email()` | < 3s | < 10s |\n| `sync()` single page (500 stubs + fetches) | < 30s | < 60s |"
+        }
+      ]
+    },
+    {
+      "id": "quality-checklist",
+      "title": "11. Quality Checklist",
+      "content": "",
+      "children": [
+        {
+          "id": "code-quality",
+          "title": "11.1 Code Quality",
+          "content": "- [x] All public methods have complete type hints (parameters + return type)\n- [x] Module, class, and all public methods have docstrings\n- [x] No hardcoded secrets, tenant IDs, or environment-specific values\n- [x] All HTTP calls go through `GmailHTTPClient` in `client/http_client.py` — no raw `aiohttp` or `requests` in `connector.py`\n- [x] Credentials stored only via `self.set_token(token_info)` → Redis (never in files or logs)\n- [x] Error handling uses typed exception classes: `GmailAuthError`, `GmailAPIError`, `GmailConnectorError` from `exceptions.py`; `RefreshError` from `shared.base_connector`\n- [x] Structured logging via `structlog` throughout — no `print()` statements\n- [x] No dead code or commented-out blocks\n- [x] Normalization logic delegated to `helpers/normalizer.py` (`normalize_message`)\n- [x] Utility logic (retry, MIME, encoding) delegated to `helpers/utils.py` (`with_retry`, `build_mime_message`, `base64url_encode`)"
+        },
+        {
+          "id": "testing",
+          "title": "11.2 Testing",
+          "content": "- [x] Unit tests for every public method (happy path + at least one error path)\n- [x] All external HTTP calls mocked — no real network calls in unit tests\n- [x] `mock_http` fixture uses `MagicMock` with `AsyncMock` for all `GmailHTTPClient` methods\n- [x] Storage methods mocked via autouse `mock_storage` fixture in `conftest.py`\n- [x] Edge cases covered: empty inbox, paginated results (2 pages), partial message failure, authorize with no scope in response, auth error in health_check\n- [x] `asyncio_mode = auto` in `pytest.ini` — no manual `@pytest.mark.asyncio` needed\n- [x] Multi-tenant isolation verified: `test_normalized_document_has_tenant_id`, `test_normalized_document_id_namespaced_by_connector`, `test_different_tenants_different_connector_instances`\n- [ ] Coverage >= 80%: verify with `pytest tests/ --cov=. --cov-fail-under=80`"
+        },
+        {
+          "id": "security",
+          "title": "11.3 Security",
+          "content": "- [x] No secrets in source code or test files (test credentials are obvious placeholders: `\"test-client-id\"`, `\"test-access-token\"`)\n- [x] OAuth tokens never logged — `structlog` calls log only `connector_id`, never token values\n- [x] API keys never appear in error messages (`GmailAuthError` messages contain status text, not token data)\n- [x] HTTPS enforced: all `GmailHTTPClient` calls target `https://gmail.googleapis.com` and `https://oauth2.googleapis.com`\n- [x] Input validation: `install()` checks for non-empty `client_id` and `client_secret` before proceeding\n- [x] No `eval()`, `exec()`, or shell injection vectors in connector or helper code\n- [x] `client_secret` field typed as `\"secret\"` in `metadata/connector.json` to prevent plaintext display in CMS UI"
+        },
+        {
+          "id": "resilience-and-production-readiness",
+          "title": "11.4 Resilience & Production Readiness",
+          "content": "- [x] `with_retry(max_retries=3)` used for all read operations: `list_messages`, `get_message`, `list_history`, `execute_create_draft`, `execute_modify_message`, `get_profile`\n- [x] `send_email()` intentionally has no retry (non-idempotent)\n- [x] `health_check()` never raises — all exceptions caught and returned as `ConnectorStatus`\n- [x] `sync()` never raises — outer exception caught; returns `SyncResult(status=FAILED)`. Per-message failures yield `SyncStatus.PARTIAL`, not `FAILED`\n- [x] `sync()` is resumable: `last_history_id` written only after full message loop; interrupted runs do not advance the cursor\n- [x] Empty inbox handled gracefully: `list_messages` returning `[]` yields `SyncResult(COMPLETED, documents_synced=0)`\n- [x] Token refresh transparent: `_get_valid_token()` → `ensure_token()` → `on_token_refresh()` on every API call\n- [x] `metadata/connector.json` is valid JSON and all `apis` entries match actual method signatures"
+        },
+        {
+          "id": "documentation",
+          "title": "11.5 Documentation",
+          "content": "- [x] All 14 sections of the Shielva documentation standard filled with connector-specific content\n- [x] Changelog updated for v1.0.0 and v1.1.0\n- [x] API reference matches actual method signatures in `connector.py`\n- [x] Error reference lists all exception classes from `exceptions.py` plus `RefreshError`\n- [x] Configuration schema matches `metadata/connector.json` `install_fields`\n- [x] Test matrix covers all 11 public methods (happy path + error path)"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "12. Troubleshooting",
+      "content": "",
+      "children": [
+        {
+          "id": "common-error-reference",
+          "title": "12.1 Common Error Reference",
+          "content": "| Symptom | Most Likely Cause | Fix |\n|---------|------------------|-----|\n| `GmailAuthError` on every request | Access token expired; refresh token revoked | Re-authorize the connector in CMS |\n| `health_check` returns `TOKEN_EXPIRED` / `DEGRADED` | `get_profile` returned 401; `on_token_refresh` failed | Re-authorize |\n| `health_check` returns `OFFLINE` / `EXPIRED` | `RefreshError` — no refresh token in Redis | Re-authorize; Redis may have evicted the token |\n| `sync` returns `PARTIAL` | Some `get_message` calls failed (network timeout, 404) | Check logs for `gmail.sync.message_failed`; retry sync |\n| `sync` returns `FAILED` | Outer sync threw (auth failure, list_messages 401/5xx) | Check logs for `gmail.sync.failed`; re-authorize if auth-related |\n| `send_email` raises `PermissionError` | `gmail.send` scope not granted during OAuth | Re-authorize with `gmail.send` scope |\n| `sync(full=True)` returns 0 documents | Query `in:inbox` returns no results | Confirm inbox has messages; check `base_url` config |\n| `ConnectorHealth.OFFLINE` + `MISSING_CREDENTIALS` | `client_id` or `client_secret` empty at install | Re-install with both credentials provided |\n| Tokens missing after service restart | Redis evicted keys | Increase Redis `maxmemory` or enable persistence (`appendonly yes`) |\n| History API `410 GONE` on incremental sync | Stored `historyId` is too old | Clear checkpoint; run `sync(full=True)` to reset |\n| `GmailConnectorError` on all API calls | Outbound HTTPS to `gmail.googleapis.com` blocked | Verify firewall allows outbound 443 to `gmail.googleapis.com` and `oauth2.googleapis.com` |"
+        },
+        {
+          "id": "debug-checklist",
+          "title": "12.2 Debug Checklist",
+          "content": "1. **Check connector logs:** CMS > Integrations > Google Gmail > Activity Log — look for `gmail.sync.failed`, `gmail.sync.message_failed`, `gmail.install.missing_credentials`\n2. **Run Health Check:** Confirms token validity and API reachability in a single call\n3. **Check token presence in Redis:** `redis-cli GET connector:{tenant_id}:{connector_id}:tokens` — must not be empty\n4. **Verify scopes:** Compare `TokenInfo.scopes` against `GmailConnector.REQUIRED_SCOPES`; `gmail.modify` and `gmail.send` are often omitted by mistake\n5. **Check `last_history_id`:** A stale or corrupted `historyId` causes History API `410 GONE`. Clear it and call `sync(full=True)` to reset\n6. **Provider status:** Check https://www.google.com/appsstatus for Gmail API outages\n7. **Network trace from connector host:** `curl -v https://gmail.googleapis.com/gmail/v1/users/me/profile -H \"Authorization: Bearer {token}\"`\n8. **Validate metadata:** `python3 -c \"import json; json.load(open('metadata/connector.json'))\"` — confirms no JSON corruption"
+        },
+        {
+          "id": "log-interpretation",
+          "title": "12.3 Log Interpretation",
+          "content": "| Log Event Key | Meaning | Key Fields to Check |\n|---------------|---------|---------------------|\n| `gmail.install.ok` | `install()` succeeded; credentials validated | `connector_id` |\n| `gmail.install.missing_credentials` | `client_id` or `client_secret` empty | `connector_id` |\n| `gmail.authorize.ok` | OAuth code exchanged; `TokenInfo` stored | `connector_id` |\n| `gmail.sync.message_failed` | One message failed to fetch or normalize | `message_id`, `error` |\n| `gmail.sync.failed` | Outer `sync()` threw an exception | `error`, `connector_id` |"
+        }
+      ]
+    },
+    {
+      "id": "faq",
+      "title": "13. FAQ",
+      "content": "**Q: How often does the connector sync?**\nA: Sync is triggered on-demand from CMS or via the Shielva API. There is no autonomous scheduled sync loop inside the connector itself. Use the platform's scheduler to call `sync()` at your desired interval.\n\n---\n\n**Q: Is credential data encrypted?**\nA: Yes. All tokens are stored in Redis via `BaseConnector.set_token()` using the platform's encryption layer. The `access_token`, `refresh_token`, and `expires_at` values are never written to disk or logged at any log level.\n\n---\n\n**Q: Can this connector run for multiple Gmail accounts in the same tenant?**\nA: Yes. Each CMS installation creates its own `connector_id`. Install the connector once per Gmail account. Each instance maintains its own token store and `last_history_id` checkpoint independently.\n\n---\n\n**Q: What happens if my refresh token is revoked?**\nA: `on_token_refresh()` raises `RefreshError`. `health_check()` returns `health=OFFLINE, auth_status=EXPIRED`. `sync()` will also fail. You must click \"Re-Authorize\" in CMS to complete a new OAuth flow and obtain a fresh refresh token.\n\n---\n\n**Q: What happens if the Gmail History API returns `410 GONE` for an old `historyId`?**\nA: The connector logs `gmail.sync.failed` and `sync()` returns `status=FAILED`. To recover: call `sync(full=True)` which bypasses the History API and re-scans the inbox from scratch, resetting the `last_history_id` checkpoint.\n\n---\n\n**Q: Why does `send_email()` not use `with_retry()`?**\nA: `send_email()` is non-idempotent — retrying after a transient failure could send duplicate emails. It calls `GmailHTTPClient.execute_send_message()` directly without a retry wrapper.\n\n---\n\n**Q: What is the difference between `get_email()` and `read_email()`?**\nA: `get_email(message_id)` fetches the raw Gmail message and passes it through `normalize_message()`, returning a `NormalizedDocument`. `read_email(message_id)` returns the raw Gmail API dict unchanged (including `payload`, `headers`, `body.data`, `historyId`). Use `get_email()` for Shielva ingestion; use `read_email()` when you need raw Gmail fields.\n\n---\n\n**Q: Can I add a new method to this connector?**\nA: Yes — add the `async` method to `GmailConnector` in `connector.py`, add a corresponding entry to `metadata/connector.json` under `apis`, write unit tests in `tests/test_connector.py`, and update the Method Inventory in section 5.1 of this document.\n\n---\n\n**Q: Why does the test fixture replace `connector.http_client` directly instead of patching `connector.GmailHTTPClient`?**\nA: Both approaches work. The `authed` fixture in `conftest.py` replaces the already-constructed `http_client` instance directly (`connector.http_client = mock_http`), which is simpler and avoids needing to know the constructor arguments. If you do need to patch the class import, patch `connector.GmailHTTPClient` (where it is used), not `client.http_client.GmailHTTPClient` (where it is defined).",
+      "children": []
+    },
+    {
+      "id": "appendix",
+      "title": "14. Appendix",
+      "content": "",
+      "children": [
+        {
+          "id": "file-structure",
+          "title": "14.1 File Structure",
+          "content": "```\ngoogle_gmail_c996c4_connector/\n├── connector.py              # GmailConnector (inherits BaseConnector)\n├── exceptions.py             # GmailAuthError, GmailAPIError, GmailConnectorError\n├── requirements.txt          # aiohttp>=3.9, python-dateutil>=2.8, pytest deps\n├── pytest.ini                # asyncio_mode = auto\n├── client/\n│   └── http_client.py        # GmailHTTPClient — aiohttp wrapper for Gmail REST API\n├── helpers/\n│   ├── normalizer.py         # normalize_message() — raw Gmail dict → NormalizedDocument\n│   └── utils.py              # with_retry(), build_mime_message(), base64url_encode()\n├── metadata/\n│   └── connector.json        # Method signatures, install_fields, capabilities (version 1.1.0)\n├── .shielva/\n│   └── docs/\n│       └── connector_docs.json  # This file\n└── tests/\n    ├── __init__.py\n    ├── conftest.py           # Fixtures: connector, authed, mock_http, valid_token, mock_storage, mock_logger\n    └── test_connector.py     # Unit test suite (43 tests across 11 public methods)\n```"
+        },
+        {
+          "id": "related-documentation",
+          "title": "14.2 Related Documentation",
+          "content": "- `shared/base_connector.py` — `BaseConnector`, `ConnectorHealth`, `AuthStatus`, `ConnectorStatus`, `SyncStatus`, `TokenInfo`, `NormalizedDocument`, `SyncResult`, `RefreshError`\n- `client/http_client.py` — `GmailHTTPClient`: `get_profile()`, `list_messages()`, `get_message()`, `execute_modify_message()`, `execute_send_message()`, `execute_create_draft()`, `list_history()`, `post_form_data()`\n- `helpers/normalizer.py` — `normalize_message(raw, connector_id, tenant_id) → NormalizedDocument`\n- `helpers/utils.py` — `with_retry(coro_fn, max_retries)`, `build_mime_message(to, subject, body, cc, bcc)`, `base64url_encode(data)`\n- [Gmail REST API Reference](https://developers.google.com/gmail/api/reference/rest)\n- [Gmail API Scopes](https://developers.google.com/gmail/api/auth/scopes)\n- [Google OAuth2 Authorization Code Flow](https://developers.google.com/identity/protocols/oauth2/web-server)\n- [OAuth2 RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)"
+        },
+        {
+          "id": "support-and-contributing",
+          "title": "14.3 Support & Contributing",
+          "content": "- **Bugs:** Raise an issue in the Shielva internal tracker with connector type `google_gmail_connector`\n- **Feature requests:** CMS > Support > Feature Request\n- **Contributing:** Follow the connector coding standards in `CONTRIBUTING.md`. All new methods require:\n  1. An `async` implementation in `GmailConnector` (`connector.py`)\n  2. A corresponding entry in `metadata/connector.json` under `apis`\n  3. Unit tests in `tests/test_connector.py` (happy path + at least one error path)\n  4. An updated Method Inventory in section 5.1 of `connector_docs.json`\n  5. A Changelog entry in section 8\n  6. `python3 -m pytest tests/ --cov=. --cov-fail-under=80` passing before PR submission"
+        }
+      ]
+    }
+  ]
+}
