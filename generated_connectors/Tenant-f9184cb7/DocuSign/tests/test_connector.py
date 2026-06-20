@@ -532,7 +532,7 @@ async def test_sync_partial_on_normalize_failure() -> None:
     c._http_client = mock_client
 
     # Patch normalize to fail on empty envelope
-    original_normalize = __import__("helpers.utils", fromlist=["normalize_envelope"]).normalize_envelope
+    from helpers.utils import normalize_envelope as original_normalize
 
     call_count = 0
 
