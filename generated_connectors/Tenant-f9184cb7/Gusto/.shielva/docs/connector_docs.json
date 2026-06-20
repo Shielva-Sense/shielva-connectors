@@ -1,0 +1,83 @@
+{
+  "title": "Gusto Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Gusto** connector integrates Shielva with the [Gusto API v1](https://docs.gusto.com/app-integrations/reference) to sync employee and payroll data into the Shielva knowledge base.\n\nThis connector reads all companies accessible to the authorized Payroll Admin account, fetches all employees (paginated) and all processed payrolls, and normalizes each record into a `ConnectorDocument` with a stable SHA-256-derived ID. One document is produced per employee and one per payroll.\n\n**Key capabilities:**\n- Retrieve current user identity via `/v1/me`\n- List all accessible companies\n- Paginate all employees across companies\n- Fetch processed payroll runs\n- Normalize employees and payrolls with stable IDs for deduplication\n- Generate Gusto OAuth2 authorization URL via `authorize()`\n- OAuth 2.0 authentication with read-only scopes"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Gusto connector running in minutes.\n\n### 1. Create an OAuth App in Gusto Developer Portal\n\n1. Go to [Gusto Developer Portal](https://dev.gusto.com)\n2. Create a new **Application**\n3. Set the Redirect URI to your Shielva callback URL\n4. Copy the **Client ID** and **Client Secret**\n\n### 2. Install the Connector\n\nIn Shielva ACP:\n1. Navigate to **Integrations → Gusto**\n2. Click **Connect**\n3. Enter your `client_id`, `client_secret`, and optionally `redirect_uri`\n4. Click **Install** — status shows **Pending**\n5. Click **Authorize with Gusto** to complete the OAuth flow\n\n### 3. Verify\n\nAfter authorization, the health check calls `GET /v1/me` and displays the connected email. Status changes to **Connected**.\n\n### 4. Run Your First Sync\n\n```python\nresult = await connector.sync(full=True)\nprint(f\"Synced {result.documents_synced} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Gusto connector uses **OAuth 2.0** with read-only scopes.\n\n### Install Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| OAuth Client ID | `client_id` | string | Yes | From Gusto Developer Portal |\n| OAuth Client Secret | `client_secret` | password | Yes | From Gusto Developer Portal |\n| Redirect URI | `redirect_uri` | string | No | Must match Gusto Developer Portal registration |\n\n### Required Scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `openid` | Identity verification |\n| `employees:read` | Read employee records |\n| `payrolls:read` | Read payroll data |\n| `companies:read` | List accessible companies |\n\n### OAuth Endpoints\n\n| Endpoint | URL |\n|----------|-----|\n| Authorization | `https://api.gusto.com/oauth/authorize` |\n| Token | `https://api.gusto.com/oauth/token` |\n\n### Flow\n\n1. `install()` validates credentials. With no `access_token` present it returns `PENDING`.\n2. `authorize()` returns the Gusto OAuth2 URL — redirect the user's browser here.\n3. After the user grants access, exchange the code for tokens and store `access_token` in config.\n4. `health_check()` calls `GET /v1/me` to verify the token is still valid.\n\n### Security\n\n- Tokens stored encrypted in the Shielva vault — never logged\n- Connector requests read-only scopes only — cannot modify Gusto data\n- `client_secret` never transmitted to the browser"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install Fields\n\n```json\n{\n  \"client_id\": \"your-gusto-client-id\",\n  \"client_secret\": \"your-gusto-client-secret\",\n  \"redirect_uri\": \"https://your-shielva-instance/oauth/callback/gusto\"\n}\n```\n\n### Runtime Config (set by OAuth flow)\n\n```json\n{\n  \"access_token\": \"your-access-token\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `GUSTO_API_V1` | `https://api.gusto.com/v1` | Gusto API base |\n| `EMPLOYEES_PAGE_SIZE` | `100` | Employees per page |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with jitter |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 5 public API methods plus `authorize()` and the sync engine.",
+      "children": [
+        {
+          "id": "get-current-user",
+          "title": "get_current_user()",
+          "content": "Return the current Gusto user record.\n\n```python\nme = await connector.get_current_user()\n# Returns: {\"email\": \"owner@acme.com\", \"roles\": {\"payroll_admin\": {\"companies\": [...]}}}\n```\n\n**Endpoint:** `GET /v1/me`"
+        },
+        {
+          "id": "list-companies",
+          "title": "list_companies()",
+          "content": "Return all companies accessible to the authorized account.\n\n```python\ncompanies = await connector.list_companies()\n# Returns: [{\"id\": \"company_001\", \"name\": \"Acme Corp\"}, ...]\n```\n\nExtracts `roles.payroll_admin.companies` from the `/v1/me` response.\n\n**Endpoint:** `GET /v1/me`"
+        },
+        {
+          "id": "list-employees",
+          "title": "list_employees(company_id, page=1)",
+          "content": "Return one page of employees for the given company.\n\n```python\nemployees = await connector.list_employees(\"company_001\", page=1)\n# Returns: [{\"id\": \"emp_001\", \"first_name\": \"Alice\", \"last_name\": \"Smith\", ...}]\n```\n\nDefaults to page 1, 100 employees per page. Iterate `page` to get all employees.\n\n**Endpoint:** `GET /v1/companies/{company_id}/employees`"
+        },
+        {
+          "id": "get-employee",
+          "title": "get_employee(company_id, employee_id)",
+          "content": "Return a single employee record.\n\n```python\nemp = await connector.get_employee(\"company_001\", \"emp_001\")\n# Returns: {\"id\": \"emp_001\", \"first_name\": \"Alice\", \"email\": \"alice@acme.com\", ...}\n```\n\n**Endpoint:** `GET /v1/companies/{company_id}/employees/{employee_id}`"
+        },
+        {
+          "id": "list-payrolls",
+          "title": "list_payrolls(company_id, processed=True)",
+          "content": "Return all payrolls for the given company.\n\n```python\npayrolls = await connector.list_payrolls(\"company_001\", processed=True)\n# Returns: [{\"payroll_id\": \"pay_001\", \"pay_period\": {...}, \"totals\": {...}}, ...]\n```\n\nSet `processed=False` to include unprocessed (draft) payrolls.\n\n**Endpoint:** `GET /v1/companies/{company_id}/payrolls`"
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "Return the Gusto OAuth2 authorization URL.\n\n```python\nurl = connector.authorize()\n# Returns: \"https://api.gusto.com/oauth/authorize?client_id=...&response_type=code&scope=...\"\n# Redirect the user's browser to this URL to initiate the OAuth flow.\n```\n\nIncludes `client_id`, `response_type=code`, `scope` (space-separated), and `redirect_uri` if configured."
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "title": "Sync & Document Schema",
+      "content": "### How sync() works\n\n1. Calls `GET /v1/me` to get the list of accessible companies\n2. For each company, pages through all employees (100 per page) via `GET /v1/companies/{id}/employees`\n3. For each company, fetches all processed payrolls via `GET /v1/companies/{id}/payrolls`\n4. Normalizes each employee and payroll into a `ConnectorDocument`\n5. Optionally ingests each document into the knowledge base via `kb_id`\n\n### Usage\n\n```python\n# Full sync of all accessible companies\nresult = await connector.sync(full=True, kb_id=\"my_kb\")\n\nprint(result.status)            # SyncStatus.COMPLETED\nprint(result.documents_found)   # total docs produced\nprint(result.documents_synced)  # docs successfully ingested\nprint(result.documents_failed)  # docs that failed ingestion\n```\n\n### Employee Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"employee:\" + employee_id)[:16]` |\n| `title` | `\"Employee: {first_name} {last_name}\"` |\n| `content` | Newline-separated `\"Field: value\"` pairs |\n| `source_url` | `https://app.gusto.com/companies/{company_id}/employees/{employee_id}` |\n| `metadata.employee_id` | Gusto employee ID |\n| `metadata.company_id` | Gusto company ID |\n| `metadata.email` | Employee email |\n| `metadata.job_title` | Job title |\n| `metadata.department` | Department |\n| `metadata.start_date` | Employment start date |\n| `metadata.terminated` | Boolean — whether the employee has been terminated |\n\n### Payroll Document Schema\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256(\"payroll:\" + payroll_id)[:16]` |\n| `title` | `\"Payroll: {period_start} – {period_end}\"` |\n| `content` | Newline-separated `\"Field: value\"` pairs |\n| `source_url` | `https://app.gusto.com/companies/{company_id}/payrolls` |\n| `metadata.payroll_id` | Gusto payroll ID |\n| `metadata.company_id` | Gusto company ID |\n| `metadata.period_start` | Pay period start date |\n| `metadata.period_end` | Pay period end date |\n| `metadata.check_date` | Check/payment date |\n| `metadata.gross_pay` | Total gross pay (string, e.g. \"50000.00\") |\n| `metadata.net_pay` | Total net pay (string) |\n| `metadata.employee_count` | Number of employees in the payroll run |"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception Hierarchy\n\n```\nGustoError (base)\n├── GustoAuthError      — 401/403: invalid or expired OAuth token\n├── GustoNetworkError   — timeouts, connection errors, 5xx\n├── GustoRateLimitError — 429: too many requests\n└── GustoNotFoundError  — 404: resource not found\n```\n\n### Retry Behavior\n\n| Error type | Retried? | Strategy |\n|-----------|----------|----------|\n| `GustoRateLimitError` (429) | Yes | Exponential backoff, up to 3 attempts; honours `Retry-After` header |\n| `GustoNetworkError` (5xx, timeout) | Yes | Exponential backoff, up to 3 attempts |\n| `GustoAuthError` (401/403) | No | Immediate failure — re-authorize |\n| `GustoNotFoundError` (404) | No | Immediate failure — check resource ID |\n\n### Error Mapping\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `GustoAuthError` |\n| 403 | `GustoAuthError` |\n| 404 | `GustoNotFoundError` |\n| 429 | `GustoRateLimitError` |\n| 5xx | `GustoNetworkError` |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\nGusto OAuth tokens expire. Re-authorize via **ACP → Integrations → Gusto → Re-authorize**.\n\n---\n\n### 403 Forbidden / No Companies Returned\n\nThe Gusto account must have **Payroll Admin** role. Basic employee accounts cannot access `employees:read` or `payrolls:read` scopes. Verify the account and re-authorize.\n\n---\n\n### Status Shows 'Pending' After Install\n\nThe OAuth flow has not been completed. Click **Authorize with Gusto** to initiate the redirect. Ensure the redirect URI matches what is registered in the Gusto Developer Portal.\n\n---\n\n### Rate Limit (429)\n\nGusto enforces per-application rate limits. The connector retries automatically with exponential backoff. For high-volume setups, increase the gap between sync runs.\n\n---\n\n### Empty Sync with Active Employees\n\nIf `documents_found == 0`:\n1. Confirm the authorized account is a Payroll Admin (not just a regular employee)\n2. Check `health_check()` returns `Connected`\n3. Verify companies are returned by `list_companies()`"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "### Unit Tests (62+ tests, zero I/O)\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/gusto_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: all passed\n```\n\nAll HTTP calls are mocked via `AsyncMock` — no Gusto account required.\n\n**Coverage:**\n- `install()` — missing creds, missing client_id, missing client_secret, pending (no token), success, invalid token, network error\n- `authorize()` — URL format, client_id included, scopes included, redirect_uri present/absent, response_type=code\n- `health_check()` — no token, healthy with email, no email fallback, auth error, network error, generic error\n- `sync()` — no token, empty companies, one company, two companies, kb_id ingest, company list failure, paginated employees, empty employees/payrolls, partial failure on employee error\n- `get_current_user()` — success, auth error\n- `list_companies()` — success, empty, auth error\n- `list_employees()` — success, page param, empty\n- `get_employee()` — success, not found, auth error\n- `list_payrolls()` — success, empty, unprocessed flag\n- `normalize_employee()` — basic, stable IDs, 16-char IDs, different employees → different IDs, source URL, metadata, terminated flag, missing optional fields, uuid fallback\n- `normalize_payroll()` — basic, stable IDs, 16-char IDs, different payrolls → different IDs, source URL, metadata, missing pay period, empty totals\n- `with_retry()` — success, transient retry, auth no-retry, exhausted, rate limit\n- Exception hierarchy and attributes (GustoAuthError, GustoNetworkError, GustoRateLimitError, GustoNotFoundError)\n- Connector model: type constants, config parsing, defaults, context manager, idempotent aclose\n- `ConnectorDocument` defaults and metadata isolation"
+    }
+  ]
+}
