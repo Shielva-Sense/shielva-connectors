@@ -1,0 +1,42 @@
+{
+  "connector_type": "surveymonkey",
+  "display_name": "SurveyMonkey",
+  "provider": "surveymonkey",
+  "service": "surveymonkey",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Connect to SurveyMonkey to sync surveys, responses, collectors, contacts, and contact lists via the SurveyMonkey API v3.",
+  "category": "surveys",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "OAuth 2.0 Client ID from the SurveyMonkey Developer Portal."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "OAuth 2.0 Client Secret from the SurveyMonkey Developer Portal."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": true,
+      "description": "The callback URL registered in your SurveyMonkey app settings."
+    }
+  ],
+  "scopes": ["surveys_read", "responses_read"],
+  "capabilities": ["sync", "health_check", "oauth2"],
+  "resources": ["surveys", "responses", "collectors", "contacts", "contact_lists"],
+  "auth_flow": {
+    "type": "oauth2",
+    "authorization_url": "https://api.surveymonkey.com/oauth/authorize",
+    "token_url": "https://api.surveymonkey.com/oauth/token",
+    "scopes": ["surveys_read", "responses_read"]
+  }
+}
