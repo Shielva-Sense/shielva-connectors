@@ -1,0 +1,29 @@
+{
+  "connector_type": "fifteen_five",
+  "name": "15Five",
+  "display_name": "15Five",
+  "description": "Connect to 15Five to sync check-in reports, OKR objectives, high-five recognition, meetings, and team data into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "15Five API key generated from your account settings."
+    }
+  ],
+  "capabilities": [
+    "list_users",
+    "list_reports",
+    "list_objectives",
+    "list_meetings",
+    "list_high_fives",
+    "list_groups",
+    "sync"
+  ],
+  "provider": "15Five",
+  "service": "15Five",
+  "category": "performance"
+}
