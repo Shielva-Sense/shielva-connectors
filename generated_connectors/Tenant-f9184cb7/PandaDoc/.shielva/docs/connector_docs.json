@@ -1,0 +1,87 @@
+{
+  "title": "PandaDoc Documentation",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The PandaDoc connector integrates with the PandaDoc API v1 to sync document management data into the Shielva knowledge base. It is designed for sales operations, legal, and RevOps teams who use PandaDoc to create, send, and track proposals, contracts, and agreements.\n\n**Key capabilities:**\n- Syncs **documents** (proposals, contracts, agreements — all statuses, paginated)\n- Syncs **templates** (reusable document templates)\n- Syncs **contacts** (recipients and signers stored in PandaDoc)\n- Syncs **forms** (data collection forms)\n- Authenticates via a single **API Key** — no OAuth flow required\n- Verifies credentials during `install()` by calling `GET /workspaces/` and reports the workspace name\n- Pagination style: count+page — iterates until the `results` array is empty or shorter than the page size\n- Page size: `SYNC_PAGE_SIZE = 100` records per request\n- HTTP client: `httpx` (async)\n- API base: `https://api.pandadoc.com/public/v1`\n- Auth header: `Authorization: API-Key {api_key}`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "**Step 1 — Generate a PandaDoc API Key**\n\n1. Log in to PandaDoc.\n2. Go to **Settings → Integrations → API**.\n3. Click **Generate API Key** (or copy an existing one).\n4. Copy the key — store it securely.\n\n**Step 2 — Install the connector**\n\nProvide the `api_key` in the Shielva connector configuration, then call `install()`:\n\n```python\nimport asyncio\nfrom connector import PandaDocConnector\n\nasync def main():\n    async with PandaDocConnector(\n        tenant_id=\"acme\",\n        connector_id=\"pandadoc-main\",\n        config={\"api_key\": \"YOUR_PANDADOC_API_KEY\"},\n    ) as connector:\n        result = await connector.install()\n        print(result.health)       # ConnectorHealth.HEALTHY\n        print(result.auth_status)  # AuthStatus.CONNECTED\n        print(result.message)      # \"PandaDoc API key validated. Workspace: Acme Corp\"\n\nasyncio.run(main())\n```\n\n**Step 3 — Verify the connection**\n\n```python\nhealth = await connector.health_check()\nprint(health.health)      # ConnectorHealth.HEALTHY\nprint(health.message)     # \"PandaDoc API is reachable\"\n```\n\n**Step 4 — Run your first sync**\n\n```python\nresult = await connector.sync(kb_id=\"kb-acme-contracts\")\nprint(f\"Found: {result.documents_found}\")\nprint(f\"Synced: {result.documents_synced}\")\nprint(f\"Failed: {result.documents_failed}\")\nprint(f\"Status: {result.status}\")\n# Status: SyncStatus.COMPLETED\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "**Auth type:** API Key (`AUTH_TYPE = \"api_key\"`)\n\nPandaDoc uses a static API key transmitted in the `Authorization` header of every request. No OAuth consent flow or token refresh is required.\n\n**Request header format:**\n```\nAuthorization: API-Key {api_key}\n```\n\n**How to obtain an API key:**\n1. Log in to PandaDoc at `https://app.pandadoc.com`\n2. Navigate to **Settings → Integrations → API**\n3. Click **Generate API Key** — or use an existing key from the list\n4. Copy the key; it can be regenerated at any time from the same page\n\n**Key validation:**\n- `install()` checks that `api_key` is non-empty, then calls `GET /workspaces/` to verify it is accepted by PagerDuty\n- `health_check()` also calls `GET /workspaces/` and returns the workspace name in the message\n- If `api_key` is invalid, `PandaDocAuthError` is raised and the install/health-check returns `INVALID_CREDENTIALS`\n\n**Permissions required:** The API key needs read access to documents, templates, contacts, forms, and workspaces. API keys in PandaDoc are account-scoped and reflect the permissions of the user who generated them."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The following fields are accepted in the `config` dictionary passed to `PandaDocConnector(config=...)`.\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| `api_key` | `password` | Yes | PandaDoc API Key. Sent as `Authorization: API-Key {api_key}` on every request. Generate at Settings → Integrations → API. |\n\n**Example config dict:**\n```python\nconfig = {\n    \"api_key\": \"your-pandadoc-api-key-here\"\n}\n```\n\n**Internal constants (not user-configurable):**\n\n| Constant | Value | Description |\n|----------|-------|-------------|\n| `SYNC_PAGE_SIZE` | `100` | Max records per paginated API call (`count` parameter) |\n| `CONNECTOR_TYPE` | `\"pandadoc\"` | Connector type identifier |\n| `AUTH_TYPE` | `\"api_key\"` | Authentication method |\n| API base URL | `https://api.pandadoc.com/public/v1` | PandaDoc API v1 base |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods on `PandaDocConnector` are async. Use `async with PandaDocConnector(...) as connector:` or call `await connector.aclose()` manually to release the underlying `httpx.AsyncClient`.",
+      "children": [
+        {
+          "id": "method-install",
+          "title": "install()",
+          "content": "Validates the `api_key` is present, then calls `GET /workspaces/` to verify it against the PandaDoc API. Returns the workspace name in the success message.\n\n**Signature:**\n```python\nasync def install(self) -> InstallResult\n```\n\n**Returns:** `InstallResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| Key valid | `HEALTHY` | `CONNECTED` | `GET /workspaces/` returns 200 |\n| Key missing | `OFFLINE` | `MISSING_CREDENTIALS` | `api_key` is empty |\n| Key rejected | `OFFLINE` | `INVALID_CREDENTIALS` | `PandaDocAuthError` (401/403) |\n| Network error | `DEGRADED` | `FAILED` | `PandaDocNetworkError` or unexpected exception |\n\n**Example:**\n```python\nasync with PandaDocConnector(\n    tenant_id=\"acme\", connector_id=\"pd-1\",\n    config={\"api_key\": \"sk-abc123\"},\n) as connector:\n    result = await connector.install()\n    # result.message == \"PandaDoc API key validated. Workspace: Acme Corp\"\n```"
+        },
+        {
+          "id": "method-health-check",
+          "title": "health_check()",
+          "content": "Calls `GET /workspaces/` and returns the connector's current health status and workspace name.\n\n**Signature:**\n```python\nasync def health_check(self) -> HealthCheckResult\n```\n\n**Returns:** `HealthCheckResult`\n\n| Outcome | `health` | `auth_status` | Condition |\n|---------|----------|---------------|-----------|\n| API reachable | `HEALTHY` | `CONNECTED` | Workspaces endpoint returns 200 |\n| No key | `OFFLINE` | `MISSING_CREDENTIALS` | `api_key` is empty |\n| Key rejected | `OFFLINE` | `INVALID_CREDENTIALS` | `PandaDocAuthError` |\n| Network error | `DEGRADED` | `FAILED` | `PandaDocNetworkError` |\n\n**Example:**\n```python\nhealth = await connector.health_check()\nprint(health.workspace_name)  # \"Acme Corp\"\nprint(health.message)         # \"PandaDoc API is reachable\"\n```"
+        },
+        {
+          "id": "method-sync",
+          "title": "sync()",
+          "content": "Syncs all PandaDoc resources (documents, templates, contacts, forms) into the Shielva knowledge base. Processes resource types sequentially. If documents fail, `sync()` returns `FAILED` immediately. Failures in templates, contacts, or forms increment `documents_failed` but continue the sync.\n\n**Signature:**\n```python\nasync def sync(self, **kwargs: Any) -> SyncResult\n```\n\n**Parameters (`kwargs`):**\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| `kb_id` | `str` | `\"\"` | Knowledge base ID. When provided, each normalized `ConnectorDocument` is passed to `_ingest_document()`. |\n\n**Returns:** `SyncResult`\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `status` | `SyncStatus` | `COMPLETED` (0 failures) or `PARTIAL` (some failures) |\n| `documents_found` | `int` | Total items retrieved across all resource types |\n| `documents_synced` | `int` | Successfully normalized and ingested items |\n| `documents_failed` | `int` | Items that failed normalization or ingestion |\n\n**Example:**\n```python\nresult = await connector.sync(kb_id=\"kb-contracts\")\nprint(result.status)            # SyncStatus.COMPLETED\nprint(result.documents_found)   # e.g. 450\nprint(result.documents_synced)  # e.g. 450\n```"
+        },
+        {
+          "id": "method-list-documents",
+          "title": "list_documents()",
+          "content": "Fetches all PandaDoc documents using count+page pagination. Iterates until the `results` array is empty or shorter than `SYNC_PAGE_SIZE`.\n\n**Signature:**\n```python\nasync def list_documents(self, **kwargs: Any) -> list[dict[str, Any]]\n```\n\n**Parameters:** `**kwargs` are forwarded to the PandaDoc `GET /documents` endpoint as additional query parameters (e.g. `status`, `date_from`, `tag`).\n\n**Returns:** `list[dict[str, Any]]` — flat list of raw document dicts from the PandaDoc API `results` array.\n\n**Example:**\n```python\ndocs = await connector.list_documents(status=\"document.draft\")\nfor doc in docs:\n    print(doc[\"id\"], doc[\"name\"], doc[\"status\"])\n```"
+        },
+        {
+          "id": "method-list-templates",
+          "title": "list_templates()",
+          "content": "Fetches all PandaDoc templates using count+page pagination.\n\n**Signature:**\n```python\nasync def list_templates(self, **kwargs: Any) -> list[dict[str, Any]]\n```\n\n**Returns:** `list[dict[str, Any]]` — raw template dicts from the `results` array.\n\n**Example:**\n```python\ntemplates = await connector.list_templates()\nfor t in templates:\n    print(t[\"id\"], t[\"name\"])\n```"
+        },
+        {
+          "id": "method-list-contacts",
+          "title": "list_contacts()",
+          "content": "Fetches all PandaDoc contacts using count+page pagination.\n\n**Signature:**\n```python\nasync def list_contacts(self, **kwargs: Any) -> list[dict[str, Any]]\n```\n\n**Returns:** `list[dict[str, Any]]` — raw contact dicts including `first_name`, `last_name`, `email`, `company`, `job_title`, `phone`.\n\n**Example:**\n```python\ncontacts = await connector.list_contacts()\nfor c in contacts:\n    print(c[\"email\"], c.get(\"company\"))\n```"
+        },
+        {
+          "id": "method-list-forms",
+          "title": "list_forms()",
+          "content": "Fetches all PandaDoc forms using count+page pagination.\n\n**Signature:**\n```python\nasync def list_forms(self, **kwargs: Any) -> list[dict[str, Any]]\n```\n\n**Returns:** `list[dict[str, Any]]` — raw form dicts including `id`, `name`, `status`, `date_created`, `date_modified`.\n\n**Example:**\n```python\nforms = await connector.list_forms()\nfor f in forms:\n    print(f[\"id\"], f[\"name\"], f[\"status\"])\n```"
+        },
+        {
+          "id": "method-get-document",
+          "title": "get_document()",
+          "content": "Retrieves a single PandaDoc document by its ID.\n\n**Signature:**\n```python\nasync def get_document(self, document_id: str) -> dict[str, Any]\n```\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|-----------|------|----------|-------------|\n| `document_id` | `str` | Yes | PandaDoc document UUID. |\n\n**Returns:** `dict[str, Any]` — full document object from `GET /documents/{id}`.\n\n**Example:**\n```python\ndoc = await connector.get_document(\"rBduPpHDZAiMhZEpagFo9Q\")\nprint(doc[\"name\"], doc[\"status\"])\n```"
+        },
+        {
+          "id": "method-get-document-details",
+          "title": "get_document_details()",
+          "content": "Retrieves detailed information for a document including fields, tokens, and pricing tables.\n\n**Signature:**\n```python\nasync def get_document_details(self, document_id: str) -> dict[str, Any]\n```\n\n**Parameters:**\n\n| Parameter | Type | Required | Description |\n|-----------|------|----------|-------------|\n| `document_id` | `str` | Yes | PandaDoc document UUID. |\n\n**Returns:** `dict[str, Any]` — detailed document object from `GET /documents/{id}/details`, including `fields`, `tokens`, and `pricing_tables`.\n\n**Example:**\n```python\ndetails = await connector.get_document_details(\"rBduPpHDZAiMhZEpagFo9Q\")\nfor field in details.get(\"fields\", []):\n    print(field[\"name\"], field.get(\"value\"))\n```"
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All connector exceptions are defined in `exceptions.py` and inherit from `PandaDocError`. Each carries `.message`, `.status_code`, and `.code` attributes.\n\n| Exception | HTTP Status | `code` | Description |\n|-----------|-------------|--------|-------------|\n| `PandaDocError` | Any | — | Base exception. |\n| `PandaDocAuthError` | 401, 403 | — | Invalid or missing API key, or insufficient plan/permissions. Auth errors are **not retried**. |\n| `PandaDocNetworkError` | Timeout / conn error | — | Transient network failure. Retried with exponential backoff (max 3 attempts, 2x factor, up to 30s delay, ±0.5s jitter). |\n| `PandaDocNotFoundError` | 404 | `resource_not_found` | Document, template, contact, or form does not exist. Constructed with `resource` and `resource_id`. |\n| `PandaDocRateLimitError` | 429 | `rate_limit` | Too many requests. Carries `retry_after` float. Retried automatically. |\n| `PandaDocServerError` | 5xx | — | Transient PandaDoc server error. Retried automatically. |\n\n**Connector-level handling:**\n- `install()` — catches `PandaDocAuthError` → `OFFLINE/INVALID_CREDENTIALS`; catches `PandaDocNetworkError` → `DEGRADED/FAILED`\n- `health_check()` — same pattern as install\n- `sync()` — a `PandaDocError` on the documents resource type returns `SyncResult(status=FAILED)` immediately; failures on templates, contacts, and forms increment `documents_failed` and the sync continues\n- All HTTP calls go through `with_retry()` which handles backoff automatically"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "**`install()` returns `INVALID_CREDENTIALS`**\n- The `api_key` was rejected by PandaDoc (`PandaDocAuthError` on `GET /workspaces/`).\n- Verify the key in PandaDoc at **Settings → Integrations → API**.\n- Regenerate the key if it was revoked or rotated.\n\n**`install()` returns `MISSING_CREDENTIALS`**\n- The `api_key` field is empty or missing from the config dict.\n- Ensure `config={\"api_key\": \"...\"}` is passed when constructing `PandaDocConnector`.\n\n**`health_check()` returns `DEGRADED`**\n- A `PandaDocNetworkError` occurred reaching `GET /workspaces/`.\n- Check outbound HTTPS connectivity to `https://api.pandadoc.com/` from the Shielva host.\n\n**`sync()` returns `FAILED` with a `PandaDocError` message**\n- The documents list call failed entirely (not just a single document).\n- Check the `message` field for the specific error.\n- Verify the API key still has permission to access documents.\n\n**`sync()` returns `PARTIAL` with `documents_failed > 0`**\n- Some documents, templates, contacts, or forms failed during normalization.\n- The sync continues for all other items — only the individual item is skipped.\n- Review normalization logic in `helpers/utils.py` for the failing resource type.\n\n**`PandaDocNotFoundError` when calling `get_document()`**\n- The document ID does not exist in PandaDoc, or has been permanently deleted.\n- Verify the document UUID in the PandaDoc web app."
+    }
+  ]
+}
