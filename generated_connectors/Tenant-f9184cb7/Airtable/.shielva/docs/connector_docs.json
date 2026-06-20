@@ -1,0 +1,98 @@
+{
+  "title": "Airtable Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Airtable** connector integrates Shielva with the [Airtable REST API v0](https://airtable.com/developers/web/api/introduction) to sync all bases, tables, and records from your Airtable workspace into Shielva's knowledge base.\n\nAirtable is a flexible database-spreadsheet hybrid used by teams worldwide. This connector exposes **8 public async methods** — `install`, `health_check`, `list_bases`, `list_tables`, `list_records`, `get_record`, `list_views`, and `sync` — and implements a full offset-paginated sync engine that ingests every accessible record as a normalized `ConnectorDocument`.\n\n**Key capabilities:**\n- Verify credentials via `GET /meta/whoami`\n- Full paginated sync: all bases → tables → records\n- Offset-based pagination at both the base and record level\n- Table schema introspection including field types and views\n- Record search via Airtable formula (`filterByFormula`)\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry with 2s base delay (Airtable rate limits: 5 req/sec)\n- Auth errors never retried\n- Stable 16-char SHA-256 source IDs keyed on `record:{record_id}`\n- All records normalized to canonical `ConnectorDocument`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Airtable connector running in under 5 minutes.\n\n### 1. Create a Personal Access Token\n\n1. Go to [airtable.com/create/tokens](https://airtable.com/create/tokens)\n2. Click **Create new token**, name it \"Shielva Connector\"\n3. Add scopes: `data.records:read` and `schema.bases:read`\n4. Set Access to **All current and future bases**\n5. Click **Create token** — copy it immediately (starts with `pat`)\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → Airtable**\n2. Paste your **Personal Access Token** in the `api_key` field\n3. Optionally enter a **Base ID** (`base_id`) to restrict sync to one base\n4. Click **Install** — status shows **ONLINE** on success\n\n### 3. Run Your First Sync\n\n```python\nasync with AirtableConnector(api_key=\"patXXX...\") as conn:\n    result = await conn.sync()\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Airtable connector uses **Personal Access Token (PAT)** authentication — Airtable's standard method for server-to-server integrations.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Personal Access Token | `api_key` | password | Yes | Airtable PAT from airtable.com/create/tokens — starts with `pat` — needs `data.records:read` and `schema.bases:read` scopes |\n| Default Base ID | `base_id` | string | No | Restrict sync to a specific Airtable base (e.g. `appXXXXXXXXXXXXXX`). Leave blank to sync all accessible bases. |\n\n### How it works\n\nEvery request uses Bearer token authentication:\n```\nAuthorization: Bearer {api_key}\n```\n\nThe connector sets this header automatically in `_make_headers()`. No manual header management is needed.\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /meta/whoami`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`.\n\n### Required Scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `schema.bases:read` | List bases, table schemas, and views |\n| `data.records:read` | Read and search records from tables |\n\n### Security\n\n- Credentials are stored encrypted in the Shielva vault and never logged\n- The api_key is never written to disk or included in any log output\n- Rotate tokens at airtable.com/create/tokens — delete old, create new, update in ACP"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "The Airtable connector requires one install field (`api_key`) and supports one optional field (`base_id`).\n\n### Install Fields\n\n```json\n{\n  \"api_key\": \"patABCDEFGHIJKLMNOP.xxxxxxxxxxxxxxxxxxxx\",\n  \"base_id\": \"appXXXXXXXXXXXXXX\"\n}\n```\n\n### Internal Defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `AIRTABLE_META_BASE_URL` | `https://api.airtable.com/v0/meta` | Airtable metadata API base URL |\n| `AIRTABLE_RECORDS_BASE_URL` | `https://api.airtable.com/v0` | Airtable records API base URL |\n| `SYNC_PAGE_SIZE` | `100` | Records per page for sync (`pageSize` param) |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BASE_DELAY` | `2.0s` | Base delay for exponential backoff (Airtable rate limits: 5 req/sec) |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 public async methods.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates the api_key by calling `GET /meta/whoami`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Connected to Airtable as user@example.com')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing api_key → `OFFLINE / MISSING_CREDENTIALS`\n- 401/403 → `OFFLINE / INVALID_CREDENTIALS`\n- Network error → `OFFLINE / FAILED`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /meta/whoami` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED, message='Airtable API reachable. User: user@example.com')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(kb_id)",
+          "content": "Syncs all accessible Airtable records into the knowledge base.\n\n```python\nresult = await connector.sync(kb_id=\"kb_my_data\")\n\nprint(result.documents_found)   # total records found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\n```\n\n**Returns:** `SyncResult` with `status` (COMPLETED/PARTIAL/FAILED), `documents_found`, `documents_synced`, `documents_failed`, `message`\n\n**How it works:**\n1. Paginates through `GET /meta/bases` (all accessible bases)\n2. For each base, fetches `GET /meta/bases/{id}/tables`\n3. For each table, paginates `GET /v0/{base_id}/{table_name}?pageSize=100` via `offset` cursor\n4. Normalizes each record to `ConnectorDocument` via `normalize_record()`\n5. Calls `_ingest_document(doc, kb_id)` for each document (wired by Shielva runtime)"
+        },
+        {
+          "id": "list-bases",
+          "title": "list_bases(offset)",
+          "content": "Returns a page of Airtable bases.\n\n```python\npage = await connector.list_bases()\n# {\"bases\": [{\"id\": \"appXXX\", \"name\": \"My Projects\", ...}], \"offset\": None}\n\n# With pagination\nnext_page = await connector.list_bases(offset=page.get(\"offset\"))\n```\n\n**Airtable endpoint:** `GET /v0/meta/bases`"
+        },
+        {
+          "id": "list-tables",
+          "title": "list_tables(base_id)",
+          "content": "Returns all tables and their schemas for the given base.\n\n```python\nresult = await connector.list_tables(\"appBASE0000000001\")\n# {\"tables\": [{\"id\": \"tblXXX\", \"name\": \"Tasks\", \"fields\": [...], \"views\": [...]}]}\n```\n\n**Airtable endpoint:** `GET /v0/meta/bases/{base_id}/tables`"
+        },
+        {
+          "id": "list-records",
+          "title": "list_records(base_id, table_name, page_size, offset)",
+          "content": "Returns a page of records from the given table.\n\n```python\npage = await connector.list_records(\"appBASE0000000001\", \"Tasks\")\n# {\"records\": [{\"id\": \"recXXX\", \"fields\": {...}, \"createdTime\": \"...\"}], \"offset\": None}\n\n# Paginate\nnext_page = await connector.list_records(\n    \"appBASE0000000001\", \"Tasks\", offset=page.get(\"offset\")\n)\n```\n\n**Airtable endpoint:** `GET /v0/{base_id}/{table_name}?pageSize={page_size}`\n\n`offset` is returned by Airtable when more pages exist."
+        },
+        {
+          "id": "get-record",
+          "title": "get_record(base_id, table_name, record_id)",
+          "content": "Returns a single record by ID.\n\n```python\nresult = await connector.get_record(\n    \"appBASE0000000001\", \"Tasks\", \"recRECORD00000001\"\n)\n# {\"id\": \"recXXX\", \"fields\": {\"Name\": \"Build connector\", ...}, \"createdTime\": \"...\"}\n```\n\n**Airtable endpoint:** `GET /v0/{base_id}/{table_name}/{record_id}`"
+        },
+        {
+          "id": "list-views",
+          "title": "list_views(base_id, table_id)",
+          "content": "Returns all views for the given table in the given base.\n\n```python\nresult = await connector.list_views(\"appBASE0000000001\", \"tblTABLE000000001\")\n# {\"views\": [{\"id\": \"viwXXX\", \"name\": \"Grid view\", \"type\": \"grid\"}]}\n```\n\nViews are extracted from the table schema response. Airtable does not have a separate views endpoint — views live inside the table schema object.\n\n**Airtable endpoint:** `GET /v0/meta/bases/{base_id}/tables` (views extracted per table_id)"
+        }
+      ]
+    },
+    {
+      "id": "http-client-methods",
+      "title": "HTTP Client Methods",
+      "content": "The `AirtableHTTPClient` class exposes the following low-level methods, all of which take `api_key` as the first argument:\n\n| Method | Endpoint | Description |\n|--------|----------|-------------|\n| `whoami(api_key)` | `GET /v0/meta/whoami` | Verify token and return identity |\n| `list_bases(api_key, offset)` | `GET /v0/meta/bases` | List all accessible bases |\n| `get_base_schema(api_key, base_id)` | `GET /v0/meta/bases/{base_id}/tables` | Get full schema for a base |\n| `list_tables(api_key, base_id)` | `GET /v0/meta/bases/{base_id}/tables` | Alias for get_base_schema |\n| `list_views(api_key, base_id, table_id)` | `GET /v0/meta/bases/{base_id}/tables` | Extract views for a specific table |\n| `list_records(api_key, base_id, table_id_or_name, page_size, offset, fields)` | `GET /v0/{base_id}/{table_id}?pageSize={n}` | List records with pagination |\n| `get_record(api_key, base_id, table_id, record_id)` | `GET /v0/{base_id}/{table_id}/{record_id}` | Fetch a single record |\n| `search_records(api_key, base_id, table_id, filter_formula, page_size)` | `GET /v0/{base_id}/{table_id}?filterByFormula={f}` | Search records by formula |"
+    },
+    {
+      "id": "sync-details",
+      "title": "Sync & Document Schema",
+      "content": "### Document Schema\n\nEach Airtable record is normalized to a `ConnectorDocument`:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('record:' + record_id)[:16]` — stable 16-char hex ID |\n| `title` | `{base_name} / {table_name}: {first_string_field_value}` (falls back to `Record {record_id}`) |\n| `content` | `Base: {name}\\nTable: {name}\\n{field}: {value}` for all fields |\n| `source_url` | `https://airtable.com/{base_id}/{table_name}/{record_id}` |\n| `metadata.record_id` | Airtable record ID (e.g. `recXXXXXXXXXXXXXX`) |\n| `metadata.base_id` | Airtable base ID |\n| `metadata.base_name` | Human-readable base name |\n| `metadata.table_name` | Table name |\n| `metadata.fields` | Raw fields dict from Airtable |\n| `metadata.created_time` | ISO 8601 creation timestamp |\n\n### Table Schema Documents\n\nThe `normalize_table()` helper converts a table schema to a `ConnectorDocument`:\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('table:' + table_id)[:16]` |\n| `title` | `Table Schema: {table_name}` |\n| `content` | Table name, base ID, field list, view list |\n| `metadata.table_id` | Airtable table ID |\n| `metadata.fields` | Field definitions array |\n| `metadata.views` | View definitions array |\n\n### Stable Source IDs\n\nSource IDs use `SHA-256(prefix + ':' + key)[:16]`. Prefixes: `record` for records, `table` for table schemas. This ensures same-object re-syncs map to the same `source_id` (idempotent upsert) and no collisions across different object types.\n\n### List and Dict fields\n\nAirtable supports complex field types (multi-select, linked records, attachments, etc.). These are serialized as JSON strings in the document content so they remain searchable as text."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "All errors are typed exceptions from `exceptions.py`.\n\n### Exception Hierarchy\n\n```\nAirtableError (base)\n├── AirtableAuthError      — 401/403: invalid token or insufficient scopes\n├── AirtableRateLimitError — 429: too many requests (stores retry_after seconds)\n├── AirtableNotFoundError  — 404: base, table, or record does not exist\n└── AirtableNetworkError   — 5xx / connection error / timeout\n```\n\n### Status Code Mapping\n\n| HTTP Status | Exception |\n|-------------|----------|\n| 200, 201 | Success — returns parsed JSON |\n| 401, 403 | `AirtableAuthError` |\n| 404 | `AirtableNotFoundError` |\n| 422 | `AirtableError` (code=`invalid_request`) — invalid formula or malformed request |\n| 429 | `AirtableRateLimitError` (retry_after from `Retry-After` header) |\n| 5xx | `AirtableNetworkError` |\n| Other 4xx | `AirtableError` |\n\n### Retry Behavior\n\n| Error | Retried? | Strategy |\n|-------|----------|----------|\n| `AirtableNetworkError` | Yes | Exponential backoff: 2s, 4s, 8s + jitter (base_delay=2.0s) |\n| `AirtableRateLimitError` | Yes | Respects `Retry-After` header; falls back to backoff |\n| `AirtableAuthError` | **No** | Immediate failure — fix credentials |\n| `AirtableNotFoundError` | **No** | Immediate failure — resource is gone |\n| `AirtableError` (422) | Yes | Falls into general AirtableError retry path |\n\n### Handling in code\n\n```python\nfrom exceptions import AirtableAuthError, AirtableRateLimitError, AirtableError\ntry:\n    result = await connector.list_records(base_id, table_name)\nexcept AirtableAuthError:\n    # token expired / revoked — prompt user to reconnect\nexcept AirtableRateLimitError as e:\n    # e.retry_after gives seconds to wait (connector retries automatically)\nexcept AirtableError as e:\n    # e.status_code, e.code for programmatic handling\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### 401 Unauthorized\n\n**Cause:** Personal Access Token is invalid or has been deleted.\n\n**Fix:** Regenerate the token at airtable.com/create/tokens and update it in the Shielva ACP connector install fields (`api_key`).\n\n---\n\n### 403 Forbidden\n\n**Cause:** Token is valid but lacks required scopes (`data.records:read` or `schema.bases:read`) or the specific base is not in the token's Access list.\n\n**Fix:** Edit the token — add the missing scopes and/or expand base access to **All current and future bases**.\n\n---\n\n### 422 Invalid Request\n\n**Cause:** A `filterByFormula` value or other request parameter is malformed.\n\n**Fix:** Check formula syntax against the [Airtable formula reference](https://support.airtable.com/docs/formula-field-reference). Common issue: unescaped quotes in string values.\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Airtable's rate limit is 5 requests/second per token.\n\n**Fix:** The connector retries automatically with exponential backoff (2s base delay) respecting the `Retry-After` header. Reduce sync concurrency if the error is persistent.\n\n---\n\n### Sync returns 0 records\n\n**Cause 1:** Token has no bases in its Access list.\n**Fix:** Edit the token, set Access to **All current and future bases**.\n\n**Cause 2:** All matched tables are empty.\n**Fix:** Populate at least one table with records and re-run sync.\n\n---\n\n### Tests fail: asyncio_mode warning\n\n**Fix:** Ensure `pytest.ini` contains:\n```ini\n[pytest]\nasyncio_mode = auto\n```\nThis is already configured in the connector root."
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with 95 unit tests — zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/airtable_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 95 passed\n```\n\n### Coverage areas\n\n- `install()` — success (email + id fallback), missing api_key, invalid token, network error, unexpected error\n- `health_check()` — healthy, auth error, network error, generic error, missing credentials\n- `sync()` — empty bases, single record, record pagination, multiple tables, multiple bases, base pagination, errors at each level (FAILED/PARTIAL), empty table name skipped\n- `list_bases()` — returns bases, passes offset, default offset=None\n- `list_tables()` — returns tables, passes base_id\n- `list_records()` — returns records, default/custom page_size, passes offset\n- `get_record()` — returns record, passes all args, raises AirtableNotFoundError on 404\n- `list_views()` — returns views, passes base+table id, handles empty views\n- `normalize_record()` — title, source_id length=16, hex, deterministic, different record IDs give different source_ids, metadata fields, content includes base+table+fields, source_url format, empty fields fallback, list field JSON serialized\n- `normalize_table()` — basic, source_id hex+deterministic, different table IDs differ, content has name+fields+views, metadata fields\n- `_stable_id()` — format, determinism, different prefixes differ, different parts differ\n- `with_retry()` — success first attempt, retries on network error, never retries auth error, raises after max attempts, rate limit reraises\n- Exception hierarchy — all 4 subclasses are AirtableError, retry_after stored, status_code + code stored\n- HTTP `_handle_response` — 401, 403, 404, 422, 429 (Retry-After), 500, other 4xx — all mapped correctly\n- HTTP client — Bearer header format, long token, meta/records base URLs\n- Connector config — api_key field, access_token legacy field, kwarg fallback, config precedence, base_id field, missing credentials list, CONNECTOR_TYPE/AUTH_TYPE constants\n- Lifecycle — context manager, aclose() clears client, _ensure_client() creates + reuses, tenant/connector id stored"
+    }
+  ]
+}
