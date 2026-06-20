@@ -1,0 +1,111 @@
+{
+  "connector_type": "customerio",
+  "connector_id": "customerio",
+  "name": "Customer.io",
+  "provider": "customerio",
+  "service": "customerio",
+  "version": "1.0.0",
+  "description": "Connects to Customer.io via the App API v1 to sync customers, campaigns, and newsletters into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "app_api_key",
+      "label": "App API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Enter your Customer.io App API key",
+      "help": "Your Customer.io App API key. Found in Customer.io → Account Settings → API Credentials. Use the App API key (not the Track API key)."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "cursor_pagination"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the App API key via GET /accounts. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /accounts and return HEALTHY, DEGRADED, or OFFLINE with the Customer.io account name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches all customers (cursor-paginated), campaigns, and newsletters. Normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Cursor-based paginated list of Customer.io customers via POST /customers.",
+      "category": "customers",
+      "endpoint": "POST /customers"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Retrieve a single customer by ID.",
+      "category": "customers",
+      "endpoint": "GET /customers/{customer_id}"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Paginated list of Customer.io campaigns.",
+      "category": "campaigns",
+      "endpoint": "GET /campaigns"
+    },
+    {
+      "id": "get_campaign",
+      "name": "Get Campaign",
+      "description": "Retrieve a single campaign by ID.",
+      "category": "campaigns",
+      "endpoint": "GET /campaigns/{campaign_id}"
+    },
+    {
+      "id": "list_newsletters",
+      "name": "List Newsletters",
+      "description": "Paginated list of Customer.io newsletters.",
+      "category": "newsletters",
+      "endpoint": "GET /newsletters"
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "Paginated list of Customer.io segments.",
+      "category": "segments",
+      "endpoint": "GET /segments"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "customers",
+    "campaigns",
+    "newsletters",
+    "segments"
+  ],
+  "apis": [
+    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
+    {"name": "Health Check", "id": "health_check", "category": "health"},
+    {"name": "Sync", "id": "sync", "category": "sync"},
+    {"name": "List Customers", "id": "list_customers", "category": "customers"},
+    {"name": "Get Customer", "id": "get_customer", "category": "customers"},
+    {"name": "List Campaigns", "id": "list_campaigns", "category": "campaigns"},
+    {"name": "Get Campaign", "id": "get_campaign", "category": "campaigns"},
+    {"name": "List Newsletters", "id": "list_newsletters", "category": "newsletters"},
+    {"name": "List Segments", "id": "list_segments", "category": "segments"}
+  ]
+}
