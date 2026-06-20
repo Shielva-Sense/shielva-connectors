@@ -1,0 +1,88 @@
+{
+  "title": "15Five Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **15Five** connector integrates Shielva with the [15Five REST API v1](https://my.15five.com/api/public/v1/) to sync continuous performance management data into Shielva's knowledge base.\n\n15Five is a leading performance management platform. This connector exposes **7 API methods** across 6 resource domains — Users, Reports (Check-ins), Objectives (OKRs), Meetings, High Fives, and Groups — and implements a full sync engine that ingests normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- Verify credentials via `GET /api/public/v1/user/`\n- Sync check-in reports (type=checkin), OKR objectives (type=objective), and high-five recognition (type=recognition)\n- Full DRF-pagination exhaustion across all list endpoints\n- Stable 16-char SHA-256 source IDs for idempotent re-syncs\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried, rate-limit honours Retry-After)\n- Bearer token authentication: `Authorization: Bearer {api_key}`"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the 15Five connector running in under 5 minutes.\n\n### 1. Generate an API Key\n\n1. Log in to 15Five as Administrator\n2. Navigate to **Settings → Integrations → API**\n3. Click **Generate New API Key**, enter a name, click **Create**\n4. Copy the key — shown only once\n\n### 2. Install the Connector\n\nIn the Shielva ACP:\n1. Navigate to **Integrations → 15Five**\n2. Enter your **API Key**\n3. Click **Install** — status shows **ONLINE** on success\n\n### 4. Run Your First Sync\n\n```python\nasync with FifteenFiveConnector(api_key=\"your_key\") as conn:\n    result = await conn.sync()\n    print(f\"Synced {result.documents_synced} records\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The 15Five connector uses **API Key authentication** via Bearer token.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | 15Five API key from Settings → Integrations → API |\n\n### How it works\n\nEvery request uses Bearer token authentication:\n```\nAuthorization: Bearer {api_key}\nAccept: application/json\n```\n\n### Install Validation\n\nDuring `install()`, the connector calls `GET /api/public/v1/user/?page_size=1`. A 401 or 403 response sets `auth_status=INVALID_CREDENTIALS` and `health=OFFLINE`. Any network error sets `health=OFFLINE` with `auth_status=FAILED`."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 6 list methods plus `install()`, `health_check()`, and `sync()`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates credentials by calling `GET /api/public/v1/user/?page_size=1`.\n\n```python\nresult = await connector.install()\n# InstallResult(health=ConnectorHealth.HEALTHY, auth_status=AuthStatus.CONNECTED)\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings the users endpoint and returns the live user count in the message.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=ConnectorHealth.HEALTHY, message='15Five API reachable. Users: 42')\n```"
+        },
+        {
+          "id": "sync",
+          "title": "sync(**kwargs)",
+          "content": "Syncs check-in reports, OKR objectives, and high-five recognition.\n\n```python\nresult = await connector.sync(kb_id=\"kb_hr\")\nprint(result.documents_found)   # total items fetched\nprint(result.documents_synced)  # successfully normalized\nprint(result.documents_failed)  # failed normalizations\n```\n\n**Sync order:** reports (fatal if fails) → objectives (non-fatal) → high fives (non-fatal)"
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "Returns all 15Five users across all DRF pages.\n\n```python\nusers = await connector.list_users()\n```\n\n**15Five endpoint:** `GET /api/public/v1/user/`"
+        },
+        {
+          "id": "list-reports",
+          "title": "list_reports()",
+          "content": "Returns all check-in reports across all DRF pages.\n\n```python\nreports = await connector.list_reports()\n```\n\n**15Five endpoint:** `GET /api/public/v1/report/`"
+        },
+        {
+          "id": "list-objectives",
+          "title": "list_objectives()",
+          "content": "Returns all OKR objectives across all DRF pages.\n\n```python\nobjectives = await connector.list_objectives()\n```\n\n**15Five endpoint:** `GET /api/public/v1/objective/`"
+        },
+        {
+          "id": "list-meetings",
+          "title": "list_meetings()",
+          "content": "Returns all 1-on-1 meetings across all DRF pages.\n\n```python\nmeetings = await connector.list_meetings()\n```\n\n**15Five endpoint:** `GET /api/public/v1/meeting/`"
+        },
+        {
+          "id": "list-high-fives",
+          "title": "list_high_fives()",
+          "content": "Returns all high-five recognition records across all DRF pages.\n\n```python\nhigh_fives = await connector.list_high_fives()\n```\n\n**15Five endpoint:** `GET /api/public/v1/highfive/`"
+        },
+        {
+          "id": "list-groups",
+          "title": "list_groups()",
+          "content": "Returns all groups/teams across all DRF pages.\n\n```python\ngroups = await connector.list_groups()\n```\n\n**15Five endpoint:** `GET /api/public/v1/group/`"
+        }
+      ]
+    },
+    {
+      "id": "normalizers",
+      "title": "Normalizers",
+      "content": "Three normalizer functions convert raw 15Five records into `ConnectorDocument` objects.\n\n| Function | Input | Document type | Source ID seed |\n|----------|-------|--------------|----------------|\n| `normalize_report(r)` | Raw check-in | `checkin` | `sha256(\"report:{id}\")[:16]` |\n| `normalize_objective(o)` | Raw OKR | `objective` | `sha256(\"objective:{id}\")[:16]` |\n| `normalize_high_five(h)` | Raw recognition | `recognition` | `sha256(\"highfive:{id}\")[:16]` |\n\nAll source IDs are stable 16-character hex strings ensuring idempotent re-syncs."
+    },
+    {
+      "id": "pagination",
+      "title": "DRF Pagination",
+      "content": "All 15Five list endpoints return DRF-style paginated responses:\n\n```json\n{\n  \"count\": 100,\n  \"next\": \"https://my.15five.com/api/public/v1/user/?page=2\",\n  \"previous\": null,\n  \"results\": [...]\n}\n```\n\nThe connector's `_fetch_all_pages()` method exhausts all pages automatically by following `next` until it is `null`. You never need to handle pagination manually when using the list methods."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "The connector uses a typed exception hierarchy:\n\n| Exception | Status | When raised |\n|-----------|--------|-------------|\n| `FifteenFiveAuthError` | 401/403 | Invalid or expired API key |\n| `FifteenFiveRateLimitError` | 429 | Rate limit exceeded; has `retry_after` attribute |\n| `FifteenFiveNotFoundError` | 404 | Requested resource does not exist |\n| `FifteenFiveNetworkError` | 5xx / timeout | Server error or connection failure |\n| `FifteenFiveError` | other | Base exception for all 15Five errors |\n\n`with_retry` automatically retries all errors except `FifteenFiveAuthError` (which requires human intervention) with exponential backoff up to 3 attempts."
+    }
+  ]
+}
