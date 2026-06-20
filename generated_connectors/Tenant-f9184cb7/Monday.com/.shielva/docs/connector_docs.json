@@ -5,17 +5,17 @@
     {
       "id": "overview",
       "title": "Overview",
-      "content": "The **Monday.com connector** integrates with Monday.com workspaces via the Monday.com GraphQL API v2. It enables Shielva to sync boards, items, and workspaces — making your project management data searchable and actionable in the Shielva knowledge base.\n\nThis connector uses personal API token authentication, granting read access to all boards and workspaces accessible to the token owner.\n\n**Key capabilities:**\n- List all boards (paginated, page-based)\n- Fetch a single board with its items and column values\n- List all items on a board (cursor-based pagination)\n- Fetch a single item by ID\n- List all workspaces\n- Full sync: all boards → all items → normalized ConnectorDocuments\n- Stable document IDs via SHA-256(\"item:\" + item_id) for deduplication",
+      "content": "The **Monday.com connector** integrates with Monday.com workspaces via the Monday.com GraphQL API v2. It enables Shielva to sync boards, items, and workspaces \u2014 making your project management data searchable and actionable in the Shielva knowledge base.\n\nThis connector uses personal API token authentication, granting read access to all boards and workspaces accessible to the token owner.\n\n**Key capabilities:**\n- List all boards (paginated, page-based)\n- Fetch a single board with its items and column values\n- List all items on a board (cursor-based pagination)\n- Fetch a single item by ID\n- List all workspaces\n- Full sync: all boards \u2192 all items \u2192 normalized ConnectorDocuments\n- Stable document IDs via SHA-256(\"item:\" + item_id) for deduplication",
       "children": [
         {
           "id": "connector-type",
           "title": "Connector Type",
-          "content": "`monday` — registered in ACP as **Monday.com**."
+          "content": "`monday` \u2014 registered in ACP as **Monday.com**."
         },
         {
           "id": "provider",
           "title": "Provider",
-          "content": "monday.com (GraphQL API v2 — `https://api.monday.com/v2`, API-Version: 2023-10)"
+          "content": "monday.com (GraphQL API v2 \u2014 `https://api.monday.com/v2`, API-Version: 2023-10)"
         },
         {
           "id": "supported-operations",
@@ -25,43 +25,22 @@
       ]
     },
     {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Monday.com connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import MondayConnector\n\nconfig = {\n    \"api_token\": \"<password>\"\n}\n\nconnector = MondayConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"monday.com_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_boards`\n\n```python\nresult = await connector.list_boards()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Monday.com data into Shielva.",
+      "children": []
+    },
+    {
       "id": "authentication",
       "title": "Authentication",
-      "content": "The connector uses **personal API token authentication** — a single token tied to the Monday.com user account.",
-      "children": [
-        {
-          "id": "auth-type",
-          "title": "Auth Type",
-          "content": "`api_key` — obtain the token from **Profile → Developers → My Access Tokens → Show**."
-        },
-        {
-          "id": "install-fields",
-          "title": "Install Fields",
-          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Token | `api_token` | password | Yes | Monday.com personal API token from Profile → Developers → My Access Tokens |"
-        },
-        {
-          "id": "auth-headers",
-          "title": "Auth Headers",
-          "content": "Every request to `https://api.monday.com/v2` includes:\n\n```\nAuthorization: <api_token>      (no \"Bearer\" prefix)\nContent-Type: application/json\nAPI-Version: 2023-10\n```\n\nNote: Monday.com does NOT require the `Bearer` prefix — the raw token is sent directly."
-        },
-        {
-          "id": "token-security",
-          "title": "Token Security",
-          "content": "Personal API tokens do not expire unless regenerated. Shielva stores the token AES-256-GCM encrypted at rest via the vault. The token can be regenerated at any time from Profile → Developers → My Access Tokens → Regenerate."
-        }
-      ]
+      "content": "This connector authenticates with **API key** credentials issued by monday. The key is sent on every request \u2014 typically as a custom header (e.g. `X-API-Key`) or as a `Bearer` authorization header \u2014 depending on the provider's convention.\n\n### Obtaining an API key\n\n1. Sign in to the monday dashboard with an account that has permission to create API credentials.\n2. Navigate to **Settings \u2192 API / Developer / Credentials**.\n3. Create a new API key, name it `Shielva Connector`, and copy the value **immediately** \u2014 most providers show the secret only once.\n4. Paste the key into the `api_key` install field when installing this connector in Shielva.\n\n### Security\n\nShielva stores API keys encrypted at rest (AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key). The plaintext value is held in memory only for the lifetime of an in-flight request and is never written to logs, audit entries, or telemetry.\n\n### Token lifecycle\n\n- `initialize()` validates credentials with a lightweight call (e.g. fetching the current user / account profile) and raises a connector-specific `AuthError` subclass if the credentials are rejected.\n- `health_check()` re-runs the same validation on demand. Use it to detect a revoked / expired credential without triggering a full sync.\n- For OAuth flows, expired access tokens are refreshed automatically on the next API call; you do not need to handle 401 retry manually.\n\n### Troubleshooting authentication\n\n| Symptom | Likely cause | Fix |\n|---------|--------------|-----|\n| `401 Unauthorized` | Credential typo, key revoked, or wrong account | Regenerate the key and re-install |\n| `403 Forbidden` | Missing scope / insufficient role | Grant the scopes listed above, then re-authorize |\n| `429 Too Many Requests` | Auth endpoint hit the rate limit | Built-in retry handles this \u2014 see Error Handling |",
+      "children": []
     },
     {
       "id": "configuration",
       "title": "Configuration",
-      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
-      "children": [
-        {
-          "id": "config-keys",
-          "title": "Config Keys",
-          "content": "| Key | Description |\n|-----|-------------|\n| `api_token` | Monday.com personal API token |"
-        }
-      ]
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `api_token` | API Token | `password` | \u2705 | Monday.com personal API token. Go to Profile \u2192 Developers \u2192 My Access Tokens \u2192 Show to copy it. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
     },
     {
       "id": "api-methods",
@@ -71,7 +50,7 @@
         {
           "id": "install",
           "title": "install()",
-          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `api_token` is present in config. Does not make network calls — token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when api_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when api_token is absent or empty"
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `api_token` is present in config. Does not make network calls \u2014 token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when api_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when api_token is absent or empty"
         },
         {
           "id": "health-check",
@@ -81,7 +60,7 @@
         {
           "id": "sync",
           "title": "sync()",
-          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFetches all boards via `list_boards()`, then for each board fetches all items via `list_items()`. Normalizes each item to a ConnectorDocument.\n\n**Parameters:**\n- `full` — accepted for interface compatibility; sync is always a full snapshot (Monday.com API has no incremental filter)\n- `since` — accepted for interface compatibility; not applied\n- `kb_id` — knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures, `PARTIAL` when some boards/items fail, `FAILED` when the board list or auth fails entirely."
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFetches all boards via `list_boards()`, then for each board fetches all items via `list_items()`. Normalizes each item to a ConnectorDocument.\n\n**Parameters:**\n- `full` \u2014 accepted for interface compatibility; sync is always a full snapshot (Monday.com API has no incremental filter)\n- `since` \u2014 accepted for interface compatibility; not applied\n- `kb_id` \u2014 knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures, `PARTIAL` when some boards/items fail, `FAILED` when the board list or auth fails entirely."
         },
         {
           "id": "list-boards",
@@ -111,28 +90,6 @@
       ]
     },
     {
-      "id": "http-client",
-      "title": "HTTP Client",
-      "content": "All HTTP calls are encapsulated in `MondayHTTPClient` (`client/http_client.py`) using `aiohttp`. The connector never calls HTTP directly.",
-      "children": [
-        {
-          "id": "http-client-methods",
-          "title": "Methods",
-          "content": "| Method | GraphQL Operation | Description |\n|--------|-------------------|-------------|\n| `graphql_query(token, query, variables, context)` | Any query | Core method — POST to `https://api.monday.com/v2` |\n| `get_me(token)` | `{ me { name email } }` | Health check — authenticated user |\n| `get_boards(token, limit, page)` | `boards(limit, page)` | Paginated board list |\n| `get_board(token, board_id)` | `boards(ids: [id])` with `items_page` | Single board with items |\n| `get_items_page(token, board_id, limit, cursor)` | `boards(ids) { items_page }` / `next_items_page` | Cursor-based item page |\n| `get_item(token, item_id)` | `items(ids: [id])` | Single item with column values |\n| `get_workspaces(token)` | `{ workspaces { id name } }` | All workspaces |"
-        },
-        {
-          "id": "error-handling",
-          "title": "Error Handling",
-          "content": "GraphQL errors are mapped by `_classify_graphql_error()` inspecting the error `message` field:\n\n| Error message contains | Exception |\n|------------------------|----------|\n| `not authenticated`, `invalid api key`, `unauthorized` | `MondayAuthError` |\n| `rate limit`, `too many requests`, `complexity budget` | `MondayRateLimitError` |\n| `not found`, `does not exist`, `invalid board`, `invalid item` | `MondayNotFoundError` |\n| HTTP 401 | `MondayAuthError` |\n| HTTP 429 | `MondayRateLimitError` |\n| HTTP 5xx | `MondayNetworkError` |\n| Connection / timeout | `MondayNetworkError` |\n| Other GraphQL errors | `MondayError` |"
-        },
-        {
-          "id": "retry-logic",
-          "title": "Retry Logic",
-          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` by default (2 for health check)\n- Back-off: 1s, 2s (doubles each attempt)\n- Skips retry on `MondayAuthError` — re-installing with a valid token is required\n- Retries on `MondayError`, `MondayNetworkError`, `MondayRateLimitError`"
-        }
-      ]
-    },
-    {
       "id": "data-model",
       "title": "Data Model",
       "content": "Normalized documents produced by `normalize_item()` and `normalize_board()` in `helpers/utils.py`.",
@@ -150,31 +107,45 @@
         {
           "id": "document-id-stability",
           "title": "Document ID Stability",
-          "content": "Item IDs: `SHA-256(\"item:\" + item_id)[:16]` — stable across syncs regardless of column value changes.\n\nBoard IDs: `SHA-256(\"board:\" + board_id)[:16]` — stable regardless of board renames.\n\nBoth are 16 hex characters truncated from the SHA-256 digest, enabling upsert deduplication without maintaining a seen-ID list."
+          "content": "Item IDs: `SHA-256(\"item:\" + item_id)[:16]` \u2014 stable across syncs regardless of column value changes.\n\nBoard IDs: `SHA-256(\"board:\" + board_id)[:16]` \u2014 stable regardless of board renames.\n\nBoth are 16 hex characters truncated from the SHA-256 digest, enabling upsert deduplication without maintaining a seen-ID list."
         }
       ]
     },
     {
-      "id": "exceptions",
-      "title": "Exception Hierarchy",
-      "content": "All exceptions inherit from `MondayError` (base) in `exceptions.py`:\n\n```\nMondayError (base)\n├── MondayAuthError         — invalid/expired API token, unauthorized\n├── MondayNetworkError      — connectivity failures, aiohttp.ClientError, HTTP 5xx\n├── MondayRateLimitError    — HTTP 429, complexity budget exhausted\n└── MondayNotFoundError     — board/item not found, does not exist\n```\n\nCallers can catch the base `MondayError` or specific subclasses for finer control."
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Monday.com, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: _no optional feature flags set_.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `MondayError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nMondayError(Exception)\n  MondayAuthError(MondayError)\n  MondayNetworkError(MondayError)\n  MondayRateLimitError(MondayError)\n  MondayNotFoundError(MondayError)\n```\n\n### When each is raised\n\n- **`MondayError`** \u2014 Base exception for all Monday.com connector errors.\n- **`MondayAuthError`** \u2014 Raised on authentication failures \u2014 invalid or expired API token.\n- **`MondayNetworkError`** \u2014 Raised on connection / timeout failures.\n- **`MondayRateLimitError`** \u2014 Raised when Monday.com API returns a rate-limit error.\n- **`MondayNotFoundError`** \u2014 Raised when a requested resource does not exist (board not found, item not found).\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd monday_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **101** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `MONDAY.COM_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
     },
     {
       "id": "troubleshooting",
       "title": "Troubleshooting",
-      "content": "Common errors and their resolutions.",
-      "children": [
-        {
-          "id": "common-errors",
-          "title": "Common Errors",
-          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `MondayAuthError: not authenticated` | Invalid or expired API token | Re-copy from Profile → Developers → My Access Tokens |\n| `MondayAuthError: invalid api key` | Token from deactivated account | Generate token from an active account |\n| `MondayRateLimitError` | Rate limit or complexity budget exceeded | Connector retries automatically with exponential back-off |\n| `MondayNetworkError` | Connection failure to api.monday.com | Check network connectivity |\n| `MondayNotFoundError: board X not found` | Board deleted or access revoked | Re-run sync; board is skipped |"
-        },
-        {
-          "id": "testing",
-          "title": "Testing",
-          "content": "Run the full test suite (101 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/monday_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 101 tests must pass before registering the connector."
-        }
-      ]
+      "content": "The most common failure modes for the Monday.com connector and how to resolve them.\n\n| Symptom | Probable cause | Resolution |\n|---------|----------------|------------|\n| `401 Unauthorized` on every call | API key revoked, OAuth token expired without a valid refresh token, or wrong account | Re-run the install flow with fresh credentials; check the provider audit log for forced revocation |\n| `403 Forbidden` on specific endpoints | Authenticated identity lacks the required scope or role | Grant the missing scope (see **Authentication**), then re-authorize |\n| `404 Not Found` for resources that should exist | Tenant / workspace ID mismatch \u2014 credentials belong to a different scope | Verify the workspace ID in `install_fields` matches the credential's scope |\n| `429 Too Many Requests` storm | Sync running concurrently with another integration that shares the rate-limit bucket | Stagger sync schedules; the connector already retries with backoff but cannot exceed the provider's per-account quota |\n| Sync returns `PARTIAL` status | One or more resource types failed (see `SyncResult.errors`) | Re-run sync; if the same resource fails repeatedly, inspect the error in the audit log and open an issue |\n| `CircuitBreakerOpen` raised | 5 consecutive failures tripped the breaker | Wait 30s \u2014 the breaker self-heals \u2014 or call `health_check()` to force a probe |\n| Connector loads but `health_check()` reports `unhealthy` | Credentials present but invalid | Inspect `health.error` for the upstream message; usually a typo'd key or revoked grant |\n| `MissingConfigError` at startup | Required `install_field` not supplied | Re-install via the UI and fill the highlighted field |\n\n### Diagnostic checklist\n\n1. `await connector.health_check()` \u2014 quickest probe; returns the upstream's verbatim error if the credentials are bad.\n2. Check the connector audit entries in shielva-sop \u2014 every API call is logged with `outcome` (`Success`/`Denied`/`Failure`) and a `correlation_id`.\n3. Reproduce the failing call in isolation with `curl` against the provider API using the same credentials \u2014 if curl also fails, the credentials are the problem, not the connector.\n4. Inspect `connector.metrics` if you have observability enabled \u2014 request counts, error rates, and p99 latency per method are exported.",
+      "children": []
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Monday.com account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Monday.com against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Monday.com propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `MondayConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Monday.com connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Monday.com connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
     }
   ]
 }
