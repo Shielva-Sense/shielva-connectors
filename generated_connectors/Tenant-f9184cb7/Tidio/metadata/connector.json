@@ -1,0 +1,14 @@
+{
+  "connector_type": "tidio",
+  "display_name": "Tidio",
+  "provider": "Tidio",
+  "service": "Tidio",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "api_key", "label": "API Key", "type": "password", "required": true}
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["conversations", "visitors", "chatbots", "operators", "messages"],
+  "api_base": "https://api.tidio.co"
+}
