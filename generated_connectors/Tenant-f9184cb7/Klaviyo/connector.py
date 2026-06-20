@@ -15,14 +15,7 @@ from models import (
     SyncStatus,
 )
 
-try:
-    from shielva_connectors.base import BaseConnector
-except ImportError:
-    class BaseConnector:  # type: ignore[no-redef]
-        def __init__(self, tenant_id: str = "", connector_id: str = "", config: dict | None = None) -> None:
-            self.tenant_id = tenant_id
-            self.connector_id = connector_id
-            self.config = config or {}
+from shared.base_connector import BaseConnector
 
 KLAVIYO_BASE_URL = "https://a.klaviyo.com/api"
 SYNC_PAGE_SIZE = 100
