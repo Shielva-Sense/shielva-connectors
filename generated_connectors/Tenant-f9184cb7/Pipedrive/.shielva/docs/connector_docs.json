@@ -1,0 +1,255 @@
+{
+  "connector": "pipedrive",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The Pipedrive connector syncs deals, persons, organizations, and activities from Pipedrive CRM into the Shielva knowledge base using the Pipedrive REST API v1. Authentication uses a personal API token passed as a query parameter (?api_token=...) on every request. The connector implements offset-based pagination (start + limit), exponential backoff retry, circuit breaker, and stable SHA-256 source IDs to ensure reliable, idempotent data ingestion."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "subsections": [
+        {
+          "id": "api_key",
+          "title": "API Token (Personal)",
+          "content": "Pipedrive uses a personal API token for authentication. The token is appended to every request as the ?api_token= query parameter. Find your token in Pipedrive → Settings → Personal preferences → API tab. The token grants the same permissions as the user who owns it.",
+          "steps": [
+            "Log into your Pipedrive account.",
+            "Click your avatar (top-right) and select Personal preferences.",
+            "Open the API tab.",
+            "Copy the 'Your personal API token' value.",
+            "Paste it into the api_key field in Shielva."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "install_fields",
+      "title": "Install Fields",
+      "fields": [
+        {
+          "key": "api_key",
+          "label": "API Key",
+          "type": "password",
+          "required": true,
+          "placeholder": "Your Pipedrive API token",
+          "description": "Pipedrive personal API token from Settings → Personal preferences → API. Required."
+        },
+        {
+          "key": "company_domain",
+          "label": "Company Domain",
+          "type": "text",
+          "required": false,
+          "placeholder": "mycompany (optional)",
+          "description": "Your Pipedrive company subdomain. Leave blank for standard cloud accounts (api.pipedrive.com)."
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync Engine",
+      "content": "The sync() method performs a full paginated sync of Pipedrive deals, persons, and organizations. For each object type, it fetches all pages using Pipedrive's offset-based pagination pattern (start + limit parameters). The presence of more pages is determined by additional_data.pagination.more_items_in_collection in each response. Each raw API record is passed through a normalizer that converts it into a ConnectorDocument with a stable SHA-256 source ID.",
+      "pagination": {
+        "mechanism": "offset-based (start + limit parameters)",
+        "page_size": 100,
+        "endpoint_pattern": "GET /v1/{resource}?api_token=...&limit=100&start={offset}",
+        "more_pages_indicator": "additional_data.pagination.more_items_in_collection"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff": "exponential with jitter",
+        "base_delay_s": 1.0,
+        "max_delay_s": 30.0,
+        "auth_errors_retried": false,
+        "rate_limit_honours_retry_after": true
+      },
+      "circuit_breaker": {
+        "failure_threshold": 5,
+        "recovery_timeout_s": 60,
+        "states": ["closed", "open", "half-open"]
+      },
+      "stable_ids": {
+        "algorithm": "SHA-256",
+        "format": "SHA-256('{entity_type}:{entity_id}')[:16]",
+        "example": "stable_id('deal', '42') → first 16 hex chars of SHA-256('deal:42')"
+      }
+    },
+    {
+      "id": "api_methods",
+      "title": "API Methods",
+      "methods": [
+        {
+          "id": "install",
+          "signature": "async def install() -> InstallResult",
+          "description": "Validates API key by probing GET /users/me. Returns HEALTHY + CONNECTED on success, or OFFLINE + appropriate AuthStatus on failure.",
+          "category": "auth"
+        },
+        {
+          "id": "health_check",
+          "signature": "async def health_check() -> HealthCheckResult",
+          "description": "Pings GET /users/me. Returns HEALTHY, DEGRADED (transient network error, circuit not open), or OFFLINE (auth failure or circuit open). Updates the circuit breaker state.",
+          "category": "health"
+        },
+        {
+          "id": "sync",
+          "signature": "async def sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult",
+          "description": "Paginated full sync of deals, persons, and organizations. Returns documents_found, documents_synced, documents_failed, and a SyncStatus (COMPLETED / PARTIAL / FAILED).",
+          "category": "sync"
+        },
+        {
+          "id": "list_deals",
+          "signature": "async def list_deals(status: str = 'all', limit: int = 100, start: int = 0) -> dict",
+          "description": "Returns one page of Pipedrive deals. status can be 'all', 'open', 'won', 'lost', or 'deleted'.",
+          "endpoint": "GET /v1/deals",
+          "category": "deals"
+        },
+        {
+          "id": "get_deal",
+          "signature": "async def get_deal(deal_id: int | str) -> dict",
+          "description": "Returns a single Pipedrive deal by ID.",
+          "endpoint": "GET /v1/deals/{deal_id}",
+          "category": "deals"
+        },
+        {
+          "id": "list_persons",
+          "signature": "async def list_persons(limit: int = 100, start: int = 0) -> dict",
+          "description": "Returns one page of Pipedrive persons.",
+          "endpoint": "GET /v1/persons",
+          "category": "persons"
+        },
+        {
+          "id": "get_person",
+          "signature": "async def get_person(person_id: int | str) -> dict",
+          "description": "Returns a single Pipedrive person by ID.",
+          "endpoint": "GET /v1/persons/{person_id}",
+          "category": "persons"
+        },
+        {
+          "id": "list_organizations",
+          "signature": "async def list_organizations(limit: int = 100, start: int = 0) -> dict",
+          "description": "Returns one page of Pipedrive organizations.",
+          "endpoint": "GET /v1/organizations",
+          "category": "organizations"
+        },
+        {
+          "id": "list_activities",
+          "signature": "async def list_activities(limit: int = 100, start: int = 0) -> dict",
+          "description": "Returns one page of Pipedrive activities.",
+          "endpoint": "GET /v1/activities",
+          "category": "activities"
+        },
+        {
+          "id": "aclose",
+          "signature": "async def aclose() -> None",
+          "description": "Closes the underlying httpx.AsyncClient and clears the http_client reference.",
+          "category": "lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "description": "Every Pipedrive object is normalized into a ConnectorDocument with a stable SHA-256 source ID before being ingested into the Shielva knowledge base.",
+      "connector_document": {
+        "fields": [
+          { "name": "source_id", "type": "str", "description": "16-char SHA-256 hex digest of '{entity_type}:{pipedrive_id}'. Stable across re-syncs." },
+          { "name": "title", "type": "str", "description": "Human-readable title. Format varies by object type." },
+          { "name": "content", "type": "str", "description": "Newline-delimited key-value representation of the object's properties." },
+          { "name": "connector_id", "type": "str", "description": "Shielva connector instance ID." },
+          { "name": "tenant_id", "type": "str", "description": "Shielva tenant ID." },
+          { "name": "source_url", "type": "str", "description": "Deep link to the object in Pipedrive UI (app.pipedrive.com)." },
+          { "name": "metadata", "type": "dict", "description": "Object-type-specific properties map. Always includes object_type key." }
+        ]
+      },
+      "normalizers": [
+        {
+          "function": "normalize_deal(record, connector_id, tenant_id)",
+          "object_type": "deal",
+          "title_format": "Pipedrive deal: {title}",
+          "metadata_keys": ["object_type", "deal_id", "title", "value", "currency", "status", "stage", "pipeline", "owner", "person", "organization", "add_time", "close_time", "expected_close_date"]
+        },
+        {
+          "function": "normalize_person(record, connector_id, tenant_id)",
+          "object_type": "person",
+          "title_format": "Pipedrive person: {name} <{email}>",
+          "metadata_keys": ["object_type", "person_id", "name", "email", "phone", "organization", "owner", "add_time", "update_time"]
+        },
+        {
+          "function": "normalize_organization(record, connector_id, tenant_id)",
+          "object_type": "organization",
+          "title_format": "Pipedrive organization: {name}",
+          "metadata_keys": ["object_type", "org_id", "name", "address", "owner", "people_count", "open_deals_count", "add_time", "update_time"]
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "exceptions": [
+        {
+          "name": "PipedriveError",
+          "description": "Base exception. Carries message, status_code, and code.",
+          "http_status": null
+        },
+        {
+          "name": "PipedriveAuthError",
+          "description": "Raised on 401 Unauthorized or 403 Forbidden. Not retried.",
+          "http_status": [401, 403]
+        },
+        {
+          "name": "PipedriveRateLimitError",
+          "description": "Raised on 429 Too Many Requests. Carries retry_after (seconds from Retry-After header). Retried after the specified delay.",
+          "http_status": 429
+        },
+        {
+          "name": "PipedriveNotFoundError",
+          "description": "Raised on 404 Not Found. Carries resource name and resource path.",
+          "http_status": 404
+        },
+        {
+          "name": "PipedriveNetworkError",
+          "description": "Raised on httpx.TimeoutException or httpx.NetworkError. Retried with exponential backoff.",
+          "http_status": null
+        },
+        {
+          "name": "PipedriveServerError",
+          "description": "Raised on 5xx responses from Pipedrive. Retried.",
+          "http_status": "5xx"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "items": [
+        {
+          "problem": "401 Unauthorized",
+          "cause": "Pipedrive API token is invalid or was regenerated.",
+          "solution": "Go to Pipedrive Settings → Personal preferences → API, copy the current token, and update the connector's api_key."
+        },
+        {
+          "problem": "403 Forbidden",
+          "cause": "The user account lacks read permissions for the requested resource.",
+          "solution": "Ensure your Pipedrive user has at least read access to deals, persons, and organizations. Contact your Pipedrive admin."
+        },
+        {
+          "problem": "429 Too Many Requests",
+          "cause": "Pipedrive API rate limit exceeded.",
+          "solution": "The connector retries automatically with exponential backoff. For very large accounts, schedule syncs during off-peak hours."
+        },
+        {
+          "problem": "Connector health is DEGRADED",
+          "cause": "Transient network errors have tripped the circuit breaker (5 failures).",
+          "solution": "Resolve the underlying network or auth issue, then trigger a health check to reset the circuit breaker."
+        },
+        {
+          "problem": "documents_failed > 0 in sync result",
+          "cause": "One or more Pipedrive records returned unexpected data that caused normalization to fail.",
+          "solution": "Check connector logs for which record IDs failed. Inspect those records in Pipedrive for missing or null field values."
+        }
+      ]
+    }
+  ]
+}
