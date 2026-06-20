@@ -1,0 +1,29 @@
+{
+  "connector_type": "smartrecruiters",
+  "name": "SmartRecruiters",
+  "display_name": "SmartRecruiters",
+  "description": "Connect to SmartRecruiters to sync job postings, candidates, and users into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token (X-SmartToken)",
+      "type": "password",
+      "required": true,
+      "description": "Your SmartRecruiters API token. Found in SmartRecruiters → Admin → Apps & Integrations → API."
+    }
+  ],
+  "capabilities": [
+    "list_jobs",
+    "get_job",
+    "list_candidates",
+    "get_candidate",
+    "list_users",
+    "list_departments",
+    "sync"
+  ],
+  "provider": "SmartRecruiters",
+  "service": "SmartRecruiters",
+  "category": "ats"
+}
