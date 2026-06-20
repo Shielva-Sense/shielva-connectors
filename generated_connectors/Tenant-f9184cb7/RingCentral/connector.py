@@ -75,6 +75,14 @@ class RingCentralConnector(BaseConnector):
     Resources: call_logs, messages, extensions, contacts, meetings.
     """
 
+    # The gateway loader registers each connector by reading `cls.CONNECTOR_TYPE`
+    # off the class — module-level constants don't reach the class attribute lookup
+    # and the class would otherwise inherit BaseConnector.CONNECTOR_TYPE = "base",
+    # causing every such connector to collide on the "base" key.
+    CONNECTOR_TYPE = "ringcentral"
+    AUTH_TYPE = "oauth2"
+
+
     def __init__(
         self,
         tenant_id: str = "",
