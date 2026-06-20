@@ -1,0 +1,185 @@
+{
+  "title": "Mailchimp Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Mailchimp connector** integrates with Mailchimp via the Marketing API v3. It enables Shielva to sync audiences, contacts (members), and campaigns from your Mailchimp account.\n\nThis connector uses API key authentication with HTTP Basic Auth (username = \"anystring\", password = API key). The data center is automatically extracted from the API key suffix (e.g. `us10` from `abc123-us10`).\n\n**Key capabilities:**\n- List all audiences/lists in the account\n- Sync all members from every audience with offset-based pagination\n- Fetch individual audience and member details\n- List campaigns across the account\n- Stable document IDs via SHA-256(list_id:email)[:16] for deduplication",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`mailchimp` — registered in ACP as **Mailchimp**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Mailchimp (Marketing API v3 — `https://{dc}.api.mailchimp.com/3.0/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key presence, extracts DC; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls GET / (root) to verify credentials; returns account name in message |\n| `sync()` | Lists all audiences, fetches all members, normalizes to ConnectorDocuments |\n| `list_audiences()` | Paginated GET /lists returning all audiences |\n| `get_audience(list_id)` | GET /lists/{list_id} for a single audience |\n| `list_members(list_id)` | Paginated GET /lists/{list_id}/members |\n| `get_member(list_id, subscriber_hash)` | GET /lists/{list_id}/members/{subscriber_hash} |\n| `list_campaigns()` | Paginated GET /campaigns |"
+        }
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **API key authentication** via HTTP Basic Auth. Mailchimp requires `username=\"anystring\"` and `password=<api_key>`.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` — generate an API key in your Mailchimp account under **Account & billing → Extras → API keys**."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | password | Yes | Mailchimp API key (e.g. `abc123-us10`) |"
+        },
+        {
+          "id": "dc-extraction",
+          "title": "Data Center Extraction",
+          "content": "Mailchimp API keys end with `-{dc}` (e.g. `-us10`). The connector calls `extract_dc_from_api_key()` to split on the last `-` and derives the base URL: `https://{dc}.api.mailchimp.com/3.0`.\n\nExamples:\n- `abc123-us10` → DC: `us10`, URL: `https://us10.api.mailchimp.com/3.0`\n- `xyz789-eu2` → DC: `eu2`, URL: `https://eu2.api.mailchimp.com/3.0`"
+        },
+        {
+          "id": "token-security",
+          "title": "API Key Security",
+          "content": "Mailchimp API keys do not expire unless revoked. Shielva stores the key AES-256-GCM encrypted at rest via the vault. Keys can be revoked at any time from the Mailchimp dashboard under Account → Extras → API keys."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "All configuration is stored in the connector's `config` dict (encrypted at rest by Shielva vault).",
+      "children": [
+        {
+          "id": "config-keys",
+          "title": "Config Keys",
+          "content": "| Key | Description |\n|-----|-------------|\n| `api_key` | Mailchimp API key including the DC suffix (e.g. `abc123-us10`) |"
+        }
+      ]
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `MailchimpHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `api_key` is present in config and extracts the DC suffix. Does not make network calls — key validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='...data center: us10')` when api_key is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when api_key is absent or empty"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `GET /` (root endpoint) to verify the API key. Returns the Mailchimp account name in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Mailchimp account: Acme Corp')`\n- `HealthCheckResult(health=DEGRADED, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFetches all audiences via `list_audiences()`, then for each audience fetches all members via `list_members()` and normalizes them into ConnectorDocuments.\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures occur, `PARTIAL` when individual members fail, `FAILED` when the audience list or auth fails entirely."
+        },
+        {
+          "id": "list-audiences",
+          "title": "list_audiences()",
+          "content": "**Signature:** `async def list_audiences(self, count=100) -> list[dict]`\n\nPaginated `GET /lists`. Follows `total_items` vs `offset` until all audiences are fetched.\n\n**Returns:** List of Mailchimp list objects with `id`, `name`, `stats`."
+        },
+        {
+          "id": "get-audience",
+          "title": "get_audience()",
+          "content": "**Signature:** `async def get_audience(self, list_id: str) -> dict`\n\nFetches a single audience via `GET /lists/{list_id}`.\n\n**Raises:** `MailchimpNotFoundError` if the audience does not exist."
+        },
+        {
+          "id": "list-members",
+          "title": "list_members()",
+          "content": "**Signature:** `async def list_members(self, list_id: str, count=100) -> list[dict]`\n\nPaginated `GET /lists/{list_id}/members`. Follows offset pagination.\n\n**Returns:** List of Mailchimp member objects with `email_address`, `status`, `merge_fields`, `tags`, etc."
+        },
+        {
+          "id": "get-member",
+          "title": "get_member()",
+          "content": "**Signature:** `async def get_member(self, list_id: str, subscriber_hash: str) -> dict`\n\nFetches a single member via `GET /lists/{list_id}/members/{subscriber_hash}`.\n\nThe `subscriber_hash` is the MD5 hash of the lowercase email address.\n\n**Raises:** `MailchimpNotFoundError` if the member does not exist."
+        },
+        {
+          "id": "list-campaigns",
+          "title": "list_campaigns()",
+          "content": "**Signature:** `async def list_campaigns(self, count=100) -> list[dict]`\n\nPaginated `GET /campaigns`. Returns all campaigns across the account.\n\n**Returns:** List of Mailchimp campaign objects with `id`, `type`, `status`, `settings`, `recipients`."
+        }
+      ]
+    },
+    {
+      "id": "http-client",
+      "title": "HTTP Client",
+      "content": "All HTTP calls are encapsulated in `MailchimpHTTPClient` (`client/http_client.py`) using `aiohttp`. The connector never calls HTTP directly.",
+      "children": [
+        {
+          "id": "http-client-methods",
+          "title": "Methods",
+          "content": "| Method | Mailchimp API Call | Description |\n|--------|-------------------|-------------|\n| `get_root()` | `GET /` | Verify credentials, returns account info |\n| `get_lists(count, offset)` | `GET /lists` | List audiences with pagination |\n| `get_list(list_id)` | `GET /lists/{list_id}` | Single audience |\n| `get_members(list_id, count, offset)` | `GET /lists/{list_id}/members` | Members with pagination |\n| `get_member(list_id, subscriber_hash)` | `GET /lists/{list_id}/members/{hash}` | Single member |\n| `get_campaigns(count, offset)` | `GET /campaigns` | List campaigns with pagination |"
+        },
+        {
+          "id": "auth-mechanism",
+          "title": "Authentication Mechanism",
+          "content": "The HTTP client uses `aiohttp.BasicAuth(\"anystring\", api_key)` per Mailchimp's documented HTTP Basic Auth pattern. This is passed to every `ClientSession` at construction time."
+        },
+        {
+          "id": "error-mapping",
+          "title": "HTTP Status to Exception Mapping",
+          "content": "| HTTP Status | Exception |\n|-------------|----------|\n| 401 | `MailchimpAuthError` |\n| 403 | `MailchimpAuthError` |\n| 404 | `MailchimpNotFoundError` |\n| 429 | `MailchimpRateLimitError` |\n| Other 4xx/5xx | `MailchimpError` |\n| Connection/timeout | `MailchimpNetworkError` |"
+        },
+        {
+          "id": "retry-logic",
+          "title": "Retry Logic",
+          "content": "`with_retry()` in `helpers/utils.py` wraps API calls with exponential back-off:\n- `max_attempts=3` by default\n- Back-off: 1s, 2s (doubles each attempt)\n- Skips retry on `MailchimpAuthError` — re-installing with a valid key is required\n- Retries on `MailchimpError`, `MailchimpNetworkError`, `MailchimpRateLimitError`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents are produced by `normalize_member()` and `normalize_campaign()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "email-contact-document",
+          "title": "Email Contact (ConnectorDocument)",
+          "content": "```json\n{\n  \"id\": \"<sha256(list_id:email_address)[:16]>\",\n  \"type\": \"email_contact\",\n  \"title\": \"Alice Smith <alice@example.com>\",\n  \"content\": \"Audience: Main List\\nEmail: alice@example.com\\nName: Alice Smith\\nStatus: subscribed\\nTags: VIP, Newsletter\\nSignup: 2024-01-15T10:00:00+00:00\",\n  \"metadata\": {\n    \"list_id\": \"abc123\",\n    \"list_name\": \"Main List\",\n    \"email\": \"alice@example.com\",\n    \"full_name\": \"Alice Smith\",\n    \"status\": \"subscribed\",\n    \"tags\": [\"VIP\", \"Newsletter\"],\n    \"language\": \"en\",\n    \"vip\": false,\n    \"connector_id\": \"mailchimp_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"mailchimp\"\n  }\n}\n```"
+        },
+        {
+          "id": "email-campaign-document",
+          "title": "Email Campaign (ConnectorDocument)",
+          "content": "```json\n{\n  \"id\": \"<sha256(campaign:campaign_id)[:16]>\",\n  \"type\": \"email_campaign\",\n  \"title\": \"June Newsletter\",\n  \"content\": \"Campaign: June Newsletter\\nType: regular\\nStatus: sent\\nSubject: Big news from us!\\nFrom: Acme Corp\\nAudience: Main List\\nSent: 2024-06-01T12:00:00+00:00\\nEmails sent: 500\",\n  \"metadata\": {\n    \"campaign_id\": \"camp_001\",\n    \"type\": \"regular\",\n    \"status\": \"sent\",\n    \"subject_line\": \"Big news from us!\",\n    \"emails_sent\": 500,\n    \"connector_id\": \"mailchimp_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"mailchimp\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "**Members:** `SHA-256(list_id + ':' + lowercase_email)` truncated to 16 hex characters. Stable across syncs — the same contact in the same audience always produces the same Shielva document ID.\n\n**Campaigns:** `SHA-256('campaign:' + campaign_id)` truncated to 16 hex characters. Stable across syncs as long as the Mailchimp campaign ID does not change."
+        }
+      ]
+    },
+    {
+      "id": "exceptions",
+      "title": "Exception Hierarchy",
+      "content": "All exceptions inherit from `MailchimpError` (base) in `exceptions.py`:\n\n```\nMailchimpError (base)\n├── MailchimpAuthError         — HTTP 401/403: invalid key, forbidden\n├── MailchimpNetworkError      — connectivity failures, aiohttp.ClientError\n├── MailchimpRateLimitError    — HTTP 429: rate limit exceeded\n└── MailchimpNotFoundError     — HTTP 404: resource not found\n```\n\nCallers can catch the base `MailchimpError` or specific subclasses for finer control."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| HTTP 401 | Invalid or revoked API key | Regenerate in Account → Extras → API keys |\n| HTTP 403 | Insufficient permissions | Ensure the API key owner has at least Viewer access |\n| HTTP 404 | Audience or member not found | Verify the list_id or subscriber_hash is correct |\n| HTTP 429 | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| Wrong DC | Key missing `-{dc}` suffix | Confirm the API key includes the data center suffix |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (105 tests, all mocked — no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/mailchimp_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 105 tests must pass before registering the connector."
+        }
+      ]
+    }
+  ]
+}
