@@ -1,0 +1,95 @@
+{
+  "title": "Wrike Connector Documentation",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "connector_type": "wrike",
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Wrike** connector integrates Shielva with the [Wrike REST API v4](https://developers.wrike.com/api/v4/) to sync folders, tasks, users, comments, and timelogs into your Shielva knowledge base.\n\nWrike is an enterprise-grade work management platform used by teams worldwide for project planning, task tracking, and collaboration. This connector exposes **8 API methods** across 5 resource domains — Folders, Tasks, Users, Comments, and Timelogs — and normalises all data to Shielva's `ConnectorDocument` schema for downstream search and AI workflows.\n\n**Key capabilities:**\n- Full sync across all folders, tasks, users, and comments with automatic `nextPageToken` cursor pagination\n- Tasks normalised with title, description, status, importance, due dates, start dates, and assignee IDs\n- Folders normalised with title, description, color, scope, child count, and project status\n- Users normalised with full name, email, role, and active status extracted from Wrike `profiles` array\n- Comments normalised with author, text, creation date, and linked task/folder reference\n- OAuth 2.0 Authorization Code flow — `client_id` + `client_secret` → authorization URL → token exchange\n- Automatic token refresh on `401` using stored `refresh_token`\n- Typed exception hierarchy with exponential backoff retry (3 attempts, jitter)\n- Auth errors never retried — fail-fast on invalid or revoked tokens"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "Get the Wrike connector running in under 10 minutes.\n\n### 1. Create a Wrike OAuth App\n\n1. Log in to Wrike → **Apps & Integrations** → **API** → **Create new app**.\n2. Set your redirect URI to `https://app.shielva.ai/oauth/callback/wrike`.\n3. Copy the **Client ID** and **Client Secret**.\n\n### 2. Install in Shielva\n\nNavigate to **Integrations → Wrike**, enter Client ID and Client Secret, and click **Install**.\n\n### 3. Authorize\n\nClick **Authorize** — Shielva opens the Wrike consent page. After you accept, the connector exchanges the `code` for tokens automatically.\n\n### 4. Run a sync\n\n```python\nfrom connector import WrikeConnector\n\nasync with WrikeConnector(config={\n    \"client_id\": \"YOUR_CLIENT_ID\",\n    \"client_secret\": \"YOUR_CLIENT_SECRET\",\n    \"access_token\": \"ACCESS_TOKEN\",\n    \"refresh_token\": \"REFRESH_TOKEN\",\n}) as conn:\n    result = await conn.sync(full=True, kb_id=\"kb_wrike_001\")\n    print(f\"Synced {result.documents_synced} of {result.documents_found} documents\")\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Wrike connector uses **OAuth 2.0 Authorization Code flow**.\n\n### Credential fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | From Wrike Apps & Integrations → API |\n| Client Secret | `client_secret` | password | Yes | From Wrike Apps & Integrations → API |\n| Redirect URI | `redirect_uri` | string | No | OAuth callback URL; defaults to Shielva's callback |\n\n### OAuth Flow\n\n1. `connector.authorize()` returns the authorization URL.\n2. User visits URL → consents → Wrike redirects with `?code=...`.\n3. Shielva exchanges `code` via `POST https://login.wrike.com/oauth2/token`.\n4. Tokens stored: `access_token`, `refresh_token`.\n5. `access_token` sent as `Authorization: Bearer {token}` on every request.\n\n### Token refresh\n\nWhen a request returns `401`, the connector automatically calls `refresh_access_token()` using the stored `refresh_token`, updates the config, and retries the original request once. If refresh also fails, `WrikeAuthError` is raised.\n\n### Security\n\n- Tokens are stored encrypted in the Shielva vault and never logged.\n- Revoke access at any time from Wrike → Apps & Integrations → Authorized Apps."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields\n\n```json\n{\n  \"client_id\": \"ABCDEF1234567890\",\n  \"client_secret\": \"your_client_secret\",\n  \"redirect_uri\": \"https://app.shielva.ai/oauth/callback/wrike\"\n}\n```\n\n### Post-authorization fields (populated automatically)\n\n```json\n{\n  \"access_token\": \"...\",\n  \"refresh_token\": \"...\"\n}\n```\n\n### Internal defaults\n\n| Parameter | Default | Description |\n|-----------|---------|-------------|\n| `pageSize` | `1000` | Tasks per page (Wrike maximum) |\n| `TIMEOUT` | `30s` | HTTP request timeout |\n| `MAX_RETRIES` | `3` | Retry attempts on transient failures |\n| `RETRY_BACKOFF` | Exponential | 1s → 2s → 4s with ±0.5s jitter |\n| `scope` | `Default` | OAuth scope; override via config key |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 8 methods across 5 resource domains.",
+      "children": [
+        {
+          "id": "list-folders",
+          "title": "list_folders()",
+          "content": "**Signature:** `async list_folders() -> list[dict]`\n\nReturns all folders accessible to the authenticated user via `GET /folders`.\n\nEach folder dict contains: `id`, `title`, `description`, `color`, `scope`, `createdDate`, `updatedDate`, `childIds`, `sharedIds`, `project` (if the folder is a project).\n\n```python\nfolders = await conn.list_folders()\nfor folder in folders:\n    print(folder[\"title\"], folder.get(\"project\", {}).get(\"status\"))\n```"
+        },
+        {
+          "id": "list-tasks",
+          "title": "list_tasks(folder_id, **kwargs)",
+          "content": "**Signature:** `async list_tasks(folder_id: str | None = None, **kwargs) -> list[dict]`\n\nReturns all tasks, optionally scoped to a specific folder. Handles `nextPageToken` pagination automatically — all pages are collected and returned as a single list.\n\n```python\n# All tasks\ntasks = await conn.list_tasks()\n\n# Tasks in a specific folder\ntasks = await conn.list_tasks(folder_id=\"IEADMXXX\")\n```\n\nEach task dict contains: `id`, `title`, `description`, `status`, `importance`, `dates`, `responsibleIds`, `parentIds`, `customStatusId`, `createdDate`, `updatedDate`."
+        },
+        {
+          "id": "list-users",
+          "title": "list_users()",
+          "content": "**Signature:** `async list_users() -> list[dict]`\n\nReturns all users (contacts) in the Wrike account via `GET /contacts`.\n\nEach user dict contains: `id`, `firstName`, `lastName`, `profiles` (array with `email` and `role`), `active`, `avatarUrl`."
+        },
+        {
+          "id": "list-comments",
+          "title": "list_comments(**kwargs)",
+          "content": "**Signature:** `async list_comments(**kwargs) -> list[dict]`\n\nReturns all comments across the account. Handles `nextPageToken` pagination automatically.\n\nEach comment dict contains: `id`, `authorId`, `text`, `createdDate`, `updatedDate`, `taskId` (or `folderId`)."
+        },
+        {
+          "id": "get-task",
+          "title": "get_task(task_id)",
+          "content": "**Signature:** `async get_task(task_id: str) -> dict`\n\nReturns a single task by its Wrike ID via `GET /tasks/{task_id}`.\n\n```python\ntask = await conn.get_task(\"IEADMXYZABCD1234\")\nprint(task[\"title\"], task[\"status\"])\n```\n\nReturns an empty dict `{}` if the `data` array in the response is empty."
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async health_check() -> HealthCheckResult`\n\nCalls `GET /contacts?me=true` to verify the access token is valid and returns the current user's display name.\n\n| Health | auth_status | Condition |\n|--------|------------|----------|\n| HEALTHY | CONNECTED | Token valid, user returned |\n| OFFLINE | MISSING_CREDENTIALS | No access_token in config |\n| OFFLINE | INVALID_CREDENTIALS | 401/403 from Wrike |\n| DEGRADED | FAILED | Network error or unexpected exception |"
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "**Signature:** `async authorize() -> str`\n\nBuilds and returns the OAuth 2.0 authorization URL. The URL includes `client_id`, `response_type=code`, `scope`, and optionally `redirect_uri`.\n\nExample output:\n```\nhttps://login.wrike.com/oauth2/authorize/v4?client_id=ABC&response_type=code&scope=Default&redirect_uri=https%3A//app.shielva.ai/oauth/callback/wrike\n```"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "**Signature:** `async sync(full: bool = False, since: datetime | None = None, kb_id: str = '') -> SyncResult`\n\nFull sync of all resources: folders → tasks → users → comments. Each resource is normalized to `ConnectorDocument` and optionally ingested into the Shielva knowledge base.\n\nTask and comment endpoints are paginated via `nextPageToken`. Folders and users return in a single response.\n\n**Returns:**\n```python\nSyncResult(\n    status=\"completed\",     # or \"partial\" if any documents failed\n    documents_found=142,    # total raw records fetched\n    documents_synced=142,   # successfully normalized + ingested\n    documents_failed=0,     # normalization or ingest errors\n)\n```"
+        }
+      ]
+    },
+    {
+      "id": "pagination",
+      "title": "Pagination",
+      "content": "Wrike uses `nextPageToken` cursor-based pagination on task and comment endpoints.\n\n```python\n# list_tasks() handles pagination automatically:\ntasks = await conn.list_tasks()  # returns ALL tasks across all pages\n\n# Manual pagination via HTTP client:\nfirst_page = await client.get_tasks(page_size=100)\nnext_token = first_page.get(\"nextPageToken\")\nif next_token:\n    second_page = await client.get_tasks(next_page_token=next_token)\n```\n\nThe `sync()` method handles pagination internally for both tasks and comments."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "### Exception hierarchy\n\n```\nWrikeError (base)\n├── WrikeAuthError          # 401 / 403 — never retried\n├── WrikeRateLimitError     # 429 — retried with backoff\n├── WrikeNetworkError       # 5xx / connection / timeout\n└── WrikeNotFoundError      # 404\n```\n\n### Retry policy\n\n`with_retry()` retries up to 3 times with exponential backoff (1s → 2s → 4s) plus ±0.5s jitter.\n\n- `WrikeAuthError` → **never retried** — requires re-authorization.\n- `WrikeRateLimitError` → retried using `retry_after` value if present.\n- `WrikeNetworkError` → retried with backoff.\n- `WrikeNotFoundError` → bubbles up immediately.\n\n### Status mapping\n\n| HTTP | Exception |\n|------|-----------|\n| 401 | WrikeAuthError |\n| 403 | WrikeAuthError |\n| 404 | WrikeNotFoundError |\n| 429 | WrikeRateLimitError |\n| 5xx | WrikeNetworkError |\n| Other | WrikeError |"
+    },
+    {
+      "id": "normalization",
+      "title": "Normalization",
+      "content": "All resources are converted to `ConnectorDocument` via normalizer functions in `helpers/utils.py`.\n\n### Source ID generation\n\nAll source IDs use `sha256(\"{prefix}:{resource_id}\")[:16]` for stable, collision-free deduplication:\n\n| Resource | Prefix | Example |\n|----------|--------|---------|\n| Task | `task` | `sha256(\"task:TASKID\")[:16]` |\n| Folder | `folder` | `sha256(\"folder:FOLDERID\")[:16]` |\n| User | `user` | `sha256(\"user:CONTACTID\")[:16]` |\n| Comment | `comment` | `sha256(\"comment:COMMENTID\")[:16]` |\n\n### ConnectorDocument structure\n\n```python\nConnectorDocument(\n    source_id=\"a1b2c3d4e5f60789\",   # 16-char sha256 prefix\n    title=\"Design new landing page\",\n    content=\"Task: Design new landing page\\nStatus: Active\\nImportance: High\\n...\",\n    connector_id=\"conn_wrike_001\",\n    tenant_id=\"Tenant-f9184cb7\",\n    source_url=\"https://www.wrike.com/open.htm?id=TASK_001\",\n    metadata={\n        \"task_id\": \"TASK_001\",\n        \"status\": \"Active\",\n        \"importance\": \"High\",\n        \"due_date\": \"2026-07-15\",\n        \"responsible_ids\": [\"CONTACT_001\"],\n    },\n)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Likely cause | Fix |\n|---------|-------------|-----|\n| `auth_status: invalid_credentials` | Access token expired or revoked | Re-authorize in Shielva |\n| `auth_status: missing_credentials` | client_id / client_secret not set | Re-enter credentials |\n| `health: degraded` | Wrike API temporarily unreachable | Retry — connector backs off automatically |\n| `403 Forbidden` | User lacks permission to the resource | Verify user permissions in Wrike |\n| `documents_failed > 0` | Malformed data from Wrike | Check Wrike API status; retry full sync |\n| Token refresh loop | refresh_token also expired | Re-authorize from scratch |"
+    }
+  ]
+}
