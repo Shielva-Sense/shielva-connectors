@@ -1,0 +1,44 @@
+{
+  "connector_type": "wordpress",
+  "display_name": "WordPress",
+  "provider": "wordpress",
+  "service": "wordpress",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync posts, pages, users, media, categories, and tags from a WordPress site via the WordPress REST API v2 using Application Passwords.",
+  "install_fields": [
+    {
+      "key": "site_url",
+      "label": "WordPress Site URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://myblog.com",
+      "help": "The full URL of your WordPress site (e.g. https://myblog.com). Must not include a trailing slash."
+    },
+    {
+      "key": "username",
+      "label": "WordPress Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "admin",
+      "help": "Your WordPress login username."
+    },
+    {
+      "key": "app_password",
+      "label": "Application Password",
+      "type": "password",
+      "required": true,
+      "placeholder": "xxxx xxxx xxxx xxxx xxxx xxxx",
+      "help": "An Application Password generated in WordPress Admin → Users → Profile → Application Passwords. Requires WordPress 5.6+."
+    }
+  ],
+  "capabilities": ["sync", "health_check"],
+  "resources": ["posts", "pages", "users", "media", "categories", "tags"],
+  "api": {
+    "base_url_template": "{site_url}/wp-json/wp/v2/",
+    "auth_method": "http_basic",
+    "auth_header": "Authorization: Basic base64(username:app_password)",
+    "documentation": "https://developer.wordpress.org/rest-api/"
+  },
+  "requires_wordpress_version": "5.6"
+}
