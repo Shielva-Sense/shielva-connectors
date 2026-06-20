@@ -1,0 +1,44 @@
+{
+  "connector_type": "new_relic",
+  "name": "New Relic",
+  "provider": "New Relic",
+  "service": "new_relic",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "User API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "NRAK-XXXXXXXXXXXXXXXXXXXX"
+    },
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "1234567"
+    },
+    {
+      "key": "region",
+      "label": "Region",
+      "type": "string",
+      "required": false,
+      "placeholder": "US or EU"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_alerts_policies",
+    "list_applications",
+    "list_incidents"
+  ],
+  "description": "Sync alerts, applications, and incident data from New Relic observability platform.",
+  "endpoints": {
+    "rest_us": "https://api.newrelic.com/v2",
+    "rest_eu": "https://api.eu.newrelic.com/v2",
+    "graphql": "https://api.newrelic.com/graphql"
+  }
+}
