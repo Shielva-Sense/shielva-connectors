@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 try:
-    from shielva_connectors.base import BaseConnector
+    from shared.base_connector import BaseConnector
     _BASE = BaseConnector
     _HAS_SDK = True
 except ImportError:
