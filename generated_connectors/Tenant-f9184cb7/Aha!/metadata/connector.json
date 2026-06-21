@@ -11,14 +11,16 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Your Aha! API key from Settings → Security → API Key."
+      "description": "Your Aha! API key from Settings \u2192 Security \u2192 API Key.",
+      "help": "API Key."
     },
     {
       "key": "subdomain",
       "label": "Aha! Subdomain (e.g. mycompany)",
       "type": "string",
       "required": true,
-      "description": "The subdomain of your Aha! account (e.g. 'mycompany' for mycompany.aha.io)."
+      "description": "The subdomain of your Aha! account (e.g. 'mycompany' for mycompany.aha.io).",
+      "help": "Aha! Subdomain (e.g. mycompany)."
     }
   ],
   "capabilities": [
@@ -32,5 +34,96 @@
   ],
   "provider": "Aha!",
   "service": "Aha!",
-  "category": "product_management"
+  "category": "product_management",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync features, releases, and ideas across all Aha! products.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Return all products the user has access to (all pages combined).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_features",
+      "name": "List Features",
+      "description": "Return all features for a product (all pages combined).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_goals",
+      "name": "List Goals",
+      "description": "Return all goals for a product.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_releases",
+      "name": "List Releases",
+      "description": "Return all releases for a product (all pages combined).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_ideas",
+      "name": "List Ideas",
+      "description": "Return all ideas for a product (all pages combined).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
