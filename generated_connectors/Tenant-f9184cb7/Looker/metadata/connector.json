@@ -22,14 +22,14 @@
       "type": "string",
       "required": true,
       "placeholder": "your_client_id",
-      "help": "The API3 Client ID from Looker Admin → Users → Edit User → API3 Keys."
+      "help": "The API3 Client ID from Looker Admin \u2192 Users \u2192 Edit User \u2192 API3 Keys."
     },
     {
       "key": "client_secret",
       "label": "API Client Secret",
       "type": "password",
       "required": true,
-      "placeholder": "••••••••••••••••",
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
       "help": "The API3 Client Secret paired with the Client ID. Only shown once at key creation time."
     }
   ],
@@ -111,14 +111,69 @@
     "models"
   ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Content", "id": "sync", "category": "sync" },
-    { "name": "List Looks", "id": "list_looks", "category": "looks" },
-    { "name": "List Dashboards", "id": "list_dashboards", "category": "dashboards" },
-    { "name": "List LookML Models", "id": "list_models", "category": "models" },
-    { "name": "Get Look", "id": "get_look", "category": "looks" },
-    { "name": "Get Dashboard", "id": "get_dashboard", "category": "dashboards" },
-    { "name": "Run Look", "id": "run_look", "category": "looks" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that base_url, client_id, and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Login via client credentials, call /user to confirm identity, return health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Content",
+      "id": "sync",
+      "category": "sync",
+      "description": "Login \u2192 fetch looks + dashboards; normalize each \u2192 SyncResult.",
+      "method": "GET"
+    },
+    {
+      "name": "List Looks",
+      "id": "list_looks",
+      "category": "looks",
+      "description": "Return all saved Looks.",
+      "method": "GET"
+    },
+    {
+      "name": "List Dashboards",
+      "id": "list_dashboards",
+      "category": "dashboards",
+      "description": "Return all dashboards.",
+      "method": "GET"
+    },
+    {
+      "name": "List LookML Models",
+      "id": "list_models",
+      "category": "models",
+      "description": "Return all LookML models.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Look",
+      "id": "get_look",
+      "category": "looks",
+      "description": "Return a single Look by ID. Raises LookerNotFoundError if not found.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Dashboard",
+      "id": "get_dashboard",
+      "category": "dashboards",
+      "description": "Return a single dashboard by ID. Raises LookerNotFoundError if not found.",
+      "method": "GET"
+    },
+    {
+      "name": "Run Look",
+      "id": "run_look",
+      "category": "looks",
+      "description": "Execute a Look and return its data.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Looker"
 }
