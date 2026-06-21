@@ -12,7 +12,7 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "help": "Found in Copper → System Settings → Integrations → API Keys"
+      "help": "Found in Copper \u2192 System Settings \u2192 Integrations \u2192 API Keys"
     },
     {
       "key": "user_email",
@@ -22,8 +22,17 @@
       "help": "The email address of the Copper account holder associated with this API key"
     }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["people", "companies", "opportunities", "tasks", "activity_types"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "people",
+    "companies",
+    "opportunities",
+    "tasks",
+    "activity_types"
+  ],
   "api_base": "https://api.copper.com/developer_api/v1/",
   "auth_headers": {
     "X-PW-AccessToken": "{api_key}",
@@ -34,5 +43,57 @@
     "strategy": "page_number",
     "default_page_size": 200,
     "max_page_size": 200
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all resources: people, companies, opportunities, tasks.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "Return all people (contacts) as normalised dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "Return all companies as normalised dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "Return all opportunities as normalised dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Return all tasks as normalised dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_person",
+      "name": "Get Person",
+      "description": "Fetch and normalise a single person by Copper ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "person_id",
+          "label": "Person Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "CopperConnector"
 }
