@@ -11,14 +11,18 @@
       "label": "Store URL",
       "type": "string",
       "required": true,
-      "description": "Your Magento 2 store base URL (e.g. https://mystore.com)."
+      "description": "Your Magento 2 store base URL (e.g. https://mystore.com).",
+      "help": "Base URL for the REST API. Leave blank to use the default.",
+      "default": "https://mystore.example.com",
+      "placeholder": "https://mystore.example.com"
     },
     {
       "key": "access_token",
       "label": "Integration Access Token",
       "type": "password",
       "required": true,
-      "description": "Magento Integration access token. From Admin → System → Integrations → Create Integration."
+      "description": "Magento Integration access token. From Admin \u2192 System \u2192 Integrations \u2192 Create Integration.",
+      "help": "Integration Access Token."
     }
   ],
   "capabilities": [
@@ -32,5 +36,161 @@
     "sync"
   ],
   "provider": "magento",
-  "category": "ecommerce"
+  "category": "ecommerce",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync orders, products, and customers from Magento.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "Return orders for the given page (Magento offset pagination).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "created_after",
+          "label": "Created After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "Calls get_order().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "order_id",
+          "label": "Order Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Return products for the given page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "created_after",
+          "label": "Created After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_product",
+      "name": "Get Product",
+      "description": "Calls get_product().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sku",
+          "label": "Sku",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return customers for the given page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "created_after",
+          "label": "Created After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Calls get_customer().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "Return full Magento category tree.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "service": "magento"
 }
