@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "your-segment-public-api-token",
-      "help": "Your Segment Public API access token. Found in Segment → Settings → Access Management → Tokens. Requires workspace:read scope at minimum."
+      "help": "Your Segment Public API access token. Found in Segment \u2192 Settings \u2192 Access Management \u2192 Tokens. Requires workspace:read scope at minimum."
     },
     {
       "key": "workspace_slug",
@@ -25,7 +25,12 @@
       "help": "Optional. Your Segment workspace slug (visible in the workspace URL). Used for constructing direct links to resources."
     }
   ],
-  "capabilities": ["sync", "health_check", "list_sources", "list_destinations"],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_sources",
+    "list_destinations"
+  ],
   "features": [
     "retry",
     "pagination",
@@ -108,14 +113,69 @@
     "functions"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Workspaces", "id": "list_workspaces", "category": "workspaces"},
-    {"name": "List Sources", "id": "list_sources", "category": "sources"},
-    {"name": "Get Source", "id": "get_source", "category": "sources"},
-    {"name": "List Destinations", "id": "list_destinations", "category": "destinations"},
-    {"name": "List Spaces", "id": "list_spaces", "category": "spaces"},
-    {"name": "List Functions", "id": "list_functions", "category": "functions"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the access_token via GET /workspaces.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /workspaces and return current health with workspace name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch sources, spaces, and functions; normalize and ingest.",
+      "method": "GET"
+    },
+    {
+      "name": "List Workspaces",
+      "id": "list_workspaces",
+      "category": "workspaces",
+      "description": "GET /workspaces \u2014 returns the single workspace for the token.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sources",
+      "id": "list_sources",
+      "category": "sources",
+      "description": "GET /sources \u2014 cursor-paginated list of sources.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Source",
+      "id": "get_source",
+      "category": "sources",
+      "description": "GET /sources/{source_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Destinations",
+      "id": "list_destinations",
+      "category": "destinations",
+      "description": "GET /sources/{source_id}/destinations.",
+      "method": "GET"
+    },
+    {
+      "name": "List Spaces",
+      "id": "list_spaces",
+      "category": "spaces",
+      "description": "GET /spaces \u2014 all Profiles AI spaces.",
+      "method": "GET"
+    },
+    {
+      "name": "List Functions",
+      "id": "list_functions",
+      "category": "functions",
+      "description": "GET /functions \u2014 cursor-paginated list of functions.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Segment"
 }
