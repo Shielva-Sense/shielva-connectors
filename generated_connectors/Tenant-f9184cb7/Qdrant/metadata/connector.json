@@ -1,0 +1,258 @@
+{
+  "connector_type": "qdrant",
+  "name": "QdrantConnector",
+  "display_name": "Qdrant",
+  "version": "1.0.0",
+  "description": "Connects to the Qdrant vector database REST API (Collections CRUD, Points upsert/get/delete/search/scroll, Payload Indexes, Snapshots, Cluster info, Service health/telemetry) using an api-key header. Supports Qdrant Cloud (per-tenant cluster URL) and self-hosted deployments. Sync mirrors the collection catalogue into the Shielva KB.",
+  "provider": "qdrant",
+  "service": "qdrant",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Cluster URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://my-cluster.aws.cloud.qdrant.io:6333",
+      "help": "Qdrant cluster URL. Cloud: https://<cluster>.aws.cloud.qdrant.io:6333 (from the Qdrant Cloud dashboard). Self-hosted: http://localhost:6333 or the internal DNS of your deployment."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Paste your Qdrant API key",
+      "help": "From Qdrant Cloud Dashboard -> API Keys. Sent in the lowercase 'api-key' header (NOT 'Authorization', NOT 'Bearer'). Leave blank for default self-hosted deployments that run without auth."
+    },
+    {
+      "key": "default_collection",
+      "label": "Default Collection",
+      "type": "string",
+      "required": false,
+      "placeholder": "shielva-kb",
+      "help": "Optional default collection for shorthand calls."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "600",
+      "placeholder": "600",
+      "help": "Client-side soft cap on requests per minute. Default 600; raise to match your Qdrant Cloud tier."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates base_url is present and records install-time config. Does not perform a live API round-trip.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies cluster reachability via GET /healthz (with /readyz and / as fallbacks).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_collections",
+      "name": "List Collections",
+      "description": "GET /collections - list all collections in this cluster.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_collection",
+      "name": "Create Collection",
+      "description": "PUT /collections/{name} - create a new collection with a vector config (size + distance).",
+      "method": "PUT",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "vectors", "type": "object", "required": true },
+        { "key": "optimizers_config", "type": "object", "required": false },
+        { "key": "shard_number", "type": "number", "required": false },
+        { "key": "replication_factor", "type": "number", "required": false },
+        { "key": "write_consistency_factor", "type": "number", "required": false },
+        { "key": "on_disk_payload", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_collection",
+      "name": "Get Collection",
+      "description": "GET /collections/{name} - fetch a single collection's config + status.",
+      "method": "GET",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_collection",
+      "name": "Delete Collection",
+      "description": "DELETE /collections/{name} - drop a collection and all its points.",
+      "method": "DELETE",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_collection",
+      "name": "Update Collection",
+      "description": "PATCH /collections/{name} - update mutable collection settings.",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "optimizers_config", "type": "object", "required": false },
+        { "key": "vectors_config", "type": "object", "required": false },
+        { "key": "params", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upsert_points",
+      "name": "Upsert Points",
+      "description": "PUT /collections/{name}/points - upsert a batch of points (id + vector + payload).",
+      "method": "PUT",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "points", "type": "array", "required": true },
+        { "key": "wait", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_points",
+      "name": "Get Points",
+      "description": "POST /collections/{name}/points - retrieve points by their ids.",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "ids", "type": "array", "required": true },
+        { "key": "with_payload", "type": "boolean", "required": false },
+        { "key": "with_vector", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_points",
+      "name": "Search Points",
+      "description": "POST /collections/{name}/points/search - vector similarity search (top-k).",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "vector", "type": "array", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "with_payload", "type": "boolean", "required": false },
+        { "key": "with_vector", "type": "boolean", "required": false },
+        { "key": "score_threshold", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "params", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_points",
+      "name": "Delete Points",
+      "description": "POST /collections/{name}/points/delete - delete by id list or by filter.",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "points", "type": "array", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "wait", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "scroll_points",
+      "name": "Scroll Points",
+      "description": "POST /collections/{name}/points/scroll - paginate through points (returns next_page_offset).",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "string", "required": false },
+        { "key": "with_payload", "type": "boolean", "required": false },
+        { "key": "with_vector", "type": "boolean", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "count_points",
+      "name": "Count Points",
+      "description": "POST /collections/{name}/points/count - count points matching a filter (exact or estimate).",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "exact", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_payload_index",
+      "name": "Create Payload Index",
+      "description": "PUT /collections/{name}/index - create a payload-field index to accelerate filtered searches.",
+      "method": "PUT",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "field_name", "type": "string", "required": true },
+        { "key": "field_schema", "type": "string", "required": true },
+        { "key": "wait", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_payload_index",
+      "name": "Delete Payload Index",
+      "description": "DELETE /collections/{name}/index/{field_name} - drop a payload index.",
+      "method": "DELETE",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true },
+        { "key": "field_name", "type": "string", "required": true },
+        { "key": "wait", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_snapshots",
+      "name": "List Snapshots",
+      "description": "GET /collections/{name}/snapshots - list snapshots for a collection.",
+      "method": "GET",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_snapshot",
+      "name": "Create Snapshot",
+      "description": "POST /collections/{name}/snapshots - create a snapshot of the collection.",
+      "method": "POST",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_cluster_info",
+      "name": "Get Cluster Info",
+      "description": "GET /cluster - return cluster topology and peer information.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
