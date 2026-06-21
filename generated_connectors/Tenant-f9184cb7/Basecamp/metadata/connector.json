@@ -13,21 +13,24 @@
       "label": "Client ID",
       "type": "string",
       "required": true,
-      "description": "OAuth 2.0 Client ID from your Basecamp app registration at https://launchpad.37signals.com/integrations."
+      "description": "OAuth 2.0 Client ID from your Basecamp app registration at https://launchpad.37signals.com/integrations.",
+      "help": "Client ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
       "required": true,
-      "description": "OAuth 2.0 Client Secret from your Basecamp app registration."
+      "description": "OAuth 2.0 Client Secret from your Basecamp app registration.",
+      "help": "Client Secret."
     },
     {
       "key": "redirect_uri",
       "label": "Redirect URI",
       "type": "string",
       "required": true,
-      "description": "The OAuth callback URL registered in your Basecamp app. Example: https://app.shielva.ai/oauth/basecamp/callback"
+      "description": "The OAuth callback URL registered in your Basecamp app. Example: https://app.shielva.ai/oauth/basecamp/callback",
+      "help": "OAuth callback URL. Leave blank to use the default."
     }
   ],
   "capabilities": [
@@ -49,5 +52,104 @@
   ],
   "api_base": "https://3.basecampapi.com/{account_id}",
   "docs_url": "https://github.com/basecamp/bc3-api",
-  "category": "project_management"
+  "category": "project_management",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Basecamp resources into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return all active Basecamp projects.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_todo_lists",
+      "name": "List Todo Lists",
+      "description": "Return all to-do lists in the given project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_todos",
+      "name": "List Todos",
+      "description": "Return all to-dos in a specific to-do list.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "todolist_id",
+          "label": "Todolist Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Return all messages in the given project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_documents",
+      "name": "List Documents",
+      "description": "Return all documents in the given project's vault.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "BasecampConnector",
+  "description": "Shielva connector for Basecamp."
 }
