@@ -14,15 +14,15 @@
       "type": "password",
       "required": true,
       "placeholder": "your-api-key",
-      "help": "Your ConvertKit API Key. Found in ConvertKit → Settings → Advanced → API Key."
+      "help": "Your ConvertKit API Key. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Key."
     },
     {
       "key": "api_secret",
       "label": "API Secret",
       "type": "password",
-      "required": false,
+      "required": true,
       "placeholder": "your-api-secret",
-      "help": "Your ConvertKit API Secret. Required to list subscribers. Found in ConvertKit → Settings → Advanced → API Secret."
+      "help": "Your ConvertKit API Secret. Required to list subscribers. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Secret."
     }
   ],
   "features": [
@@ -107,14 +107,50 @@
     "broadcasts"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Subscribers", "id": "list_subscribers", "category": "subscribers"},
-    {"name": "Get Subscriber", "id": "get_subscriber", "category": "subscribers"},
-    {"name": "List Tags", "id": "list_tags", "category": "tags"},
-    {"name": "List Sequences", "id": "list_sequences", "category": "sequences"},
-    {"name": "List Forms", "id": "list_forms", "category": "forms"},
-    {"name": "List Broadcasts", "id": "list_broadcasts", "category": "broadcasts"}
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync"
+    },
+    {
+      "name": "List Subscribers",
+      "id": "list_subscribers",
+      "category": "subscribers"
+    },
+    {
+      "name": "Get Subscriber",
+      "id": "get_subscriber",
+      "category": "subscribers"
+    },
+    {
+      "name": "List Tags",
+      "id": "list_tags",
+      "category": "tags"
+    },
+    {
+      "name": "List Sequences",
+      "id": "list_sequences",
+      "category": "sequences"
+    },
+    {
+      "name": "List Forms",
+      "id": "list_forms",
+      "category": "forms"
+    },
+    {
+      "name": "List Broadcasts",
+      "id": "list_broadcasts",
+      "category": "broadcasts"
+    }
   ]
 }
