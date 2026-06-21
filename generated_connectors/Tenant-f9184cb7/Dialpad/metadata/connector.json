@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "Your Dialpad OAuth Client ID",
-      "help": "From the Dialpad Developer Portal → Your App → OAuth Credentials → Client ID"
+      "help": "From the Dialpad Developer Portal \u2192 Your App \u2192 OAuth Credentials \u2192 Client ID"
     },
     {
       "key": "client_secret",
@@ -22,7 +22,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Dialpad OAuth Client Secret",
-      "help": "From the Dialpad Developer Portal → Your App → OAuth Credentials → Client Secret"
+      "help": "From the Dialpad Developer Portal \u2192 Your App \u2192 OAuth Credentials \u2192 Client Secret"
     },
     {
       "key": "redirect_uri",
@@ -33,7 +33,11 @@
       "help": "Optional. The OAuth redirect URI registered in your Dialpad App. Leave blank to use the default."
     }
   ],
-  "oauth_scopes": ["calls", "contacts", "users"],
+  "oauth_scopes": [
+    "calls",
+    "contacts",
+    "users"
+  ],
   "oauth_auth_url": "https://dialpad.com/oauth2/authorize",
   "oauth_token_url": "https://dialpad.com/oauth2/token",
   "features": [
@@ -99,15 +103,72 @@
       "endpoint": "GET /api/v2/departments"
     }
   ],
-  "categories": ["auth", "health", "sync", "users", "calls", "contacts", "departments"],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "users",
+    "calls",
+    "contacts",
+    "departments"
+  ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Authorize", "id": "authorize", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Users", "id": "list_users", "category": "users" },
-    { "name": "List Call Logs", "id": "list_call_logs", "category": "calls" },
-    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
-    { "name": "List Departments", "id": "list_departments", "category": "departments" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Dialpad OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /api/v2/users/me and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Dialpad call logs and contacts into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Users",
+      "id": "list_users",
+      "category": "users",
+      "description": "Fetch all users via cursor pagination.",
+      "method": "GET"
+    },
+    {
+      "name": "List Call Logs",
+      "id": "list_call_logs",
+      "category": "calls",
+      "description": "Fetch all call logs via cursor pagination, optionally filtered by started_after.",
+      "method": "GET"
+    },
+    {
+      "name": "List Contacts",
+      "id": "list_contacts",
+      "category": "contacts",
+      "description": "Fetch all contacts via cursor pagination.",
+      "method": "GET"
+    },
+    {
+      "name": "List Departments",
+      "id": "list_departments",
+      "category": "departments",
+      "description": "Fetch all departments via cursor pagination.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Dialpad"
 }
