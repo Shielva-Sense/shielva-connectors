@@ -1,0 +1,288 @@
+{
+  "connector_type": "huggingface",
+  "name": "HuggingFaceConnector",
+  "display_name": "HuggingFace",
+  "version": "1.0.0",
+  "description": "Connects to the HuggingFace Hub, Inference API, and managed Inference Endpoints. Supports listing/getting models/datasets/spaces, running text generation, embeddings, classification, summarization, translation, image classification, and managing dedicated inference deployments.",
+  "provider": "huggingface",
+  "service": "huggingface",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "HuggingFace API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "help": "Generate at huggingface.co/settings/tokens (read or write scope). Sent as 'Authorization: Bearer <api_key>' on every Hub, Inference, and Inference Endpoints request."
+    },
+    {
+      "key": "base_url",
+      "label": "Hub Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://huggingface.co/api",
+      "placeholder": "https://huggingface.co/api",
+      "help": "Base URL for the HuggingFace Hub REST API. Override only for a private mirror."
+    },
+    {
+      "key": "inference_url",
+      "label": "Inference Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api-inference.huggingface.co",
+      "placeholder": "https://api-inference.huggingface.co",
+      "help": "Base URL for the serverless HuggingFace Inference API."
+    },
+    {
+      "key": "endpoints_url",
+      "label": "Inference Endpoints Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.endpoints.huggingface.cloud/v2",
+      "placeholder": "https://api.endpoints.huggingface.cloud/v2",
+      "help": "Base URL for the managed Inference Endpoints API. Override for self-hosted gateways."
+    },
+    {
+      "key": "default_model",
+      "label": "Default Model",
+      "type": "string",
+      "required": false,
+      "placeholder": "meta-llama/Llama-3-8B-Instruct",
+      "help": "Default model id used by inference helpers when the caller does not specify one."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side cap on HuggingFace API requests per minute. Default is 60 (free-tier safe)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the api_key and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies HuggingFace API connectivity by calling GET /whoami-v2.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "whoami",
+      "name": "Whoami",
+      "description": "GET /whoami-v2 — returns the authenticated user's identity.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "GET /models — list Hub models matching search/author/filter/sort/limit.",
+      "method": "GET",
+      "params": [
+        { "key": "search", "type": "string", "required": false },
+        { "key": "author", "type": "string", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "sort", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_model",
+      "name": "Get Model",
+      "description": "GET /models/{id} — fetch a single model's full metadata.",
+      "method": "GET",
+      "params": [
+        { "key": "model_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "description": "GET /datasets — list Hub datasets matching the given search.",
+      "method": "GET",
+      "params": [
+        { "key": "search", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_dataset",
+      "name": "Get Dataset",
+      "description": "GET /datasets/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_spaces",
+      "name": "List Spaces",
+      "description": "GET /spaces — list HuggingFace Spaces matching the given search.",
+      "method": "GET",
+      "params": [
+        { "key": "search", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_organization_repos",
+      "name": "List Organization Repos",
+      "description": "GET /organizations/{name} — list public repos for an organization.",
+      "method": "GET",
+      "params": [
+        { "key": "organization", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_inference",
+      "name": "Run Inference",
+      "description": "POST {inference}/models/{model} — generic JSON inference entry point.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "any", "required": true },
+        { "key": "parameters", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "text_generation",
+      "name": "Text Generation",
+      "description": "POST {inference}/models/{model} — text-generation completion.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "string", "required": true },
+        { "key": "parameters", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "feature_extraction",
+      "name": "Feature Extraction",
+      "description": "POST {inference}/models/{model} — return embedding vector(s).",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "text_classification",
+      "name": "Text Classification",
+      "description": "POST {inference}/models/{model} — classification scores for inputs.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "summarization",
+      "name": "Summarization",
+      "description": "POST {inference}/models/{model} — summarize inputs.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "string", "required": true },
+        { "key": "parameters", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "translation",
+      "name": "Translation",
+      "description": "POST {inference}/models/{model} — translate inputs.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "image_classification",
+      "name": "Image Classification",
+      "description": "POST {inference}/models/{model} — classify a raw image (binary body).",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "image_bytes", "type": "bytes", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_endpoints",
+      "name": "List Inference Endpoints",
+      "description": "GET {endpoints}/endpoint — list managed Inference Endpoints.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_endpoint",
+      "name": "Get Inference Endpoint",
+      "description": "GET {endpoints}/endpoint/{name}.",
+      "method": "GET",
+      "params": [
+        { "key": "endpoint_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_endpoint",
+      "name": "Create Inference Endpoint",
+      "description": "POST {endpoints}/endpoint — create a managed deployment.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_endpoint",
+      "name": "Delete Inference Endpoint",
+      "description": "DELETE {endpoints}/endpoint/{name}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "endpoint_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_inference_endpoint",
+      "name": "Run Inference Endpoint",
+      "description": "POST {endpoint_url} — invoke a managed Inference Endpoint by its served URL.",
+      "method": "POST",
+      "params": [
+        { "key": "endpoint_url", "type": "string", "required": true },
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Any"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
