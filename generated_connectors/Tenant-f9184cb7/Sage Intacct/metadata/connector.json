@@ -1,0 +1,371 @@
+{
+  "connector_type": "sage_intacct",
+  "name": "SageIntacctConnector",
+  "display_name": "Sage Intacct",
+  "version": "1.0.0",
+  "description": "Connects to Sage Intacct (cloud financial management) via its XML Gateway. Supports readByQuery for any object (CUSTOMER, VENDOR, ARINVOICE, APBILL, GLBATCH, GLACCOUNT, EMPLOYEE, PROJECT, DEPARTMENT, LOCATION), create_customer / create_vendor / create_invoice / update_customer, getAPISession-based session caching, smart events, and per-tenant credential isolation.",
+  "provider": "sage",
+  "service": "intacct",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "sender_id",
+      "label": "Web Services Sender ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Intacct Web Services Sender ID",
+      "help": "Web Services Sender ID — assigned by Intacct support when you sign the Web Services agreement."
+    },
+    {
+      "key": "sender_password",
+      "label": "Web Services Sender Password",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Intacct Web Services Sender Password",
+      "help": "Web Services Sender Password — paired with the Sender ID by Intacct support."
+    },
+    {
+      "key": "user_id",
+      "label": "Intacct User ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter the Intacct User ID",
+      "help": "Intacct user with Web Services privilege. Subscribe the user to Web Services in Company → Subscriptions."
+    },
+    {
+      "key": "user_password",
+      "label": "Intacct User Password",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter the Intacct user password",
+      "help": "Password for the Intacct user. We recommend a dedicated service user with API privilege."
+    },
+    {
+      "key": "company_id",
+      "label": "Intacct Company ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter the Intacct Company ID",
+      "help": "Intacct Company ID — also called Org ID. Found in Company → Information."
+    },
+    {
+      "key": "location_id",
+      "label": "Location ID (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional — for multi-entity scope",
+      "help": "Optional Location ID — restricts API requests to a specific location in a multi-entity company."
+    },
+    {
+      "key": "entity_id",
+      "label": "Entity ID (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional — for multi-entity scope",
+      "help": "Optional Entity ID — restricts API requests to a specific entity in a multi-entity company."
+    },
+    {
+      "key": "base_url",
+      "label": "Intacct XML Gateway URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.intacct.com/ia/xml/xmlgw.phtml",
+      "placeholder": "https://api.intacct.com/ia/xml/xmlgw.phtml",
+      "help": "Base URL for the Intacct XML Gateway. Leave blank to use the production default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Maximum Intacct API requests per minute. Default is 30 (a conservative shared quota)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the five required credentials and mints a getAPISession session_id (best-effort). Optional location_id / entity_id / base_url are also stored when provided.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (No-Op)",
+      "description": "Sage Intacct uses static API credentials — there is no OAuth dance. This method exists for platform contract parity and returns a synthetic TokenInfo whose access_token is f'intacct:{company_id}'.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies the full credential chain by running a 1-row readByQuery on GLACCOUNT.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Catalog Objects",
+      "description": "Syncs CUSTOMER, VENDOR, and GLACCOUNT records into the Shielva knowledge base via readByQuery + readMore pagination. Each row is normalised to a NormalizedDocument with id=f'{tenant_id}_{source_id}'.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "read_by_query",
+      "name": "readByQuery",
+      "description": "Run a generic readByQuery against any Intacct object.",
+      "method": "POST",
+      "params": [
+        { "key": "object_name", "type": "string", "required": true },
+        { "key": "fields", "type": "string", "required": false },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false },
+        { "key": "returnFormat", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "read",
+      "name": "read (by primary key)",
+      "description": "Fetch one or more records by primary key on any Intacct object.",
+      "method": "POST",
+      "params": [
+        { "key": "object_name", "type": "string", "required": true },
+        { "key": "keys", "type": "array", "required": true },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "read_more",
+      "name": "readMore (paginate)",
+      "description": "Fetch next page of a prior readByQuery using its resultId.",
+      "method": "POST",
+      "params": [
+        { "key": "result_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "List Intacct customers via readByQuery on CUSTOMER.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Fetch a single CUSTOMER record by customerid.",
+      "method": "GET",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_customer",
+      "name": "Create Customer",
+      "description": "Create a CUSTOMER record via the create_customer function.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "contact_info", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_customer",
+      "name": "Update Customer",
+      "description": "Partial-update a CUSTOMER record via the update_customer function. Supports name, status, termname, currency, comments, entity.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "List Intacct vendors via readByQuery on VENDOR.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_vendor",
+      "name": "Get Vendor",
+      "description": "Fetch a single VENDOR record by vendorid.",
+      "method": "GET",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_vendor",
+      "name": "Create Vendor",
+      "description": "Create a VENDOR record via the create_vendor function.",
+      "method": "POST",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "contact_info", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "List AR invoices via readByQuery on ARINVOICE.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_invoice",
+      "name": "Create Invoice",
+      "description": "Create an ARINVOICE via the create_invoice function with one or more line items.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "invoice_no", "type": "string", "required": true },
+        { "key": "invoice_date", "type": "string", "required": true },
+        { "key": "due_date", "type": "string", "required": true },
+        { "key": "line_items", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_bills",
+      "name": "List Bills",
+      "description": "List AP bills via readByQuery on APBILL.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_journal_entries",
+      "name": "List Journal Entries",
+      "description": "List GL batches (journal entries) via readByQuery on GLBATCH.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_gl_accounts",
+      "name": "List GL Accounts",
+      "description": "List GL accounts via readByQuery on GLACCOUNT.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_chart_of_accounts",
+      "name": "List Chart of Accounts",
+      "description": "Alias of list_gl_accounts — list GL accounts via readByQuery on GLACCOUNT.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "List employees via readByQuery on EMPLOYEE.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "List projects via readByQuery on PROJECT.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "List departments via readByQuery on DEPARTMENT.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "List locations via readByQuery on LOCATION.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "pagesize", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_smart_event",
+      "name": "Run Smart Event",
+      "description": "Invoke an Intacct Smart Event by name with an optional parameter map.",
+      "method": "POST",
+      "params": [
+        { "key": "event_name", "type": "string", "required": true },
+        { "key": "params", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1.0"
+  ]
+}
