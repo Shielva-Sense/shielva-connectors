@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "e.g. abc123def456ghi789",
-      "help": "Your Amplitude API Key. Found in Amplitude → Settings → Projects → [Project] → General."
+      "help": "Your Amplitude API Key. Found in Amplitude \u2192 Settings \u2192 Projects \u2192 [Project] \u2192 General."
     },
     {
       "key": "api_secret",
@@ -117,14 +117,69 @@
     "users"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "Export Events", "id": "export_events", "category": "events"},
-    {"name": "Get Event Segmentation", "id": "get_event_segmentation", "category": "events"},
-    {"name": "List Cohorts", "id": "list_cohorts", "category": "cohorts"},
-    {"name": "Get Cohort Members", "id": "get_cohort", "category": "cohorts"},
-    {"name": "Get Active Users", "id": "get_active_users", "category": "users"},
-    {"name": "Get User Activity", "id": "get_user_activity", "category": "users"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate api_key and api_secret via GET /settings.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /settings and return current health with project name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync event counts, cohorts, and active user data for the last 30 days.",
+      "method": "GET"
+    },
+    {
+      "name": "Export Events",
+      "id": "export_events",
+      "category": "events",
+      "description": "Export raw event data as a ZIP archive.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Event Segmentation",
+      "id": "get_event_segmentation",
+      "category": "events",
+      "description": "GET /events/segmentation \u2014 event counts over a date range.",
+      "method": "GET"
+    },
+    {
+      "name": "List Cohorts",
+      "id": "list_cohorts",
+      "category": "cohorts",
+      "description": "GET /cohorts \u2014 list all cohorts in the project.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Cohort Members",
+      "id": "get_cohort",
+      "category": "cohorts",
+      "description": "GET /cohorts/{cohort_id}/members \u2014 list cohort member user IDs.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Active Users",
+      "id": "get_active_users",
+      "category": "users",
+      "description": "GET /active \u2014 DAU/WAU/MAU data for the given date range.",
+      "method": "GET"
+    },
+    {
+      "name": "Get User Activity",
+      "id": "get_user_activity",
+      "category": "users",
+      "description": "GET /usersearch?user={user_id} \u2014 event stream for a specific user.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Amplitude"
 }
