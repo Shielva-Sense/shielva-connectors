@@ -28,8 +28,96 @@
       "help": "Leave blank for Sentry Cloud. For self-hosted Sentry, enter your instance URL (e.g. https://sentry.mycompany.com)."
     }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["issues", "projects", "releases", "events"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "issues",
+    "projects",
+    "releases",
+    "events"
+  ],
   "pagination": "link_header_cursor",
-  "description": "Syncs Sentry issues, projects, releases, and issue events into the Shielva knowledge base for AI-powered error analysis and incident response."
+  "description": "Syncs Sentry issues, projects, releases, and issue events into the Shielva knowledge base for AI-powered error analysis and incident response.",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync projects, issues (per project), releases, and issue events.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "Fetch all issues for the org (optionally filtered by project) via cursor pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_slug",
+          "label": "Project Slug",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Return a single raw Sentry issue by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "issue_id",
+          "label": "Issue Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Fetch all projects for the organization.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_releases",
+      "name": "List Releases",
+      "description": "Fetch all releases for the org (optionally filtered by project) via cursor pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_slug",
+          "label": "Project Slug",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_issue_events",
+      "name": "List Issue Events",
+      "description": "Fetch all events for a specific issue.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "issue_id",
+          "label": "Issue Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "SentryConnector"
 }
