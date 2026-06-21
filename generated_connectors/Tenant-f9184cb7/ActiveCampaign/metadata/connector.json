@@ -13,7 +13,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your ActiveCampaign API key",
-      "help": "Found in Settings → Developer → API Key."
+      "help": "Found in Settings \u2192 Developer \u2192 API Key."
     },
     {
       "key": "account_name",
@@ -127,5 +127,182 @@
     "automations",
     "deals",
     "tags"
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync ActiveCampaign contacts, deals, and campaigns into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Calls list_contacts().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Calls get_contact().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Calls list_lists().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Calls list_campaigns().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_automations",
+      "name": "List Automations",
+      "description": "Calls list_automations().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Calls list_deals().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Calls get_deal().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "deal_id",
+          "label": "Deal Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Calls list_tags().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Activecampaign"
 }
