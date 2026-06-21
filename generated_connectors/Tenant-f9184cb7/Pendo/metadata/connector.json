@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Pendo Integration Key",
-      "help": "Your Pendo Integration Key. Found in Pendo → Settings → Integrations → Integration Keys."
+      "help": "Your Pendo Integration Key. Found in Pendo \u2192 Settings \u2192 Integrations \u2192 Integration Keys."
     }
   ],
   "features": [
@@ -104,14 +104,69 @@
     "visitors"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Apps", "id": "list_apps", "category": "apps"},
-    {"name": "List Guides", "id": "list_guides", "category": "guides"},
-    {"name": "List Features", "id": "list_features", "category": "features"},
-    {"name": "List Pages", "id": "list_pages", "category": "pages"},
-    {"name": "List Accounts", "id": "list_accounts", "category": "accounts"},
-    {"name": "List Visitors", "id": "list_visitors", "category": "visitors"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate integration_key is present and functional via get_apps().",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Call get_apps() and return current health with app count.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync guides and features from all Pendo apps.",
+      "method": "GET"
+    },
+    {
+      "name": "List Apps",
+      "id": "list_apps",
+      "category": "apps",
+      "description": "GET /api/v1/app \u2014 list all Pendo applications.",
+      "method": "GET"
+    },
+    {
+      "name": "List Guides",
+      "id": "list_guides",
+      "category": "guides",
+      "description": "GET /api/v1/guide \u2014 list in-app guides for ``app_id``.",
+      "method": "GET"
+    },
+    {
+      "name": "List Features",
+      "id": "list_features",
+      "category": "features",
+      "description": "GET /api/v1/feature \u2014 list tagged features for ``app_id``.",
+      "method": "GET"
+    },
+    {
+      "name": "List Pages",
+      "id": "list_pages",
+      "category": "pages",
+      "description": "GET /api/v1/page \u2014 list pages for ``app_id``.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "POST /api/v1/aggregation \u2014 account aggregation pipeline.",
+      "method": "GET"
+    },
+    {
+      "name": "List Visitors",
+      "id": "list_visitors",
+      "category": "visitors",
+      "description": "POST /api/v1/aggregation \u2014 visitor aggregation pipeline.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Pendo"
 }
