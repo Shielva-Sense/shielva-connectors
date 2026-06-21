@@ -1,0 +1,375 @@
+{
+  "connector_type": "mattermost",
+  "name": "MattermostConnector",
+  "display_name": "Mattermost",
+  "version": "1.0.0",
+  "description": "Connects to a self-hosted or cloud Mattermost server (REST v4) for user, team, channel, post, file, webhook, bot, and command operations using a Personal Access Token or Bot Token.",
+  "provider": "mattermost",
+  "service": "mattermost",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "server_url",
+      "label": "Mattermost Server URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://mattermost.yourcompany.com",
+      "help": "Your Mattermost server base URL — e.g. https://mattermost.yourcompany.com. Do NOT include the /api/v4 suffix; the connector adds it automatically."
+    },
+    {
+      "key": "personal_access_token",
+      "label": "Personal Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste the access token",
+      "help": "From Account Settings → Security → Personal Access Tokens. The system admin must enable PATs first. Bot account tokens also work."
+    },
+    {
+      "key": "default_team_id",
+      "label": "Default Team ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional 26-char team ID",
+      "help": "Optional. The Mattermost team ID (26-char string) the connector uses as a default for actions like list_channels when none is supplied."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "200",
+      "placeholder": "200",
+      "help": "Soft client-side cap on requests per minute. The connector also honours server-issued 429 responses with exponential backoff."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates server_url + personal_access_token by probing /users/me. Persists config and stores the token.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Mattermost API reachability via GET /system/ping (no auth required by spec, but the connector still sends the auth header to surface permission-policy errors).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Enumerates teams, channels, and recent channel posts, then ingests each into the KB as a NormalizedDocument (id = tenant_id + '_' + source_id).",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "datetime", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "get_me",
+      "name": "Get Authenticated User",
+      "description": "GET /users/me — fetch the user backing the configured token.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — list users, optionally scoped to a team or channel.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "in_team_id", "type": "string", "required": false },
+        { "key": "in_channel_id", "type": "string", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{user_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Create User",
+      "description": "POST /users — admin-only user registration.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_users",
+      "name": "Search Users",
+      "description": "POST /users/search — search users by term, optionally scoped to in_channel_id / not_in_channel_id.",
+      "method": "POST",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true },
+        { "key": "term", "type": "string", "required": true },
+        { "key": "in_channel_id", "type": "string", "required": false },
+        { "key": "not_in_channel_id", "type": "string", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "GET /teams — list teams the token has access to.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "include_total_count", "type": "boolean", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_team",
+      "name": "Get Team",
+      "description": "GET /teams/{team_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_channels",
+      "name": "List Channels",
+      "description": "GET /teams/{team_id}/channels — list channels in a team.",
+      "method": "GET",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "include_deleted", "type": "boolean", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_channel",
+      "name": "Get Channel",
+      "description": "GET /channels/{channel_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_channel",
+      "name": "Create Channel",
+      "description": "POST /channels. type is 'O' (public) or 'P' (private).",
+      "method": "POST",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "purpose", "type": "string", "required": false },
+        { "key": "header", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_channel",
+      "name": "Delete Channel",
+      "description": "DELETE /channels/{channel_id} (server-side soft-delete).",
+      "method": "DELETE",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_user_to_channel",
+      "name": "Add User to Channel",
+      "description": "POST /channels/{channel_id}/members.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "post_message",
+      "name": "Create Post",
+      "description": "POST /posts — create a new post or threaded reply (via root_id).",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": true },
+        { "key": "root_id", "type": "string", "required": false },
+        { "key": "props", "type": "object", "required": false },
+        { "key": "file_ids", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_post",
+      "name": "Get Post",
+      "description": "GET /posts/{post_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "post_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_post",
+      "name": "Update Post",
+      "description": "PUT /posts/{post_id} — partial update of message or props.",
+      "method": "POST",
+      "params": [
+        { "key": "post_id", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": false },
+        { "key": "props", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_post",
+      "name": "Delete Post",
+      "description": "DELETE /posts/{post_id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "post_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_channel_posts",
+      "name": "List Channel Posts",
+      "description": "GET /channels/{channel_id}/posts — paginated channel timeline.",
+      "method": "GET",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "since", "type": "number", "required": false },
+        { "key": "before", "type": "string", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upload_file",
+      "name": "Upload File",
+      "description": "POST /files (multipart) — upload a single attachment to a channel.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "file_bytes", "type": "string", "required": true },
+        { "key": "filename", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file_info",
+      "name": "Get File Info",
+      "description": "GET /files/{file_id}/info.",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_incoming_webhook",
+      "name": "Create Incoming Webhook",
+      "description": "POST /hooks/incoming — provision an incoming webhook for the given channel.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "username", "type": "string", "required": false },
+        { "key": "icon_url", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_incoming_webhooks",
+      "name": "List Incoming Webhooks",
+      "description": "GET /hooks/incoming — list incoming webhooks (optionally scoped to a team).",
+      "method": "GET",
+      "params": [
+        { "key": "team_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_outgoing_webhook",
+      "name": "Create Outgoing Webhook",
+      "description": "POST /hooks/outgoing — provision an outgoing webhook for trigger words.",
+      "method": "POST",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true },
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "trigger_words", "type": "array", "required": true },
+        { "key": "callback_urls", "type": "array", "required": true },
+        { "key": "channel_id", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "content_type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_outgoing_webhooks",
+      "name": "List Outgoing Webhooks",
+      "description": "GET /hooks/outgoing — list outgoing webhooks (optionally scoped to a team).",
+      "method": "GET",
+      "params": [
+        { "key": "team_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_bots",
+      "name": "List Bots",
+      "description": "GET /bots — list bot accounts on the server.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "include_deleted", "type": "boolean", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_team_commands",
+      "name": "List Team Commands",
+      "description": "GET /commands?team_id=… — list slash-commands installed on a team.",
+      "method": "GET",
+      "params": [
+        { "key": "team_id", "type": "string", "required": true },
+        { "key": "custom_only", "type": "boolean", "required": false }
+      ],
+      "returns": "List[Dict]"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0",
+    "pydantic>=2.0",
+    "structlog>=24.1"
+  ]
+}
