@@ -1,0 +1,79 @@
+{
+  "title": "Vanta Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Vanta** is a compliance-automation SaaS that continuously monitors security controls, vendor risk, personnel access, and audit evidence to maintain SOC 2, ISO 27001, HIPAA, GDPR, and PCI DSS attestations. This connector — `VantaConnector` (`CONNECTOR_TYPE = \"vanta\"`, `AUTH_TYPE = \"oauth2_client_credentials\"`) — wraps the operational surfaces a Shielva tenant typically needs from Vanta:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Frameworks | `/v1/frameworks` | List + read compliance frameworks |\n| Controls | `/v1/controls` | List + read controls (optionally scoped to a framework) |\n| Vendors | `/v1/vendors` | Third-party vendor inventory + risk metadata |\n| Personnel | `/v1/personnel` | Employees, contractors, role assignments |\n| Risks | `/v1/risks` | Risk register entries with likelihood + impact |\n| Incidents | `/v1/incidents` | Security incidents with severity + status |\n| Documents | `/v1/documents` | Policy / SOP documents under version control |\n| Tests | `/v1/tests` | Continuous control tests + status |\n| Findings | `/v1/findings` | Open findings flagged by Vanta scanners |\n| Audits | `/v1/audits` | Active and historical audit engagements |\n\nThe connector normalises frameworks + controls + vendors + personnel into `NormalizedDocument` (id = `f\"{connector_id}_{kind}_{source_id}\"`, tenant-scoped via `connector_id`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::VantaHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create an OAuth client in Vanta\n\n1. Sign in to https://app.vanta.com.\n2. Open **Settings → API → OAuth Apps**.\n3. Click **Create OAuth App** and choose the **Client Credentials** flow.\n4. Grant the scopes you need — at minimum `vanta-api.all:read`; add `vanta-api.vendors:write` if you intend to create or update vendors.\n5. Copy the **Client ID** and **Client Secret** — Vanta shows the secret only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Vanta**, fill in:\n\n| Field | Value |\n|---|---|\n| `client_id` (string) | OAuth client id from step 5 |\n| `client_secret` (secret) | Paired secret |\n| `scopes` (string, optional) | Defaults to `vanta-api.all:read vanta-api.vendors:write` |\n| `base_url` (string, optional) | Override `https://api.vanta.com/v1` (rarely needed) |\n| `token_url` (string, optional) | Override `https://api.vanta.com/oauth/token` |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates the credential pair, immediately mints an access token, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`. If the token endpoint returns 401, `install()` returns `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` so the operator sees the failure straight away.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /frameworks?pageSize=1` as a lightweight reachability test. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED` (after a single token re-mint attempt). On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → retry with exponential backoff; if still failing → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Vanta REST API uses **OAuth 2.0 client_credentials** (`AUTH_TYPE = \"oauth2_client_credentials\"`) — machine-to-machine, no user popup, no redirect URI.\n\n### Credential model\n\n- `client_id` + `client_secret` are sent form-encoded to `POST https://api.vanta.com/oauth/token` with `grant_type=client_credentials` and optional `scope`.\n- The token endpoint returns `{ access_token, expires_in, token_type, scope }`.\n- The access token is cached in-memory under an `asyncio.Lock` until `expires_in - 60s` (refresh leeway). After that, any request transparently re-mints.\n- A single 401 response on a downstream call triggers exactly one forced re-mint + retry — no recursion, no infinite loop.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `client_id` + `client_secret`. Mints the first access token. Returns `HEALTHY + AUTHENTICATED` on success. |\n| `authorize(...)` | Returns a `TokenInfo` populated from the cached / minted token. |\n| `health_check()` | Mints token if needed, then `GET /frameworks?pageSize=1`. |\n| `ensure_token()` | Implicit — every `_request()` checks the cache before sending. |\n| token storage | In-memory only (process-local). The connector framework can layer Redis-backed storage on top via the `BaseConnector` hooks. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `client_id` | string | yes | `self.client_id` | OAuth client id |\n| `client_secret` | secret | yes | `self.client_secret` | OAuth client secret |\n| `scopes` | string | no | `self.scopes` (default `vanta-api.all:read vanta-api.vendors:write`) | Space-separated scope list |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.vanta.com/v1`) | Override for sandbox or proxy |\n| `token_url` | string | no | `self.token_url` (defaults to `https://api.vanta.com/oauth/token`) | OAuth token endpoint |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"client_id\", \"client_secret\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_VANTA_BASE_URL  = \"https://api.vanta.com/v1\"\n_VANTA_TOKEN_URL = \"https://api.vanta.com/oauth/token\"\n_DEFAULT_SCOPES  = \"vanta-api.all:read vanta-api.vendors:write\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `VantaConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::VantaHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `client_id` + `client_secret`; mint the access token; persist install-time config.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nclient_credentials grant — `auth_code`/`state` are unused. Returns a `TokenInfo` carrying the cached / freshly-minted access token.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /frameworks?pageSize=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Vanta frameworks, controls, vendors, personnel → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-frameworks",
+          "title": "Frameworks",
+          "content": "### `async list_frameworks(*, page_size=50, page_cursor=None) -> Dict`\n`GET /frameworks?pageSize={N}&pageCursor={C}`.\n\n### `async get_framework(framework_id) -> Dict`\n`GET /frameworks/{framework_id}`."
+        },
+        {
+          "id": "api-controls",
+          "title": "Controls",
+          "content": "### `async list_controls(*, page_size=50, page_cursor=None, framework_id=None) -> Dict`\n`GET /controls?pageSize={N}&pageCursor={C}&frameworkId={F}`.\n\n### `async get_control(control_id) -> Dict`\n`GET /controls/{control_id}`."
+        },
+        {
+          "id": "api-vendors",
+          "title": "Vendors",
+          "content": "### `async list_vendors(*, page_size=50, page_cursor=None) -> Dict`\n`GET /vendors`.\n\n### `async get_vendor(vendor_id) -> Dict`\n`GET /vendors/{vendor_id}`."
+        },
+        {
+          "id": "api-personnel",
+          "title": "Personnel",
+          "content": "### `async list_personnel(*, page_size=50, page_cursor=None, includes_inactive=False) -> Dict`\n`GET /personnel?pageSize={N}&pageCursor={C}&includesInactive={true|false}`.\n\n### `async get_personnel(person_id) -> Dict`\n`GET /personnel/{person_id}`."
+        },
+        {
+          "id": "api-risks-incidents-documents",
+          "title": "Risks · Incidents · Documents",
+          "content": "### `async list_risks(*, page_size=50, page_cursor=None) -> Dict`\n`GET /risks`.\n\n### `async list_incidents(*, page_size=50, page_cursor=None, severity=None, status=None) -> Dict`\n`GET /incidents` with optional `severity` + `status` filters.\n\n### `async list_documents(*, page_size=50, page_cursor=None) -> Dict`\n`GET /documents`."
+        },
+        {
+          "id": "api-tests-findings-audits",
+          "title": "Tests · Findings · Audits",
+          "content": "### `async list_tests(*, page_size=50, page_cursor=None, test_status=None) -> Dict`\n`GET /tests` (the `test_status` arg maps to the `status` query param).\n\n### `async list_findings(*, page_size=50, page_cursor=None, severity=None, status=None) -> Dict`\n`GET /findings`.\n\n### `async list_audits(*, page_size=50, page_cursor=None) -> Dict`\n`GET /audits`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nVantaError                            # base; carries status_code + response_body\n├── VantaAuthError                    # 401 / 403\n├── VantaBadRequestError              # 400\n├── VantaNotFoundError                # 404\n├── VantaConflictError                # 409\n├── VantaRateLimitError               # 429 — retry_after_s\n└── VantaServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nVantaNetworkError = VantaServerError  # legacy name from older code\nVantaNotFound     = VantaNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 404 | Raise immediately |\n| 401 | Re-mint access token once, retry the request once; if still 401 → raise `VantaAuthError` |\n| 403 | Raise immediately (scope insufficient) |\n| 429 | Honour `Retry-After` when present; otherwise exponential backoff (`0.5s × 2^attempt + jitter`, capped at 16s), max 3 retries |\n| 5xx | Same exponential backoff, max 3 retries |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff + retry, max 3, then raise `VantaNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)        ← after the single re-mint attempt\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)            — logged as warning\n5xx → ConnectorStatus(OFFLINE,   CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `client_id` or `client_secret` blank | Re-enter both in ACP. Vanta shows the secret only once at OAuth-app creation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at install | Token endpoint returned 401 — wrong client_id / client_secret | Verify the credential pair in the Vanta OAuth Apps screen. Rotate if uncertain. |\n| `ConnectorStatus(OFFLINE, PENDING)` at install | Token endpoint unreachable (DNS / TLS / outbound firewall) | Verify the host running the connector can reach `https://api.vanta.com`. Whitelist the egress IP if your network requires it. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — OAuth app's scopes don't include the API surface you called | In Vanta → Settings → API → OAuth Apps, edit the app and add the required scope (`vanta-api.all:read` covers the read surfaces). |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — token expired AND the forced re-mint also failed | Usually the OAuth client was rotated or revoked. Re-issue `client_id` + `client_secret` in Vanta and re-install. |\n| `vanta.http.retry` warnings spike | Hitting 429 (Vanta per-tenant rate cap) | The client retries with `Retry-After` then exponential backoff. Lower `rate_limit_per_min` or batch fewer requests in the sync. |\n| 404 on `get_framework` / `get_control` etc. | Wrong UUID, or the resource was deleted in Vanta | Re-list the parent collection (`list_frameworks`) to find the current UUID. |\n| `ImportError: cannot import name 'VantaNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `VantaNetworkError = VantaServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}
