@@ -1,0 +1,74 @@
+{
+  "title": "Kommo Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Kommo** (formerly amoCRM) is a CRM platform exposing a tenant-scoped REST API at `https://{subdomain}.kommo.com/api/v4`. This connector — `KommoConnector` (`CONNECTOR_TYPE = \"kommo\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Account | `/account` | Health probe; verify token + subdomain. |\n| Leads | `/leads` | List, get, create, update, delete leads (the deal pipeline). |\n| Contacts | `/contacts` | List, get, create, update, delete contacts. |\n| Companies | `/companies` | List, get, create, update, delete companies. |\n| Customers | `/customers` | List customers (repeat-buyer CRM). |\n| Tasks | `/tasks` | List, get, create, update, delete tasks. |\n| Events | `/events` | List CRM timeline events. |\n| Notes | `/{entity_type}/{id}/notes` | List + create notes per entity. |\n| Custom Fields | `/{entity_type}/custom_fields` | List + create custom fields. |\n| Pipelines | `/leads/pipelines` | List pipelines + statuses. |\n| Users | `/users` | List operator users. |\n| Webhooks | `/webhooks` | Create + delete outbound webhooks. |\n\nThe connector normalises leads + contacts into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::KommoHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Kommo long-lived access token\n\n1. Sign in to your Kommo account at `https://{subdomain}.kommo.com`.\n2. Open **Settings → Integrations** (top-right gear icon).\n3. Click **Create Integration → Private Integration** (or open an existing one).\n4. Configure the integration — name, description, optional redirect URI.\n5. Tick the **Access Rights** your team needs (read/write leads, contacts, etc.).\n6. Open the **Keys and Scopes** tab on the saved integration.\n7. Copy the **Long-Lived Access Token** — Kommo shows it on the integration page.\n8. Note your **subdomain** — the `mycompany` portion of `https://mycompany.kommo.com`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Kommo**, fill in:\n\n| Field | Value |\n|---|---|\n| `subdomain` (text) | `mycompany` (just the subdomain or the full URL — both are accepted) |\n| `access_token` (secret) | The long-lived token from step 7 |\n| `base_url` (text, optional) | Override the computed `https://{subdomain}.kommo.com/api/v4` |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n| `timeout_s` (number) | Per-request timeout, default 30 |\n\nClick **Install**. `install()` validates `subdomain` + `access_token` are present (it does NOT call the API), sanitises the subdomain (strips protocol + `.kommo.com` suffix), persists via `save_config`, rebuilds the `KommoHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /account` as a lightweight health check. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Kommo REST API supports a long-lived OAuth access token for server-to-server integrations. Shielva treats it as an API key (`AUTH_TYPE = \"api_key\"`) — no OAuth code exchange, no refresh-token dance.\n\n### Credential model\n\n- `access_token` is sent in the `Authorization` header as `Bearer <access_token>`.\n- `subdomain` is captured at install time and used to construct the per-tenant base URL `https://{subdomain}.kommo.com/api/v4` — no header.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `subdomain` + `access_token`. Sanitises subdomain. Persists config. Does **not** call any Kommo endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` wrapping the configured long-lived token. No code exchange. |\n| `health_check()` | `GET /api/v4/account` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the access_token lives in `self.config` only. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n```\n\n### Subdomain handling\n\n`helpers.utils.sanitize_subdomain` accepts any of:\n\n- `mycompany`\n- `mycompany.kommo.com`\n- `https://mycompany.kommo.com/`\n- `HTTPS://MyCompany.kommo.com`\n\nand returns the canonical bare token `mycompany`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `subdomain` | text | yes | `self.subdomain` (sanitised) | The `{subdomain}` segment in `{subdomain}.kommo.com` |\n| `access_token` | secret | yes | `self.access_token` | `Bearer <token>` in Authorization header |\n| `base_url` | text | no | `self.base_url` | Override of the computed base URL |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n| `timeout_s` | number | no | `self.timeout_s` (default 30) | Per-request httpx timeout |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"subdomain\", \"access_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `KommoConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::KommoHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `subdomain` + `access_token`; sanitise subdomain; persist via `save_config`; rebuild `KommoHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` whose `access_token` is the configured long-lived token (`token_type=\"api_key\"`).\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /account`. Classifies failures: 401 → `OFFLINE/TOKEN_EXPIRED`; 403 → `UNHEALTHY/INVALID_CREDENTIALS`; network → `OFFLINE/CONNECTED`; other → `DEGRADED/CONNECTED`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPaginates Kommo leads (`updated_at` cursor) → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-leads",
+          "title": "Leads",
+          "content": "### `async list_leads(page=1, limit=50, query=None, filter=None) -> Dict`\n`GET /leads?page=&limit=&query=&filter[…]`. Nested `filter` dicts are flattened to Kommo bracket-style query params (e.g. `{\"statuses\": [{\"pipeline_id\": 1}]}` → `filter[statuses][0][pipeline_id]=1`).\n\n### `async get_lead(lead_id) -> Dict`\n`GET /leads/{id}`.\n\n### `async create_lead(leads: List[Dict]) -> Dict`\n`POST /leads` — body MUST be a JSON array (Kommo bulk semantics). Raises `TypeError` if a single dict is passed.\n\n### `async update_lead(lead_id, fields) -> Dict`\n`PATCH /leads/{id}` with a single object body.\n\n### `async delete_lead(lead_id) -> Dict`\n`DELETE /leads/{id}`."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(page=1, limit=50, query=None) -> Dict`\n`GET /contacts`.\n\n### `async get_contact(contact_id) -> Dict`\n`GET /contacts/{id}`.\n\n### `async create_contact(contacts: List[Dict]) -> Dict`\n`POST /contacts` — array body.\n\n### `async update_contact(contact_id, fields) -> Dict`\n`PATCH /contacts/{id}`.\n\n### `async delete_contact(contact_id) -> Dict`\n`DELETE /contacts/{id}`."
+        },
+        {
+          "id": "api-companies-customers",
+          "title": "Companies + Customers",
+          "content": "### `async list_companies(page=1, limit=50) -> Dict`\n`GET /companies`.\n\n### `async get_company(company_id) -> Dict`\n`GET /companies/{id}`.\n\n### `async create_company(companies: List[Dict]) -> Dict`\n`POST /companies` — array body.\n\n### `async update_company(company_id, fields) -> Dict`\n`PATCH /companies/{id}`.\n\n### `async delete_company(company_id) -> Dict`\n`DELETE /companies/{id}`.\n\n### `async list_customers(page=1, limit=50) -> Dict`\n`GET /customers`."
+        },
+        {
+          "id": "api-tasks-events",
+          "title": "Tasks + Events + Notes",
+          "content": "### `async list_tasks(page=1, limit=50, filter=None) -> Dict`\n`GET /tasks`.\n\n### `async get_task(task_id) -> Dict`, `async create_task(tasks: List[Dict]) -> Dict`, `async update_task(task_id, fields) -> Dict`, `async delete_task(task_id) -> Dict`\nFull CRUD on `/tasks` — `create_task` requires array body.\n\n### `async list_events(page=1, limit=50, filter=None) -> Dict`\n`GET /events` — read-only timeline.\n\n### `async list_notes(entity_type, entity_id, page=1, limit=50) -> Dict`\n`GET /{entity_type}/{entity_id}/notes` — works for `leads`, `contacts`, `companies`, `customers`.\n\n### `async create_note(entity_type, entity_id, notes: List[Dict]) -> Dict`\n`POST /{entity_type}/{entity_id}/notes` — array body."
+        },
+        {
+          "id": "api-custom-fields-pipelines",
+          "title": "Custom Fields · Pipelines · Users · Webhooks",
+          "content": "### `async list_custom_fields(entity_type) -> Dict`\n`GET /{entity_type}/custom_fields`.\n\n### `async create_custom_field(entity_type, fields: List[Dict]) -> Dict`\n`POST /{entity_type}/custom_fields` — array body.\n\n### `async list_pipelines() -> Dict`\n`GET /leads/pipelines`.\n\n### `async list_users() -> Dict`\n`GET /users`.\n\n### `async create_webhook(destination, settings=None) -> Dict`\n`POST /webhooks` — body `{destination, settings: [event_names...]}`.\n\n### `async delete_webhook(destination) -> Dict`\n`DELETE /webhooks` — body identifies the webhook by destination URL."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nKommoError                              # base; carries status_code + response_body\n├── KommoAuthError                      # 401 / 403\n├── KommoBadRequestError                # 400\n├── KommoNotFoundError                  # 404\n├── KommoConflictError                  # 409\n├── KommoRateLimitError                 # 429 — retry_after_s\n└── KommoServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nKommoNetworkError = KommoServerError    # legacy name from older code\nKommoNotFound     = KommoNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honour `Retry-After` if present; otherwise exponential backoff `min(1.0 * 2 ** attempt + jitter, 32.0)`. Retry up to `_MAX_RETRIES=3`. |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `KommoServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED) — logged as warning\n5xx / network → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `subdomain` or `access_token` blank | Re-enter both in ACP. The token is shown only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Kommo — token lacks scope | In Kommo → Settings → Integrations → your integration, edit and grant the read/write rights your operations need; re-save the integration. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or wrong subdomain | Verify the subdomain matches the account that owns the token. Rotate the token via the integration page. |\n| `kommo.http.retry` warnings spike | Hitting Kommo's ~7 req/sec rate cap | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer calls. |\n| 404 on `/leads/{id}` | Wrong entity ID OR the lead lives in a sub-account | Verify the ID via `list_leads`; check the subdomain matches the account holding the lead. |\n| `ImportError: cannot import name 'KommoNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `KommoNetworkError = KommoServerError` alias added. |\n| `ValueError: subdomain is required` at startup | `subdomain` field blank | Fill the `subdomain` install field — the HTTP client cannot build a base URL without it. |\n| `create_lead expects a list…` TypeError | Caller passed a single lead dict | Wrap in a list — Kommo's `/leads`, `/contacts`, `/companies`, `/tasks`, `/notes`, `/custom_fields` all expect array bodies for bulk semantics. |"
+    }
+  ]
+}
