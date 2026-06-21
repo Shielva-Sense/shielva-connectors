@@ -13,7 +13,7 @@
       "type": "string",
       "required": true,
       "placeholder": "mystore",
-      "help": "Your Gorgias subdomain — the part before .gorgias.com (e.g. mystore)."
+      "help": "Your Gorgias subdomain \u2014 the part before .gorgias.com (e.g. mystore)."
     },
     {
       "key": "email",
@@ -28,8 +28,8 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "placeholder": "••••••••••••",
-      "help": "Generate an API key in Gorgias → Settings → REST API."
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      "help": "Generate an API key in Gorgias \u2192 Settings \u2192 REST API."
     }
   ],
   "resources": [
@@ -39,7 +39,10 @@
     "macros",
     "satisfaction_surveys"
   ],
-  "capabilities": ["sync", "health_check"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
   "auth_details": {
     "method": "Basic",
     "header": "Authorization",
@@ -56,5 +59,147 @@
     "requests_per_second": 2,
     "retry_on_429": true,
     "respect_retry_after_header": true
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Gorgias resources into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "Return a list of Gorgias tickets (one page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "cursor",
+          "label": "Cursor",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_ticket",
+      "name": "Get Ticket",
+      "description": "Return a single Gorgias ticket by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "ticket_id",
+          "label": "Ticket Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return a list of Gorgias customers (one page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "cursor",
+          "label": "Cursor",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Return a single Gorgias customer by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Return all Gorgias tags.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_macros",
+      "name": "List Macros",
+      "description": "Return a list of Gorgias macros (one page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "cursor",
+          "label": "Cursor",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "GorgiasConnector"
 }
