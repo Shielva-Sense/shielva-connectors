@@ -1,0 +1,405 @@
+{
+  "connector_type": "kommo",
+  "name": "KommoConnector",
+  "display_name": "Kommo",
+  "version": "1.0.0",
+  "description": "Connects to the Kommo CRM (formerly amoCRM) REST API using a long-lived OAuth access token. Tenant-scoped by subdomain (https://{subdomain}.kommo.com/api/v4). Supports leads, contacts, companies, customers, tasks, events, notes, custom fields, pipelines, users and outbound webhooks.",
+  "provider": "kommo",
+  "service": "kommo",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "subdomain",
+      "label": "Kommo Subdomain",
+      "type": "string",
+      "required": true,
+      "placeholder": "mycompany",
+      "help": "Your Kommo subdomain — e.g. 'mycompany' if your URL is https://mycompany.kommo.com. The field accepts the bare subdomain or the full URL; the connector normalises both."
+    },
+    {
+      "key": "access_token",
+      "label": "Long-Lived Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Kommo long-lived OAuth access token",
+      "help": "Generated from Kommo → Settings → Integrations → your integration → 'Long-Lived Access Token'. Sent as 'Authorization: Bearer <token>' on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Kommo API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "placeholder": "https://{subdomain}.kommo.com/api/v4",
+      "help": "Override the computed base URL. Leave blank to use the per-subdomain default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Soft per-minute cap for outbound Kommo requests. Kommo enforces ~7 req/sec server-side; the client retries 429 with exponential backoff."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout in seconds."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates subdomain and access_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "API-key wrapper that returns a TokenInfo whose access_token is the configured long-lived token.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Kommo API connectivity by calling GET /account.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List leads with paging, optional free-text query and Kommo-style nested filter (bracket-flattened).",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_lead",
+      "name": "Get Lead",
+      "description": "GET /leads/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "POST /leads — body MUST be an array (Kommo bulk semantics).",
+      "method": "POST",
+      "params": [
+        { "key": "leads", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_lead",
+      "name": "Update Lead",
+      "description": "PATCH /leads/{id} with the supplied fields.",
+      "method": "PATCH",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_lead",
+      "name": "Delete Lead",
+      "description": "DELETE /leads/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List contacts with paging and optional free-text query.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /contacts/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /contacts — body MUST be an array.",
+      "method": "POST",
+      "params": [
+        { "key": "contacts", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "PATCH /contacts/{id}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "DELETE /contacts/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "List companies with paging.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_company",
+      "name": "Get Company",
+      "description": "GET /companies/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "company_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_company",
+      "name": "Create Company",
+      "description": "POST /companies — body MUST be an array.",
+      "method": "POST",
+      "params": [
+        { "key": "companies", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_company",
+      "name": "Update Company",
+      "description": "PATCH /companies/{id}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "company_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_company",
+      "name": "Delete Company",
+      "description": "DELETE /companies/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "company_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "List customers with paging.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "List tasks with paging and optional Kommo-style nested filter.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "GET /tasks/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_task",
+      "name": "Create Task",
+      "description": "POST /tasks — body MUST be an array.",
+      "method": "POST",
+      "params": [
+        { "key": "tasks", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_task",
+      "name": "Update Task",
+      "description": "PATCH /tasks/{id}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_task",
+      "name": "Delete Task",
+      "description": "DELETE /tasks/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "List CRM timeline events with paging and optional filter.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "GET /{entity_type}/{entity_id}/notes — list notes attached to a Kommo entity.",
+      "method": "GET",
+      "params": [
+        { "key": "entity_type", "type": "string", "required": true },
+        { "key": "entity_id", "type": "number", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_note",
+      "name": "Create Note",
+      "description": "POST /{entity_type}/{entity_id}/notes — body MUST be an array.",
+      "method": "POST",
+      "params": [
+        { "key": "entity_type", "type": "string", "required": true },
+        { "key": "entity_id", "type": "number", "required": true },
+        { "key": "notes", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_custom_fields",
+      "name": "List Custom Fields",
+      "description": "GET /{entity_type}/custom_fields.",
+      "method": "GET",
+      "params": [
+        { "key": "entity_type", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_custom_field",
+      "name": "Create Custom Field",
+      "description": "POST /{entity_type}/custom_fields — body MUST be an array.",
+      "method": "POST",
+      "params": [
+        { "key": "entity_type", "type": "string", "required": true },
+        { "key": "fields", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "GET /leads/pipelines — list configured pipelines + statuses.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — list operator users attached to the Kommo account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "POST /webhooks — register an outbound webhook destination + event settings.",
+      "method": "POST",
+      "params": [
+        { "key": "destination", "type": "string", "required": true },
+        { "key": "settings", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_webhook",
+      "name": "Delete Webhook",
+      "description": "DELETE /webhooks — remove an outbound webhook by destination URL.",
+      "method": "DELETE",
+      "params": [
+        { "key": "destination", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
