@@ -17,33 +17,136 @@
       "label": "Application (client) ID",
       "type": "string",
       "required": true,
-      "description": "Azure AD application client ID from the Azure Portal app registration."
+      "description": "Azure AD application client ID from the Azure Portal app registration.",
+      "help": "Application (client) ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
       "required": true,
-      "description": "Azure AD client secret value (not the secret ID)."
+      "description": "Azure AD client secret value (not the secret ID).",
+      "help": "Client Secret."
     },
     {
       "key": "tenant_hint",
       "label": "Azure AD Tenant (optional)",
       "type": "string",
       "required": false,
-      "description": "Your Azure AD tenant ID or domain. Leave blank to allow any Microsoft account."
+      "description": "Your Azure AD tenant ID or domain. Leave blank to allow any Microsoft account.",
+      "help": "Azure AD Tenant (optional)."
     },
     {
       "key": "redirect_uri",
       "label": "Redirect URI",
       "type": "string",
       "required": false,
-      "description": "OAuth redirect URI registered in Azure Portal. Must match exactly."
+      "description": "OAuth redirect URI registered in Azure Portal. Must match exactly.",
+      "help": "OAuth callback URL. Leave blank to use the default."
     }
   ],
-  "capabilities": ["list_calendars", "list_events", "get_event", "sync"],
+  "capabilities": [
+    "list_calendars",
+    "list_events",
+    "get_event",
+    "sync"
+  ],
   "provider": "microsoft",
   "category": "calendar",
   "logo_url": "https://cdn.shielva.ai/connectors/outlook-calendar.svg",
-  "docs_url": "https://docs.shielva.ai/connectors/outlook-calendar"
+  "docs_url": "https://docs.shielva.ai/connectors/outlook-calendar",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync upcoming events (next 30 days) via /me/calendarView with pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "webhook_url",
+          "label": "Webhook Url",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_calendars",
+      "name": "List Calendars",
+      "description": "Calls list_calendars().",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "Calls list_events().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "calendar_id",
+          "label": "Calendar Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "start_datetime",
+          "label": "Start Datetime",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "end_datetime",
+          "label": "End Datetime",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "top",
+          "label": "Top",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_event",
+      "name": "Get Event",
+      "description": "Calls get_event().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event_id",
+          "label": "Event Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "calendar_id",
+          "label": "Calendar Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "service": "outlook_calendar"
 }
