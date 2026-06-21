@@ -13,7 +13,7 @@
       "type": "string",
       "required": true,
       "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "help": "From Azure Portal → App registrations → your app → Overview → Application (client) ID"
+      "help": "From Azure Portal \u2192 App registrations \u2192 your app \u2192 Overview \u2192 Application (client) ID"
     },
     {
       "key": "client_secret",
@@ -21,7 +21,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Client secret value",
-      "help": "From Azure Portal → App registrations → your app → Certificates & secrets → Client secrets"
+      "help": "From Azure Portal \u2192 App registrations \u2192 your app \u2192 Certificates & secrets \u2192 Client secrets"
     },
     {
       "key": "tenant_id_azure",
@@ -29,7 +29,7 @@
       "type": "string",
       "required": true,
       "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "help": "From Azure Portal → Azure Active Directory → Overview → Tenant ID"
+      "help": "From Azure Portal \u2192 Azure Active Directory \u2192 Overview \u2192 Tenant ID"
     }
   ],
   "scopes": [
@@ -39,16 +39,95 @@
   "oauth_auth_url_template": "https://login.microsoftonline.com/{tenant_id_azure}/oauth2/v2.0/authorize",
   "oauth_token_url_template": "https://login.microsoftonline.com/{tenant_id_azure}/oauth2/v2.0/token",
   "api_base": "https://api.powerbi.com/v1.0/myorg/",
-  "capabilities": ["sync", "health_check", "oauth2"],
-  "entities": ["dashboards", "reports", "datasets", "workspaces"],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "entities": [
+    "dashboards",
+    "reports",
+    "datasets",
+    "workspaces"
+  ],
   "methods": [
-    {"id": "install", "name": "Install / Authenticate", "category": "auth"},
-    {"id": "authorize", "name": "Get OAuth URL", "category": "auth"},
-    {"id": "health_check", "name": "Health Check", "category": "health"},
-    {"id": "sync", "name": "Sync Power BI Resources", "category": "sync"},
-    {"id": "list_dashboards", "name": "List Dashboards", "category": "dashboards"},
-    {"id": "list_reports", "name": "List Reports", "category": "reports"},
-    {"id": "list_datasets", "name": "List Datasets", "category": "datasets"},
-    {"id": "list_workspaces", "name": "List Workspaces", "category": "workspaces"}
-  ]
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Get OAuth URL",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Power BI Resources",
+      "category": "sync"
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "category": "dashboards"
+    },
+    {
+      "id": "list_reports",
+      "name": "List Reports",
+      "category": "reports"
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "category": "datasets"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "category": "workspaces"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Power BI resources (dashboards, reports, datasets) into the",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "Return raw dashboard records from the Power BI REST API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_reports",
+      "name": "List Reports",
+      "description": "Return raw report records from the Power BI REST API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "description": "Return raw dataset records from the Power BI REST API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Return raw workspace (group) records from the Power BI REST API.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "PowerBIConnector"
 }
