@@ -13,35 +13,139 @@
       "label": "Client ID",
       "type": "string",
       "required": true,
-      "description": "OAuth2 Client ID from your Webflow App registration."
+      "description": "OAuth2 Client ID from your Webflow App registration.",
+      "help": "Client ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
       "required": true,
-      "description": "OAuth2 Client Secret from your Webflow App registration."
+      "description": "OAuth2 Client Secret from your Webflow App registration.",
+      "help": "Client Secret."
     },
     {
       "key": "redirect_uri",
       "label": "Redirect URI",
       "type": "string",
       "required": false,
-      "description": "OAuth2 callback URL registered with your Webflow App. Must match exactly."
+      "description": "OAuth2 callback URL registered with your Webflow App. Must match exactly.",
+      "help": "OAuth callback URL. Leave blank to use the default."
     }
   ],
   "oauth": {
     "authorization_url": "https://webflow.com/oauth/authorize",
     "token_url": "https://api.webflow.com/oauth/access_token",
-    "scopes": ["sites:read", "cms:read", "pages:read", "forms:read"],
+    "scopes": [
+      "sites:read",
+      "cms:read",
+      "pages:read",
+      "forms:read"
+    ],
     "response_type": "code",
     "grant_type": "authorization_code"
   },
-  "scopes": ["sites:read", "cms:read", "pages:read", "forms:read"],
-  "capabilities": ["sync", "health_check", "oauth2", "list_sites", "list_collections", "list_items", "list_pages"],
-  "resources": ["sites", "collections", "items", "pages"],
+  "scopes": [
+    "sites:read",
+    "cms:read",
+    "pages:read",
+    "forms:read"
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2",
+    "list_sites",
+    "list_collections",
+    "list_items",
+    "list_pages"
+  ],
+  "resources": [
+    "sites",
+    "collections",
+    "items",
+    "pages"
+  ],
   "api_base": "https://api.webflow.com/v2/",
   "api_version": "2.0.0",
   "category": "cms",
-  "documentation_url": "https://developers.webflow.com/v2.0.0/reference"
+  "documentation_url": "https://developers.webflow.com/v2.0.0/reference",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all accessible Webflow resources.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_sites",
+      "name": "List Sites",
+      "description": "Return all sites accessible by the current access token.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_site",
+      "name": "Get Site",
+      "description": "Return a single site by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "site_id",
+          "label": "Site Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_collections",
+      "name": "List Collections",
+      "description": "Return all CMS collections for a given site.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "site_id",
+          "label": "Site Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_items",
+      "name": "List Items",
+      "description": "Return all CMS items for a collection using offset pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "collection_id",
+          "label": "Collection Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "Return all pages for a given site.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "site_id",
+          "label": "Site Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
