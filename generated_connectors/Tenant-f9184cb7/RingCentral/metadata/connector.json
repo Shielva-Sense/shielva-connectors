@@ -29,7 +29,9 @@
       "label": "Server URL (default: https://platform.ringcentral.com)",
       "type": "string",
       "required": false,
-      "help": "Use https://platform.ringcentral.com for production or https://platform.devtest.ringcentral.com for sandbox."
+      "help": "Use https://platform.ringcentral.com for production or https://platform.devtest.ringcentral.com for sandbox.",
+      "default": "https://platform.ringcentral.com",
+      "placeholder": "https://platform.ringcentral.com"
     }
   ],
   "scopes": [
@@ -49,5 +51,50 @@
     "sync",
     "health_check",
     "oauth2"
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all supported resources and return a SyncResult.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_call_logs",
+      "name": "List Call Logs",
+      "description": "Fetch and normalize all call log records (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Fetch and normalize all messages (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_extensions",
+      "name": "List Extensions",
+      "description": "Fetch and normalize all extensions (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Fetch and normalize all contacts (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Fetch and normalize all meetings (all pages).",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "RingCentralConnector"
 }
