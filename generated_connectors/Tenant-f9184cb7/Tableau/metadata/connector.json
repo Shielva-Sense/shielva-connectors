@@ -29,7 +29,7 @@
       "label": "Personal Access Token Secret",
       "type": "password",
       "required": true,
-      "placeholder": "••••••••••••••••",
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
       "help": "The secret value of the Personal Access Token. This is only shown once at creation time."
     },
     {
@@ -115,13 +115,62 @@
     "projects"
   ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Content", "id": "sync", "category": "sync" },
-    { "name": "List Workbooks", "id": "list_workbooks", "category": "workbooks" },
-    { "name": "List Views", "id": "list_views", "category": "views" },
-    { "name": "List Datasources", "id": "list_datasources", "category": "datasources" },
-    { "name": "List Users", "id": "list_users", "category": "users" },
-    { "name": "List Projects", "id": "list_projects", "category": "projects" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that server_url, pat_name, and pat_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Sign in, retrieve current site info, and return health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Content",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sign in then fetch workbooks, views, and datasources; normalize each to SyncResult.",
+      "method": "GET"
+    },
+    {
+      "name": "List Workbooks",
+      "id": "list_workbooks",
+      "category": "workbooks",
+      "description": "Return all workbooks for the current site (auto-paginated).",
+      "method": "GET"
+    },
+    {
+      "name": "List Views",
+      "id": "list_views",
+      "category": "views",
+      "description": "Return all views for the current site (auto-paginated).",
+      "method": "GET"
+    },
+    {
+      "name": "List Datasources",
+      "id": "list_datasources",
+      "category": "datasources",
+      "description": "Return all datasources for the current site (auto-paginated).",
+      "method": "GET"
+    },
+    {
+      "name": "List Users",
+      "id": "list_users",
+      "category": "users",
+      "description": "Return all users for the current site (auto-paginated).",
+      "method": "GET"
+    },
+    {
+      "name": "List Projects",
+      "id": "list_projects",
+      "category": "projects",
+      "description": "Return all projects for the current site.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Tableau"
 }
