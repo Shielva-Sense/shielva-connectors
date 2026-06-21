@@ -1,0 +1,69 @@
+{
+  "title": "Plausible Analytics Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Plausible Analytics** is a privacy-friendly, lightweight, open-source web-analytics product exposing a REST API at `https://plausible.io/api/v1` (cloud) or `https://<self-hosted>/api/v1`. This connector — `PlausibleConnector` (`CONNECTOR_TYPE = \"plausible\"`, `AUTH_TYPE = \"api_key\"`) — wraps the three operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Stats | `/stats/aggregate`, `/stats/timeseries`, `/stats/breakdown`, `/stats/realtime/visitors` | KPI snapshots, time-bucketed series, paginated dimension breakdowns, live visitor counts |\n| Sites Provisioning | `/sites` | List, get, create, update, delete tracked sites |\n| Goals | `/sites/{site_id}/goals` | List + create event/page conversion goals |\n| Events | `/events` | Anonymous pageview + custom-event ingestion (no Bearer; identity from User-Agent) |\n\nThe connector materialises per-site snapshot documents into `NormalizedDocument` (id = `f\"{tenant_id}_{site_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, honours `Retry-After`), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::PlausibleHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Plausible API key\n\n1. Sign in to https://plausible.io (or your self-hosted instance).\n2. Open **Settings → API Keys → New API key**.\n3. Name the key (e.g. `Shielva`) and click **Create**.\n4. Copy the API key value — Plausible shows it only once.\n5. Note the **site domain** (e.g. `example.com`) you want to connect — that is the `default_site_id`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Plausible Analytics**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `base_url` (string, optional) | Leave blank for cloud (`https://plausible.io`); set to `https://<host>` for self-hosted |\n| `default_site_id` (string, optional) | Plausible site domain (e.g. `example.com`) |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 600 |\n\nClick **Install**. `install()` validates `api_key` is present (it does NOT call the API), initialises the `PlausibleHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()`. When `default_site_id` is set, it issues `GET /stats/realtime/visitors?site_id={default_site_id}` — a cheap probe. When it is blank, it falls back to `GET /sites`. On 2xx → `HEALTHY + CONNECTED`. On 401/403 → `DEGRADED + INVALID_CREDENTIALS`. On 429 → retried with exponential backoff."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Plausible REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry — until the key is revoked from the dashboard.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as **`Bearer <api_key>`** for Stats + Sites + Goals endpoints.\n- The **Events** endpoint is anonymous — identity is derived from the `User-Agent` header. The connector deliberately omits `Authorization` on `/events` so the IP/UA are the only identification surface (matches Plausible's privacy posture).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Initialises `PlausibleHTTPClient`. Does **not** call any Plausible endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured key — there is no token exchange. |\n| `health_check()` | `GET /stats/realtime/visitors?site_id={default_site_id}` (or `GET /sites` fallback). |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the key lives in the encrypted connector config. |\n\n### Header contract\n\nStats + Sites + Goals:\n\n```\nAuthorization: Bearer <api_key>\nContent-Type:  application/json\nAccept:        application/json\n```\n\nEvents:\n\n```\nUser-Agent:   <forwarded visitor UA>\nContent-Type: application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Authorization Bearer value |\n| `base_url` | string | no | `self.base_url` (defaults to `https://plausible.io/api/v1`) | Override for self-hosted instance |\n| `default_site_id` | string | no | `self.default_site_id` | Default Plausible site domain (e.g. `example.com`) |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 600) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"INVALID_CREDENTIALS\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_BASE_URL = \"https://plausible.io/api/v1\"\n```\n\n`base_url` is normalised to always end in `/api/v1`, so callers may pass either form (`https://plausible.io` or `https://plausible.io/api/v1`)."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `PlausibleConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::PlausibleHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; initialise `PlausibleHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo with `access_token=<api_key>`.\n\n### `async health_check() -> ConnectorStatus`\n`GET /stats/realtime/visitors?site_id={default_site_id}` (preferred) or `GET /sites` (fallback).\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nMaterialises a 30-day aggregate + realtime snapshot as a `NormalizedDocument` (id = `f\"{tenant_id}_{default_site_id}\"`) and ingests it via `ingest_document`."
+        },
+        {
+          "id": "api-stats",
+          "title": "Stats",
+          "content": "### `async aggregate(site_id, *, period=\"30d\", date=None, metrics=None, filters=None, compare=None) -> Dict`\n`GET /stats/aggregate`. Default metrics: `visitors,pageviews,bounce_rate,visit_duration`.\n\n### `async timeseries(site_id, *, period=\"30d\", date=None, metrics=None, filters=None, interval=\"date\") -> Dict`\n`GET /stats/timeseries`. `interval`: `date` (default), `month`, or `hour`.\n\n### `async breakdown(site_id, *, period=\"30d\", date=None, property=\"event:page\", metrics=None, filters=None, page=1, limit=100) -> Dict`\n`GET /stats/breakdown`. Adds a `normalized` sibling key splitting each row into `{dimension, metrics}`.\n\n### `async realtime_visitors(site_id) -> Dict`\n`GET /stats/realtime/visitors`. Wraps Plausible's integer payload as `{visitors: <n>}`.\n\nSpec aliases also exposed: `get_aggregate`, `get_timeseries`, `get_breakdown`, `get_realtime_visitors`."
+        },
+        {
+          "id": "api-events",
+          "title": "Events (anonymous)",
+          "content": "### `async record_pageview(domain, url, *, user_agent=..., screen_width=None, referrer=None) -> Dict`\n`POST /events` with `name=\"pageview\"`. No `Authorization` header — identity from `User-Agent`.\n\n### `async record_custom_event(domain, name, url, *, user_agent=..., props=None, referrer=None) -> Dict`\n`POST /events` with the custom `name` and optional `props` map.\n\n### `async send_event(domain, name, url, ...) -> Dict`\nSpec-aligned alias for `record_custom_event`."
+        },
+        {
+          "id": "api-sites",
+          "title": "Sites Provisioning",
+          "content": "### `async list_sites() -> Dict`\n`GET /sites`.\n\n### `async get_site(site_id) -> Dict`\n`GET /sites/{site_id}`.\n\n### `async create_site(domain, timezone=\"UTC\") -> Dict`\n`POST /sites`. Body: `{domain, timezone}`.\n\n### `async update_site(site_id, *, timezone=None) -> Dict`\n`PUT /sites/{site_id}`. Body: `{timezone?}`.\n\n### `async delete_site(site_id) -> Dict`\n`DELETE /sites/{site_id}`."
+        },
+        {
+          "id": "api-goals",
+          "title": "Goals",
+          "content": "### `async list_goals(site_id) -> Dict`\n`GET /sites/{site_id}/goals`.\n\n### `async create_goal(site_id, goal_type, *, event_name=None, page_path=None) -> Dict`\n`POST /sites/{site_id}/goals`. Validates that `event` goals carry `event_name` and `page` goals carry `page_path` before send — raises `PlausibleAPIError(status_code=400)` otherwise."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nPlausibleError                       # base; carries status_code + response_body\n├── PlausibleAuthError                # 401 / 403\n├── PlausibleBadRequestError          # 400\n├── PlausibleNotFound                 # 404\n├── PlausibleRateLimitError           # 429 — retry_after_s\n├── PlausibleNetworkError             # transport + 5xx\n└── PlausibleAPIError                 # unexpected 4xx\n```\n\nBack-compat aliases preserved:\n```\nPlausibleNotFoundError = PlausibleNotFound\nPlausibleServerError   = PlausibleNetworkError\n```\n\n### Retry behaviour (`client/http_client.py::_request_with_retry`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After`; otherwise exponential backoff `0.5 * 2^attempt + jitter` capped at 16s; retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.HTTPError` | Backoff, retry up to 3, then raise `PlausibleNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n404 → ConnectorStatus(DEGRADED,  CONNECTED)            — site misconfigured, not an auth failure\n429 → ConnectorStatus(DEGRADED,  CONNECTED)            — logged as warning\n5xx → ConnectorStatus(OFFLINE,   CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. Plausible only shows the key once at generation; rotate from **Settings → API Keys** if lost. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 401 from Plausible | Verify the key has not been revoked. Generate a new key and update the connector. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — the key lacks Stats API scope | Plausible API keys default to Stats access. Re-generate the key if scoping was changed. |\n| `ConnectorStatus(DEGRADED, CONNECTED)` after 429 | Rate-limit hit | Default cap is 600 req/min. The client retries with exponential backoff. Lower call volume or batch metrics into single `/stats/aggregate` requests. |\n| `PlausibleNotFound` on `realtime_visitors` | `default_site_id` does not match a site visible to the key | Verify the site domain in **Sites Provisioning** and update `default_site_id`. |\n| Events appear to be accepted but never land | Wrong `domain` value in `record_pageview`/`record_custom_event` | The `domain` field must match the Plausible site primary domain exactly. |\n| `Authorization` header rejected on `/events` | Some self-hosted instances reject Bearer on `/events` — the connector intentionally omits it; if your fork *requires* a token, fork `client/http_client.py::_event_headers`. | — |\n| Self-hosted instance not reachable | `base_url` points to the wrong host or port | Set `base_url` to the full origin (e.g. `https://analytics.example.com`); the connector appends `/api/v1` automatically. |"
+    }
+  ]
+}
