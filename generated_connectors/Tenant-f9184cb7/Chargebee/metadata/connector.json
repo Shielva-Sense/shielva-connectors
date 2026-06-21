@@ -11,14 +11,16 @@
       "label": "Site",
       "type": "string",
       "required": true,
-      "description": "Your Chargebee site name (e.g. 'acme' from acme.chargebee.com)."
+      "description": "Your Chargebee site name (e.g. 'acme' from acme.chargebee.com).",
+      "help": "Site."
     },
     {
       "key": "api_key",
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Your Chargebee API key from Settings → Configure Chargebee → API Keys."
+      "description": "Your Chargebee API key from Settings \u2192 Configure Chargebee \u2192 API Keys.",
+      "help": "API Key."
     }
   ],
   "capabilities": [
@@ -32,5 +34,129 @@
   ],
   "provider": "chargebee",
   "service": "chargebee",
-  "category": "billing"
+  "category": "billing",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync subscriptions, customers, and invoices from Chargebee.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_subscriptions",
+      "name": "List Subscriptions",
+      "description": "Return one page of subscriptions; empty ``list`` key signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_subscription",
+      "name": "Get Subscription",
+      "description": "Return a single subscription by ID (unwraps the Chargebee envelope).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "subscription_id",
+          "label": "Subscription Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return one page of customers; empty ``list`` key signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Return a single customer by ID (unwraps the Chargebee envelope).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Return one page of invoices; empty ``list`` key signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "Return a single invoice by ID (unwraps the Chargebee envelope).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "invoice_id",
+          "label": "Invoice Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
