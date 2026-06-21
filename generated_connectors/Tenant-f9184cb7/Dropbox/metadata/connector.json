@@ -139,16 +139,82 @@
     "team"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Authorize", "id": "authorize", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync Files", "id": "sync", "category": "sync"},
-    {"name": "List Folder", "id": "list_folder", "category": "files"},
-    {"name": "List Folder Continue", "id": "list_folder_continue", "category": "files"},
-    {"name": "Get Metadata", "id": "get_metadata", "category": "files"},
-    {"name": "Search Files", "id": "search_files", "category": "files"},
-    {"name": "List Shared Links", "id": "list_shared_links", "category": "sharing"},
-    {"name": "Get Space Usage", "id": "get_space_usage", "category": "account"},
-    {"name": "List Team Members", "id": "list_team_members", "category": "team"}
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate app_key/app_secret (and access_token if provided).",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Dropbox OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "POST /users/get_current_account + /users/get_space_usage to verify token.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Files",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync all Dropbox files recursively into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Folder",
+      "id": "list_folder",
+      "category": "files",
+      "description": "POST /files/list_folder.",
+      "method": "GET"
+    },
+    {
+      "name": "List Folder Continue",
+      "id": "list_folder_continue",
+      "category": "files",
+      "description": "POST /files/list_folder/continue.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Metadata",
+      "id": "get_metadata",
+      "category": "files",
+      "description": "POST /files/get_metadata.",
+      "method": "GET"
+    },
+    {
+      "name": "Search Files",
+      "id": "search_files",
+      "category": "files",
+      "description": "POST /files/search_v2.",
+      "method": "GET"
+    },
+    {
+      "name": "List Shared Links",
+      "id": "list_shared_links",
+      "category": "sharing",
+      "description": "POST /sharing/list_shared_links.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Space Usage",
+      "id": "get_space_usage",
+      "category": "account",
+      "description": "POST /users/get_space_usage.",
+      "method": "GET"
+    },
+    {
+      "name": "List Team Members",
+      "id": "list_team_members",
+      "category": "team",
+      "description": "Calls list_team_members() on the connector.",
+      "method": "GET"
+    }
   ]
 }
