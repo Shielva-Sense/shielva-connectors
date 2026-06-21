@@ -1,0 +1,305 @@
+{
+  "connector_type": "lightspeed",
+  "name": "LightspeedConnector",
+  "display_name": "Lightspeed Retail",
+  "version": "1.0.0",
+  "description": "Connects to the Lightspeed Retail (R-Series POS) REST API to read and manage customers, items, sales, inventory, categories, vendors, employees, and shops. Uses OAuth 2.0 Authorization Code with refresh-on-401 and honors Lightspeed's leaky-bucket rate limit (X-LS-API-Bucket-Level).",
+  "provider": "lightspeed",
+  "service": "lightspeed",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "your-lightspeed-client-id",
+      "help": "From the Lightspeed Developer Portal -> API. Create an OAuth client and copy the Client ID here."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "your-lightspeed-client-secret",
+      "help": "From the Lightspeed Developer Portal -> API. Stored encrypted by Shielva."
+    },
+    {
+      "key": "account_id",
+      "label": "Lightspeed Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "123456",
+      "help": "Your Lightspeed Retail account ID (numeric) - found under Settings -> Account in the Lightspeed Retail dashboard. Used as a URL segment on every API call."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth Scopes",
+      "type": "string",
+      "required": false,
+      "default": "employee:all employee:register",
+      "placeholder": "employee:all employee:register",
+      "help": "Space-separated Lightspeed scopes. 'employee:all' grants full read/write; 'employee:register' is required for sale + register operations."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://cloud.lightspeedapp.com/oauth/authorize.php",
+      "placeholder": "https://cloud.lightspeedapp.com/oauth/authorize.php",
+      "help": "Lightspeed OAuth2 authorization endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://cloud.lightspeedapp.com/auth/oauth/token",
+      "placeholder": "https://cloud.lightspeedapp.com/auth/oauth/token",
+      "help": "Lightspeed OAuth2 token endpoint (exchange + refresh). Leave blank to use the default."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.ai/oauth/callback/lightspeed",
+      "help": "OAuth callback URL configured in the Lightspeed Developer Portal."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "50",
+      "placeholder": "50",
+      "help": "Approximate sustainable Lightspeed throughput. The connector also enforces Lightspeed's leaky-bucket header (X-LS-API-Bucket-Level) at runtime."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Lightspeed Retail API connectivity by probing /Account.json.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "Returns the raw Lightspeed Account envelope for the configured account_id.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "List Lightspeed customers, optionally filtered by lastName.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Fetch a single customer by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "customer_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_customer",
+      "name": "Create Customer",
+      "description": "Create a new customer record. Accepts a raw Contact sub-doc, or convenience email/phone arguments.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone", "type": "string", "required": false },
+        { "key": "contact", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_items",
+      "name": "List Items",
+      "description": "List Lightspeed Retail items, optionally filtered by description (search) or category.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "search", "type": "string", "required": false },
+        { "key": "category_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_item",
+      "name": "Get Item",
+      "description": "Fetch a single Lightspeed item by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "item_id", "type": "number", "required": true },
+        { "key": "load_relations", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_item",
+      "name": "Create Item",
+      "description": "Create a new Lightspeed Retail item. Builds the Prices sub-envelope from default_price.",
+      "method": "POST",
+      "params": [
+        { "key": "description", "type": "string", "required": true },
+        { "key": "default_cost", "type": "number", "required": true },
+        { "key": "default_price", "type": "number", "required": true },
+        { "key": "item_type", "type": "string", "required": false },
+        { "key": "category_id", "type": "number", "required": false },
+        { "key": "manufacturer_id", "type": "number", "required": false },
+        { "key": "tax_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_item",
+      "name": "Update Item",
+      "description": "Update an existing Lightspeed item with the given fields dict (PUT semantics).",
+      "method": "PUT",
+      "params": [
+        { "key": "item_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sales",
+      "name": "List Sales",
+      "description": "List sales with optional completed/date/customer filters. Date filters use Lightspeed's '>,<,><' operators on createTime.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "completed", "type": "boolean", "required": false },
+        { "key": "start_date", "type": "string", "required": false },
+        { "key": "end_date", "type": "string", "required": false },
+        { "key": "customer_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_sale",
+      "name": "Get Sale",
+      "description": "Fetch a single sale by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "sale_id", "type": "number", "required": true },
+        { "key": "load_relations", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_sale",
+      "name": "Create Sale",
+      "description": "POST /Sale.json - create a new sale envelope. Accepts a raw Lightspeed Sale body.",
+      "method": "POST",
+      "params": [
+        { "key": "sale", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_inventory",
+      "name": "List Inventory",
+      "description": "Per-shop inventory rows for items via /ItemShop.json.",
+      "method": "GET",
+      "params": [
+        { "key": "item_id", "type": "number", "required": false },
+        { "key": "shop_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "List item categories.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "List Lightspeed vendors.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "List Lightspeed employees.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_shops",
+      "name": "List Shops",
+      "description": "List configured Lightspeed shops/locations.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Items",
+      "description": "Sync Lightspeed Retail items into the Shielva knowledge base. Uses incremental timeStamp filter when a checkpoint exists.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
