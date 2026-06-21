@@ -29,16 +29,162 @@
       "type": "password",
       "required": true,
       "placeholder": "xxxx xxxx xxxx xxxx xxxx xxxx",
-      "help": "An Application Password generated in WordPress Admin → Users → Profile → Application Passwords. Requires WordPress 5.6+."
+      "help": "An Application Password generated in WordPress Admin \u2192 Users \u2192 Profile \u2192 Application Passwords. Requires WordPress 5.6+."
     }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["posts", "pages", "users", "media", "categories", "tags"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "posts",
+    "pages",
+    "users",
+    "media",
+    "categories",
+    "tags"
+  ],
   "api": {
     "base_url_template": "{site_url}/wp-json/wp/v2/",
     "auth_method": "http_basic",
     "auth_header": "Authorization: Basic base64(username:app_password)",
     "documentation": "https://developer.wordpress.org/rest-api/"
   },
-  "requires_wordpress_version": "5.6"
+  "requires_wordpress_version": "5.6",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync posts, pages, users, media, categories, and tags into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_posts",
+      "name": "List Posts",
+      "description": "Return a list of raw post dicts from WordPress.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "Return a list of raw page dicts from WordPress.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a list of raw user dicts from WordPress.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_media",
+      "name": "List Media",
+      "description": "Return a list of raw media item dicts from WordPress.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "Return a list of raw category dicts from WordPress.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Return a list of raw tag dicts from WordPress.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_post",
+      "name": "Get Post",
+      "description": "Return a single raw post dict from WordPress.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "post_id",
+          "label": "Post Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "WordPressConnector"
 }
