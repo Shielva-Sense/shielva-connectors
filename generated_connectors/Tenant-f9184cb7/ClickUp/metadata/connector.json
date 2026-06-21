@@ -8,7 +8,129 @@
       "key": "api_key",
       "label": "Personal API Token",
       "type": "password",
-      "required": true
+      "required": true,
+      "help": "Personal API Token."
     }
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync ClickUp: teams \u2192 spaces \u2192 lists \u2192 tasks.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "Return all authorized workspaces (teams).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_spaces",
+      "name": "List Spaces",
+      "description": "Return all spaces in a workspace.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_folders",
+      "name": "List Folders",
+      "description": "Return all folders in a space.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Return all lists in a space or folder.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "folder_id",
+          "label": "Folder Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Return all tasks in a list, auto-paginating until empty.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "list_id",
+          "label": "List Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "include_closed",
+          "label": "Include Closed",
+          "type": "boolean",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "Return a single task by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "task_id",
+          "label": "Task Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "ClickUpConnector",
+  "provider": "clickup",
+  "service": "clickup",
+  "description": "Shielva connector for Clickup."
 }
