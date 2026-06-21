@@ -1,0 +1,120 @@
+{
+  "connector_type": "bandwidth",
+  "name": "BandwidthConnector",
+  "display_name": "Bandwidth",
+  "version": "1.0.0",
+  "description": "Bandwidth CPaaS connector covering Messaging (SMS/MMS/media), Voice (programmable calls + recordings), and Numbers/Dashboard (applications, phone-number orders). HTTP Basic auth with account_id + API user.",
+  "provider": "bandwidth",
+  "service": "bandwidth",
+  "auth_type": "basic",
+  "install_fields": [
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "5000123",
+      "help": "Numeric Bandwidth account identifier — Dashboard → Account Settings."
+    },
+    {
+      "key": "username",
+      "label": "API Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "api-user",
+      "help": "API user provisioned in Bandwidth Dashboard → Account → API Credentials."
+    },
+    {
+      "key": "password",
+      "label": "API Password",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your API password",
+      "help": "API user password — stored encrypted, never returned."
+    },
+    {
+      "key": "webhook_secret",
+      "label": "Webhook Signing Secret",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Optional — HMAC-SHA256 secret",
+      "help": "HMAC-SHA256 secret used to verify Bandwidth callback signatures."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Per-request timeout in seconds."
+    }
+  ],
+  "apis": [
+    { "id": "install",              "name": "Install",                  "description": "Validate required config keys and initialise the HTTP client.",                    "method": "install",        "params": [],                                                                                                                                                                                                                       "returns": "ConnectorStatus" },
+    { "id": "health_check",         "name": "Health Check",             "description": "Probe Dashboard /applications to verify credentials.",                              "method": "health_check",   "params": [],                                                                                                                                                                                                                       "returns": "ConnectorStatus" },
+    { "id": "sync",                 "name": "Sync",                     "description": "Aggregate recent messages + calls into NormalizedDocument batches.",                "method": "sync",           "params": [
+      { "key": "since", "type": "string", "required": false },
+      { "key": "full",  "type": "boolean", "required": false },
+      { "key": "kb_id", "type": "string", "required": false },
+      { "key": "webhook_url", "type": "string", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "SyncResult" },
+    { "id": "send_message",         "name": "Send Message",             "description": "POST /users/{accountId}/messages — send SMS or MMS.",                                "method": "POST",           "params": [{ "key": "payload", "type": "object", "required": true }],                                                                                                                                                                "returns": "object" },
+    { "id": "get_message",          "name": "Get Message",              "description": "GET /users/{accountId}/messages/{messageId}.",                                       "method": "GET",            "params": [{ "key": "message_id", "type": "string", "required": true }],                                                                                                                                                              "returns": "object" },
+    { "id": "list_messages",        "name": "List Messages",            "description": "GET /users/{accountId}/messages — paginated via RFC 5988 Link header.",              "method": "GET",            "params": [
+      { "key": "page_token", "type": "string", "required": false },
+      { "key": "from_date_time", "type": "string", "required": false },
+      { "key": "to_date_time", "type": "string", "required": false },
+      { "key": "limit", "type": "number", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "list_media",           "name": "List Media",               "description": "GET /users/{accountId}/media.",                                                       "method": "GET",            "params": [],                                                                                                                                                                                                                       "returns": "array"  },
+    { "id": "upload_media",         "name": "Upload Media",             "description": "PUT /users/{accountId}/media/{mediaId}.",                                              "method": "PUT",            "params": [
+      { "key": "media_id", "type": "string", "required": true },
+      { "key": "content", "type": "string", "required": true },
+      { "key": "content_type", "type": "string", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "delete_media",         "name": "Delete Media",             "description": "DELETE /users/{accountId}/media/{mediaId}.",                                           "method": "DELETE",         "params": [{ "key": "media_id", "type": "string", "required": true }],                                                                                                                                                              "returns": "object" },
+    { "id": "create_call",          "name": "Create Call",              "description": "POST /accounts/{accountId}/calls — place an outbound call.",                          "method": "POST",           "params": [{ "key": "payload", "type": "object", "required": true }],                                                                                                                                                                "returns": "object" },
+    { "id": "get_call",             "name": "Get Call",                 "description": "GET /accounts/{accountId}/calls/{callId}.",                                            "method": "GET",            "params": [{ "key": "call_id", "type": "string", "required": true }],                                                                                                                                                                "returns": "object" },
+    { "id": "update_call",          "name": "Update Call",              "description": "POST /accounts/{accountId}/calls/{callId} — change state / redirect.",                "method": "POST",           "params": [
+      { "key": "call_id", "type": "string", "required": true },
+      { "key": "payload", "type": "object", "required": true }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "list_calls",           "name": "List Calls",               "description": "GET /accounts/{accountId}/calls — paginated.",                                         "method": "GET",            "params": [
+      { "key": "page_token", "type": "string", "required": false },
+      { "key": "min_start_time", "type": "string", "required": false },
+      { "key": "max_start_time", "type": "string", "required": false },
+      { "key": "limit", "type": "number", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "get_call_recordings",  "name": "Get Call Recordings",      "description": "GET /accounts/{accountId}/calls/{callId}/recordings.",                                 "method": "GET",            "params": [{ "key": "call_id", "type": "string", "required": true }],                                                                                                                                                                "returns": "array"  },
+    { "id": "download_recording",   "name": "Download Recording",       "description": "GET /accounts/{accountId}/calls/{callId}/recordings/{recordingId}/media.",            "method": "GET",            "params": [
+      { "key": "call_id", "type": "string", "required": true },
+      { "key": "recording_id", "type": "string", "required": true }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "bytes"  },
+    { "id": "list_phone_numbers",   "name": "List Phone Numbers",       "description": "GET /accounts/{accountId}/orders — phone-number orders.",                              "method": "GET",            "params": [
+      { "key": "page", "type": "number", "required": false },
+      { "key": "size", "type": "number", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "list_applications",    "name": "List Applications",        "description": "GET /accounts/{accountId}/applications.",                                              "method": "GET",            "params": [],                                                                                                                                                                                                                       "returns": "array"  },
+    { "id": "handle_webhook",       "name": "Handle Webhook",           "description": "Route a Bandwidth event callback through process_callback then per-event handler.",  "method": "handle_webhook", "params": [
+      { "key": "payload", "type": "object", "required": true },
+      { "key": "headers", "type": "object", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "process_callback",     "name": "Process Callback",         "description": "Verify X-Callback-Signature using HMAC-SHA256 and webhook_secret.",                   "method": "process_callback","params": [
+      { "key": "payload", "type": "object", "required": true },
+      { "key": "headers", "type": "object", "required": false }
+    ],                                                                                                                                                                                                                                                                                                                                "returns": "object" },
+    { "id": "handle_event",         "name": "Handle Event",             "description": "Idempotency-keyed event acknowledgement.",                                            "method": "handle_event",   "params": [{ "key": "event", "type": "object", "required": true }],                                                                                                                                                                  "returns": "object" },
+    { "id": "batch_processor",      "name": "Batch Processor",          "description": "Iterate events through handle_event with per-item error capture.",                    "method": "batch_processor","params": [{ "key": "items", "type": "array",  "required": true }],                                                                                                                                                                  "returns": "object" }
+  ],
+  "dependencies": [
+    "tenacity>=8.2",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "structlog>=24.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "pytest-timeout==2.4.0"
+  ]
+}
