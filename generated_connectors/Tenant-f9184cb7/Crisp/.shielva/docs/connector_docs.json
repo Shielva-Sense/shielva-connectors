@@ -1,0 +1,69 @@
+{
+  "title": "Crisp Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Crisp** is a customer messaging + helpdesk platform exposing a REST API at `https://api.crisp.chat/v1`. This connector — `CrispConnector` (`CONNECTOR_TYPE = \"crisp\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Crisp website:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| User / Account | `/user/account`, `/user/websites` | Authenticated profile + accessible websites |\n| Website | `/website/{wid}` | Read website settings |\n| Conversations | `/website/{wid}/conversations/{page}` + `/website/{wid}/conversation/{sid}` | List, get, send message |\n| People | `/website/{wid}/people/profiles/{page}` + `/website/{wid}/people/profile/{pid}` | List, get, create, update contacts |\n| Helpdesk | `/website/{wid}/helpdesk/locale/{locale}/articles/{page}` | List helpdesk articles |\n| Campaigns | `/website/{wid}/campaigns/list/{page}` | List campaigns |\n\nThe connector normalises conversations + people + helpdesk articles into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429 / 5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::CrispHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create a Crisp plugin\n\n1. Sign in to https://app.crisp.chat.\n2. Open **Marketplace → Develop → Manage plugins** (or visit https://marketplace.crisp.chat).\n3. Click **New plugin**, fill in name + description, and grant the scopes you need (people:read, people:write, conversation:read, conversation:write, helpdesk:read, etc.).\n4. From the plugin page → **Tokens** tab, copy the **Identifier** and **Key**. Crisp shows the Key only once.\n5. From the main Crisp app → **Settings → Website Settings**, copy the **Website ID** (UUID).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Crisp**, fill in:\n\n| Field | Value |\n|---|---|\n| `identifier` (text) | Plugin identifier from step 4 |\n| `api_key` (secret) | Plugin key from step 4 |\n| `website_id` (text) | Website UUID from step 5 |\n| `tier` (text, optional) | Defaults to `plugin` — only change to `user` for personal-token integrations |\n| `base_url` (text, optional) | Override `https://api.crisp.chat/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `identifier` + `api_key` + `website_id` are present (it does NOT call the API), initialises the `CrispHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which fetches the authenticated account via `GET /user/account` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Crisp REST API uses **HTTP Basic plugin authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `identifier` is sent as the Basic-auth **username** half.\n- `api_key` is sent as the Basic-auth **password** half.\n- `tier` is sent in the `X-Crisp-Tier` header — almost always `plugin`; `user` for personal user tokens.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `identifier` + `api_key` + `website_id`. Initialises `CrispHTTPClient`. Does **not** call any Crisp endpoint. |\n| `authorize(...)` | Returns a synthesised `TokenInfo` whose `access_token` is the precomputed `base64(identifier:api_key)` string and `token_type` is `\"Basic\"`. No real exchange happens. |\n| `health_check()` | `GET /user/account` — minimal authenticated probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — credentials live in `self.config` only. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(identifier:api_key)\nX-Crisp-Tier:  plugin                          (or \"user\")\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `identifier` | text | yes | `self.identifier` | Basic-auth username half |\n| `api_key` | secret | yes | `self.api_key` | Basic-auth password half |\n| `website_id` | text | yes | `self.website_id` | Default Crisp website UUID for site-scoped methods |\n| `tier` | text | no | `self.tier` (defaults to `\"plugin\"`) | `X-Crisp-Tier` header value |\n| `base_url` | text | no | `self.base_url` (defaults to `\"https://api.crisp.chat/v1\"`) | Override for Crisp sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default `60`) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"identifier\", \"api_key\", \"website_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_CRISP_BASE = \"https://api.crisp.chat/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `CrispConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::CrispHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `identifier` + `api_key` + `website_id`; initialise `CrispHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for Basic auth — returns a synthesised `TokenInfo(token_type=\"Basic\")` whose `access_token` is the precomputed base64-encoded credential.\n\n### `async health_check() -> ConnectorStatus`\nFetches `GET /user/account` as a lightweight probe. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates helpdesk articles → conversations → people for the configured `website_id`, normalises each into `NormalizedDocument`, and ingests via `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-account",
+          "title": "User / Account",
+          "content": "### `async get_account_profile() -> Dict`\n`GET /user/account`.\n\n### `async list_websites() -> Dict`\n`GET /user/websites`.\n\n### `async get_website(website_id) -> Dict`\n`GET /website/{website_id}`."
+        },
+        {
+          "id": "api-conversations",
+          "title": "Conversations",
+          "content": "### `async list_conversations(website_id, page=1, per_page=50, search_query=None, search_filter_type=None) -> Dict`\n`GET /website/{wid}/conversations/{page}?per_page={N}&search_query={Q}&search_type={T}`.\n\n### `async get_conversation(website_id, session_id) -> Dict`\n`GET /website/{wid}/conversation/{sid}`.\n\n### `async send_message(website_id, session_id, type, from_, origin, content) -> Dict`\n`POST /website/{wid}/conversation/{sid}/message` — body `{type, from, origin, content}`. The Python parameter `from_` is renamed to `from` on the wire to avoid the Python reserved word."
+        },
+        {
+          "id": "api-people",
+          "title": "People (Contacts)",
+          "content": "### `async list_people(website_id, page=1, per_page=50, search_text=None, search_filter=None) -> Dict`\n`GET /website/{wid}/people/profiles/{page}?per_page={N}&search_text={S}`.\n\n### `async get_person(website_id, people_id) -> Dict`\n`GET /website/{wid}/people/profile/{pid}`.\n\n### `async create_person(website_id, email=None, person=None, segments=None) -> Dict`\n`POST /website/{wid}/people/profile` — body contains only the non-None fields among `email` / `person` / `segments`.\n\n### `async update_person(website_id, people_id, person) -> Dict`\n`PATCH /website/{wid}/people/profile/{pid}` — body `{person: {...}}`."
+        },
+        {
+          "id": "api-helpdesk",
+          "title": "Helpdesk · Campaigns",
+          "content": "### `async list_helpdesks(website_id, locale=\"en\", page=1) -> Dict`\n`GET /website/{wid}/helpdesk/locale/{locale}/articles/{page}`.\n\n### `async list_campaigns(website_id, page=1) -> Dict`\n`GET /website/{wid}/campaigns/list/{page}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nCrispError                            # base; carries status_code + response_body\n├── CrispAuthError                    # 401 / 403\n├── CrispBadRequestError              # 400\n├── CrispNotFoundError                # 404\n├── CrispConflictError                # 409 (duplicate contact email)\n├── CrispRateLimitError               # 429 — retry_after_s\n└── CrispServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nCrispNetworkError = CrispServerError  # legacy name from older code\nCrispNotFound     = CrispNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `CrispNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `identifier`, `api_key` or `website_id` blank | Re-enter all three in ACP. Crisp shows the Key only once at generation — rotate the plugin if lost. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — Basic credentials rejected | Verify `identifier` + `api_key` came from the same plugin. Rotate the key in Marketplace and re-paste. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — plugin lacks required scope | Open the plugin in Marketplace → Permissions, add the scopes you need (e.g. `website:conversation:sessions:read`, `website:people:write`). |\n| `crisp.http.retry` warnings spike | Hitting 429 (Crisp plugin rate cap) | Client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on a site-scoped call | Wrong `website_id` or resource doesn't exist on this site | Verify the Website ID matches the workspace the plugin token was issued for. |\n| `send_message` body rejected with `reason: invalid_type` | Crisp's allowed values for `type` are `text`/`file`/`animation`/`audio`/`picker`/`field`/`carousel` | Pass one of the allowed kinds; `content` shape changes per `type`. |\n| `ImportError: cannot import name 'CrispNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `CrispNetworkError = CrispServerError` and `CrispNotFound = CrispNotFoundError` aliases are in `exceptions.py`. |"
+    }
+  ]
+}
