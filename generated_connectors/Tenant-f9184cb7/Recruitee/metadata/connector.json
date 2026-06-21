@@ -1,0 +1,250 @@
+{
+  "connector_type": "recruitee",
+  "name": "RecruiteeConnector",
+  "display_name": "Recruitee",
+  "version": "1.0.0",
+  "description": "Connects to the Recruitee Applicant Tracking System (ATS) REST API. Surfaces Candidates (full CRUD), Offers (list/get/create), Departments, Pipelines, Stages, Notes, Tags, Tasks, and Hiring Managers, plus KB sync of candidates + offers.",
+  "provider": "recruitee",
+  "service": "recruitee",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "company_id",
+      "label": "Company ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "12345",
+      "help": "Your Recruitee Company ID — visible in the URL after login (e.g. https://yourco.recruitee.com → look up Company ID in Settings → Company Profile). Embedded in every API URL path."
+    },
+    {
+      "key": "api_token",
+      "label": "Personal API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Recruitee Personal API Token",
+      "help": "Generate at Settings → Apps & Plugins → Personal API Tokens. Sent as Authorization: Bearer <token> on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.recruitee.com/c",
+      "placeholder": "https://api.recruitee.com/c",
+      "help": "Base URL for the Recruitee REST API. The connector appends /{company_id}/<path> automatically."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Recruitee API requests per minute. Default is 60 to match Recruitee's standard quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates company_id + api_token and probes /current_user to verify the token resolves to the company.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Recruitee API connectivity by fetching the API token's current user.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "GET /current_user — returns the user record that owns the active API token.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_candidates",
+      "name": "List Candidates",
+      "description": "GET /candidates — search candidates with full-text query, scope, status, and sort options.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "sort", "type": "string", "required": false },
+        { "key": "scope", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_candidate",
+      "name": "Get Candidate",
+      "description": "GET /candidates/{id} — fetch a full candidate record by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "candidate_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_candidate",
+      "name": "Create Candidate",
+      "description": "POST /candidates — create a new candidate, optionally placing them on one or more offers.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": false },
+        { "key": "emails", "type": "array", "required": false },
+        { "key": "phones", "type": "array", "required": false },
+        { "key": "source", "type": "string", "required": false },
+        { "key": "offers", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_candidate",
+      "name": "Update Candidate",
+      "description": "PATCH /candidates/{id} — partial update of a candidate record.",
+      "method": "PATCH",
+      "params": [
+        { "key": "candidate_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_candidate",
+      "name": "Delete Candidate",
+      "description": "DELETE /candidates/{id} — permanently delete a candidate.",
+      "method": "DELETE",
+      "params": [
+        { "key": "candidate_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_offers",
+      "name": "List Offers",
+      "description": "GET /offers — list job offers (requisitions) filtered by status and scope.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "scope", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_offer",
+      "name": "Get Offer",
+      "description": "GET /offers/{id} — fetch a full offer (requisition) by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "offer_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_offer",
+      "name": "Create Offer",
+      "description": "POST /offers — create a new job offer (requisition).",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "position_type", "type": "string", "required": true },
+        { "key": "employment_type_code", "type": "string", "required": false },
+        { "key": "department_id", "type": "number", "required": false },
+        { "key": "location_ids", "type": "array", "required": false },
+        { "key": "description_html", "type": "string", "required": false },
+        { "key": "requirements_html", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "GET /departments — list company departments used to scope offers.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "GET /pipeline_templates — list company pipeline templates.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_stages",
+      "name": "List Stages",
+      "description": "GET /offers/{offer_id}/stages — list stages of a specific offer's pipeline.",
+      "method": "GET",
+      "params": [
+        { "key": "offer_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "GET /candidates/{candidate_id}/notes — list notes attached to a candidate.",
+      "method": "GET",
+      "params": [
+        { "key": "candidate_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_note",
+      "name": "Create Note",
+      "description": "POST /candidates/{candidate_id}/notes — attach a note to a candidate, optionally restricted to a specific team.",
+      "method": "POST",
+      "params": [
+        { "key": "candidate_id", "type": "number", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "visible_to_team_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /tasks — list company tasks (assignable to candidates / offers).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /tags — list candidate tags.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_hiring_managers",
+      "name": "List Hiring Managers",
+      "description": "GET /admins — list hiring managers / admins.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1"
+  ]
+}
