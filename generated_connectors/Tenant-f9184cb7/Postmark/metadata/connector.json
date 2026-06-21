@@ -1,0 +1,281 @@
+{
+  "connector_type": "postmark",
+  "name": "PostmarkConnector",
+  "display_name": "Postmark",
+  "version": "1.0.0",
+  "description": "Connects to the Postmark transactional email API (Email send, Bounces, Stats, Servers, Templates, Domains, Webhooks, Inbound Messages, Suppressions). Server-scoped surfaces use the server_token (X-Postmark-Server-Token); account-scoped surfaces (Servers, Domains) use the account_token (X-Postmark-Account-Token). The connector picks the right header per call.",
+  "provider": "postmark",
+  "service": "postmark",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "server_token",
+      "label": "Server Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Postmark Server API token",
+      "help": "From Postmark → Servers → your server → API Tokens. Sent as X-Postmark-Server-Token on every send / server-scoped call. Postmark shows the token at creation only — rotate if lost."
+    },
+    {
+      "key": "account_token",
+      "label": "Account Token",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Paste your Postmark Account API token",
+      "help": "From Account → API Tokens. Required only for account-wide surfaces (/servers, /domains). Sent as X-Postmark-Account-Token. Leave blank if you only need send + per-server APIs."
+    },
+    {
+      "key": "default_from_email",
+      "label": "Default From Address",
+      "type": "string",
+      "required": false,
+      "placeholder": "no-reply@yourdomain.com",
+      "help": "Verified sender address — must be in a domain you've verified in Postmark. Used when send_email / send_email_with_template callers omit from_email."
+    },
+    {
+      "key": "base_url",
+      "label": "Postmark API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.postmarkapp.com",
+      "placeholder": "https://api.postmarkapp.com",
+      "help": "Base URL for the Postmark REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "600",
+      "placeholder": "600",
+      "help": "Maximum Postmark API requests per minute. Default is 600 (Postmark's published throughput cap). Lower this if you share the token with another integration."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates server_token by calling GET /server and saves connector config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Postmark API connectivity by calling GET /server.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_server",
+      "name": "Get Server",
+      "description": "GET /server — returns server settings (name, color, inbound address, tracking flags).",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_email",
+      "name": "Send Email",
+      "description": "POST /email — send a single transactional message. Requires at least one of html_body or text_body. Inactive recipients raise PostmarkInactiveRecipient.",
+      "method": "POST",
+      "params": [
+        { "key": "from_email", "type": "string", "required": true },
+        { "key": "to", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "html_body", "type": "string", "required": false },
+        { "key": "text_body", "type": "string", "required": false },
+        { "key": "cc", "type": "string", "required": false },
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "tag", "type": "string", "required": false },
+        { "key": "metadata", "type": "object", "required": false },
+        { "key": "message_stream", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_email_batch",
+      "name": "Send Email Batch",
+      "description": "POST /email/batch — send up to 500 messages in a single request.",
+      "method": "POST",
+      "params": [
+        { "key": "messages", "type": "array", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "send_email_with_template",
+      "name": "Send Email With Template",
+      "description": "POST /email/withTemplate — send a templated message. Exactly one of template_id or template_alias must be supplied.",
+      "method": "POST",
+      "params": [
+        { "key": "template_id", "type": "number", "required": false },
+        { "key": "template_alias", "type": "string", "required": false },
+        { "key": "from_email", "type": "string", "required": false },
+        { "key": "to", "type": "string", "required": false },
+        { "key": "template_model", "type": "object", "required": false },
+        { "key": "message_stream", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_message_details",
+      "name": "Get Message Details",
+      "description": "GET /messages/outbound/{id}/details — returns the full message envelope plus delivery events.",
+      "method": "GET",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_messages",
+      "name": "List Outbound Messages",
+      "description": "GET /messages/outbound — paginated search of sent messages with optional filters.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "recipient", "type": "string", "required": false },
+        { "key": "from_email", "type": "string", "required": false },
+        { "key": "tag", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_inbound_messages",
+      "name": "List Inbound Messages",
+      "description": "GET /messages/inbound — paginated search of received messages.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "recipient", "type": "string", "required": false },
+        { "key": "from_email", "type": "string", "required": false },
+        { "key": "subject", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_bounces",
+      "name": "List Bounces",
+      "description": "GET /bounces — paginated bounce log with type/inactive/email_filter filters.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "inactive", "type": "boolean", "required": false },
+        { "key": "email_filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_bounce",
+      "name": "Get Bounce",
+      "description": "GET /bounces/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "bounce_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "activate_bounce",
+      "name": "Activate Bounce",
+      "description": "PUT /bounces/{id}/activate — reactivates a previously suppressed recipient.",
+      "method": "PUT",
+      "params": [
+        { "key": "bounce_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "GET /templates — paginated template list.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "GET /templates/{id_or_alias}.",
+      "method": "GET",
+      "params": [
+        { "key": "template_id_or_alias", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_template",
+      "name": "Create Template",
+      "description": "POST /templates — provision a new template. Requires at least one of html_body or text_body.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "html_body", "type": "string", "required": false },
+        { "key": "text_body", "type": "string", "required": false },
+        { "key": "alias", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_stats_overview",
+      "name": "Get Stats Overview",
+      "description": "GET /stats/outbound — aggregated outbound delivery stats.",
+      "method": "GET",
+      "params": [
+        { "key": "tag", "type": "string", "required": false },
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_servers",
+      "name": "List Servers",
+      "description": "GET /servers — account-wide server registry. Requires account_token.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_server_by_id",
+      "name": "Get Server By ID",
+      "description": "GET /servers/{id} — per-server detail (account-scoped). Requires account_token.",
+      "method": "GET",
+      "params": [
+        { "key": "server_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_domains",
+      "name": "List Domains",
+      "description": "GET /domains — sender-domain registry with DKIM / SPF status. Requires account_token.",
+      "method": "GET",
+      "params": [
+        { "key": "count", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0",
+    "structlog>=24.1"
+  ]
+}
