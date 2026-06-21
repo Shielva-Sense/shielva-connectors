@@ -1,0 +1,74 @@
+{
+  "title": "SignWell Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**SignWell** is a transactional e-signature platform exposing a REST API under `https://www.signwell.com/api/v1`. This connector — `SignWellConnector` (`CONNECTOR_TYPE = \"signwell\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Account | `/me` | Authenticated account metadata + plan quotas |\n| Documents | `/documents/*` | Create, send, list, get, cancel, archive, delete, download signed PDF |\n| Document Templates | `/document_templates/documents` | Instantiate a document from a reusable template |\n| Templates | `/templates/*` | List + read reusable templates |\n| Recipients / Reminders | `/documents/{id}/recipients[/...]` | List recipients, send per-recipient reminder |\n| Webhooks | `/api_application/webhooks` | Register + list + delete webhook subscriptions |\n\nThe connector normalises documents into `NormalizedDocument` with **tenant-scoped ids** (`id = f\"{tenant_id}_{source_id}\"`), surfaces every user operation as a standalone `async def` method (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::SignWellHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a SignWell API key\n\n1. Sign in to https://www.signwell.com.\n2. Open **Settings → API → API Keys**.\n3. Click **Generate API Key**, label it (e.g. `shielva-prod`), and copy the value — SignWell shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → SignWell**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 3 |\n| `test_mode_default` (boolean) | `true` for dev/test, `false` for production |\n| `base_url` (text, optional) | Override `https://www.signwell.com/api/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n\nClick **Install**. `install()` validates `api_key` is present, persists non-secret config, and materialises a `TokenInfo` for surface compatibility. It does NOT call the SignWell API — the gateway's first `health_check()` does that.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /me` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "SignWell REST API uses **header-based API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no refresh, no expiry — the key stays valid until you revoke it.\n\n### Credential model\n\nThe API key is sent in the `X-Api-Key` header — **NOT** `Authorization: Bearer …` (a common SignWell-vs-everyone-else gotcha). Sending the key in `Authorization` returns 401.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`, persists non-secret config, materialises a TokenInfo. Does **not** call the SignWell API. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the api_key (surface compatibility — no exchange). |\n| `health_check()` | `GET /me` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | The api_key is materialised once into a TokenInfo at install time. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nX-Api-Key:    <api_key>\nAccept:       application/json    (or application/pdf on completed_pdf download)\nContent-Type: application/json    (when a body is present)\nUser-Agent:   shielva-signwell-connector/1.0\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `X-Api-Key` header value |\n| `test_mode_default` | boolean | no | `self.test_mode_default` (default `true`) | Default `test_mode` for created documents |\n| `base_url` | text | no | `self.base_url` (defaults to `https://www.signwell.com/api/v1`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\nOPTIONAL_CONFIG_KEYS = [\"test_mode_default\", \"base_url\", \"rate_limit_per_min\"]\n\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_SIGNWELL_BASE = \"https://www.signwell.com/api/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `SignWellConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::SignWellHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`, persist non-secret config, materialise a `TokenInfo` for surface compatibility. Does NOT call the SignWell API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose `access_token` is the configured api_key.\n\n### `async health_check() -> ConnectorStatus`\n`GET /me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/documents`, normalises each entry → `NormalizedDocument` (tenant-scoped id), and ingests. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-account",
+          "title": "Account",
+          "content": "### `async get_me() -> Dict`\n`GET /me` — returns the authenticated SignWell account payload (id, email, plan, quota counters)."
+        },
+        {
+          "id": "api-documents",
+          "title": "Documents",
+          "content": "### `async list_documents(page=1, status=None, archived=False, q=None) -> Dict`\n`GET /documents?page={N}&status={S}&archived={A}&q={Q}`. Pagination is page-based; SignWell returns `next_page` / `has_more` to indicate continuation.\n\n### `async get_document(document_id) -> Dict`\n`GET /documents/{id}`.\n\n### `async create_document(name, recipients, files=None, file_urls=None, message=None, subject=None, test_mode=None, draft=False, embedded_signing=False, expires_in=None, reminders=True) -> Dict`\n`POST /documents`. Validates `recipients` is non-empty with `name`+`email` per entry, and that `files` OR `file_urls` is provided. `test_mode` defaults to the install-time `test_mode_default`.\n\n### `async send_document(document_id) -> Dict`\n`POST /documents/{id}/send` — release a draft.\n\n### `async cancel_document(document_id) -> Dict`\n`POST /documents/{id}/cancel`.\n\n### `async archive_document(document_id) -> Dict`\n`POST /documents/{id}/archive`.\n\n### `async delete_document(document_id) -> Dict`\n`DELETE /documents/{id}`.\n\n### `async download_completed_document(document_id, type='completed') -> bytes`\n`GET /documents/{id}/completed_pdf` — raw PDF bytes. Alias: `download_document` (kept for back-compat)."
+        },
+        {
+          "id": "api-templates",
+          "title": "Templates",
+          "content": "### `async list_templates(page=1, q=None) -> Dict`\n`GET /templates`.\n\n### `async get_template(template_id) -> Dict`\n`GET /templates/{id}`.\n\n### `async create_document_from_template(template_id, name, recipients, template_fields=None, test_mode=None, draft=False, embedded_signing=False) -> Dict`\n`POST /document_templates/documents`. `template_fields` is a list of `{api_id, value}` pairs to pre-fill template fields."
+        },
+        {
+          "id": "api-recipients",
+          "title": "Recipients & Reminders",
+          "content": "### `async list_recipients(document_id) -> Dict`\n`GET /documents/{id}/recipients`.\n\n### `async send_reminder(document_id, recipient_id) -> Dict`\n`POST /documents/{did}/recipients/{rid}/reminder` — send a per-recipient reminder email."
+        },
+        {
+          "id": "api-webhooks",
+          "title": "Webhooks",
+          "content": "### `async list_webhooks() -> Dict`\n`GET /api_application/webhooks`.\n\n### `async create_webhook(url, events=None) -> Dict`\n`POST /api_application/webhooks` with body `{url, events}`. `events` filters which SignWell events trigger the webhook (e.g. `document_completed`, `document_signed`).\n\n### `async delete_webhook(webhook_id) -> Dict`\n`DELETE /api_application/webhooks/{id}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nSignWellError                              # base; carries status_code + response_body\n├── SignWellAuthError                      # 401 / 403\n├── SignWellBadRequestError                # 400\n├── SignWellNotFoundError                  # 404\n├── SignWellConflictError                  # 409 (cancel-on-completed, etc.)\n├── SignWellRateLimitError                 # 429 — retry_after_s\n├── SignWellServerError                    # 5xx\n└── SignWellNetworkError                   # transport (timeout / DNS / reset)\n```\n\nBack-compat aliases:\n```\nSignWellNotFound = SignWellNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `0.5s, 1s, 2s`, retry up to `_MAX_RETRIES=3`. Honours `Retry-After` header when present. |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `SignWellNetworkError` |\n\n`helpers/utils.py::with_retry` adds a higher-level retry layer for transient errors that escape the client (e.g. JSON-decode flakiness on intermittent proxies).\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\n5xx / transport → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Generate a new key in SignWell → Settings → API → API Keys; paste it into ACP. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — API key invalid or revoked | Verify the key was copied verbatim (no leading/trailing whitespace). Generate a new key if needed. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — account suspended or key scope missing | Check billing + scope in SignWell; re-enable or rotate the key. |\n| Sending the key in `Authorization: Bearer …` returns 401 | SignWell-specific: uses `X-Api-Key`, not `Authorization` | The connector already does this — only relevant when wiring a raw HTTP call outside the connector. |\n| `signwell.http.retry` warnings spike | Hitting 429 (per-minute cap) | The client retries with exponential backoff and honours `Retry-After`. Lower `rate_limit_per_min` install field or batch fewer concurrent requests. |\n| `recipients[N].email is required` ValueError | Recipient missing required field | Every recipient must be `{name: '...', email: '...'}` at minimum. |\n| `at least one of files or file_urls is required` ValueError | `create_document` called without document content | Provide `files=[{name, file_base64}, ...]` or `file_urls=['https://...']`. |\n| 404 on `download_completed_document` | Document not yet completed | The completed_pdf path is only available once the document status is `completed`. Poll `get_document` first. |\n| Webhook events not arriving | Webhook URL not reachable / signature mismatch | Verify the URL is publicly reachable; SignWell signs webhooks with the `X-SignWell-Signature` header — verify on the receiving side. |"
+    }
+  ]
+}
