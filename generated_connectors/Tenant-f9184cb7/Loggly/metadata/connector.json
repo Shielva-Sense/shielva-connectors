@@ -1,0 +1,201 @@
+{
+  "connector_type": "loggly",
+  "name": "LogglyConnector",
+  "display_name": "Loggly",
+  "version": "1.0.0",
+  "description": "Connects to SolarWinds Loggly (log management). Searches logs and field stats, manages saved searches / alerts / dashboards / source groups / users, and pushes events via the bulk-send endpoint. Management API uses HTTP Basic; bulk send uses a URL-embedded customer token.",
+  "provider": "loggly",
+  "service": "loggly",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "subdomain",
+      "label": "Loggly Subdomain",
+      "type": "string",
+      "required": true,
+      "placeholder": "acme",
+      "help": "Your Loggly account subdomain (the prefix in https://{subdomain}.loggly.com). Used to derive the Management API base URL."
+    },
+    {
+      "key": "username",
+      "label": "Loggly Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "ops@example.com",
+      "help": "Loggly account username (or API-credential username) used as the Basic-auth principal for the Management API."
+    },
+    {
+      "key": "password",
+      "label": "Loggly Password",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Loggly password",
+      "help": "Loggly account password (or API-credential secret). Sent only as part of HTTP Basic auth — never logged."
+    },
+    {
+      "key": "customer_token",
+      "label": "Customer Token (Bulk Send)",
+      "type": "secret",
+      "required": false,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Loggly customer token (UUID) used in the bulk-send URL path. Required only if this connector pushes events via send_events_bulk."
+    },
+    {
+      "key": "base_url",
+      "label": "Management API Base URL Override",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://{subdomain}.loggly.com/apiv2",
+      "help": "Override the derived Management API base URL. Leave blank to use https://{subdomain}.loggly.com/apiv2."
+    },
+    {
+      "key": "ingest_base_url",
+      "label": "Bulk Ingest Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://logs-01.loggly.com",
+      "placeholder": "https://logs-01.loggly.com",
+      "help": "Bulk-ingest base URL. Default is the global ingest host; override only for testing or a private collector."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Loggly Management API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates subdomain + username + password and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Loggly Management API connectivity by running a 1-row search.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "search_logs",
+      "name": "Search Logs",
+      "description": "GET /apiv2/search — search logs by query, time window, page size, and order.",
+      "method": "GET",
+      "params": [
+        { "key": "q", "type": "string", "required": false },
+        { "key": "from_", "type": "string", "required": false },
+        { "key": "until", "type": "string", "required": false },
+        { "key": "size", "type": "number", "required": false },
+        { "key": "order", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_search_field_stats",
+      "name": "Field Stats",
+      "description": "GET /apiv2/fields/{field} — facet aggregation for a single field over a time window.",
+      "method": "GET",
+      "params": [
+        { "key": "field", "type": "string", "required": true },
+        { "key": "q", "type": "string", "required": false },
+        { "key": "from_", "type": "string", "required": false },
+        { "key": "until", "type": "string", "required": false },
+        { "key": "facet_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_saved_searches",
+      "name": "List Saved Searches",
+      "description": "GET /apiv2/savedsearches.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_saved_search",
+      "name": "Create Saved Search",
+      "description": "POST /apiv2/savedsearches.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_alerts",
+      "name": "List Alerts",
+      "description": "GET /apiv2/alerts.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_alert",
+      "name": "Create Alert",
+      "description": "POST /apiv2/alerts.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "GET /apiv2/dashboards.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_dashboard",
+      "name": "Get Dashboard",
+      "description": "GET /apiv2/dashboards/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "dashboard_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_source_groups",
+      "name": "List Source Groups",
+      "description": "GET /apiv2/sourcegroups.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /apiv2/users.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_events_bulk",
+      "name": "Send Events (Bulk)",
+      "description": "POST https://logs-01.loggly.com/bulk/{customer_token}/tag/{tag}/ — newline-delimited JSON ingest.",
+      "method": "POST",
+      "params": [
+        { "key": "events", "type": "array", "required": true },
+        { "key": "tag", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0",
+    "structlog>=24.1"
+  ]
+}
