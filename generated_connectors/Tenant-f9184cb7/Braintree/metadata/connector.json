@@ -34,11 +34,18 @@
       "type": "string",
       "required": true,
       "default": "sandbox",
-      "options": ["sandbox", "production"],
-      "help": "Use 'sandbox' for testing and 'production' for live transactions."
+      "options": [
+        "sandbox",
+        "production"
+      ],
+      "help": "Use 'sandbox' for testing and 'production' for live transactions.",
+      "placeholder": "sandbox"
     }
   ],
-  "capabilities": ["sync", "health_check"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
   "resources": [
     {
       "name": "transactions",
@@ -68,5 +75,64 @@
     "additional_headers": {
       "X-ApiVersion": "6"
     }
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync of all resources: transactions, customers, subscriptions, plans.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Transactions",
+      "description": "Return all transactions via paginated advanced search.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_transaction",
+      "name": "Get Transaction",
+      "description": "Fetch a single transaction by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "transaction_id",
+          "label": "Transaction Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return all customers via paginated advanced search.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_subscriptions",
+      "name": "List Subscriptions",
+      "description": "Return all subscriptions via paginated advanced search.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_plans",
+      "name": "List Plans",
+      "description": "Return all billing plans.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "BraintreeConnector"
 }
