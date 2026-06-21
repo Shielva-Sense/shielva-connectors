@@ -12,14 +12,14 @@
       "label": "User API Key",
       "type": "password",
       "required": true,
-      "help": "Found in New Relic → Profile icon → API Keys → Create key (User key type)"
+      "help": "Found in New Relic \u2192 Profile icon \u2192 API Keys \u2192 Create key (User key type)"
     },
     {
       "key": "account_id",
       "label": "Account ID",
       "type": "string",
       "required": true,
-      "help": "Found in New Relic → Profile icon → Administration → Account details, or in the URL after /accounts/"
+      "help": "Found in New Relic \u2192 Profile icon \u2192 Administration \u2192 Account details, or in the URL after /accounts/"
     },
     {
       "key": "region",
@@ -29,17 +29,39 @@
       "default": "US",
       "help": "Select US for api.newrelic.com or EU for api.eu.newrelic.com. Leave blank for US default.",
       "options": [
-        {"label": "US (api.newrelic.com)", "value": "US"},
-        {"label": "EU (api.eu.newrelic.com)", "value": "EU"}
-      ]
+        {
+          "label": "US (api.newrelic.com)",
+          "value": "US"
+        },
+        {
+          "label": "EU (api.eu.newrelic.com)",
+          "value": "EU"
+        }
+      ],
+      "placeholder": "US"
     }
   ],
-  "capabilities": ["sync", "health_check", "query"],
-  "resources": ["alerts", "applications", "incidents", "dashboards"],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "query"
+  ],
+  "resources": [
+    "alerts",
+    "applications",
+    "incidents",
+    "dashboards"
+  ],
   "auth": {
     "headers": [
-      {"name": "Api-Key", "from": "api_key"},
-      {"name": "X-Api-Key", "from": "api_key"}
+      {
+        "name": "Api-Key",
+        "from": "api_key"
+      },
+      {
+        "name": "X-Api-Key",
+        "from": "api_key"
+      }
     ],
     "validation_endpoint": "GET /v2/applications.json"
   },
@@ -48,16 +70,114 @@
     "rest_base_eu": "https://api.eu.newrelic.com/v2/",
     "nerdgraph_us": "https://api.newrelic.com/graphql",
     "nerdgraph_eu": "https://api.eu.newrelic.com/graphql",
-    "versions": ["v2", "nerdgraph"]
+    "versions": [
+      "v2",
+      "nerdgraph"
+    ]
   },
   "methods": [
-    {"name": "install", "description": "Validate API key and account_id, record connector as installed"},
-    {"name": "health_check", "description": "Verify API key is still valid via GET /v2/applications.json"},
-    {"name": "sync", "description": "Sync alerts, applications, incidents, and dashboards to knowledge base"},
-    {"name": "list_alerts", "description": "List all alert policies with pagination"},
-    {"name": "list_applications", "description": "List all APM applications with pagination"},
-    {"name": "list_incidents", "description": "List recent alert incidents via NerdGraph"},
-    {"name": "list_dashboards", "description": "List all dashboards via NerdGraph entity search"},
-    {"name": "run_nrql", "description": "Execute a NRQL query via NerdGraph and return results"}
-  ]
+    {
+      "name": "install",
+      "description": "Validate API key and account_id, record connector as installed"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify API key is still valid via GET /v2/applications.json"
+    },
+    {
+      "name": "sync",
+      "description": "Sync alerts, applications, incidents, and dashboards to knowledge base"
+    },
+    {
+      "name": "list_alerts",
+      "description": "List all alert policies with pagination"
+    },
+    {
+      "name": "list_applications",
+      "description": "List all APM applications with pagination"
+    },
+    {
+      "name": "list_incidents",
+      "description": "List recent alert incidents via NerdGraph"
+    },
+    {
+      "name": "list_dashboards",
+      "description": "List all dashboards via NerdGraph entity search"
+    },
+    {
+      "name": "run_nrql",
+      "description": "Execute a NRQL query via NerdGraph and return results"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync alerts, applications, incidents, and dashboards from New Relic.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_alerts",
+      "name": "List Alerts",
+      "description": "Fetch all alert policies from New Relic, paginating automatically.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_applications",
+      "name": "List Applications",
+      "description": "Fetch all APM applications from New Relic, paginating automatically.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_incidents",
+      "name": "List Incidents",
+      "description": "Fetch recent alert incidents from New Relic via NerdGraph.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "Fetch dashboards from New Relic via NerdGraph entity search.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "run_nrql",
+      "name": "Run Nrql",
+      "description": "Execute a NRQL query via NerdGraph and return the results.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "nrql",
+          "label": "Nrql",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "NewRelicConnector"
 }
