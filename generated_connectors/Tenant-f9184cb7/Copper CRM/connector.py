@@ -8,16 +8,16 @@ from typing import Any
 from shared.base_connector import BaseConnector
 
 
-from .client.http_client import CopperHTTPClient
-from .exceptions import CopperAuthError, CopperError
-from .helpers.utils import (
+from client.http_client import CopperHTTPClient
+from exceptions import CopperAuthError, CopperError
+from helpers.utils import (
     normalize_company,
     normalize_opportunity,
     normalize_person,
     normalize_task,
     with_retry,
 )
-from .models import (
+from models import (
     ConnectorDocument,
     HealthCheckResult,
     InstallResult,
@@ -273,3 +273,4 @@ class CopperConnector(BaseConnector):
                 break
             page += 1
         return docs
+
