@@ -4,9 +4,27 @@
   "auth_type": "oauth2",
   "version": "1.0.0",
   "install_fields": [
-    {"key": "client_id", "label": "OAuth Client ID", "type": "string", "required": true},
-    {"key": "client_secret", "label": "OAuth Client Secret", "type": "password", "required": true},
-    {"key": "redirect_uri", "label": "Redirect URI (optional)", "type": "string", "required": false}
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "help": "OAuth Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "OAuth Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI (optional)",
+      "type": "string",
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
   ],
   "config_keys": [
     "access_token",
@@ -93,5 +111,92 @@
     "properties",
     "reports",
     "metadata"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync sessions + users report for the last 30 days.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return all GA accounts accessible by the authenticated user.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_properties",
+      "name": "List Properties",
+      "description": "Return all GA4 properties under the given account.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "account_id",
+          "label": "Account Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "run_report",
+      "name": "Run Report",
+      "description": "Run a GA4 Data API report and return the raw response.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "property_id",
+          "label": "Property Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "dimensions",
+          "label": "Dimensions",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "metrics",
+          "label": "Metrics",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "start_date",
+          "label": "Start Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "end_date",
+          "label": "End Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
   ]
 }
