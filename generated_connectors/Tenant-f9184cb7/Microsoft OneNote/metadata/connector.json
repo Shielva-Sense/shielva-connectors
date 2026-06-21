@@ -1,0 +1,289 @@
+{
+  "connector_type": "onenote",
+  "name": "OneNoteConnector",
+  "display_name": "Microsoft OneNote",
+  "version": "1.0.0",
+  "description": "Connects to Microsoft OneNote via the Microsoft Graph v1.0 API. List, read, create, update, copy, and delete notebooks, section groups, sections, and pages on behalf of an authenticated Microsoft 365 user.",
+  "provider": "microsoft",
+  "service": "onenote",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Application (Client) ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Found in Azure Portal → App registrations → your app → Overview → Application (client) ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter the client secret value",
+      "help": "Generate under Azure Portal → App registrations → your app → Certificates & secrets → New client secret. Copy the VALUE, not the ID."
+    },
+    {
+      "key": "tenant_id",
+      "label": "Azure Tenant ID",
+      "type": "string",
+      "required": false,
+      "default": "common",
+      "placeholder": "common",
+      "help": "Azure AD tenant. Use 'common' for multi-tenant apps, 'organizations' for any work/school account, or a tenant GUID/domain for single-tenant apps. NOT the same as your Shielva tenant_id."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth2 Redirect URI",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://gateway.shielva.local/oauth/callback",
+      "help": "The redirect URI registered in your Azure app. Must match EXACTLY what is configured in Azure Portal → App registrations → your app → Authentication."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "Notes.ReadWrite Notes.Read offline_access",
+      "placeholder": "Notes.ReadWrite Notes.Read offline_access",
+      "help": "Space-separated Microsoft Graph delegated permissions. 'offline_access' is required to receive a refresh token."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "help": "Microsoft identity platform authorization endpoint. Swap 'common' with your tenant ID for single-tenant."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "help": "Microsoft identity platform token endpoint. Swap 'common' with your tenant ID for single-tenant."
+    },
+    {
+      "key": "base_url",
+      "label": "Microsoft Graph OneNote Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/v1.0/me/onenote",
+      "placeholder": "https://graph.microsoft.com/v1.0/me/onenote",
+      "help": "Base URL for the Microsoft Graph OneNote API. Leave blank to use the per-user /me/onenote root."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "120",
+      "placeholder": "120",
+      "help": "Soft cap on outbound Graph requests per minute. Graph enforces its own throttling; this guards against client-side bursts."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and persists install-time config. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access + refresh tokens via the Microsoft identity token endpoint.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Microsoft Graph (OneNote) reachability by listing one notebook via GET /me/onenote/notebooks?$top=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_notebooks",
+      "name": "List Notebooks",
+      "description": "GET /me/onenote/notebooks — list OneNote notebooks for the signed-in user. Supports $top, $skip, $filter, $orderby.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "orderby", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_notebook",
+      "name": "Get Notebook",
+      "description": "GET /me/onenote/notebooks/{id} — fetch a single notebook by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_notebook",
+      "name": "Create Notebook",
+      "description": "POST /me/onenote/notebooks — create a new notebook with the given display name.",
+      "method": "POST",
+      "params": [
+        { "key": "display_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sections",
+      "name": "List Sections",
+      "description": "GET /me/onenote/notebooks/{id}/sections or /me/onenote/sections — list sections, optionally scoped to a notebook.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_section",
+      "name": "Get Section",
+      "description": "GET /me/onenote/sections/{id} — fetch a single section by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "section_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_section",
+      "name": "Create Section",
+      "description": "POST /me/onenote/notebooks/{id}/sections — create a section under a notebook.",
+      "method": "POST",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": true },
+        { "key": "display_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_section_groups",
+      "name": "List Section Groups",
+      "description": "GET /me/onenote/notebooks/{id}/sectionGroups or /me/onenote/sectionGroups — list section groups.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "GET /me/onenote/sections/{id}/pages or /me/onenote/pages — list pages, optionally with $filter or $search.",
+      "method": "GET",
+      "params": [
+        { "key": "section_id", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "GET /me/onenote/pages/{id} — fetch page metadata (no body).",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_page_content",
+      "name": "Get Page Content",
+      "description": "GET /me/onenote/pages/{id}/content — returns the raw XHTML body of the page as a string.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "string"
+    },
+    {
+      "id": "create_page",
+      "name": "Create Page",
+      "description": "POST /me/onenote/sections/{id}/pages — create a page from a raw XHTML body. Content-Type defaults to application/xhtml+xml (NOT application/json).",
+      "method": "POST",
+      "params": [
+        { "key": "section_id", "type": "string", "required": true },
+        { "key": "html_body", "type": "string", "required": true },
+        { "key": "content_type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_page",
+      "name": "Update Page",
+      "description": "PATCH /me/onenote/pages/{id}/content — apply a JSON array of update commands (append, insert, replace, prepend).",
+      "method": "PATCH",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true },
+        { "key": "commands", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_page",
+      "name": "Delete Page",
+      "description": "DELETE /me/onenote/pages/{id} — permanently remove a page.",
+      "method": "DELETE",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "copy_page_to_section",
+      "name": "Copy Page to Section",
+      "description": "POST /me/onenote/pages/{id}/copyToSection — copy a page to another section. Returns an async operation handle (202 Accepted).",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true },
+        { "key": "target_section_id", "type": "string", "required": true },
+        { "key": "group_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_pages",
+      "name": "Search Pages",
+      "description": "GET /me/onenote/pages?$search=… — full-text search across all OneNote pages the user can access.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "respx>=0.21"
+  ]
+}
