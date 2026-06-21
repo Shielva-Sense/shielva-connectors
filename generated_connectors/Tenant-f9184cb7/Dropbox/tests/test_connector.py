@@ -1,68 +1,737 @@
-"""Unit tests for DropboxConnector — all Dropbox HTTP calls are mocked.
+"""Unit tests for DropboxConnector — respx-mocked, zero real I/O.
 
-Covers:
-- Class attributes (CONNECTOR_TYPE, AUTH_TYPE)
-- All exception types and their attributes
-- All model enum values and dataclass fields
-- normalize_file_metadata (full file, full folder, minimal, missing fields)
-- _stable_doc_id SHA-256 logic
-- with_retry (success, retry, auth-error short-circuit, exhausted, rate-limit)
-- CircuitBreaker (threshold, reset, half-open, is_open)
-- install() — missing creds, app-key only, success with token, auth error, generic exception
-- authorize() — URL generation with/without redirect_uri
-- health_check() — success (display_name/email), auth error, network error, generic, missing creds
-- sync() — empty, single page, pagination (has_more), normalize failure (PARTIAL), FAILED, creates client
-- list_folder, list_folder_continue, get_metadata, search_files
-- aclose / context manager
-- _ensure_client
+Mirrors the Wix gold-standard suite: instance identity, auth-header shape,
+per-endpoint smoke tests, retry policy on 429/5xx, error classification, and
+the multi-tenant isolation invariant.
 """
 from __future__ import annotations
 
-import hashlib
-import sys
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+import base64
+import json
+from datetime import datetime
 
+import httpx
 import pytest
+import respx
 
-ROOT = Path(__file__).parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+from shared.base_connector import (
+    AuthStatus,
+    ConnectorHealth,
+    NormalizedDocument,
+    SyncStatus,
+    TokenInfo,
+)
 
 from connector import DropboxConnector
 from exceptions import (
     DropboxAuthError,
+    DropboxBadRequestError,
+    DropboxConflictError,
     DropboxError,
     DropboxNetworkError,
     DropboxNotFoundError,
     DropboxRateLimitError,
+    DropboxServerError,
 )
-from helpers.utils import CircuitBreaker, _stable_doc_id, normalize_file_metadata, with_retry
-from models import (
-    AuthStatus,
-    ConnectorDocument,
-    ConnectorHealth,
-    DropboxFileType,
-    HealthCheckResult,
-    InstallResult,
-    SyncResult,
-    SyncStatus,
+from helpers.normalizer import normalize_entry, normalize_file, normalize_folder
+from helpers.utils import (
+    normalize_dropbox_path,
+    parse_dt,
+    safe_get,
+    utcnow,
+    with_retry,
 )
 
-TENANT_ID = "tenant_dropbox_test"
-CONNECTOR_ID = "conn_dropbox_test_001"
-VALID_ACCESS_TOKEN = "sl.dropbox-access-token-xyz"
-VALID_APP_KEY = "test_app_key_123"
-VALID_APP_SECRET = "test_app_secret_456"
+from tests.conftest import (
+    API_BASE,
+    CONNECTOR_ID,
+    CONTENT_BASE,
+    TENANT_ID,
+    TEST_ACCESS_TOKEN,
+    TEST_CLIENT_ID,
+    TEST_CLIENT_SECRET,
+    TEST_CONFIG,
+    TEST_REDIRECT_URI,
+    TEST_REFRESH_TOKEN,
+    TOKEN_URL,
+)
 
-# ── Sample fixtures ──────────────────────────────────────────────────────────
 
-SAMPLE_FILE_ENTRY: dict = {
+# ═══════════════════════════════════════════════════════════════════════════
+# Connector identity
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_connector_type_class_attr():
+    assert DropboxConnector.CONNECTOR_TYPE == "dropbox"
+
+
+def test_auth_type_class_attr():
+    assert DropboxConnector.AUTH_TYPE == "oauth2_code"
+
+
+def test_required_config_keys_defined():
+    assert hasattr(DropboxConnector, "REQUIRED_CONFIG_KEYS")
+    assert "client_id" in DropboxConnector.REQUIRED_CONFIG_KEYS
+    assert "client_secret" in DropboxConnector.REQUIRED_CONFIG_KEYS
+
+
+def test_oauth_constants_defined():
+    assert DropboxConnector.AUTH_URI.startswith("https://www.dropbox.com")
+    assert DropboxConnector.TOKEN_URI.startswith("https://api.dropboxapi.com")
+    assert "files.metadata.read" in DropboxConnector.REQUIRED_SCOPES
+    assert "account_info.read" in DropboxConnector.REQUIRED_SCOPES
+
+
+def test_status_map_has_required_codes():
+    keys = DropboxConnector._STATUS_MAP.keys()
+    assert 401 in keys and 403 in keys and 429 in keys
+
+
+def test_independent_instances_per_tenant():
+    c1 = DropboxConnector(tenant_id="t-A", connector_id="conn-1", config=dict(TEST_CONFIG))
+    c2 = DropboxConnector(tenant_id="t-B", connector_id="conn-2", config=dict(TEST_CONFIG))
+    assert c1.tenant_id != c2.tenant_id
+    assert c1.connector_id != c2.connector_id
+    assert c1.http_client is not c2.http_client
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# install()
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_install_success(connector):
+    result = await connector.install()
+    assert result.health == ConnectorHealth.HEALTHY
+    # Until OAuth completes the auth status is PENDING, not AUTHENTICATED.
+    assert result.auth_status == AuthStatus.PENDING
+    assert result.connector_id == CONNECTOR_ID
+    assert "authorize" in (result.message or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_install_missing_client_id(connector):
+    connector.config.pop("client_id", None)
+    result = await connector.install()
+    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+    assert result.health == ConnectorHealth.OFFLINE
+    assert "client_id" in (result.message or "")
+
+
+@pytest.mark.asyncio
+async def test_install_missing_client_secret(connector):
+    connector.config.pop("client_secret", None)
+    result = await connector.install()
+    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
+    assert "client_secret" in (result.message or "")
+
+
+@pytest.mark.asyncio
+async def test_install_persists_config(connector, mocker):
+    spy = mocker.patch.object(DropboxConnector, "save_config", new_callable=mocker.AsyncMock)
+    await connector.install()
+    spy.assert_awaited_once()
+    saved = spy.await_args.args[0]
+    assert saved["client_id"] == TEST_CLIENT_ID
+    assert saved["client_secret"] == TEST_CLIENT_SECRET
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# authorize() — OAuth code exchange
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_authorize_exchanges_code_for_token(connector):
+    route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 14400,
+                "token_type": "bearer",
+                "scope": "files.metadata.read files.content.read",
+                "account_id": "dbid:1234",
+            },
+        )
+    )
+    token = await connector.authorize(auth_code="auth-code-123", state="some-state")
+    assert route.called
+    assert isinstance(token, TokenInfo)
+    assert token.access_token == "new-access-token"
+    assert token.refresh_token == "new-refresh-token"
+    assert "files.metadata.read" in token.scopes
+    # Verify form-encoded body has the right grant + redirect_uri
+    sent_body = route.calls[0].request.content.decode()
+    assert "grant_type=authorization_code" in sent_body
+    assert "code=auth-code-123" in sent_body
+    assert "redirect_uri=" in sent_body
+
+
+@pytest.mark.asyncio
+async def test_authorize_rejects_empty_code(connector):
+    with pytest.raises(DropboxAuthError):
+        await connector.authorize(auth_code="", state=None)
+
+
+@pytest.mark.asyncio
+async def test_authorize_requires_redirect_uri(connector):
+    connector.config["redirect_uri"] = ""
+    connector.redirect_uri = ""
+    with pytest.raises(DropboxAuthError):
+        await connector.authorize(auth_code="code", state=None)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_authorize_propagates_dropbox_error(connector):
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(400, json={"error": "invalid_grant"})
+    )
+    with pytest.raises(DropboxAuthError):
+        await connector.authorize(auth_code="bad", state=None)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_on_token_refresh_uses_refresh_token(connector):
+    route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "refreshed-access",
+                "expires_in": 14400,
+                "token_type": "bearer",
+            },
+        )
+    )
+    token = await connector.on_token_refresh()
+    assert route.called
+    assert token is not None
+    assert token.access_token == "refreshed-access"
+    # Dropbox refresh response often omits a new refresh_token — we should
+    # preserve the existing one.
+    assert token.refresh_token == TEST_REFRESH_TOKEN
+    sent_body = route.calls[0].request.content.decode()
+    assert "grant_type=refresh_token" in sent_body
+
+
+@pytest.mark.asyncio
+async def test_on_token_refresh_returns_none_when_no_refresh_token(connector, mocker):
+    mocker.patch.object(
+        DropboxConnector,
+        "get_token",
+        new_callable=mocker.AsyncMock,
+        return_value=TokenInfo(access_token="x", refresh_token=None),
+    )
+    result = await connector.on_token_refresh()
+    assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# health_check()
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_health_check_healthy(connector):
+    respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "account_id": "dbid:abc",
+                "email": "user@example.com",
+                "name": {"display_name": "Test User"},
+            },
+        )
+    )
+    result = await connector.health_check()
+    assert result.health == ConnectorHealth.HEALTHY
+    assert result.auth_status == AuthStatus.CONNECTED
+    assert result.metadata.get("email") == "user@example.com"
+    assert result.metadata.get("display_name") == "Test User"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_health_check_auth_error(connector):
+    respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(401, json={"error_summary": "expired_access_token/"})
+    )
+    result = await connector.health_check()
+    assert result.health == ConnectorHealth.OFFLINE
+    assert result.auth_status == AuthStatus.TOKEN_EXPIRED
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_health_check_rate_limited(connector, no_retry_sleep):
+    respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(
+            429,
+            headers={"Retry-After": "1"},
+            json={"error_summary": "too_many_requests/"},
+        )
+    )
+    result = await connector.health_check()
+    assert result.health == ConnectorHealth.DEGRADED
+    assert result.auth_status == AuthStatus.CONNECTED
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Auth header shape — Bearer prefix
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_authorization_header_has_bearer_prefix(connector):
+    route = respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    await connector.get_current_account()
+    assert route.called
+    sent_auth = route.calls[0].request.headers.get("authorization", "")
+    assert sent_auth == f"Bearer {TEST_ACCESS_TOKEN}"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_empty_body_endpoints_send_null(connector):
+    """``/users/get_current_account`` body must be JSON ``null``, not ``{}``."""
+    route = respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    await connector.get_current_account()
+    sent_body = route.calls[0].request.content.decode()
+    assert sent_body == "null"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Files RPC endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_list_folder_success(connector):
+    route = respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "entries": [
+                    {".tag": "file", "id": "id:1", "name": "a.txt", "path_display": "/a.txt"},
+                ],
+                "cursor": "cur1",
+                "has_more": False,
+            },
+        )
+    )
+    result = await connector.list_folder(path="/x", recursive=True, limit=50)
+    assert route.called
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["path"] == "/x"
+    assert body["recursive"] is True
+    assert body["limit"] == 50
+    assert result["entries"][0]["id"] == "id:1"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_list_folder_continue_success(connector):
+    route = respx.post(f"{API_BASE}/files/list_folder/continue").mock(
+        return_value=httpx.Response(
+            200,
+            json={"entries": [], "cursor": "cur2", "has_more": False},
+        )
+    )
+    result = await connector.list_folder_continue("cur-abc")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"cursor": "cur-abc"}
+    assert result["cursor"] == "cur2"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_metadata_success(connector):
+    route = respx.post(f"{API_BASE}/files/get_metadata").mock(
+        return_value=httpx.Response(
+            200,
+            json={".tag": "file", "id": "id:x", "name": "z.pdf", "path_display": "/z.pdf"},
+        )
+    )
+    result = await connector.get_metadata("/z.pdf")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["path"] == "/z.pdf"
+    assert result["name"] == "z.pdf"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_metadata_not_found_raises(connector):
+    """Dropbox returns 409 with a not_found tag for missing paths."""
+    respx.post(f"{API_BASE}/files/get_metadata").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error_summary": "path/not_found/..",
+                "error": {".tag": "path", "path": {".tag": "not_found"}},
+            },
+        )
+    )
+    with pytest.raises(DropboxNotFoundError):
+        await connector.get_metadata("/missing.txt")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_copy_file_success(connector):
+    route = respx.post(f"{API_BASE}/files/copy_v2").mock(
+        return_value=httpx.Response(200, json={"metadata": {"id": "id:dup"}})
+    )
+    result = await connector.copy_file("/a", "/b", autorename=True)
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["from_path"] == "/a"
+    assert body["to_path"] == "/b"
+    assert body["autorename"] is True
+    assert result["metadata"]["id"] == "id:dup"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_move_file_success(connector):
+    route = respx.post(f"{API_BASE}/files/move_v2").mock(
+        return_value=httpx.Response(200, json={"metadata": {"id": "id:moved"}})
+    )
+    await connector.move_file("/a", "/b")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["from_path"] == "/a"
+    assert body["to_path"] == "/b"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_delete_file_success(connector):
+    route = respx.post(f"{API_BASE}/files/delete_v2").mock(
+        return_value=httpx.Response(200, json={"metadata": {".tag": "file"}})
+    )
+    await connector.delete_file("/old.txt")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"path": "/old.txt"}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_create_folder_success(connector):
+    route = respx.post(f"{API_BASE}/files/create_folder_v2").mock(
+        return_value=httpx.Response(200, json={"metadata": {".tag": "folder"}})
+    )
+    await connector.create_folder("/newfolder", autorename=False)
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"path": "/newfolder", "autorename": False}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_search_success(connector):
+    route = respx.post(f"{API_BASE}/files/search_v2").mock(
+        return_value=httpx.Response(200, json={"matches": [], "has_more": False})
+    )
+    await connector.search("invoice", max_results=25, path="/inbox")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["query"] == "invoice"
+    assert body["options"]["max_results"] == 25
+    assert body["options"]["path"] == "/inbox"
+    assert body["options"]["file_status"] == "active"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_list_revisions_success(connector):
+    route = respx.post(f"{API_BASE}/files/list_revisions").mock(
+        return_value=httpx.Response(
+            200, json={"is_deleted": False, "entries": [{"rev": "r1"}]}
+        )
+    )
+    result = await connector.list_revisions("/doc.txt", limit=5)
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"path": "/doc.txt", "mode": "path", "limit": 5}
+    assert result["entries"][0]["rev"] == "r1"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_restore_revision_success(connector):
+    route = respx.post(f"{API_BASE}/files/restore").mock(
+        return_value=httpx.Response(200, json={".tag": "file", "rev": "r1"})
+    )
+    await connector.restore_revision("/doc.txt", "r1")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"path": "/doc.txt", "rev": "r1"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Content endpoints (upload / download)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_download_file_routes_to_content_host(connector):
+    """download uses the content host, args go in Dropbox-API-Arg header, body is binary."""
+    payload = b"hello dropbox"
+    route = respx.post(f"{CONTENT_BASE}/files/download").mock(
+        return_value=httpx.Response(
+            200,
+            headers={
+                "Dropbox-API-Result": json.dumps(
+                    {"name": "hello.txt", "id": "id:42", "size": len(payload)}
+                ),
+                "Content-Type": "application/octet-stream",
+            },
+            content=payload,
+        )
+    )
+    result = await connector.download_file("/hello.txt")
+    assert route.called
+    sent = route.calls[0].request
+    api_arg = json.loads(sent.headers["dropbox-api-arg"])
+    assert api_arg == {"path": "/hello.txt"}
+    assert result["metadata"]["name"] == "hello.txt"
+    assert base64.b64decode(result["content_b64"]) == payload
+    assert result["size"] == len(payload)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_upload_file_routes_to_content_host(connector):
+    payload = b"file body bytes"
+    route = respx.post(f"{CONTENT_BASE}/files/upload").mock(
+        return_value=httpx.Response(
+            200,
+            json={"name": "up.txt", "id": "id:up", "size": len(payload)},
+        )
+    )
+    result = await connector.upload_file("/up.txt", payload, mode="overwrite", autorename=False)
+    sent = route.calls[0].request
+    api_arg = json.loads(sent.headers["dropbox-api-arg"])
+    assert api_arg["path"] == "/up.txt"
+    assert api_arg["mode"] == "overwrite"
+    assert api_arg["autorename"] is False
+    assert sent.headers.get("content-type") == "application/octet-stream"
+    assert sent.content == payload
+    assert result["id"] == "id:up"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sharing
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_create_shared_link_success(connector):
+    route = respx.post(f"{API_BASE}/sharing/create_shared_link_with_settings").mock(
+        return_value=httpx.Response(200, json={"url": "https://www.dropbox.com/s/abc"})
+    )
+    result = await connector.create_shared_link("/share.txt", settings={"requested_visibility": "public"})
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body["path"] == "/share.txt"
+    assert body["settings"]["requested_visibility"] == "public"
+    assert "url" in result
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_list_shared_links_success(connector):
+    route = respx.post(f"{API_BASE}/sharing/list_shared_links").mock(
+        return_value=httpx.Response(200, json={"links": [{"url": "u1"}], "has_more": False})
+    )
+    await connector.list_shared_links(path="/x", cursor="c1", direct_only=False)
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"direct_only": False, "path": "/x", "cursor": "c1"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Users
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_current_account_success(connector):
+    respx.post(f"{API_BASE}/users/get_current_account").mock(
+        return_value=httpx.Response(200, json={"email": "u@example.com"})
+    )
+    result = await connector.get_current_account()
+    assert result["email"] == "u@example.com"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_account_success(connector):
+    route = respx.post(f"{API_BASE}/users/get_account").mock(
+        return_value=httpx.Response(200, json={"account_id": "dbid:other"})
+    )
+    await connector.get_account("dbid:other")
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"account_id": "dbid:other"}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_space_usage_success(connector):
+    respx.post(f"{API_BASE}/users/get_space_usage").mock(
+        return_value=httpx.Response(
+            200,
+            json={"used": 1024, "allocation": {".tag": "individual", "allocated": 2000000000}},
+        )
+    )
+    result = await connector.get_space_usage()
+    assert result["used"] == 1024
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Error classification — http_client → typed exceptions
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_400_raises_bad_request(connector):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(400, json={"error_summary": "bad input/"})
+    )
+    with pytest.raises(DropboxBadRequestError):
+        await connector.list_folder()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_401_raises_auth_error(connector):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(401, json={"error_summary": "expired_access_token/"})
+    )
+    with pytest.raises(DropboxAuthError):
+        await connector.list_folder()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_403_raises_auth_error(connector):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(403, json={"error_summary": "missing_scope/"})
+    )
+    with pytest.raises(DropboxAuthError):
+        await connector.list_folder()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_404_raises_not_found(connector):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(404, json={"error_summary": "not_found/"})
+    )
+    with pytest.raises(DropboxNotFoundError):
+        await connector.list_folder()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_409_conflict_raises_conflict(connector):
+    respx.post(f"{API_BASE}/files/move_v2").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error_summary": "to/conflict/file",
+                "error": {".tag": "to", "to": {".tag": "conflict"}},
+            },
+        )
+    )
+    with pytest.raises(DropboxConflictError):
+        await connector.move_file("/a", "/b")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_500_after_retries_raises_server_error(connector, no_retry_sleep):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(500, json={"error_summary": "boom"})
+    )
+    with pytest.raises(DropboxServerError):
+        await connector.list_folder()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Retry policy — 429 / 5xx / transport recovery
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_retry_on_429_then_success(connector, no_retry_sleep):
+    route = respx.post(f"{API_BASE}/files/list_folder").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "1"}, json={"error_summary": "rl"}),
+            httpx.Response(200, json={"entries": [], "cursor": "x", "has_more": False}),
+        ]
+    )
+    result = await connector.list_folder()
+    assert route.call_count == 2
+    assert result["entries"] == []
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_retry_on_500_then_success(connector, no_retry_sleep):
+    route = respx.post(f"{API_BASE}/users/get_current_account").mock(
+        side_effect=[
+            httpx.Response(500, json={"error_summary": "boom"}),
+            httpx.Response(200, json={"email": "u@example.com"}),
+        ]
+    )
+    result = await connector.get_current_account()
+    assert route.call_count == 2
+    assert result["email"] == "u@example.com"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_429_rate_limit_exhausts_to_typed_error(connector, no_retry_sleep):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "1"}, json={"error_summary": "rl"})
+    )
+    with pytest.raises(DropboxRateLimitError) as exc_info:
+        await connector.list_folder()
+    assert exc_info.value.retry_after_s >= 0
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_transport_error_retries_then_raises_network(connector, no_retry_sleep):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    with pytest.raises(DropboxNetworkError):
+        await connector.list_folder()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sync — end-to-end with mocked Dropbox
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+SAMPLE_FILE_ENTRY = {
     ".tag": "file",
     "name": "report.pdf",
     "path_lower": "/docs/report.pdf",
     "path_display": "/Docs/report.pdf",
-    "id": "id:abc123XYZ",
+    "id": "id:abc123",
     "client_modified": "2024-03-15T10:00:00Z",
     "server_modified": "2024-03-15T11:00:00Z",
     "rev": "0123456789abcdef",
@@ -70,7 +739,7 @@ SAMPLE_FILE_ENTRY: dict = {
     "is_downloadable": True,
 }
 
-SAMPLE_FOLDER_ENTRY: dict = {
+SAMPLE_FOLDER_ENTRY = {
     ".tag": "folder",
     "name": "Docs",
     "path_lower": "/docs",
@@ -78,1460 +747,253 @@ SAMPLE_FOLDER_ENTRY: dict = {
     "id": "id:folderXYZ",
 }
 
-SAMPLE_ACCOUNT: dict = {
-    "account_id": "dbid:AAHsampleaccountid",
-    "name": {
-        "given_name": "Jane",
-        "surname": "Doe",
-        "display_name": "Jane Doe",
-    },
-    "email": "jane.doe@example.com",
-    "email_verified": True,
-    "account_type": {".tag": "personal"},
-}
 
-LIST_FOLDER_PAGE_SINGLE: dict = {
-    "entries": [SAMPLE_FILE_ENTRY, SAMPLE_FOLDER_ENTRY],
-    "cursor": "cursor_abc",
-    "has_more": False,
-}
-
-LIST_FOLDER_EMPTY: dict = {
-    "entries": [],
-    "cursor": "cursor_empty",
-    "has_more": False,
-}
-
-LIST_FOLDER_PAGE1: dict = {
-    "entries": [SAMPLE_FILE_ENTRY],
-    "cursor": "cursor_page1",
-    "has_more": True,
-}
-
-LIST_FOLDER_PAGE2: dict = {
-    "entries": [SAMPLE_FOLDER_ENTRY],
-    "cursor": "cursor_page2",
-    "has_more": False,
-}
-
-
-# ── Connector fixture ────────────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def authed() -> DropboxConnector:
-    c = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
-    )
-    c.http_client = MagicMock()
-    return c
-
-
-@pytest.fixture()
-def app_creds_only() -> DropboxConnector:
-    """Connector with app_key/app_secret but no access_token."""
-    return DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
-    )
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 1. CLASS ATTRIBUTES
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_connector_type_attr() -> None:
-    assert DropboxConnector.CONNECTOR_TYPE == "dropbox"
-
-
-def test_auth_type_attr() -> None:
-    assert DropboxConnector.AUTH_TYPE == "oauth2"
-
-
-def test_connector_stores_tenant_id() -> None:
-    c = DropboxConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID)
-    assert c.tenant_id == TENANT_ID
-
-
-def test_connector_stores_connector_id() -> None:
-    c = DropboxConnector(tenant_id=TENANT_ID, connector_id=CONNECTOR_ID)
-    assert c.connector_id == CONNECTOR_ID
-
-
-def test_connector_reads_app_key_from_config() -> None:
-    c = DropboxConnector(config={"app_key": "myappkey"})
-    assert c._app_key == "myappkey"
-
-
-def test_connector_reads_app_secret_from_config() -> None:
-    c = DropboxConnector(config={"app_secret": "mysecret"})
-    assert c._app_secret == "mysecret"
-
-
-def test_connector_reads_access_token_from_config() -> None:
-    c = DropboxConnector(config={"access_token": "sl.tok"})
-    assert c._access_token == "sl.tok"
-
-
-def test_connector_reads_redirect_uri_from_config() -> None:
-    c = DropboxConnector(config={"redirect_uri": "https://example.com/cb"})
-    assert c._redirect_uri == "https://example.com/cb"
-
-
-def test_connector_no_http_client_initially() -> None:
-    c = DropboxConnector()
-    assert c.http_client is None
-
-
-def test_has_credentials_true_with_token() -> None:
-    c = DropboxConnector(config={"access_token": VALID_ACCESS_TOKEN})
-    assert c._has_credentials() is True
-
-
-def test_has_credentials_false_without_token() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY})
-    assert c._has_credentials() is False
-
-
-def test_has_app_credentials_true() -> None:
-    c = DropboxConnector(
-        config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET}
-    )
-    assert c._has_app_credentials() is True
-
-
-def test_has_app_credentials_false_missing_key() -> None:
-    c = DropboxConnector(config={"app_secret": VALID_APP_SECRET})
-    assert c._has_app_credentials() is False
-
-
-def test_has_app_credentials_false_missing_secret() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY})
-    assert c._has_app_credentials() is False
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 2. EXCEPTIONS
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_dropbox_error_base() -> None:
-    exc = DropboxError("boom", status_code=500, code="server_error")
-    assert exc.message == "boom"
-    assert exc.status_code == 500
-    assert exc.code == "server_error"
-    assert str(exc) == "boom"
-
-
-def test_dropbox_auth_error_is_dropbox_error() -> None:
-    exc = DropboxAuthError("auth fail", 401, "invalid_access_token")
-    assert isinstance(exc, DropboxError)
-    assert exc.status_code == 401
-
-
-def test_dropbox_rate_limit_error_attrs() -> None:
-    exc = DropboxRateLimitError("rate limited", retry_after=10.0)
-    assert exc.status_code == 429
-    assert exc.code == "rate_limit"
-    assert exc.retry_after == 10.0
-
-
-def test_dropbox_rate_limit_error_default_retry_after() -> None:
-    exc = DropboxRateLimitError("rate limited")
-    assert exc.retry_after == 0.0
-
-
-def test_dropbox_not_found_error_message() -> None:
-    exc = DropboxNotFoundError("path", "/missing/file.txt")
-    assert "/missing/file.txt" in str(exc)
-    assert exc.status_code == 409
-    assert exc.code == "not_found"
-
-
-def test_dropbox_network_error_is_dropbox_error() -> None:
-    exc = DropboxNetworkError("timeout")
-    assert isinstance(exc, DropboxError)
-
-
-def test_dropbox_auth_error_inherits_attributes() -> None:
-    exc = DropboxAuthError("forbidden", 403, "forbidden")
-    assert exc.status_code == 403
-    assert exc.code == "forbidden"
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 3. MODELS
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_connector_health_enum_values() -> None:
-    assert ConnectorHealth.HEALTHY == "healthy"
-    assert ConnectorHealth.DEGRADED == "degraded"
-    assert ConnectorHealth.OFFLINE == "offline"
-
-
-def test_auth_status_enum_values() -> None:
-    assert AuthStatus.CONNECTED == "connected"
-    assert AuthStatus.FAILED == "failed"
-    assert AuthStatus.MISSING_CREDENTIALS == "missing_credentials"
-    assert AuthStatus.INVALID_CREDENTIALS == "invalid_credentials"
-
-
-def test_sync_status_enum_values() -> None:
-    assert SyncStatus.COMPLETED == "completed"
-    assert SyncStatus.PARTIAL == "partial"
-    assert SyncStatus.FAILED == "failed"
-    assert SyncStatus.RUNNING == "running"
-
-
-def test_dropbox_file_type_enum() -> None:
-    assert DropboxFileType.FILE == "file"
-    assert DropboxFileType.FOLDER == "folder"
-
-
-def test_install_result_fields() -> None:
-    r = InstallResult(
-        health=ConnectorHealth.HEALTHY,
-        auth_status=AuthStatus.CONNECTED,
-        connector_id="c1",
-        message="ok",
-    )
-    assert r.health == ConnectorHealth.HEALTHY
-    assert r.connector_id == "c1"
-    assert r.message == "ok"
-
-
-def test_health_check_result_fields() -> None:
-    r = HealthCheckResult(
-        health=ConnectorHealth.HEALTHY,
-        auth_status=AuthStatus.CONNECTED,
-        message="ok",
-        display_name="Jane Doe",
-        email="jane@example.com",
-    )
-    assert r.display_name == "Jane Doe"
-    assert r.email == "jane@example.com"
-
-
-def test_health_check_result_defaults() -> None:
-    r = HealthCheckResult(
-        health=ConnectorHealth.OFFLINE,
-        auth_status=AuthStatus.MISSING_CREDENTIALS,
-    )
-    assert r.display_name == ""
-    assert r.email == ""
-    assert r.message == ""
-
-
-def test_sync_result_fields() -> None:
-    r = SyncResult(
-        status=SyncStatus.PARTIAL,
-        documents_found=10,
-        documents_synced=8,
-        documents_failed=2,
-        message="partial",
-    )
-    assert r.documents_found == 10
-    assert r.documents_failed == 2
-
-
-def test_connector_document_fields() -> None:
-    doc = ConnectorDocument(
-        source_id="abc123",
-        title="Test file",
-        content="Content here",
-        connector_id="c1",
-        tenant_id="t1",
-        source_url="https://dropbox.com/home/test.pdf",
-        metadata={"type": "dropbox_file"},
-    )
-    assert doc.source_id == "abc123"
-    assert doc.metadata["type"] == "dropbox_file"
-
-
-def test_connector_document_default_metadata() -> None:
-    doc = ConnectorDocument(
-        source_id="x2",
-        title="T",
-        content="C",
-        connector_id="c",
-        tenant_id="t",
-    )
-    assert doc.metadata == {}
-    assert doc.source_url == ""
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 4. NORMALIZER
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_stable_doc_id_is_sha256_prefix() -> None:
-    file_id = "id:abc123XYZ"
-    expected = hashlib.sha256(file_id.encode()).hexdigest()[:16]
-    assert _stable_doc_id(file_id) == expected
-
-
-def test_stable_doc_id_length() -> None:
-    assert len(_stable_doc_id("id:anything")) == 16
-
-
-def test_normalize_file_metadata_source_id_from_dropbox_id() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    expected = hashlib.sha256("id:abc123XYZ".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-def test_normalize_file_metadata_title_contains_path() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "/Docs/report.pdf" in doc.title
-    assert "file" in doc.title
-
-
-def test_normalize_file_metadata_content_has_name() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "report.pdf" in doc.content
-
-
-def test_normalize_file_metadata_content_has_size() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "204800" in doc.content
-
-
-def test_normalize_file_metadata_content_has_modified() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "2024-03-15T11:00:00Z" in doc.content
-
-
-def test_normalize_file_metadata_source_url_contains_path() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "dropbox.com" in doc.source_url
-    assert "/Docs/report.pdf" in doc.source_url
-
-
-def test_normalize_file_metadata_type_in_metadata() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.metadata["type"] == "dropbox_file"
-
-
-def test_normalize_file_metadata_dropbox_id_in_metadata() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.metadata["dropbox_id"] == "id:abc123XYZ"
-
-
-def test_normalize_file_metadata_rev_in_metadata() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.metadata["rev"] == "0123456789abcdef"
-
-
-def test_normalize_folder_entry() -> None:
-    doc = normalize_file_metadata(SAMPLE_FOLDER_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "folder" in doc.title
-    assert doc.metadata["type"] == "dropbox_folder"
-
-
-def test_normalize_folder_source_id_from_id() -> None:
-    doc = normalize_file_metadata(SAMPLE_FOLDER_ENTRY, CONNECTOR_ID, TENANT_ID)
-    expected = hashlib.sha256("id:folderXYZ".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-def test_normalize_folder_no_size_in_content() -> None:
-    doc = normalize_file_metadata(SAMPLE_FOLDER_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert "Size:" not in doc.content
-
-
-def test_normalize_file_missing_id_falls_back_to_path_lower() -> None:
-    entry = {
-        ".tag": "file",
-        "name": "nokey.txt",
-        "path_lower": "/nokey.txt",
-        "path_display": "/nokey.txt",
-        "size": 0,
-    }
-    doc = normalize_file_metadata(entry, CONNECTOR_ID, TENANT_ID)
-    expected = hashlib.sha256("/nokey.txt".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-def test_normalize_file_connector_and_tenant() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.connector_id == CONNECTOR_ID
-    assert doc.tenant_id == TENANT_ID
-
-
-def test_normalize_file_metadata_tag_in_metadata() -> None:
-    doc = normalize_file_metadata(SAMPLE_FILE_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.metadata["tag"] == "file"
-
-
-def test_normalize_folder_tag_in_metadata() -> None:
-    doc = normalize_file_metadata(SAMPLE_FOLDER_ENTRY, CONNECTOR_ID, TENANT_ID)
-    assert doc.metadata["tag"] == "folder"
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 5. RETRY LOGIC
-# ════════════════════════════════════════════════════════════════════════
-
-
+@respx.mock
 @pytest.mark.asyncio
-async def test_retry_succeeds_first_attempt() -> None:
-    fn = AsyncMock(return_value={"ok": True})
-    result = await with_retry(fn, max_retries=3, base_delay=0)
-    assert result == {"ok": True}
-    assert fn.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_retry_retries_on_dropbox_error() -> None:
-    fn = AsyncMock(side_effect=[DropboxNetworkError("timeout"), {"ok": True}])
-    result = await with_retry(fn, max_retries=3, base_delay=0)
-    assert result == {"ok": True}
-    assert fn.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_retry_auth_error_not_retried() -> None:
-    fn = AsyncMock(side_effect=DropboxAuthError("auth fail", 401))
-    with pytest.raises(DropboxAuthError):
-        await with_retry(fn, max_retries=3, base_delay=0)
-    assert fn.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_retry_exhausted_raises_last_exception() -> None:
-    fn = AsyncMock(side_effect=DropboxNetworkError("timeout"))
-    with pytest.raises(DropboxNetworkError):
-        await with_retry(fn, max_retries=2, base_delay=0)
-    assert fn.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_retry_rate_limit_uses_retry_after() -> None:
-    fn = AsyncMock(
-        side_effect=[DropboxRateLimitError("rl", retry_after=0), {"done": True}]
-    )
-    with patch("helpers.utils.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        result = await with_retry(fn, max_retries=3, base_delay=0)
-    assert result == {"done": True}
-    mock_sleep.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_retry_with_args_and_kwargs() -> None:
-    fn = AsyncMock(return_value="result")
-    result = await with_retry(fn, "arg1", max_retries=1, base_delay=0, kwarg1="val")
-    fn.assert_called_once_with("arg1", kwarg1="val")
-    assert result == "result"
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 6. install()
-# ════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_install_missing_credentials() -> None:
-    connector = DropboxConnector(config={})
-    result = await connector.install()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-    assert "required" in result.message
-
-
-@pytest.mark.asyncio
-async def test_install_missing_app_secret() -> None:
-    connector = DropboxConnector(config={"app_key": VALID_APP_KEY})
-    result = await connector.install()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-
-@pytest.mark.asyncio
-async def test_install_app_creds_only_no_token(app_creds_only: DropboxConnector) -> None:
-    """app_key + app_secret but no access_token → install succeeds, prompts authorize()."""
-    result = await app_creds_only.install()
-    assert result.health == ConnectorHealth.HEALTHY
-    assert result.auth_status == AuthStatus.CONNECTED
-    assert "authorize" in result.message.lower()
-
-
-@pytest.mark.asyncio
-async def test_install_success_with_access_token() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
-    )
-    with patch("connector.DropboxHTTPClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_current_account = AsyncMock(return_value=SAMPLE_ACCOUNT)
-        instance.aclose = AsyncMock()
-        result = await connector.install()
-    assert result.health == ConnectorHealth.HEALTHY
-    assert result.auth_status == AuthStatus.CONNECTED
-
-
-@pytest.mark.asyncio
-async def test_install_invalid_access_token() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": "bad-token",
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
-    )
-    with patch("connector.DropboxHTTPClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_current_account = AsyncMock(
-            side_effect=DropboxAuthError("Invalid token", 401)
+async def test_sync_single_page_completed(connector, mocker):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "entries": [SAMPLE_FILE_ENTRY, SAMPLE_FOLDER_ENTRY],
+                "cursor": "c",
+                "has_more": False,
+            },
         )
-        instance.aclose = AsyncMock()
-        result = await connector.install()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
-
-
-@pytest.mark.asyncio
-async def test_install_exception_fallback() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
     )
-    with patch("connector.DropboxHTTPClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_current_account = AsyncMock(side_effect=Exception("unexpected"))
-        instance.aclose = AsyncMock()
-        result = await connector.install()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.FAILED
-
-
-@pytest.mark.asyncio
-async def test_install_sets_http_client_on_success() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
+    ingest = mocker.patch.object(
+        DropboxConnector, "ingest_document", new_callable=mocker.AsyncMock,
     )
-    with patch("connector.DropboxHTTPClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_current_account = AsyncMock(return_value=SAMPLE_ACCOUNT)
-        instance.aclose = AsyncMock()
-        await connector.install()
-    assert connector.http_client is not None
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 7. authorize()
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_authorize_returns_string() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET})
-    url = c.authorize()
-    assert isinstance(url, str)
-    assert url.startswith("https://www.dropbox.com/oauth2/authorize")
-
-
-def test_authorize_contains_client_id() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET})
-    url = c.authorize()
-    assert VALID_APP_KEY in url
-
-
-def test_authorize_contains_response_type_code() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET})
-    url = c.authorize()
-    assert "response_type=code" in url
-
-
-def test_authorize_contains_offline_access() -> None:
-    c = DropboxConnector(config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET})
-    url = c.authorize()
-    assert "token_access_type=offline" in url
-
-
-def test_authorize_with_redirect_uri() -> None:
-    c = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "redirect_uri": "https://myapp.com/callback",
-        }
-    )
-    url = c.authorize()
-    assert "redirect_uri" in url
-    assert "myapp.com" in url
-
-
-def test_authorize_without_redirect_uri_no_param() -> None:
-    c = DropboxConnector(
-        config={"app_key": VALID_APP_KEY, "app_secret": VALID_APP_SECRET}
-    )
-    url = c.authorize()
-    assert "redirect_uri" not in url
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 8. health_check()
-# ════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_health_check_missing_credentials() -> None:
-    connector = DropboxConnector(config={})
-    result = await connector.health_check()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-
-SAMPLE_SPACE_USAGE: dict = {
-    "used": 1073741824,
-    "allocation": {".tag": "individual", "allocated": 2147483648},
-}
-
-
-def _make_healthy_client() -> MagicMock:
-    """Return a mock HTTP client whose account+space methods are all AsyncMock."""
-    instance = MagicMock()
-    instance.get_current_account = AsyncMock(return_value=SAMPLE_ACCOUNT)
-    instance.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    instance.aclose = AsyncMock()
-    return instance
-
-
-@pytest.mark.asyncio
-async def test_health_check_healthy(authed: DropboxConnector) -> None:
-    authed._make_client = _make_healthy_client
-    result = await authed.health_check()
-    assert result.health == ConnectorHealth.HEALTHY
-    assert result.auth_status == AuthStatus.CONNECTED
-    assert result.display_name == "Jane Doe"
-    assert result.email == "jane.doe@example.com"
-
-
-@pytest.mark.asyncio
-async def test_health_check_message_reachable(authed: DropboxConnector) -> None:
-    authed._make_client = _make_healthy_client
-    result = await authed.health_check()
-    assert "reachable" in result.message
-
-
-@pytest.mark.asyncio
-async def test_health_check_auth_error(authed: DropboxConnector) -> None:
-    instance = MagicMock()
-    instance.get_current_account = AsyncMock(
-        side_effect=DropboxAuthError("Invalid token", 401)
-    )
-    instance.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    instance.aclose = AsyncMock()
-    authed._make_client = lambda: instance
-    result = await authed.health_check()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.INVALID_CREDENTIALS
-
-
-@pytest.mark.asyncio
-async def test_health_check_network_error(authed: DropboxConnector) -> None:
-    instance = MagicMock()
-    instance.get_current_account = AsyncMock(
-        side_effect=DropboxNetworkError("timeout")
-    )
-    instance.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    instance.aclose = AsyncMock()
-    authed._make_client = lambda: instance
-    result = await authed.health_check()
-    assert result.health in (ConnectorHealth.DEGRADED, ConnectorHealth.OFFLINE)
-    assert result.auth_status == AuthStatus.FAILED
-
-
-@pytest.mark.asyncio
-async def test_health_check_generic_exception(authed: DropboxConnector) -> None:
-    instance = MagicMock()
-    instance.get_current_account = AsyncMock(side_effect=RuntimeError("boom"))
-    instance.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    instance.aclose = AsyncMock()
-    authed._make_client = lambda: instance
-    result = await authed.health_check()
-    assert result.health == ConnectorHealth.DEGRADED
-    assert result.auth_status == AuthStatus.FAILED
-
-
-@pytest.mark.asyncio
-async def test_health_check_increments_circuit_breaker(authed: DropboxConnector) -> None:
-    instance = MagicMock()
-    instance.get_current_account = AsyncMock(
-        side_effect=DropboxNetworkError("timeout")
-    )
-    instance.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    instance.aclose = AsyncMock()
-    authed._make_client = lambda: instance
-    await authed.health_check()
-    assert authed._circuit_breaker._failures >= 1
-
-
-@pytest.mark.asyncio
-async def test_health_check_resets_circuit_breaker(authed: DropboxConnector) -> None:
-    for _ in range(3):
-        authed._circuit_breaker.on_failure()
-    authed._make_client = _make_healthy_client
-    await authed.health_check()
-    assert authed._circuit_breaker._failures == 0
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 9. sync()
-# ════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_sync_empty(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_EMPTY)
-    result = await authed.sync(full=True)
-    assert result.status == SyncStatus.COMPLETED
-    assert result.documents_found == 0
-    assert result.documents_synced == 0
-
-
-@pytest.mark.asyncio
-async def test_sync_with_data(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_PAGE_SINGLE)
-    result = await authed.sync(full=True, kb_id="kb_test")
+    result = await connector.sync()
     assert result.status == SyncStatus.COMPLETED
     assert result.documents_found == 2
     assert result.documents_synced == 2
     assert result.documents_failed == 0
+    assert ingest.await_count == 2
 
 
+@respx.mock
 @pytest.mark.asyncio
-async def test_sync_pagination_follows_has_more(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_PAGE1)
-    authed.http_client.list_folder_continue = AsyncMock(return_value=LIST_FOLDER_PAGE2)
-    result = await authed.sync(full=True)
+async def test_sync_pagination(connector, mocker):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(
+            200,
+            json={"entries": [SAMPLE_FILE_ENTRY], "cursor": "c1", "has_more": True},
+        )
+    )
+    respx.post(f"{API_BASE}/files/list_folder/continue").mock(
+        return_value=httpx.Response(
+            200,
+            json={"entries": [SAMPLE_FOLDER_ENTRY], "cursor": "c2", "has_more": False},
+        )
+    )
+    mocker.patch.object(DropboxConnector, "ingest_document", new_callable=mocker.AsyncMock)
+    result = await connector.sync()
     assert result.documents_found == 2
-    authed.http_client.list_folder_continue.assert_called_once_with("cursor_page1")
-
-
-@pytest.mark.asyncio
-async def test_sync_multi_page_continues_until_done(authed: DropboxConnector) -> None:
-    page_mid = {"entries": [SAMPLE_FILE_ENTRY], "cursor": "c_mid", "has_more": True}
-    authed.http_client.list_folder = AsyncMock(return_value=page_mid)
-    authed.http_client.list_folder_continue = AsyncMock(
-        side_effect=[
-            {"entries": [SAMPLE_FOLDER_ENTRY], "cursor": "c2", "has_more": True},
-            {"entries": [SAMPLE_FILE_ENTRY], "cursor": "c3", "has_more": False},
-        ]
-    )
-    result = await authed.sync(full=True)
-    assert result.documents_found == 3
-    assert authed.http_client.list_folder_continue.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_sync_normalize_failure_increments_failed(authed: DropboxConnector) -> None:
-    bad_entry: dict = {".tag": None, "name": None, "path_lower": None, "path_display": None, "id": None}
-    authed.http_client.list_folder = AsyncMock(
-        return_value={"entries": [bad_entry], "cursor": "c", "has_more": False}
-    )
-    result = await authed.sync(full=True)
-    # normalize_file_metadata may or may not raise; if it doesn't it still counts
-    assert result.documents_found == 1
-    assert result.status in (SyncStatus.COMPLETED, SyncStatus.PARTIAL)
-
-
-@pytest.mark.asyncio
-async def test_sync_status_completed_when_no_failures(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_PAGE_SINGLE)
-    result = await authed.sync(full=True)
     assert result.status == SyncStatus.COMPLETED
 
 
+@respx.mock
 @pytest.mark.asyncio
-async def test_sync_fetch_error_returns_failed(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(
-        side_effect=DropboxError("API gone", 500)
+async def test_sync_empty_returns_completed(connector):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(
+            200, json={"entries": [], "cursor": "", "has_more": False}
+        )
     )
-    result = await authed.sync(full=True)
+    result = await connector.sync()
+    assert result.status == SyncStatus.COMPLETED
+    assert result.documents_found == 0
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_sync_fetch_failure_returns_failed(connector, no_retry_sleep):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(401, json={"error_summary": "expired/"})
+    )
+    result = await connector.sync()
     assert result.status == SyncStatus.FAILED
+    assert result.documents_synced == 0
 
 
+@respx.mock
 @pytest.mark.asyncio
-async def test_sync_creates_http_client_if_none() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
+async def test_sync_partial_when_ingest_fails(connector, mocker):
+    respx.post(f"{API_BASE}/files/list_folder").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "entries": [SAMPLE_FILE_ENTRY, SAMPLE_FOLDER_ENTRY],
+                "cursor": "c",
+                "has_more": False,
+            },
+        )
     )
-    mock_client = MagicMock()
-    mock_client.list_folder = AsyncMock(return_value=LIST_FOLDER_EMPTY)
-    connector._make_client = lambda: mock_client
-    result = await connector.sync(full=True)
-    assert result.status == SyncStatus.COMPLETED
+
+    call_count = {"n": 0}
+
+    async def _ingest(self, doc, *, kb_id="", webhook_url=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("kb down")
+
+    mocker.patch.object(DropboxConnector, "ingest_document", _ingest)
+    result = await connector.sync()
+    assert result.status == SyncStatus.PARTIAL
+    assert result.documents_synced == 1
+    assert result.documents_failed == 1
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# disconnect()
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@respx.mock
 @pytest.mark.asyncio
-async def test_sync_counts_all_entries(authed: DropboxConnector) -> None:
-    page = {
-        "entries": [SAMPLE_FILE_ENTRY, SAMPLE_FOLDER_ENTRY, SAMPLE_FILE_ENTRY],
-        "cursor": "c",
-        "has_more": False,
-    }
-    authed.http_client.list_folder = AsyncMock(return_value=page)
-    result = await authed.sync(full=True)
-    assert result.documents_found == 3
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 10. list_folder / list_folder_continue / get_metadata / search_files
-# ════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_list_folder(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_PAGE_SINGLE)
-    result = await authed.list_folder(path="")
-    assert len(result["entries"]) == 2
-
-
-@pytest.mark.asyncio
-async def test_list_folder_with_recursive(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder = AsyncMock(return_value=LIST_FOLDER_PAGE_SINGLE)
-    await authed.list_folder(path="/docs", recursive=True)
-    authed.http_client.list_folder.assert_called_once_with(path="/docs", recursive=True)
-
-
-@pytest.mark.asyncio
-async def test_list_folder_continue(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder_continue = AsyncMock(return_value=LIST_FOLDER_PAGE2)
-    result = await authed.list_folder_continue("cursor_page1")
-    assert result["entries"][0][".tag"] == "folder"
-
-
-@pytest.mark.asyncio
-async def test_list_folder_continue_passes_cursor(authed: DropboxConnector) -> None:
-    authed.http_client.list_folder_continue = AsyncMock(return_value=LIST_FOLDER_PAGE2)
-    await authed.list_folder_continue("cursor_xyz")
-    authed.http_client.list_folder_continue.assert_called_once_with("cursor_xyz")
-
-
-@pytest.mark.asyncio
-async def test_get_metadata(authed: DropboxConnector) -> None:
-    authed.http_client.get_metadata = AsyncMock(return_value=SAMPLE_FILE_ENTRY)
-    result = await authed.get_metadata("/Docs/report.pdf")
-    assert result["name"] == "report.pdf"
-
-
-@pytest.mark.asyncio
-async def test_get_metadata_passes_path(authed: DropboxConnector) -> None:
-    authed.http_client.get_metadata = AsyncMock(return_value=SAMPLE_FILE_ENTRY)
-    await authed.get_metadata("/Docs/report.pdf")
-    authed.http_client.get_metadata.assert_called_once_with("/Docs/report.pdf")
-
-
-@pytest.mark.asyncio
-async def test_search_files(authed: DropboxConnector) -> None:
-    search_response = {
-        "matches": [{"metadata": {"metadata": SAMPLE_FILE_ENTRY}}],
-        "has_more": False,
-    }
-    authed.http_client.search_files = AsyncMock(return_value=search_response)
-    result = await authed.search_files(query="report", max_results=50)
-    assert len(result["matches"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_search_files_passes_max_results(authed: DropboxConnector) -> None:
-    authed.http_client.search_files = AsyncMock(return_value={"matches": [], "has_more": False})
-    await authed.search_files(query="doc", max_results=25)
-    authed.http_client.search_files.assert_called_once_with("doc", max_results=25)
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 11. aclose / context manager
-# ════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_aclose_calls_http_client_aclose(authed: DropboxConnector) -> None:
-    mock_aclose = AsyncMock()
-    authed.http_client.aclose = mock_aclose
-    await authed.aclose()
-    mock_aclose.assert_called_once()
-    assert authed.http_client is None
-
-
-@pytest.mark.asyncio
-async def test_aclose_noop_when_no_client() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        }
+async def test_disconnect_revokes_and_clears(connector, mocker):
+    respx.post(f"{API_BASE}/auth/token/revoke").mock(
+        return_value=httpx.Response(200, json={})
     )
-    await connector.aclose()
-    assert connector.http_client is None
+    clear = mocker.patch.object(DropboxConnector, "clear_token", new_callable=mocker.AsyncMock)
+    status = await connector.disconnect()
+    assert status.auth_status == AuthStatus.UNAUTHENTICATED
+    clear.assert_awaited_once()
 
 
+@respx.mock
 @pytest.mark.asyncio
-async def test_context_manager() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
+async def test_disconnect_swallows_auth_error(connector, mocker):
+    """Already-invalid token must NOT prevent local cleanup."""
+    respx.post(f"{API_BASE}/auth/token/revoke").mock(
+        return_value=httpx.Response(401, json={"error_summary": "expired/"})
     )
-    mock_client = MagicMock()
-    mock_client.aclose = AsyncMock()
-    connector.http_client = mock_client
-    async with connector as c:
-        assert c is connector
-    mock_client.aclose.assert_called_once()
+    clear = mocker.patch.object(DropboxConnector, "clear_token", new_callable=mocker.AsyncMock)
+    status = await connector.disconnect()
+    assert status.auth_status == AuthStatus.UNAUTHENTICATED
+    clear.assert_awaited_once()
 
 
-# ════════════════════════════════════════════════════════════════════════
-# 12. CircuitBreaker
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# Helpers — normalizer + utils
+# ═══════════════════════════════════════════════════════════════════════════
 
 
-def test_circuit_breaker_starts_closed() -> None:
-    cb = CircuitBreaker(failure_threshold=5)
-    assert cb.state == "closed"
-    assert not cb.is_open
-
-
-def test_circuit_breaker_opens_on_threshold() -> None:
-    cb = CircuitBreaker(failure_threshold=5)
-    for _ in range(5):
-        cb.on_failure()
-    assert cb.state == "open"
-
-
-def test_circuit_breaker_closes_on_success() -> None:
-    cb = CircuitBreaker(failure_threshold=5)
-    for _ in range(5):
-        cb.on_failure()
-    cb.on_success()
-    assert cb.state == "closed"
-    assert cb._failures == 0
-
-
-def test_circuit_breaker_is_open_property() -> None:
-    cb = CircuitBreaker(failure_threshold=3)
-    assert not cb.is_open
-    for _ in range(3):
-        cb.on_failure()
-    assert cb.is_open
-
-
-def test_circuit_breaker_half_open_after_timeout() -> None:
-    import time
-    cb = CircuitBreaker(failure_threshold=1, recovery_timeout_s=0.01)
-    cb.on_failure()
-    assert cb.state == "open"
-    time.sleep(0.05)
-    assert cb.state == "half-open"
-
-
-def test_circuit_breaker_failure_below_threshold_stays_closed() -> None:
-    cb = CircuitBreaker(failure_threshold=5)
-    for _ in range(4):
-        cb.on_failure()
-    assert cb.state == "closed"
-
-
-def test_circuit_breaker_custom_recovery_timeout() -> None:
-    cb = CircuitBreaker(failure_threshold=1, recovery_timeout_s=999.0)
-    cb.on_failure()
-    assert cb.state == "open"
-    assert cb.state == "open"
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 13. _ensure_client
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_ensure_client_creates_if_none() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        }
-    )
-    mock_client = MagicMock()
-    connector._make_client = lambda: mock_client
-    client = connector._ensure_client()
-    assert client is mock_client
-    assert connector.http_client is mock_client
-
-
-def test_ensure_client_returns_existing() -> None:
-    connector = DropboxConnector(
-        config={
-            "app_key": VALID_APP_KEY,
-            "app_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        }
-    )
-    existing = MagicMock()
-    connector.http_client = existing
-    client = connector._ensure_client()
-    assert client is existing
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 14. client_id / client_secret config keys (spec field names)
-# ════════════════════════════════════════════════════════════════════════
-
-
-def test_client_id_config_key_maps_to_app_key() -> None:
-    """Spec uses client_id/client_secret — connector must accept them."""
-    c = DropboxConnector(config={"client_id": "cid123", "client_secret": "csec456"})
-    assert c._app_key == "cid123"
-    assert c._app_secret == "csec456"
-
-
-def test_client_id_takes_precedence_over_app_key() -> None:
-    c = DropboxConnector(
-        config={"client_id": "new_id", "app_key": "old_key", "client_secret": "sec"}
-    )
-    assert c._app_key == "new_id"
-
-
-def test_client_secret_takes_precedence_over_app_secret() -> None:
-    c = DropboxConnector(
-        config={"client_id": "cid", "client_secret": "new_sec", "app_secret": "old_sec"}
-    )
-    assert c._app_secret == "new_sec"
-
-
-def test_refresh_token_stored_from_config() -> None:
-    c = DropboxConnector(config={"refresh_token": "rt_refresh123"})
-    assert c._refresh_token == "rt_refresh123"
-
-
-def test_account_id_stored_from_config() -> None:
-    c = DropboxConnector(config={"account_id": "dbid:AAHsample"})
-    assert c._account_id == "dbid:AAHsample"
-
-
-@pytest.mark.asyncio
-async def test_install_with_client_id_and_client_secret() -> None:
-    """install() must accept client_id/client_secret field names."""
-    connector = DropboxConnector(
-        config={
-            "client_id": VALID_APP_KEY,
-            "client_secret": VALID_APP_SECRET,
-            "access_token": VALID_ACCESS_TOKEN,
-        },
-        connector_id=CONNECTOR_ID,
-        tenant_id=TENANT_ID,
-    )
-    with patch("connector.DropboxHTTPClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_current_account = AsyncMock(return_value=SAMPLE_ACCOUNT)
-        instance.aclose = AsyncMock()
-        result = await connector.install()
-    assert result.health == ConnectorHealth.HEALTHY
-    assert result.auth_status == AuthStatus.CONNECTED
-
-
-@pytest.mark.asyncio
-async def test_install_missing_client_id() -> None:
-    connector = DropboxConnector(config={"client_secret": VALID_APP_SECRET})
-    result = await connector.install()
-    assert result.health == ConnectorHealth.OFFLINE
-    assert result.auth_status == AuthStatus.MISSING_CREDENTIALS
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 15. normalize_file / normalize_folder (spec separate functions)
-# ════════════════════════════════════════════════════════════════════════
-
-from helpers.utils import normalize_file, normalize_folder
-
-
-def test_normalize_file_source_is_dropbox() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert doc.metadata["source"] == "dropbox"
-
-
-def test_normalize_file_type_is_file() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert doc.metadata["type"] == "file"
-
-
-def test_normalize_file_id_uses_file_prefix() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    expected = hashlib.sha256("file:id:abc123XYZ".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-def test_normalize_file_id_length_is_16() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert len(doc.source_id) == 16
-
-
-def test_normalize_file_title_contains_path() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert "/Docs/report.pdf" in doc.title
-
-
-def test_normalize_file_content_has_name() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
+def test_normalize_file_full():
+    doc = normalize_file(SAMPLE_FILE_ENTRY, "conn-1", "tenant-A")
+    assert isinstance(doc, NormalizedDocument)
+    assert doc.id == "tenant-A_id:abc123"
+    assert doc.source_id == "id:abc123"
+    assert doc.title == "report.pdf"
     assert "report.pdf" in doc.content
+    assert doc.source == "dropbox"
+    assert doc.metadata["kind"] == "dropbox.file"
+    assert doc.metadata["size"] == 204800
+    assert doc.metadata["rev"] == "0123456789abcdef"
+    assert doc.source_url.startswith("https://www.dropbox.com/home")
 
 
-def test_normalize_file_content_has_size() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert "204800" in doc.content
+def test_normalize_folder_full():
+    doc = normalize_folder(SAMPLE_FOLDER_ENTRY, "conn-1", "tenant-A")
+    assert doc.id == "tenant-A_id:folderXYZ"
+    assert doc.metadata["kind"] == "dropbox.folder"
+    assert doc.content.startswith("Folder:")
 
 
-def test_normalize_file_content_has_server_modified() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert "2024-03-15T11:00:00Z" in doc.content
+def test_normalize_entry_dispatches_by_tag():
+    f = normalize_entry(SAMPLE_FILE_ENTRY, "c", "t")
+    d = normalize_entry(SAMPLE_FOLDER_ENTRY, "c", "t")
+    assert f.metadata["kind"] == "dropbox.file"
+    assert d.metadata["kind"] == "dropbox.folder"
 
 
-def test_normalize_file_metadata_id_field() -> None:
-    doc = normalize_file(SAMPLE_FILE_ENTRY)
-    assert "id" in doc.metadata
-    assert len(doc.metadata["id"]) == 16
+def test_normalize_file_minimal_entry():
+    minimal = {".tag": "file", "name": "x"}
+    doc = normalize_file(minimal, "c", "t")
+    # source_id falls back to name when both id and path_lower are absent.
+    assert doc.source_id == "x"
+    assert doc.title == "x"
 
 
-def test_normalize_folder_source_is_dropbox() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    assert doc.metadata["source"] == "dropbox"
+def test_normalize_dropbox_path_root_and_relative():
+    assert normalize_dropbox_path("") == ""
+    assert normalize_dropbox_path("/") == ""
+    assert normalize_dropbox_path("foo") == "/foo"
+    assert normalize_dropbox_path("/foo") == "/foo"
 
 
-def test_normalize_folder_type_is_folder() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    assert doc.metadata["type"] == "folder"
+def test_parse_dt_iso():
+    dt = parse_dt("2024-03-15T10:00:00Z")
+    assert isinstance(dt, datetime)
+    assert dt.year == 2024
 
 
-def test_normalize_folder_id_uses_folder_prefix() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    expected = hashlib.sha256("folder:id:folderXYZ".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
+def test_parse_dt_invalid_returns_none():
+    assert parse_dt("not-a-date") is None
+    assert parse_dt(None) is None
+    assert parse_dt("") is None
 
 
-def test_normalize_folder_title_contains_path() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    assert "/Docs" in doc.title
+def test_safe_get_walks_nested():
+    d = {"a": {"b": {"c": 1}}}
+    assert safe_get(d, "a", "b", "c") == 1
+    assert safe_get(d, "a", "x", default="fallback") == "fallback"
+    assert safe_get(None, "a", default="fb") == "fb"
 
 
-def test_normalize_folder_no_size_in_content() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    assert "Size:" not in doc.content
-
-
-def test_normalize_folder_metadata_id_field() -> None:
-    doc = normalize_folder(SAMPLE_FOLDER_ENTRY)
-    assert "id" in doc.metadata
-    assert len(doc.metadata["id"]) == 16
-
-
-def test_normalize_file_fallback_when_no_id() -> None:
-    entry = {".tag": "file", "name": "x.txt", "path_lower": "/x.txt", "path_display": "/x.txt", "size": 0}
-    doc = normalize_file(entry)
-    expected = hashlib.sha256("file:/x.txt".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-def test_normalize_folder_fallback_when_no_id() -> None:
-    entry = {".tag": "folder", "name": "empty", "path_lower": "/empty", "path_display": "/empty"}
-    doc = normalize_folder(entry)
-    expected = hashlib.sha256("folder:/empty".encode()).hexdigest()[:16]
-    assert doc.source_id == expected
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 16. list_shared_links / get_space_usage connector methods
-# ════════════════════════════════════════════════════════════════════════
+def test_utcnow_is_timezone_aware():
+    now = utcnow()
+    assert now.tzinfo is not None
 
 
 @pytest.mark.asyncio
-async def test_list_shared_links_no_path(authed: DropboxConnector) -> None:
-    response = {"links": [], "has_more": False}
-    authed.http_client.list_shared_links = AsyncMock(return_value=response)
-    result = await authed.list_shared_links()
-    assert result == response
-    authed.http_client.list_shared_links.assert_called_once_with(path=None)
+async def test_with_retry_returns_on_first_success():
+    calls = {"n": 0}
+
+    async def ok():
+        calls["n"] += 1
+        return "value"
+
+    out = await with_retry(ok, max_retries=3, base_delay=0)
+    assert out == "value"
+    assert calls["n"] == 1
 
 
 @pytest.mark.asyncio
-async def test_list_shared_links_with_path(authed: DropboxConnector) -> None:
-    response = {"links": [{"url": "https://www.dropbox.com/s/abc/file.pdf?dl=0"}], "has_more": False}
-    authed.http_client.list_shared_links = AsyncMock(return_value=response)
-    result = await authed.list_shared_links(path="/Docs/report.pdf")
-    assert len(result["links"]) == 1
-    authed.http_client.list_shared_links.assert_called_once_with(path="/Docs/report.pdf")
+async def test_with_retry_eventually_raises():
+    async def boom():
+        raise RuntimeError("fail")
+
+    with pytest.raises(RuntimeError):
+        await with_retry(boom, max_retries=2, base_delay=0)
 
 
-@pytest.mark.asyncio
-async def test_get_space_usage_connector(authed: DropboxConnector) -> None:
-    authed.http_client.get_space_usage = AsyncMock(return_value=SAMPLE_SPACE_USAGE)
-    result = await authed.get_space_usage()
-    assert result["used"] == 1073741824
-    authed.http_client.get_space_usage.assert_called_once()
+# ═══════════════════════════════════════════════════════════════════════════
+# Exception identity
+# ═══════════════════════════════════════════════════════════════════════════
 
 
-# ════════════════════════════════════════════════════════════════════════
-# 17. HTTP client new methods (mocked via respx / AsyncMock)
-# ════════════════════════════════════════════════════════════════════════
-
-import respx
-import httpx as _httpx
-
-from client.http_client import DropboxHTTPClient
-
-
-@pytest.mark.asyncio
-async def test_http_client_get_space_usage() -> None:
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/users/get_space_usage").mock(
-            return_value=_httpx.Response(200, json=SAMPLE_SPACE_USAGE)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.get_space_usage()
-        await client.aclose()
-    assert result["used"] == 1073741824
+def test_exception_hierarchy_rooted_at_dropbox_error():
+    for cls in (
+        DropboxAuthError,
+        DropboxBadRequestError,
+        DropboxConflictError,
+        DropboxNotFoundError,
+        DropboxRateLimitError,
+        DropboxServerError,
+        DropboxNetworkError,
+    ):
+        assert issubclass(cls, DropboxError)
 
 
-@pytest.mark.asyncio
-async def test_http_client_list_shared_links_no_path() -> None:
-    response_body = {"links": [], "has_more": False}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/sharing/list_shared_links").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.list_shared_links()
-        await client.aclose()
-    assert result == response_body
+def test_rate_limit_error_carries_retry_after():
+    exc = DropboxRateLimitError("rl", retry_after_s=12.0)
+    assert exc.retry_after_s == 12.0
+    assert exc.status_code == 429
 
 
-@pytest.mark.asyncio
-async def test_http_client_list_shared_links_with_path() -> None:
-    response_body = {"links": [{"url": "https://dropbox.com/s/abc"}], "has_more": False}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        route = mock.post("/sharing/list_shared_links").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.list_shared_links(path="/Docs")
-        await client.aclose()
-    assert len(result["links"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_http_client_list_team_members() -> None:
-    response_body = {"members": [], "has_more": False, "cursor": ""}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/team/members/list_v2").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.list_team_members()
-        await client.aclose()
-    assert result == response_body
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_auth_error_on_401() -> None:
-    err_body = {"error_summary": "invalid_access_token/...", "error": {".tag": "invalid_access_token"}}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/users/get_current_account").mock(
-            return_value=_httpx.Response(401, json=err_body)
-        )
-        client = DropboxHTTPClient(access_token="bad_token")
-        with pytest.raises(DropboxAuthError) as exc_info:
-            await client.get_current_account()
-        await client.aclose()
-    assert exc_info.value.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_auth_error_on_403() -> None:
-    err_body = {"error_summary": "forbidden/...", "error": {".tag": "forbidden"}}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/users/get_space_usage").mock(
-            return_value=_httpx.Response(403, json=err_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises(DropboxAuthError) as exc_info:
-            await client.get_space_usage()
-        await client.aclose()
-    assert exc_info.value.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_not_found_on_409_path_not_found() -> None:
-    err_body = {
-        "error_summary": "path/not_found/...",
-        "error": {".tag": "path", "path": {".tag": "not_found"}},
-    }
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/files/get_metadata").mock(
-            return_value=_httpx.Response(409, json=err_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises((DropboxNotFoundError, DropboxError)):
-            await client.get_metadata("/missing/file.pdf")
-        await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_rate_limit_on_429() -> None:
-    err_body = {"error_summary": "too_many_requests/...", "error": {".tag": "too_many_requests"}}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/files/list_folder").mock(
-            return_value=_httpx.Response(
-                429, json=err_body, headers={"Retry-After": "5"}
-            )
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises(DropboxRateLimitError) as exc_info:
-            await client.list_folder()
-        await client.aclose()
-    assert exc_info.value.retry_after == 5.0
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_dropbox_error_on_5xx() -> None:
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/files/list_folder").mock(
-            return_value=_httpx.Response(500, json={"error_summary": "internal_error"})
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises(DropboxError) as exc_info:
-            await client.list_folder()
-        await client.aclose()
-    assert exc_info.value.status_code == 500
-
-
-@pytest.mark.asyncio
-async def test_http_client_raises_network_error_on_timeout() -> None:
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/users/get_current_account").mock(
-            side_effect=_httpx.TimeoutException("timed out")
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises(DropboxNetworkError):
-            await client.get_current_account()
-        await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_http_client_list_folder_uses_post() -> None:
-    response_body = {"entries": [], "cursor": "c", "has_more": False}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        route = mock.post("/files/list_folder").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        await client.list_folder(path="", recursive=True, limit=100)
-        await client.aclose()
-    # Dropbox API v2 always uses POST — verify the route was matched (POST only)
-    assert route.called
-
-
-@pytest.mark.asyncio
-async def test_http_client_search_v2_uses_post() -> None:
-    response_body = {"matches": [], "has_more": False}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        route = mock.post("/files/search_v2").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        await client.search_files(query="test", max_results=50)
-        await client.aclose()
-    assert route.called
-
-
-@pytest.mark.asyncio
-async def test_http_client_get_metadata_uses_post() -> None:
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        route = mock.post("/files/get_metadata").mock(
-            return_value=_httpx.Response(200, json=SAMPLE_FILE_ENTRY)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        await client.get_metadata("/Docs/report.pdf")
-        await client.aclose()
-    assert route.called
-
-
-@pytest.mark.asyncio
-async def test_http_client_list_folder_continue_passes_cursor() -> None:
-    response_body = {"entries": [SAMPLE_FOLDER_ENTRY], "cursor": "c2", "has_more": False}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        route = mock.post("/files/list_folder/continue").mock(
-            return_value=_httpx.Response(200, json=response_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.list_folder_continue("cursor_abc")
-        await client.aclose()
-    assert route.called
-    assert result["entries"][0][".tag"] == "folder"
-
-
-@pytest.mark.asyncio
-async def test_http_client_empty_200_returns_empty_dict() -> None:
-    """Empty 200 body should return {} without raising."""
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/users/get_current_account").mock(
-            return_value=_httpx.Response(200, content=b"")
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        result = await client.get_current_account()
-        await client.aclose()
-    assert result == {}
-
-
-@pytest.mark.asyncio
-async def test_http_client_other_4xx_raises_dropbox_error() -> None:
-    """Non-401/403/409/429 4xx should raise DropboxError."""
-    err_body = {"error_summary": "bad_request", "error": {".tag": "bad_input"}}
-    with respx.mock(base_url="https://api.dropboxapi.com/2") as mock:
-        mock.post("/files/get_metadata").mock(
-            return_value=_httpx.Response(400, json=err_body)
-        )
-        client = DropboxHTTPClient(access_token=VALID_ACCESS_TOKEN)
-        with pytest.raises(DropboxError) as exc_info:
-            await client.get_metadata("/bad")
-        await client.aclose()
-    assert exc_info.value.status_code == 400
+def test_dropbox_error_carries_status_and_body():
+    exc = DropboxError("x", status_code=418, response_body={"why": "tea"})
+    assert exc.status_code == 418
+    assert exc.response_body == {"why": "tea"}

@@ -1,69 +1,78 @@
+"""Pydantic request/response schemas for Dropbox API v2.
+
+The connector boundary uses ``Dict[str, Any]`` payloads (consistent with the
+rest of the Shielva connector estate). These models exist so callers that want
+typed access to a response can opt in via ``ListFolderResponse.model_validate(...)``.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class ConnectorHealth(str, Enum):
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    OFFLINE = "offline"
+class _DropboxModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
-class AuthStatus(str, Enum):
-    CONNECTED = "connected"
-    FAILED = "failed"
-    MISSING_CREDENTIALS = "missing_credentials"
-    INVALID_CREDENTIALS = "invalid_credentials"
+class FileEntry(_DropboxModel):
+    """A single ``.tag == 'file'`` entry from list_folder / get_metadata."""
+
+    tag: str = Field(default="file", alias=".tag")
+    id: Optional[str] = None
+    name: str = ""
+    path_lower: Optional[str] = None
+    path_display: Optional[str] = None
+    client_modified: Optional[datetime] = None
+    server_modified: Optional[datetime] = None
+    rev: Optional[str] = None
+    size: int = 0
+    is_downloadable: bool = True
+    content_hash: Optional[str] = None
 
 
-class SyncStatus(str, Enum):
-    COMPLETED = "completed"
-    PARTIAL = "partial"
-    FAILED = "failed"
-    RUNNING = "running"
+class FolderEntry(_DropboxModel):
+    """A single ``.tag == 'folder'`` entry."""
+
+    tag: str = Field(default="folder", alias=".tag")
+    id: Optional[str] = None
+    name: str = ""
+    path_lower: Optional[str] = None
+    path_display: Optional[str] = None
 
 
-class DropboxFileType(str, Enum):
-    FILE = "file"
-    FOLDER = "folder"
+class ListFolderResponse(_DropboxModel):
+    entries: List[Dict[str, Any]] = Field(default_factory=list)
+    cursor: Optional[str] = None
+    has_more: bool = False
 
 
-@dataclass
-class InstallResult:
-    health: ConnectorHealth
-    auth_status: AuthStatus
-    connector_id: str = ""
-    message: str = ""
+class AccountInfo(_DropboxModel):
+    account_id: Optional[str] = None
+    name: Optional[Dict[str, Any]] = None
+    email: Optional[str] = None
+    email_verified: Optional[bool] = None
+    country: Optional[str] = None
+    account_type: Optional[Dict[str, Any]] = None
 
 
-@dataclass
-class HealthCheckResult:
-    health: ConnectorHealth
-    auth_status: AuthStatus
-    message: str = ""
-    display_name: str = ""
-    email: str = ""
+class SpaceUsage(_DropboxModel):
+    used: int = 0
+    allocation: Optional[Dict[str, Any]] = None
 
 
-@dataclass
-class SyncResult:
-    status: SyncStatus
-    documents_found: int = 0
-    documents_synced: int = 0
-    documents_failed: int = 0
-    message: str = ""
+class SharedLinkRequest(_DropboxModel):
+    path: str
+    settings: Optional[Dict[str, Any]] = None
 
 
-@dataclass
-class ConnectorDocument:
-    """Normalized document emitted by the connector into the knowledge base."""
+class SearchOptions(_DropboxModel):
+    path: Optional[str] = None
+    max_results: int = 100
+    file_status: str = "active"
 
-    source_id: str
-    title: str
-    content: str
-    connector_id: str
-    tenant_id: str
-    source_url: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+
+class SearchRequest(_DropboxModel):
+    query: str
+    options: SearchOptions = Field(default_factory=SearchOptions)
