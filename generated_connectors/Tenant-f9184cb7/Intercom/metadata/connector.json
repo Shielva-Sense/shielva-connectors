@@ -11,7 +11,8 @@
       "label": "Access Token",
       "type": "password",
       "required": true,
-      "description": "Intercom Access Token from Settings → Integrations → Developer Hub → Access Token."
+      "description": "Intercom Access Token from Settings \u2192 Integrations \u2192 Developer Hub \u2192 Access Token.",
+      "help": "Access Token."
     }
   ],
   "capabilities": [
@@ -24,5 +25,123 @@
   ],
   "provider": "intercom",
   "service": "intercom",
-  "category": "customer_support"
+  "category": "customer_support",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Intercom contacts and conversations into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return a flat list of all Intercom contacts (leads + users).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "starting_after",
+          "label": "Starting After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Return a single contact dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "Return a flat list of all Intercom conversations.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "starting_after",
+          "label": "Starting After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "Return a single conversation dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "Return a flat list of all Intercom companies.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_admins",
+      "name": "List Admins",
+      "description": "Return a list of all admins in the Intercom workspace.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Return a list of all tags in the Intercom workspace.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "Return a list of all segments in the Intercom workspace.",
+      "method": "GET",
+      "params": []
+    }
+  ]
 }
