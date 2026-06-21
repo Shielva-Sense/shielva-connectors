@@ -11,21 +11,24 @@
       "label": "Instance Name",
       "type": "string",
       "required": true,
-      "description": "Your ServiceNow instance name (e.g. 'dev12345' from dev12345.service-now.com)."
+      "description": "Your ServiceNow instance name (e.g. 'dev12345' from dev12345.service-now.com).",
+      "help": "Instance Name."
     },
     {
       "key": "username",
       "label": "Username",
       "type": "string",
       "required": true,
-      "description": "ServiceNow username with read access to incidents and change requests."
+      "description": "ServiceNow username with read access to incidents and change requests.",
+      "help": "Username."
     },
     {
       "key": "password",
       "label": "Password",
       "type": "password",
       "required": true,
-      "description": "Password for the ServiceNow user account."
+      "description": "Password for the ServiceNow user account.",
+      "help": "Password."
     }
   ],
   "capabilities": [
@@ -38,5 +41,188 @@
     "sync"
   ],
   "provider": "servicenow",
-  "category": "itsm"
+  "category": "itsm",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all ServiceNow incidents and change requests into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_incidents",
+      "name": "List Incidents",
+      "description": "Return a paginated list of ServiceNow incidents.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "sysparm_query",
+          "label": "Sysparm Query",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_incident",
+      "name": "Get Incident",
+      "description": "Return a single incident by sys_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sys_id",
+          "label": "Sys Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_problems",
+      "name": "List Problems",
+      "description": "Return a paginated list of ServiceNow problem records.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_changes",
+      "name": "List Changes",
+      "description": "Return a paginated list of ServiceNow change requests.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_change",
+      "name": "Get Change",
+      "description": "Return a single change request by sys_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sys_id",
+          "label": "Sys Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_service_catalog_items",
+      "name": "List Service Catalog Items",
+      "description": "Return a paginated list of ServiceNow service catalog items.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a paginated list of ServiceNow users.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_cmdb_items",
+      "name": "List Cmdb Items",
+      "description": "Return CMDB configuration items for the given CI class.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "class_name",
+          "label": "Class Name",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "service": "servicenow"
 }
