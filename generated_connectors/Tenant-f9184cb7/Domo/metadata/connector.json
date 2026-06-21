@@ -14,14 +14,16 @@
       "label": "Client ID",
       "type": "string",
       "required": true,
-      "description": "Your Domo client ID. Create a client at developer.domo.com under My Account → New Client."
+      "description": "Your Domo client ID. Create a client at developer.domo.com under My Account \u2192 New Client.",
+      "help": "Client ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
       "required": true,
-      "description": "Your Domo client secret, provided when you create the client."
+      "description": "Your Domo client secret, provided when you create the client.",
+      "help": "Client Secret."
     }
   ],
   "capabilities": [
@@ -39,5 +41,64 @@
     "users",
     "groups"
   ],
-  "category": "business_intelligence"
+  "category": "business_intelligence",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Domo resources: datasets and dashboard pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "description": "Return all Domo datasets (auto-paginates).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "Return all Domo dashboard pages (auto-paginates).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all Domo users (auto-paginates).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_dataset",
+      "name": "Get Dataset",
+      "description": "Return a single Domo dataset by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "dataset_id",
+          "label": "Dataset Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "Return a single Domo dashboard page by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "DomoConnector"
 }
