@@ -11,7 +11,8 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Jotform API Key. Find it at https://www.jotform.com/myaccount/api."
+      "description": "Jotform API Key. Find it at https://www.jotform.com/myaccount/api.",
+      "help": "API Key."
     }
   ],
   "capabilities": [
@@ -24,5 +25,114 @@
   ],
   "provider": "Jotform",
   "service": "Jotform",
-  "category": "forms"
+  "category": "forms",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Jotform forms and submissions into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "Return a paginated list of Jotform forms.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "order_by",
+          "label": "Order By",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_form",
+      "name": "Get Form",
+      "description": "Return a single form definition.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_form_questions",
+      "name": "List Form Questions",
+      "description": "Return all questions for a form.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_submissions",
+      "name": "List Submissions",
+      "description": "Return paginated submissions for a specific form.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_all_submissions",
+      "name": "List All Submissions",
+      "description": "Return paginated submissions across all forms.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ]
 }
