@@ -1,0 +1,271 @@
+{
+  "connector_type": "rudderstack",
+  "name": "RudderstackConnector",
+  "display_name": "RudderStack",
+  "version": "1.0.0",
+  "description": "Connects to RudderStack (open-source CDP) — two surfaces: data plane (HTTP Basic with write_key) for event ingestion (track / identify / page / screen / group / alias / batch), and control plane (Bearer with personal access token) for sources, destinations, connections, workspaces, profiles, and identities.",
+  "provider": "rudderstack",
+  "service": "rudderstack",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "write_key",
+      "label": "Write Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "1aBcDeFgHiJkLmNoPqRs",
+      "help": "Source Write Key from RudderStack → Sources → your source → Write Key. Sent as HTTP Basic username (with empty password) on every data-plane call."
+    },
+    {
+      "key": "access_token",
+      "label": "Personal Access Token",
+      "type": "secret",
+      "required": false,
+      "placeholder": "rs_pat_…",
+      "help": "Personal Access Token from RudderStack → Settings → Personal Access Tokens. Required to manage sources / destinations / connections / workspaces / profiles via the control plane. Leave blank for data-plane-only use."
+    },
+    {
+      "key": "data_plane_url",
+      "label": "Data Plane URL",
+      "type": "string",
+      "required": false,
+      "default": "https://hosted.rudderlabs.com",
+      "placeholder": "https://hosted.rudderlabs.com",
+      "help": "Data plane base URL. Default is the RudderStack-hosted endpoint. Override only for self-hosted / private regions."
+    },
+    {
+      "key": "control_plane_url",
+      "label": "Control Plane URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.rudderstack.com/v2",
+      "placeholder": "https://api.rudderstack.com/v2",
+      "help": "Management API base URL. Override only if you self-host the control plane."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum RudderStack API requests per minute. Default is 100."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates write_key (required) and persists install config. Does NOT call any RudderStack endpoint.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "If a PAT is set, probes the control plane (GET /sources?limit=1). Otherwise reports HEALTHY when write_key is present (data plane has no idempotent GET).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "GET /workspaces — list workspaces accessible to the PAT.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sources",
+      "name": "List Sources",
+      "description": "GET /sources — list workspace sources with cursor pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_source",
+      "name": "Get Source",
+      "description": "GET /sources/{id} — fetch a single source.",
+      "method": "GET",
+      "params": [
+        { "key": "source_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_source",
+      "name": "Create Source",
+      "description": "POST /sources — create a source of a given type (Javascript, Python, HTTP, …).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": true },
+        { "key": "config", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_destinations",
+      "name": "List Destinations",
+      "description": "GET /destinations — list workspace destinations.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_destination",
+      "name": "Get Destination",
+      "description": "GET /destinations/{id} — fetch a single destination.",
+      "method": "GET",
+      "params": [
+        { "key": "destination_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_connections",
+      "name": "List Connections",
+      "description": "GET /connections — list source↔destination wirings.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_profiles",
+      "name": "List Profiles",
+      "description": "GET /profiles — list unified user profiles via the Profiles API.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_profile",
+      "name": "Get Profile",
+      "description": "GET /profiles/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "profile_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_identities",
+      "name": "List Identities",
+      "description": "GET /identities — list identity records across sources.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "track_event",
+      "name": "Track Event",
+      "description": "POST {data_plane}/v1/track — record a user action (data plane, HTTP Basic with write_key).",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "event", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": false },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "identify_user",
+      "name": "Identify User",
+      "description": "POST {data_plane}/v1/identify — set user identity and traits.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "traits", "type": "object", "required": false },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "page_event",
+      "name": "Page View",
+      "description": "POST {data_plane}/v1/page — record a web page-view event.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "properties", "type": "object", "required": false },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "screen_event",
+      "name": "Screen View",
+      "description": "POST {data_plane}/v1/screen — record a mobile screen-view event.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "properties", "type": "object", "required": false },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "group_event",
+      "name": "Group Association",
+      "description": "POST {data_plane}/v1/group — associate user with a group/account.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "traits", "type": "object", "required": false },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "alias_user",
+      "name": "Alias User",
+      "description": "POST {data_plane}/v1/alias — link a new userId to a previousId.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "previous_id", "type": "string", "required": true },
+        { "key": "write_key", "type": "string", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "batch_events",
+      "name": "Batch Events",
+      "description": "POST {data_plane}/v1/batch — submit multiple events in one request.",
+      "method": "POST",
+      "params": [
+        { "key": "events", "type": "array", "required": true },
+        { "key": "write_key", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
