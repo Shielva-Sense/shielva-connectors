@@ -1,0 +1,69 @@
+{
+  "title": "Drip Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Drip** is an email-marketing + automation platform exposing a v2 REST API under `https://api.getdrip.com/v2/{account_id}`. This connector — `DripConnector` (`CONNECTOR_TYPE = \"drip\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Drip account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Subscribers | `/subscribers` | List + get + create-or-update + delete |\n| Tags | `/tags` + `/subscribers/{id}/tags/{tag}` | List, apply, remove |\n| Events | `/events` | Record custom events tied to a subscriber email |\n| Orders | `/orders` | List + create (triggers Ecommerce automations) |\n| Campaigns | `/campaigns` | List + get, subscribe an email to one |\n| Workflows | `/workflows` | List, trigger for a subscriber email |\n| Custom Fields | `/custom_field_identifiers` | List custom field keys |\n| Broadcasts | `/broadcasts` | List one-off email broadcasts |\n| Forms | `/forms` | List email-capture forms |\n\nThe connector normalises subscribers + campaigns + orders into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per spec operation (OCP), retries 429/5xx + transport errors with exponential backoff (3 attempts at the HTTP layer), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::DripHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate Drip credentials\n\n1. Sign in to https://www.getdrip.com.\n2. Open **Settings → General Info** and copy the numeric **Account ID** (also visible as the URL prefix `app.getdrip.com/{id}/…`).\n3. From the avatar menu open **User Settings → My User Settings**.\n4. In the **API Token** section copy the token (or generate a new one). Treat it as a password — anyone with the token can read and mutate every subscriber, campaign, and workflow in the account.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Drip**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `account_id` (text) | Numeric account id from step 2 |\n| `base_url` (text, optional) | Override `https://api.getdrip.com/v2` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 3600 |\n\nClick **Install**. `install()` validates the fields, persists config via `save_config`, then round-trips `GET /campaigns` so an invalid key fails fast.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists campaigns as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401/403 → `DEGRADED + TOKEN_EXPIRED` (or, at install time, `OFFLINE + INVALID_CREDENTIALS`). On 429 → retried with exponential backoff; if still failing → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Drip uses **HTTP Basic authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent as the **username** of an HTTP Basic pair, with an **empty password** — encoded as `Basic base64(api_key + \":\")`.\n- `account_id` is appended to the base URL: `https://api.getdrip.com/v2/{account_id}`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` + `account_id`. Persists config. Round-trips `GET /campaigns` — install fails fast if the key is wrong. |\n| `authorize(...)` | Returns a synthetic `TokenInfo(access_token=api_key, token_type=\"Basic\")` for ABI uniformity. |\n| `health_check()` | `GET /campaigns` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(api_key:)\nAccept:        application/json\nContent-Type:  application/vnd.api+json\nUser-Agent:    Shielva-Drip-Connector/1.0\n```\n\n### Back-compat\n\nEarlier revisions of this connector used the config key `api_token`. `__init__` accepts either `api_key` (canonical) or `api_token` (legacy) so previously-installed tenants keep working without a re-install."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Basic-auth username (empty password). Falls back to `api_token` for legacy installs. |\n| `account_id` | text | yes | `self.account_id` | Appended to `base_url` to form the effective host. |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.getdrip.com/v2`) | Override for staging / proxy. |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 3600) | Client-side soft cap. |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\", \"account_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DRIP_BASE_HOST = \"https://api.getdrip.com/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `DripConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::DripHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key` + `account_id`; persist config; round-trip `GET /campaigns`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a synthetic `TokenInfo` so platform plumbing has a uniform shape.\n\n### `async health_check() -> ConnectorStatus`\nLists campaigns via `GET /campaigns`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Drip subscribers (page-paged) + campaigns → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-subscribers",
+          "title": "Subscribers",
+          "content": "### `async list_subscribers(*, status=\"active\", page=1, per_page=50, subscribed_after=None, subscribed_before=None, tags=None) -> Dict`\n`GET /subscribers` — page-based pagination via `meta.total_pages`.\n\n### `async get_subscriber(id_or_email) -> Dict`\n`GET /subscribers/{id_or_email}` — URL-encodes `@`/`+`/etc so emails work in the path slot.\n\n### `async create_or_update_subscriber(email, *, custom_fields=None, tags=None, time_zone=None, ip_address=None, first_name=None, last_name=None) -> Dict`\n`POST /subscribers` — body wrapped in `{subscribers:[…]}` envelope. Drip dedupes on email.\n\n### `async delete_subscriber(id_or_email) -> Dict`\n`DELETE /subscribers/{id_or_email}`."
+        },
+        {
+          "id": "api-tags-events",
+          "title": "Tags + Events",
+          "content": "### `async list_tags() -> Dict`\n`GET /tags` — all account tags.\n\n### `async apply_tag(email, tag) -> Dict`\n`POST /tags` — body `{tags:[{email,tag}]}`.\n\n### `async remove_tag(email, tag) -> Dict`\n`DELETE /subscribers/{email}/tags/{tag}` — both segments URL-encoded.\n\n### `async record_event(email, action, *, properties=None, occurred_at=None) -> Dict`\n`POST /events` — body wrapped in `{events:[{email, action, properties, occurred_at}]}` envelope."
+        },
+        {
+          "id": "api-orders-campaigns",
+          "title": "Orders + Campaigns",
+          "content": "### `async list_orders(*, page=1, per_page=50, occurred_after=None) -> Dict`\n`GET /orders`.\n\n### `async create_order(email, *, provider=None, provider_order_id=None, amount=None, currency=None, occurred_at=None, items=None) -> Dict`\n`POST /orders` — body wrapped in `{orders:[…]}`. Triggers Ecommerce automations server-side.\n\n### `async list_campaigns(*, status=\"active\", page=1, per_page=50) -> Dict`\n`GET /campaigns`.\n\n### `async get_campaign(campaign_id) -> Dict`\n`GET /campaigns/{id}`.\n\n### `async subscribe_to_campaign(campaign_id, email, *, double_optin=False) -> Dict`\n`POST /campaigns/{id}/subscribers` — body `{subscribers:[{email, double_optin}]}`."
+        },
+        {
+          "id": "api-workflows-meta",
+          "title": "Workflows · Custom Fields · Broadcasts · Forms",
+          "content": "### `async list_workflows(*, page=1, per_page=50) -> Dict`\n`GET /workflows`.\n\n### `async trigger_workflow(workflow_id, email) -> Dict`\n`POST /workflows/{id}/subscribers` — body `{subscribers:[{email}]}`.\n\n### `async list_custom_fields() -> Dict`\n`GET /custom_field_identifiers`.\n\n### `async list_broadcasts(*, status=\"draft\", page=1) -> Dict`\n`GET /broadcasts`.\n\n### `async list_forms() -> Dict`\n`GET /forms`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nDripError                            # base; carries status_code + response_body\n├── DripAuthError                    # 401 / 403\n├── DripBadRequestError              # 400\n├── DripNotFoundError                # 404\n├── DripConflictError                # 409\n├── DripUnprocessableError           # 422\n├── DripRateLimitError               # 429 — retry_after_s honoured\n└── DripServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nDripNetworkError = DripServerError   # legacy import name in older callers\nDripNotFound     = DripNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 422 | Raise immediately (no retry) |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `DripNetworkError` |\n\nCaller-side `helpers.utils.with_retry` adds a belt-and-braces retry layer for the same status set so an isolated 429 that the HTTP layer surfaces never blows up a sync.\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 / 403 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n5xx / net  → ConnectorStatus(OFFLINE,  CONNECTED)\nother      → ConnectorStatus(DEGRADED, CONNECTED)\n```\n\nAt `install()` time a 401/403 round-trip surfaces as `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)` — installer fails fast rather than persist a bad token."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` or `account_id` blank | Re-enter both in ACP. Drip shows the key in the User Settings panel — copy verbatim. |\n| `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)` at install | 401/403 from Drip — API key wrong, revoked, or `account_id` mismatched | Confirm both values. Rotate the key in **User Settings → API Token** if compromised. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | API key was revoked after install | Re-install with a fresh key. |\n| `drip.http.retry` warnings spike | Hitting 429 (Drip's 3,600/min cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `/subscribers/{email}` | Email not in Drip yet | Call `create_or_update_subscriber` first. |\n| 422 on `record_event` | Action name contains illegal characters, or properties contain non-JSON values | Sanitize the action string; ensure all values in `properties` are JSON-serialisable scalars. |\n| 422 on `create_order` | `provider_order_id` already exists for this provider | Use a unique id per order; Drip rejects re-submits of the same `(provider, provider_order_id)` pair. |\n| `ImportError: cannot import name 'DripNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `DripNetworkError = DripServerError` alias is in `exceptions.py`. |"
+    }
+  ]
+}

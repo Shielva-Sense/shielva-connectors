@@ -1,0 +1,272 @@
+{
+  "connector_type": "drip",
+  "name": "DripConnector",
+  "display_name": "Drip",
+  "version": "1.0.0",
+  "description": "Connects to the Drip v2 REST API for email marketing automation: Subscribers, Campaigns, Workflows, Events, Orders, Tags, Custom Fields, Broadcasts, and Forms. Auth via HTTP Basic with the Drip API key (api_key as Basic-auth username, empty password).",
+  "provider": "drip",
+  "service": "drip",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Drip API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Drip API key",
+      "help": "From Drip → Account → User Settings → API Token. Sent as the username of an HTTP Basic auth pair (password empty). Treat as a password — grants full account access."
+    },
+    {
+      "key": "account_id",
+      "label": "Drip Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "1234567",
+      "help": "Numeric account id from Drip → Settings → General Info (or the URL prefix at app.getdrip.com/{id}/). Appended to base_url automatically."
+    },
+    {
+      "key": "base_url",
+      "label": "Drip API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.getdrip.com/v2",
+      "placeholder": "https://api.getdrip.com/v2",
+      "help": "Base URL for the Drip REST API. The account_id is appended automatically. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "3600",
+      "placeholder": "3600",
+      "help": "Maximum Drip API requests per minute. Drip's standard limit is 3,600/min per account."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key + account_id and round-trips GET /campaigns to confirm credentials. Returns ConnectorStatus.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Drip API connectivity by calling GET /campaigns.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_subscribers",
+      "name": "List Subscribers",
+      "description": "GET /subscribers — list with optional status, paging, date-range and tag filters.",
+      "method": "GET",
+      "params": [
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "subscribed_after", "type": "string", "required": false },
+        { "key": "subscribed_before", "type": "string", "required": false },
+        { "key": "tags", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_subscriber",
+      "name": "Get Subscriber",
+      "description": "GET /subscribers/{id_or_email} — fetch a single subscriber by Drip ID or URL-encoded email.",
+      "method": "GET",
+      "params": [
+        { "key": "id_or_email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_or_update_subscriber",
+      "name": "Create or Update Subscriber",
+      "description": "POST /subscribers — Drip dedupes on email. Body wrapped in {subscribers:[…]} envelope.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "custom_fields", "type": "object", "required": false },
+        { "key": "tags", "type": "array", "required": false },
+        { "key": "time_zone", "type": "string", "required": false },
+        { "key": "ip_address", "type": "string", "required": false },
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_subscriber",
+      "name": "Delete Subscriber",
+      "description": "DELETE /subscribers/{id_or_email} — permanently delete a subscriber.",
+      "method": "DELETE",
+      "params": [
+        { "key": "id_or_email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "GET /campaigns — list email campaigns filtered by status.",
+      "method": "GET",
+      "params": [
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_campaign",
+      "name": "Get Campaign",
+      "description": "GET /campaigns/{id} — fetch a single campaign.",
+      "method": "GET",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "subscribe_to_campaign",
+      "name": "Subscribe to Campaign",
+      "description": "POST /campaigns/{id}/subscribers — subscribe an email to a Drip campaign, optionally double-opt-in.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "email", "type": "string", "required": true },
+        { "key": "double_optin", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_workflows",
+      "name": "List Workflows",
+      "description": "GET /workflows — list all Drip workflows.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "trigger_workflow",
+      "name": "Trigger Workflow",
+      "description": "POST /workflows/{id}/subscribers — start a workflow for a subscriber by email.",
+      "method": "POST",
+      "params": [
+        { "key": "workflow_id", "type": "number", "required": true },
+        { "key": "email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "record_event",
+      "name": "Record Custom Event",
+      "description": "POST /events — record a custom event tied to a subscriber email. Body wrapped in {events:[…]} envelope.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "action", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": false },
+        { "key": "occurred_at", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "GET /orders — list orders.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "occurred_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_order",
+      "name": "Create Order",
+      "description": "POST /orders — create an order in Drip (triggers Ecommerce automations). Body wrapped in {orders:[…]}.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "provider", "type": "string", "required": false },
+        { "key": "provider_order_id", "type": "string", "required": false },
+        { "key": "amount", "type": "number", "required": false },
+        { "key": "currency", "type": "string", "required": false },
+        { "key": "occurred_at", "type": "string", "required": false },
+        { "key": "items", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /tags — list all tags defined in the Drip account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "apply_tag",
+      "name": "Apply Tag",
+      "description": "POST /tags — apply a tag to a subscriber by email. Body wrapped in {tags:[{email,tag}]}.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "tag", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "remove_tag",
+      "name": "Remove Tag",
+      "description": "DELETE /subscribers/{email}/tags/{tag} — remove a tag from a subscriber.",
+      "method": "DELETE",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "tag", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_custom_fields",
+      "name": "List Custom Fields",
+      "description": "GET /custom_field_identifiers — list custom field keys defined in the account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_broadcasts",
+      "name": "List Broadcasts",
+      "description": "GET /broadcasts — list email broadcasts filtered by status.",
+      "method": "GET",
+      "params": [
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "GET /forms — list email-capture forms.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
