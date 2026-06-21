@@ -1,0 +1,69 @@
+{
+  "title": "OneSignal Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**OneSignal** is a customer-messaging platform delivering push notifications, email, SMS, and in-app messages through a single REST API. This connector — `OneSignalConnector` (`CONNECTOR_TYPE = \"onesignal\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Notifications | `/notifications` | Send, list, get, cancel push / email / SMS |\n| Notification history | `/notifications/{id}/history` | Per-event CSV export (sent / clicked) |\n| Apps | `/apps` | List, get, create, update apps (account-scope) |\n| Players (devices) | `/players` | Create, list, get, update device registrations |\n| Segments | `/apps/{id}/segments` | List / create / delete audience filters |\n\nThe connector normalises notifications + apps + players into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::OneSignalHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Collect your OneSignal credentials\n\n1. Sign in to https://dashboard.onesignal.com.\n2. Pick (or create) the OneSignal app you want to connect.\n3. **Settings → Keys & IDs** — copy these two values:\n   - **OneSignal App ID** — UUID.\n   - **REST API Key** — long opaque string. Used to send notifications, manage players + segments.\n4. (Optional) **Account icon (top-right) → Account → Keys & IDs** — copy the **User Auth Key**. Required only if you want to call `list_apps`, `create_app`, or `update_app`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → OneSignal**, fill in:\n\n| Field | Value |\n|---|---|\n| `app_id` (text, required) | OneSignal App ID from step 3 |\n| `rest_api_key` (secret, required) | REST API Key from step 3 |\n| `user_auth_key` (secret, optional) | User Auth Key from step 4 — only if you need /apps endpoints |\n| `base_url` (text, optional) | Override `https://onesignal.com/api/v1` (rare) |\n| `timeout_s` (number, optional) | Per-request httpx timeout, default 30 |\n\nClick **Install**. `install()` validates `app_id` + `rest_api_key` are present (it does NOT call the API), initialises the `OneSignalHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /apps/{app_id}` using the REST API key. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "OneSignal REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### The \"Basic\" prefix gotcha\n\nOneSignal documents the auth header as:\n\n```\nAuthorization: Basic <REST_API_KEY>\n```\n\nThe header literally starts with the word `Basic` followed by a space and **the raw REST API key**. **The key is NOT base64-encoded** despite the prefix — this is a OneSignal-specific quirk inherited from legacy HTTP semantics. Standard HTTP Basic auth would require `base64(user:password)`; OneSignal does NOT. Any client that base64-encodes the value will get a 401 with `Invalid authentication`.\n\nThe connector enforces this in `client/http_client.py::_auth_headers`:\n\n```python\n@staticmethod\ndef _auth_headers(key: str) -> Dict[str, str]:\n    return {\n        \"Authorization\": f\"Basic {key}\",   # raw key — NO base64\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\",\n    }\n```\n\n### Two keys, one header shape\n\n| Surface | Auth | Key |\n|---|---|---|\n| `/notifications/*`, `/players/*`, `/apps/{id}/segments/*` | `Authorization: Basic <rest_api_key>` | App-scope **REST API Key** |\n| `/apps`, `/apps/{id}` (PUT/POST) | `Authorization: Basic <user_auth_key>` | Account-wide **User Auth Key** |\n\nThe connector picks the right key per endpoint via the `_require_rest_key()` / `_require_user_key()` helpers.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `app_id` + `rest_api_key`. Initialises `OneSignalHTTPClient`. Does **not** call any OneSignal endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured `rest_api_key` (api_key flow has no exchange). |\n| `health_check()` | `GET /apps/{app_id}` — minimal probe with the REST API key. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `app_id` | text | yes | `self.app_id` | Default OneSignal app UUID for shorthand calls |\n| `rest_api_key` | secret | yes | `self.rest_api_key` | Authorization header value for app-scoped endpoints |\n| `user_auth_key` | secret | no | `self.user_auth_key` | Authorization header value for `/apps` endpoints |\n| `base_url` | text | no | `self.base_url` (default `https://onesignal.com/api/v1`) | Override for sandbox or proxy |\n| `timeout_s` | number | no | `self.timeout_s` (default 30) | Per-request httpx timeout |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"app_id\", \"rest_api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\nONESIGNAL_BASE = \"https://onesignal.com/api/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `OneSignalConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::OneSignalHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `app_id` + `rest_api_key`; persist config. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose access_token is `rest_api_key`.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /apps/{app_id}` with the REST API key. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nFetches the app record + recent notifications, normalises to `NormalizedDocument`, calls `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-notifications",
+          "title": "Notifications",
+          "content": "### `async list_notifications(app_id=None, limit=50, offset=0, kind=None) -> Dict`\n`GET /notifications?app_id={app_id}&limit={N}&offset={O}`.\n\n### `async get_notification(notification_id, app_id=None) -> Dict`\n`GET /notifications/{id}?app_id={app_id}`.\n\n### `async send_notification(contents, *, app_id=None, headings=None, included_segments=None, excluded_segments=None, include_player_ids=None, include_external_user_ids=None, data=None, url=None, big_picture=None, send_after=None) -> Dict`\n`POST /notifications` — payload built by `helpers.utils.build_notification_payload`; only set keys are sent.\n\n### `async cancel_notification(notification_id, app_id=None) -> Dict`\n`DELETE /notifications/{id}?app_id={app_id}`.\n\n### `async notification_history(notification_id, events=\"sent\", app_id=None) -> Dict`\n`POST /notifications/{id}/history` — body `{events, app_id}`. Triggers a CSV export of `sent` or `clicked` events."
+        },
+        {
+          "id": "api-apps",
+          "title": "Apps",
+          "content": "### `async list_apps() -> List[Dict]`\n`GET /apps` — requires `user_auth_key`.\n\n### `async get_app(app_id=None) -> Dict`\n`GET /apps/{app_id}` — prefers `user_auth_key`, falls back to `rest_api_key` for the connector's own app (used by `health_check`).\n\n### `async create_app(name, gcm_key=None, apns_env=None, apns_p12=None) -> Dict`\n`POST /apps` — requires `user_auth_key`.\n\n### `async update_app(app_id, fields) -> Dict`\n`PUT /apps/{app_id}` — requires `user_auth_key`."
+        },
+        {
+          "id": "api-devices",
+          "title": "Devices (Players)",
+          "content": "### `async list_devices(app_id=None, limit=50, offset=0) -> Dict`\n`GET /players?app_id={app_id}`.\n\n### `async get_device(player_id, app_id=None) -> Dict`\n`GET /players/{id}?app_id={app_id}`.\n\n### `async create_device(device_type, *, app_id=None, identifier=None, language=None, tags=None, external_user_id=None) -> Dict`\n`POST /players` — `device_type` is the OneSignal device-type enum (0 iOS, 1 Android, 5 Web push, etc.).\n\n### `async update_device(player_id, fields, app_id=None) -> Dict`\n`PUT /players/{id}` — `app_id` is injected into the body automatically."
+        },
+        {
+          "id": "api-segments",
+          "title": "Segments",
+          "content": "### `async list_segments(app_id=None) -> Dict`\n`GET /apps/{app_id}/segments`.\n\n### `async create_segment(name, filters, app_id=None) -> Dict`\n`POST /apps/{app_id}/segments` — `filters` is the OneSignal filter list.\n\n### `async delete_segment(segment_id, app_id=None) -> Dict`\n`DELETE /apps/{app_id}/segments/{segment_id}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nOneSignalError                         # base; carries status_code + response_body\n├── OneSignalAuthError                  # 401 / 403\n├── OneSignalBadRequestError            # 400 — empty audience, missing app_id\n├── OneSignalNotFoundError              # 404\n├── OneSignalConflictError              # 409\n├── OneSignalRateLimitError             # 429 — retry_after_s\n└── OneSignalServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nOneSignalNetworkError = OneSignalServerError\nOneSignalNotFound     = OneSignalNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `_BASE_DELAY_S * 2 ** attempt + jitter` (0.5s, 1s, 2s + 0..0.3s jitter), capped at 16s, retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.HTTPError` (timeouts / transport) | Backoff, retry up to 3, then raise `OneSignalNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED) with message text\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `app_id` or `rest_api_key` blank | Re-enter both in ACP. The REST API key is shown in OneSignal Dashboard → Settings → Keys & IDs. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — REST API key for a different app than `app_id` | Verify the key was copied from the SAME app whose UUID you entered as `app_id`. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — usually one of: (a) key revoked, (b) key base64-encoded by accident, (c) wrong header format | OneSignal expects `Authorization: Basic <raw_key>`. The connector sets this correctly; if you proxy through another client, ensure it does NOT base64-encode the value. |\n| `OneSignalAuthError: user_auth_key is required for /apps endpoints` | Calling `list_apps()` / `create_app()` / `update_app()` without `user_auth_key` set | Open OneSignal **Account → Keys & IDs**, copy the **User Auth Key**, paste it into the connector's `user_auth_key` install field. |\n| `onesignal.http.retry` warnings spike | Hitting 429 (OneSignal per-app rate cap) | The client retries with exponential backoff. Batch your sends or use segments instead of long `include_player_ids` arrays. |\n| 400 with `included_segments cannot be empty` | `send_notification` called with no audience | Provide at least one of `included_segments`, `include_player_ids`, or `include_external_user_ids`. |\n| 404 on `get_notification` | Wrong `app_id` in the query string OR notification expired (OneSignal prunes very old notifications) | Verify the notification was created under THIS app and is within OneSignal's retention window. |\n| `ImportError: cannot import name 'OneSignalNetworkError'` | Older code expecting the legacy name | Already covered — `OneSignalNetworkError = OneSignalServerError` alias in `exceptions.py`. |\n| Sync syncs the app but zero notifications | App has never sent a notification, OR rate-limit retries exhausted | Send a test notification via `send_notification`, wait ~30s, re-run sync. |"
+    }
+  ]
+}
