@@ -117,5 +117,182 @@
     "pages",
     "blog_posts",
     "search"
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Confluence spaces, pages, and blog posts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_spaces",
+      "name": "List Spaces",
+      "description": "GET /wiki/api/v2/spaces \u2014 return first page of spaces, optionally filtered by type.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "type",
+          "label": "Type",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_space",
+      "name": "Get Space",
+      "description": "GET /wiki/api/v2/spaces/{space_id} \u2014 single space by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "GET /wiki/api/v2/pages \u2014 first page of pages, optionally filtered by space.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "GET /wiki/api/v2/pages/{page_id}?body-format=storage \u2014 single page with body.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_page_children",
+      "name": "Get Page Children",
+      "description": "GET /wiki/api/v2/pages/{page_id}/children \u2014 child pages of a given page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_blogposts",
+      "name": "List Blogposts",
+      "description": "GET /wiki/api/v2/blogposts \u2014 first page of blog posts, optionally filtered by space.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_blog_posts",
+      "name": "List Blog Posts",
+      "description": "Alias for list_blogposts \u2014 retained for backward compatibility.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "space_id",
+          "label": "Space Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "search_content",
+      "name": "Search Content",
+      "description": "GET /wiki/rest/api/search?cql=text~\"{query}\" \u2014 CQL full-text search.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "cursor",
+          "label": "Cursor",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "ConfluenceConnector"
 }
