@@ -1,0 +1,74 @@
+{
+  "title": "Honeycomb Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Honeycomb** is a hosted observability platform — store, query, and alert on high-cardinality structured events (traces, metrics, logs). This connector — `HoneycombConnector` (`CONNECTOR_TYPE = \"honeycomb\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Honeycomb environment:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Auth | `/auth` | Probe team / environment / key scopes |\n| Datasets | `/datasets` | List + read + create datasets |\n| Columns | `/datasets/{slug}/columns` | Enumerate dataset schema |\n| Queries | `/queries/{slug}` | Save / fetch query specs |\n| Query Results | `/query_results/{slug}` | Run a query → poll for result |\n| Markers | `/markers/{slug}` | Annotate dataset timeline (deploys, incidents) |\n| Triggers | `/triggers/{slug}` | Threshold-based alerts |\n| Boards | `/boards` | Dashboards over saved queries |\n| SLOs | `/slos/{slug}` | Service Level Objectives |\n| Recipients | `/recipients` | Notification destinations |\n| Events ingest | `/events/{slug}` | One-shot event row ingest |\n\nThe connector normalizes datasets (with their columns folded in) into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter honoring `Retry-After`, and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HoneycombHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Honeycomb API key\n\n1. Sign in to https://ui.honeycomb.io.\n2. Pick the Environment you want Shielva to talk to (top-left selector — Honeycomb keys are environment-scoped, not team-scoped).\n3. Open **Environment Settings → API Keys**.\n4. Click **Create API Key**. Name it `shielva` (or per tenant).\n5. Grant the scopes you need:\n    - `Send Events` if you intend to call `send_event()`.\n    - `Manage Queries and Columns` for create_query / create_dataset.\n    - `Manage Triggers` for create_trigger.\n    - `Manage Markers` for create_marker.\n    - `Configuration` (read) is implicit and enough for list_* and get_*.\n6. Copy the API key value — Honeycomb shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Honeycomb**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 6 |\n| `region` (text, optional) | `us` (default) or `eu` |\n| `base_url` (text, optional) | Override only behind a proxy |\n| `default_dataset` (text, optional) | Default dataset slug for shorthand calls |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n\nClick **Install**. `install()` probes `GET /auth` — on 2xx the connector lands as `ConnectorStatus(HEALTHY, CONNECTED)`. On 401 it lands as `(OFFLINE, EXPIRED)` and the gateway surfaces a clear actionable error.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `/auth`. Successful response includes the team + environment slug — Shielva surfaces this so users can confirm they connected to the right environment."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Honeycomb uses **server-to-server API-key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\nThe api_key is sent in the `X-Honeycomb-Team` header on every request. **This is the canonical Honeycomb gotcha** — the header is NOT `Authorization: Bearer <key>`. Gateway middleware / proxies that emit a Bearer Authorization header must not clobber the team header.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` is non-empty AND probes `GET /auth`. Persists config snapshot. |\n| `authorize(auth_code, state)` | Returns a synthetic `TokenInfo` wrapping the api_key — for surface compatibility with OAuth connectors. |\n| `health_check()` | `GET /auth` — minimal probe. |\n| `on_token_refresh()` | No-op (api_key auth has no refresh). |\n| token storage | The api_key itself, as a long-lived synthetic TokenInfo. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nX-Honeycomb-Team: <api_key>          ← canonical Honeycomb header\nContent-Type:     application/json\nAccept:           application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `X-Honeycomb-Team` header value |\n| `region` | string | no | `self.region` (default `us`) | Selects between `api.honeycomb.io/1` (us) and `api.eu1.honeycomb.io/1` (eu) |\n| `base_url` | string | no | `self.base_url` (defaults to the region URL) | Override for sandbox or proxy |\n| `default_dataset` | string | no | `self.default_dataset` | Convenience default for callers that omit the dataset slug |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"honeycomb\"\nAUTH_TYPE = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HONEYCOMB_BASE_US = \"https://api.honeycomb.io/1\"\n_HONEYCOMB_BASE_EU = \"https://api.eu1.honeycomb.io/1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HoneycombConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::HoneycombHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`, persist config, probe `GET /auth`. Returns `HEALTHY/CONNECTED` on success, `OFFLINE/EXPIRED` on 401, `OFFLINE/MISSING_CREDENTIALS` when `api_key` is blank.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — wraps the configured key into a long-lived synthetic `TokenInfo`.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /auth`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Honeycomb datasets, folds in column lists, normalizes each into a `NormalizedDocument`, calls `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-datasets",
+          "title": "Datasets + Columns",
+          "content": "### `async list_datasets() -> List[Dict]`\n`GET /datasets`.\n\n### `async get_dataset(dataset_slug: str) -> Dict`\n`GET /datasets/{slug}`. Raises `HoneycombNotFoundError` on 404.\n\n### `async create_dataset(name, description='', expand_json_depth=0) -> Dict`\n`POST /datasets` — body: `{name, description, expand_json_depth}`. Requires `Configuration` scope.\n\n### `async list_columns(dataset_slug: str) -> List[Dict]`\n`GET /datasets/{slug}/columns`."
+        },
+        {
+          "id": "api-queries",
+          "title": "Queries + Query Results",
+          "content": "### `async list_queries(dataset_slug) -> List[Dict]`\n`GET /queries/{slug}`.\n\n### `async create_query(dataset_slug, breakdowns=None, calculations=None, filters=None, time_range=7200, granularity=None, orders=None, having=None) -> Dict`\n`POST /queries/{slug}`. Body fields are passed through as-is. Returns `{id}`.\n\n### `async get_query(dataset_slug, query_id) -> Dict`\n`GET /queries/{slug}/{id}`.\n\n### `async run_query(dataset_slug, query_id, disable_series=False, limit=1000) -> Dict`\n`POST /query_results/{slug}`. Returns `{id, complete}`. Spec-named alias `run_query_result` is also exposed.\n\n### `async get_query_result(dataset_slug, result_id) -> Dict`\n`GET /query_results/{slug}/{rid}`. Poll until `complete=true`."
+        },
+        {
+          "id": "api-markers-triggers",
+          "title": "Markers + Triggers",
+          "content": "### `async list_markers(dataset_slug) -> List[Dict]`\n`GET /markers/{slug}`.\n\n### `async create_marker(dataset_slug, message, type='deploy', url=None, start_time=None, end_time=None) -> Dict`\n`POST /markers/{slug}`. Typical use: record deploys.\n\n### `async list_triggers(dataset_slug) -> List[Dict]`\n`GET /triggers/{slug}`.\n\n### `async create_trigger(dataset_slug, name, query_id, threshold, frequency=900, alert_type='on_change', recipients=None) -> Dict`\n`POST /triggers/{slug}`. `threshold` like `{op: '>', value: 100}`; `recipients` is a list of `{type, target}`."
+        },
+        {
+          "id": "api-boards-slos-recipients",
+          "title": "Boards · SLOs · Recipients",
+          "content": "### `async list_boards() -> List[Dict]`\n`GET /boards`.\n\n### `async get_board(board_id) -> Dict`\n`GET /boards/{id}`.\n\n### `async create_board(name, description='', style='list', queries=None) -> Dict`\n`POST /boards`.\n\n### `async list_slos(dataset_slug) -> List[Dict]`\n`GET /slos/{slug}`.\n\n### `async list_recipients() -> List[Dict]`\n`GET /recipients`. Email / Slack / Webhook / PagerDuty destinations."
+        },
+        {
+          "id": "api-events",
+          "title": "Events (ingest)",
+          "content": "### `async send_event(dataset_slug, event: Dict) -> Dict`\n`POST /events/{slug}`. Every top-level key in the `event` dict becomes a column on the row. For high-volume ingest the Honeycomb beelines / OTel exporter remain the right tools — `send_event` is for one-off acknowledgements, sentinel events, and ad-hoc debugging."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHoneycombError                         # base; carries status_code + response_body\n├── HoneycombAuthError                  # 401 / 403\n├── HoneycombBadRequestError            # 400\n├── HoneycombNotFoundError              # 404\n├── HoneycombConflictError              # 409\n├── HoneycombRateLimitError             # 429 — retry_after_s\n└── HoneycombServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nHoneycombNetworkError = HoneycombServerError\nHoneycombNotFound     = HoneycombNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff with jitter, honoring `Retry-After` header. Retry up to `_DEFAULT_MAX_RETRIES=3`. |\n| 5xx | Same exponential backoff. Retry up to 3. |\n| `httpx.HTTPError` (timeout / network) | Backoff, retry up to 3, then raise `HoneycombNetworkError`. |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED, CONNECTED)            — logged as warning\nNetwork → ConnectorStatus(OFFLINE, PENDING)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. Honeycomb shows it only once — generate a new one if lost. |\n| `ConnectorStatus(OFFLINE, EXPIRED)` at install | 401 from Honeycomb — key invalid or wrong region | Verify the `region` install field matches the environment that owns the key. Rotate the key if needed. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Honeycomb — key lacks a required scope | Edit the API key in Honeycomb and add the missing scope (Send Events / Manage Queries / Manage Triggers / Manage Markers). |\n| `honeycomb.retry` warnings spike | Hitting 429 (Honeycomb per-environment rate cap) | Client retries with backoff + jitter, honoring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on a dataset-scoped call | Slug wrong, or dataset created in a different environment | Verify the dataset slug via `list_datasets()`. Slug is lowercase-hyphenated; `slugify()` helper normalizes. |\n| `send_event` returns 401 | API key lacks `Send Events` scope | Honeycomb separates ingest from management scopes; enable it on the key. |\n| Authorization header showing instead of X-Honeycomb-Team | Gateway middleware injected `Authorization: Bearer ...` | Honeycomb ignores Authorization; the `X-Honeycomb-Team` is what counts. Confirm middleware doesn't strip the team header. |\n| Cold-start latency on first `/auth` | DNS / TLS handshake to `api.honeycomb.io` | First request opens a fresh `httpx.AsyncClient`. Subsequent requests share the connection pool. Consider warming on connector boot. |"
+    }
+  ]
+}
