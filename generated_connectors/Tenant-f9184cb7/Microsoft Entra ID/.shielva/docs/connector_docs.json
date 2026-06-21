@@ -1,0 +1,41 @@
+{
+  "title": "Microsoft Entra ID Documentation",
+  "generated_by": "bulk_rebuild.py",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Microsoft Entra ID** connector \u2014 `CONNECTOR_TYPE = \"entra_id\"`, `AUTH_TYPE = \"oauth2\"`. Exposes 20 public async methods. Connects to Microsoft Entra ID (formerly Azure AD) via the Microsoft Graph API for identity and access management: users, groups, applications, service principals, directory roles, audit logs, and sign-in logs. Uses the OAuth2 client-credentials grant against a tenant-scoped token endpoint."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "1. Provision credentials in the Microsoft Entra ID dashboard.\n2. In ACP \u2192 Manage Connectors \u2192 Microsoft Entra ID, fill in the install fields below.\n3. Click Install \u2014 the connector validates required config keys via `install()`.\n4. The gateway calls `health_check()` to confirm credentials are valid."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Auth type: **oauth2**. Credentials live in `self.config`, read via `self.config.get(...)`. Never hardcoded."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Install fields (per-tenant):\n\n| Key | Type | Required | Description |\n|---|---|---|---|\n| `tenant_id` | string | yes | Your Microsoft Entra ID tenant ID (GUID) \u2014 from Azure Portal \u2192 Microsoft Entra ID \u2192 Overview |\n| `client_id` | string | yes | From Azure Portal \u2192 App registrations \u2192 your app \u2192 Application (client) ID |\n| `client_secret` | secret | yes | From App registrations \u2192 Certificates & secrets \u2192 Client secrets |\n| `scopes` | string | no | Microsoft Graph scope. Use the default (.default) for client-credentials apps so consented application permissions are honored. |\n| `base_url` | string | no | Microsoft Graph API base URL. Override only when targeting national cloud endpoints (US Gov, China, Germany). |\n| `rate_limit_per_min` | number | no | Maximum Microsoft Graph requests per minute. Graph throttles per-app and per-tenant; 240 is a safe default for most workloads. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "20 public async methods. See `metadata/connector.json::apis` for full param + return docs.\n\n### `async install()`\nValidates required config (tenant_id, client_id, client_secret) and marks the connector as installed.\n### `async authenticate()`\nMints a Microsoft Graph access token via the OAuth2 client-credentials grant against the tenant-scoped token endpoint.\n### `async health_check()`\nVerifies Microsoft Graph connectivity by fetching the tenant's /organization resource.\n### `async list_users(top, filter, search, orderby, select)`\nLists directory users with optional $filter, $search, $orderby, $select, and $top.\n### `async get_user(user_id_or_upn, select)`\nFetches a single user by id or userPrincipalName.\n### `async create_user(account_enabled, display_name, mail_nickname, password, user_principal_name, force_change_password_next_signin)`\nCreates a new directory user with passwordProfile.\n### `async update_user(user_id, fields)`\nPATCHes arbitrary fields on a user.\n### `async delete_user(user_id)`\nDeletes a user.\n### `async reset_user_password(user_id, new_password, force_change_next_signin)`\nAdministratively resets a user's password via PATCH on passwordProfile.\n### `async list_groups(top, filter, select)`\nLists directory groups.\n### `async get_group(group_id)`\nFetches a single group by id.\n### `async create_group(display_name, mail_nickname, mail_enabled, security_enabled, description, group_types)`\nCreates a new directory group.\n### `async list_group_members(group_id, top)`\nLists members of a group.\n### `async add_group_member(group_id, user_id)`\nAdds a user to a group via POST /groups/{id}/members/$ref with @odata.id payload.\n### `async remove_group_member(group_id, user_id)`\nRemoves a user from a group via DELETE /groups/{gid}/members/{uid}/$ref.\n### `async list_applications(top, filter)`\nLists app registrations in the tenant.\n### `async list_service_principals(top, filter)`\nLists service principals in the tenant.\n### `async list_directory_roles()`\nLists activated directory roles in the tenant.\n### `async list_audit_logs(top, filter)`\nLists directory audit log entries.\n### `async list_signin_logs(top, filter)`\nLists Entra ID sign-in log entries."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Common HTTP status mapping (via `_STATUS_MAP` or `_classify_failure`):\n\n| Status | ConnectorHealth | AuthStatus |\n|---|---|---|\n| 401 | OFFLINE | TOKEN_EXPIRED |\n| 403 | UNHEALTHY | INVALID_CREDENTIALS |\n| 429 | DEGRADED | CONNECTED (logged) |\n| 5xx | UNHEALTHY | FAILED (retried) |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Fix |\n|---|---|\n| `MISSING_CREDENTIALS` at install | Verify all required install fields populated |\n| `INVALID_CREDENTIALS` at health_check | Confirm API user has required permissions in the Microsoft Entra ID dashboard |\n| 429 rate limit warnings | The client honours `Retry-After`; reduce request frequency |"
+    }
+  ]
+}

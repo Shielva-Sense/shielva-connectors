@@ -1,0 +1,287 @@
+{
+  "connector_type": "entra_id",
+  "name": "EntraIDConnector",
+  "display_name": "Microsoft Entra ID",
+  "version": "1.0.0",
+  "description": "Connects to Microsoft Entra ID (formerly Azure AD) via the Microsoft Graph API for identity and access management: users, groups, applications, service principals, directory roles, audit logs, and sign-in logs. Uses the OAuth2 client-credentials grant against a tenant-scoped token endpoint.",
+  "provider": "microsoft",
+  "service": "entra_id",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "tenant_id",
+      "label": "Tenant ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Your Microsoft Entra ID tenant ID (GUID) — from Azure Portal → Microsoft Entra ID → Overview"
+    },
+    {
+      "key": "client_id",
+      "label": "Application (Client) ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "From Azure Portal → App registrations → your app → Application (client) ID"
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Microsoft Entra ID client secret",
+      "help": "From App registrations → Certificates & secrets → Client secrets"
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scope",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/.default",
+      "placeholder": "https://graph.microsoft.com/.default",
+      "help": "Microsoft Graph scope. Use the default (.default) for client-credentials apps so consented application permissions are honored."
+    },
+    {
+      "key": "base_url",
+      "label": "Microsoft Graph Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/v1.0",
+      "placeholder": "https://graph.microsoft.com/v1.0",
+      "help": "Microsoft Graph API base URL. Override only when targeting national cloud endpoints (US Gov, China, Germany)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "240",
+      "placeholder": "240",
+      "help": "Maximum Microsoft Graph requests per minute. Graph throttles per-app and per-tenant; 240 is a safe default for most workloads."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates required config (tenant_id, client_id, client_secret) and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authenticate",
+      "name": "Authenticate (Client Credentials)",
+      "description": "Mints a Microsoft Graph access token via the OAuth2 client-credentials grant against the tenant-scoped token endpoint.",
+      "method": "POST",
+      "params": [],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Microsoft Graph connectivity by fetching the tenant's /organization resource.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Lists directory users with optional $filter, $search, $orderby, $select, and $top.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false },
+        { "key": "orderby", "type": "string", "required": false },
+        { "key": "select", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Fetches a single user by id or userPrincipalName.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id_or_upn", "type": "string", "required": true },
+        { "key": "select", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Create User",
+      "description": "Creates a new directory user with passwordProfile.",
+      "method": "POST",
+      "params": [
+        { "key": "account_enabled", "type": "boolean", "required": true },
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "mail_nickname", "type": "string", "required": true },
+        { "key": "password", "type": "string", "required": true },
+        { "key": "user_principal_name", "type": "string", "required": true },
+        { "key": "force_change_password_next_signin", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Update User",
+      "description": "PATCHes arbitrary fields on a user.",
+      "method": "PATCH",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete User",
+      "description": "Deletes a user.",
+      "method": "DELETE",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "reset_user_password",
+      "name": "Reset User Password",
+      "description": "Administratively resets a user's password via PATCH on passwordProfile.",
+      "method": "PATCH",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "new_password", "type": "string", "required": true },
+        { "key": "force_change_next_signin", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "Lists directory groups.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "select", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_group",
+      "name": "Get Group",
+      "description": "Fetches a single group by id.",
+      "method": "GET",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_group",
+      "name": "Create Group",
+      "description": "Creates a new directory group.",
+      "method": "POST",
+      "params": [
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "mail_nickname", "type": "string", "required": true },
+        { "key": "mail_enabled", "type": "boolean", "required": false },
+        { "key": "security_enabled", "type": "boolean", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "group_types", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_group_members",
+      "name": "List Group Members",
+      "description": "Lists members of a group.",
+      "method": "GET",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_group_member",
+      "name": "Add Group Member",
+      "description": "Adds a user to a group via POST /groups/{id}/members/$ref with @odata.id payload.",
+      "method": "POST",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "remove_group_member",
+      "name": "Remove Group Member",
+      "description": "Removes a user from a group via DELETE /groups/{gid}/members/{uid}/$ref.",
+      "method": "DELETE",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applications",
+      "name": "List Applications",
+      "description": "Lists app registrations in the tenant.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_service_principals",
+      "name": "List Service Principals",
+      "description": "Lists service principals in the tenant.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_directory_roles",
+      "name": "List Directory Roles",
+      "description": "Lists activated directory roles in the tenant.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_audit_logs",
+      "name": "List Directory Audit Logs",
+      "description": "Lists directory audit log entries.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_signin_logs",
+      "name": "List Sign-In Logs",
+      "description": "Lists Entra ID sign-in log entries.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
