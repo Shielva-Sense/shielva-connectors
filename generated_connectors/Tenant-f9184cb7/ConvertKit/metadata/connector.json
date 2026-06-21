@@ -14,15 +14,15 @@
       "type": "password",
       "required": true,
       "placeholder": "your-api-key",
-      "help": "Your ConvertKit API Key. Found in ConvertKit → Settings → Advanced → API Key."
+      "help": "Your ConvertKit API Key. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Key."
     },
     {
       "key": "api_secret",
       "label": "API Secret",
       "type": "password",
-      "required": false,
+      "required": true,
       "placeholder": "your-api-secret",
-      "help": "Your ConvertKit API Secret. Required to list subscribers. Found in ConvertKit → Settings → Advanced → API Secret."
+      "help": "Your ConvertKit API Secret. Required to list subscribers. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Secret."
     }
   ],
   "features": [
@@ -107,14 +107,69 @@
     "broadcasts"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Subscribers", "id": "list_subscribers", "category": "subscribers"},
-    {"name": "Get Subscriber", "id": "get_subscriber", "category": "subscribers"},
-    {"name": "List Tags", "id": "list_tags", "category": "tags"},
-    {"name": "List Sequences", "id": "list_sequences", "category": "sequences"},
-    {"name": "List Forms", "id": "list_forms", "category": "forms"},
-    {"name": "List Broadcasts", "id": "list_broadcasts", "category": "broadcasts"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the API key via GET /v3/account.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /v3/account and return current health with account name/email.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch subscribers, sequences, and forms; normalize each \u2192 SyncResult.",
+      "method": "GET"
+    },
+    {
+      "name": "List Subscribers",
+      "id": "list_subscribers",
+      "category": "subscribers",
+      "description": "Calls list_subscribers() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Subscriber",
+      "id": "get_subscriber",
+      "category": "subscribers",
+      "description": "Calls get_subscriber() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Tags",
+      "id": "list_tags",
+      "category": "tags",
+      "description": "Calls list_tags() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sequences",
+      "id": "list_sequences",
+      "category": "sequences",
+      "description": "Calls list_sequences() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Forms",
+      "id": "list_forms",
+      "category": "forms",
+      "description": "Calls list_forms() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Broadcasts",
+      "id": "list_broadcasts",
+      "category": "broadcasts",
+      "description": "Calls list_broadcasts() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Convertkit"
 }
