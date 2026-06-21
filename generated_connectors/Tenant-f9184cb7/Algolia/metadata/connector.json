@@ -1,0 +1,245 @@
+{
+  "connector_type": "algolia",
+  "name": "AlgoliaConnector",
+  "display_name": "Algolia",
+  "version": "1.0.0",
+  "description": "Connects to Algolia (search-as-a-service) to manage indexes, push and query objects, run keyword and federated searches, and curate synonyms + merchandising rules. Uses Algolia's official DSN-routed read host (`<app_id>-dsn.algolia.net`) and write host (`<app_id>.algolia.net`) with `algolianet.com` fallbacks for high availability.",
+  "provider": "algolia",
+  "service": "algolia",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "app_id",
+      "label": "Application ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Algolia Application ID",
+      "help": "Found in Algolia Dashboard → API Keys → Application ID. A short uppercase alphanumeric string (e.g. 'LATENCY'). Sent on every request as the `X-Algolia-Application-Id` header."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Algolia API Key",
+      "help": "Algolia Admin API Key (or a sufficiently-scoped key). Found in Algolia Dashboard → API Keys → Admin API Key. Treat as secret — Admin keys grant full read/write across the entire application. Sent on every request as the `X-Algolia-API-Key` header."
+    },
+    {
+      "key": "default_index",
+      "label": "Default Index",
+      "type": "string",
+      "required": false,
+      "placeholder": "products",
+      "help": "Optional default index name. Surfaced to the dashboard as a hint — the connector does not auto-route to this index."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout. The connector retries on transient failures, so this is a single-attempt cap."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates app_id + api_key by probing `GET /1/indexes`, then persists config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes `GET /1/indexes` (DSN-routed read host) as a lightweight liveness check.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_indexes",
+      "name": "List Indexes",
+      "description": "GET /1/indexes — list every index on the Algolia application. Returns `{items, nbPages}`.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_index_settings",
+      "name": "Create / Replace Index Settings",
+      "description": "PUT /1/indexes/{name}/settings — replace all index settings. Algolia creates the index on the first settings push.",
+      "method": "PUT",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "settings", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_index_settings",
+      "name": "Get Index Settings",
+      "description": "GET /1/indexes/{name}/settings — fetch the full settings object for an index.",
+      "method": "GET",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "save_object",
+      "name": "Save Object",
+      "description": "Upsert a single object. With `object_id` → `PUT /1/indexes/{name}/{id}` (overwrite). Without → `POST /1/indexes/{name}` (Algolia generates ID).",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "object_data", "type": "object", "required": true },
+        { "key": "object_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "save_objects",
+      "name": "Save Objects (Batch)",
+      "description": "POST /1/indexes/{name}/batch — bulk indexing. `action` one of addObject | updateObject | partialUpdateObject | partialUpdateObjectNoCreate | deleteObject.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "objects", "type": "array", "required": true },
+        { "key": "action", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_object",
+      "name": "Get Object",
+      "description": "GET /1/indexes/{name}/{id} — fetch a single object. Optional `attributes` projection.",
+      "method": "GET",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true },
+        { "key": "attributes", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_object",
+      "name": "Delete Object",
+      "description": "DELETE /1/indexes/{name}/{id} — delete a single object.",
+      "method": "DELETE",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "partial_update_object",
+      "name": "Partial Update Object",
+      "description": "POST /1/indexes/{name}/{id}/partial — patch specific attributes. `create_if_not_exists` controls upsert vs strict-update semantics.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true },
+        { "key": "attributes", "type": "object", "required": true },
+        { "key": "create_if_not_exists", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "browse_index",
+      "name": "Browse Index",
+      "description": "POST /1/indexes/{name}/browse — cursor-paginated full-index export. Pass `cursor` from each response to fetch the next page.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "params", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_index",
+      "name": "Search Index",
+      "description": "POST /1/indexes/{name}/query — keyword search with optional filters + pagination.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "query", "type": "string", "required": true },
+        { "key": "filters", "type": "string", "required": false },
+        { "key": "hits_per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "extra", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "multi_search",
+      "name": "Multi-Index Search",
+      "description": "POST /1/indexes/*/queries — federated search across multiple indexes in one round-trip. Each request is `{indexName, query, ...}`.",
+      "method": "POST",
+      "params": [
+        { "key": "requests", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_synonyms",
+      "name": "List Synonyms",
+      "description": "POST /1/indexes/{name}/synonyms/search — paginated synonym search with optional type filter.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "hits_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "save_synonym",
+      "name": "Save Synonym",
+      "description": "PUT /1/indexes/{name}/synonyms/{id} — upsert a synonym record. `forward_to_replicas` propagates to replica indexes.",
+      "method": "PUT",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "synonym_id", "type": "string", "required": true },
+        { "key": "synonym", "type": "object", "required": true },
+        { "key": "forward_to_replicas", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_rules",
+      "name": "List Rules",
+      "description": "POST /1/indexes/{name}/rules/search — paginated search for merchandising rules.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "hits_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "save_rule",
+      "name": "Save Rule",
+      "description": "PUT /1/indexes/{name}/rules/{id} — upsert a merchandising rule (condition + consequence).",
+      "method": "PUT",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "rule_id", "type": "string", "required": true },
+        { "key": "rule", "type": "object", "required": true },
+        { "key": "forward_to_replicas", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
