@@ -1,0 +1,79 @@
+{
+  "title": "Loggly Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Loggly** (SolarWinds Loggly) is a hosted log-management SaaS. The Shielva connector — `LogglyConnector` (`CONNECTOR_TYPE = \"loggly\"`, `AUTH_TYPE = \"api_key\"`) — wraps BOTH Loggly HTTP surfaces in a single client:\n\n| Surface | Base URL | Auth |\n|---|---|---|\n| Management / Search | `https://{subdomain}.loggly.com/apiv2` | HTTP Basic `username:password` |\n| Bulk Send | `https://logs-01.loggly.com/bulk/{customer_token}/tag/{tag}/` | URL-embedded customer token (no header) |\n\nMethods (each a standalone public `async def` in `connector.py`):\n\n- Search: `search_logs`, `get_search_field_stats`\n- Saved Searches: `list_saved_searches`, `create_saved_search`\n- Alerts: `list_alerts`, `create_alert`\n- Dashboards: `list_dashboards`, `get_dashboard`\n- Source Groups: `list_source_groups`\n- Users: `list_users`\n- Bulk Send: `send_events_bulk`\n\nThe connector normalises events into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), retries 429/5xx with exponential backoff (3 attempts honoring `Retry-After` when present), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::LogglyHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Gather your Loggly credentials\n\n1. Sign in at `https://{subdomain}.loggly.com`.\n2. Open **Settings → Account → Account Information** and note your **subdomain** (the prefix in the URL).\n3. Either reuse your account username/password OR create an API-credential pair under **Settings → Account → API Tokens**. Both shapes are valid Basic-auth credentials.\n4. For bulk send, open **Settings → Source Setup → Customer Tokens** and copy a token UUID.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Loggly**, fill in:\n\n| Field | Value |\n|---|---|\n| `subdomain` (text) | e.g. `acme` |\n| `username` (text) | Loggly username |\n| `password` (secret) | Loggly password |\n| `customer_token` (secret, optional) | UUID; required only for `send_events_bulk` |\n| `base_url` (text, optional) | Override `https://{subdomain}.loggly.com/apiv2` (rare) |\n| `ingest_base_url` (text, optional) | Override `https://logs-01.loggly.com` |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `subdomain` + `username` + `password` are present (it does NOT call Loggly), initialises the `LogglyHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which runs `GET /apiv2/search?q=*&size=1` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Loggly exposes two distinct auth modes that the connector handles in a single HTTP client (`AUTH_TYPE = \"api_key\"` is the umbrella label since both are static, non-OAuth credentials).\n\n### Management API — HTTP Basic\n\nEvery request to `https://{subdomain}.loggly.com/apiv2/*`:\n\n```\nAuthorization: Basic base64(\"{username}:{password}\")\nContent-Type:  application/json\nAccept:        application/json\n```\n\n### Bulk Send — Token in URL\n\n`send_events_bulk` posts to:\n\n```\nPOST https://logs-01.loggly.com/bulk/{customer_token}/tag/{tag}/\nContent-Type: application/json\nBody: newline-delimited JSON (one event per line)\n```\n\nNo `Authorization` header is sent — the `customer_token` UUID embedded in the path IS the credential. If `customer_token` is blank, calling `send_events_bulk` raises `LogglyError` without making a network call.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `subdomain` + `username` + `password`. Initialises `LogglyHTTPClient`. Does **not** call any Loggly endpoint. |\n| `authorize(...)` | Returns a stub `TokenInfo` — there is no token exchange. |\n| `health_check()` | `GET /apiv2/search?q=*&size=1` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `subdomain` | text | yes | `self.subdomain` | URL prefix for Management API |\n| `username` | text | yes | `self.username` | Basic-auth username |\n| `password` | secret | yes | `self.password` | Basic-auth password |\n| `customer_token` | secret | no | `self.customer_token` | UUID in bulk-send URL path |\n| `base_url` | text | no | `self.base_url` (default `https://{subdomain}.loggly.com/apiv2`) | Override Management base |\n| `ingest_base_url` | text | no | `self.ingest_base_url` (default `https://logs-01.loggly.com`) | Override Bulk Send base |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"subdomain\", \"username\", \"password\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_INGEST_BASE = \"https://logs-01.loggly.com\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `LogglyConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::LogglyHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `subdomain` + `username` + `password`; initialise `LogglyHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key/Basic auth — returns a stub TokenInfo.\n\n### `async health_check() -> ConnectorStatus`\nRuns `GET /apiv2/search?q=*&size=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPaginates `/apiv2/events/iterate` over a 24h (or `since`-bounded) window → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-search",
+          "title": "Search",
+          "content": "### `async search_logs(*, q='*', from_='-24h', until='now', size=100, order='desc') -> Dict`\n`GET /apiv2/search?q={q}&from={from_}&until={until}&size={size}&order={order}` — returns `{rsid, events}`.\n\n### `async get_search_field_stats(field, *, q='*', from_='-24h', until='now', facet_size=100) -> Dict`\n`GET /apiv2/fields/{field}` — facet aggregation for one field across the time window."
+        },
+        {
+          "id": "api-saved",
+          "title": "Saved Searches",
+          "content": "### `async list_saved_searches() -> Dict`\n`GET /apiv2/savedsearches`.\n\n### `async create_saved_search(payload: Dict) -> Dict`\n`POST /apiv2/savedsearches` — body is the saved-search JSON (`{name, query, ...}`)."
+        },
+        {
+          "id": "api-alerts",
+          "title": "Alerts",
+          "content": "### `async list_alerts() -> Dict`\n`GET /apiv2/alerts`.\n\n### `async create_alert(payload: Dict) -> Dict`\n`POST /apiv2/alerts` — body is the alert spec (`{name, query, type, thresholdValue, timeRange, endpoints}`)."
+        },
+        {
+          "id": "api-dashboards",
+          "title": "Dashboards",
+          "content": "### `async list_dashboards() -> Dict`\n`GET /apiv2/dashboards`.\n\n### `async get_dashboard(dashboard_id: str) -> Dict`\n`GET /apiv2/dashboards/{id}`."
+        },
+        {
+          "id": "api-source-groups-users",
+          "title": "Source Groups + Users",
+          "content": "### `async list_source_groups() -> Dict`\n`GET /apiv2/sourcegroups`.\n\n### `async list_users() -> Dict`\n`GET /apiv2/users` — requires admin role on the Loggly side."
+        },
+        {
+          "id": "api-bulk-send",
+          "title": "Bulk Event Send",
+          "content": "### `async send_events_bulk(events: List[Dict], tag='bulk') -> Dict`\n`POST https://logs-01.loggly.com/bulk/{customer_token}/tag/{tag}/`.\n\nBody is newline-delimited JSON — one event per line, up to 5 MB total. Requires `customer_token` to be configured at install time; raises `LogglyError` otherwise. An empty `events` list short-circuits to `{response: 'ok', sent: 0}` (no HTTP call)."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nLogglyError                              # base; carries status_code + response_body\n├── LogglyAuthError                      # 401 / 403\n├── LogglyBadRequestError                # 400\n├── LogglyNotFoundError                  # 404\n├── LogglyConflictError                  # 409\n├── LogglyRateLimitError                 # 429 — retry_after_s\n└── LogglyServerError                    # 5xx\n```\n\nBack-compat aliases:\n```\nLogglyNetworkError = LogglyServerError   # legacy name\nLogglyNotFound     = LogglyNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honour `Retry-After` if present; otherwise exponential backoff `0.5 * 2 ** attempt` (0.5s, 1s, 2s). Up to `_MAX_RETRIES = 3` |\n| 5xx | Exponential backoff, up to 3 retries |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `LogglyServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED) or (OFFLINE, CONNECTED) on transport\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `subdomain`, `username`, or `password` blank | Re-enter all three in ACP. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — Basic-auth credentials wrong, or `subdomain` mis-typed | Verify subdomain matches the URL you log into. Rotate password if needed. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — user lacks role required for the endpoint (e.g. `list_users` needs admin) | Promote the user OR use an admin-scoped API-credential pair. |\n| `loggly.http.retry` warnings spike | Hitting 429 (Loggly per-minute cap) | The client retries honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on every call | Wrong `subdomain` (e.g. typo) | Confirm the prefix in `https://{subdomain}.loggly.com` matches the Account Information page. |\n| `send_events_bulk` raises `LogglyError` without HTTP call | `customer_token` install_field is blank | Re-open the connector install in ACP and paste a token from **Source Setup → Customer Tokens**. |\n| Bulk events visible but not queryable in UI | Tag mismatch — events pushed under a tag your Loggly source-group doesn't include | Pass `tag=` explicitly when calling `send_events_bulk(events, tag='myapp')`. |\n| `ImportError: cannot import name 'LogglyNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `LogglyNetworkError = LogglyServerError` alias preserved. |"
+    }
+  ]
+}
