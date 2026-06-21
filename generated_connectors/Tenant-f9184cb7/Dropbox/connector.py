@@ -18,7 +18,11 @@ from models import (
     SyncStatus,
 )
 
-from shared.base_connector import BaseConnector
+try:
+    from shared.base_connector import BaseConnector
+    _BASE = BaseConnector
+except ImportError:
+    _BASE = object  # standalone / test mode
 
 # Dropbox OAuth2 endpoints
 DROPBOX_AUTH_URL = "https://www.dropbox.com/oauth2/authorize"
