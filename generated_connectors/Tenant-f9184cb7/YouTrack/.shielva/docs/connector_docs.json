@@ -1,0 +1,74 @@
+{
+  "title": "YouTrack Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**YouTrack** is JetBrains' issue-tracking and agile project-management product. The REST API lives on a per-tenant cluster: Cloud at `https://{instance}.youtrack.cloud/api`, self-hosted at `https://youtrack.example.com/api`. This connector — `YouTrackConnector` (`CONNECTOR_TYPE = \"youtrack\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users` + `/users/me` | Current user, list, get |\n| Projects | `/admin/projects` | List, get |\n| Issues | `/issues` | List, get, create, update, delete |\n| Comments | `/issues/{id}/comments` | List, add |\n| Tags | `/issueTags` | List |\n| Time Tracking | `/issues/{id}/timeTracking/workItems` | List logged work items |\n| Agile Boards | `/agiles` | List boards |\n| Sprints | `/agiles/{agileId}/sprints` | List sprints on a board |\n| Articles | `/articles` | Knowledge-base articles |\n\nThe connector normalises issues into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::YouTrackHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a YouTrack permanent token\n\n1. Sign in to your YouTrack instance (`https://{instance}.youtrack.cloud` or your self-hosted URL).\n2. Open **Profile → Account Security → Permanent Tokens**.\n3. Click **New token**, give it a name + scope (typically `YouTrack` service with read+write on the surfaces you need: Issues, Projects, Articles, Comments).\n4. Copy the token — it starts with `perm:` and is shown only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → YouTrack**, fill in:\n\n| Field | Value |\n|---|---|\n| `base_url` (text) | Instance root URL — e.g. `https://yourorg.youtrack.cloud` (the connector appends `/api` automatically). |\n| `permanent_token` (secret) | Permanent token from step 4 |\n| `default_project_id` (text, optional) | Project short-name or internal id (e.g. `0-1`). Used by `sync()` and as a fallback for `create_issue`. |\n| `rate_limit_per_min` (number) | Soft cap, default 200 |\n\nClick **Install**. `install()` validates `base_url` + `permanent_token` are present, normalises the base URL (`https://{host}` or `https://{host}/api` are both accepted), initialises the `YouTrackHTTPClient`, and probes `GET /users/me?fields=login` to verify the token.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which re-runs the `/users/me` probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On network failure → `OFFLINE + CONNECTED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "YouTrack REST API uses **server-to-server permanent-token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no refresh, no expiry — but admins can revoke tokens manually.\n\n### Credential model\n\n- `permanent_token` is sent as `Authorization: Bearer <perm:...>`. Tokens always start with the `perm:` prefix.\n- `base_url` is per-tenant. Cloud: `https://{instance}.youtrack.cloud`. Self-hosted: `https://youtrack.example.com`. The connector calls `normalize_base_url(...)` and ends every request URL with `/api`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `base_url` + `permanent_token`. Initialises `YouTrackHTTPClient`. Calls `GET /users/me?fields=login` as a token probe. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured permanent token; there is no exchange. |\n| `health_check()` | `GET /users/me?fields=login` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the permanent token lives in `config`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <perm:...>\nAccept:        application/json\nContent-Type:  application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `base_url` | text | yes | `self.base_url` | Per-tenant YouTrack root; normalised to `{host}/api` by `helpers/utils.py::normalize_base_url`. |\n| `permanent_token` | secret | yes | `self.permanent_token` | `Authorization: Bearer <token>` header value. |\n| `default_project_id` | text | no | `self.default_project_id` | Filter for `sync()` and fallback for `create_issue`. |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 200) | Client-side soft cap. |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"base_url\", \"permanent_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```\n\nThere is no provider-wide host constant — `base_url` is always tenant-supplied."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `YouTrackConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::YouTrackHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `base_url` + `permanent_token`; initialise `YouTrackHTTPClient`; probe `GET /users/me?fields=login`. Returns `(HEALTHY, CONNECTED)` on success.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` whose `access_token` is the configured permanent token.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /users/me?fields=login`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/issues` (filtered by `default_project_id` and `since` when set), normalises each into a `NormalizedDocument`, calls `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`.\n\n### `async get_issue_normalized(issue_id) -> NormalizedDocument`\nFetches one issue with the full field set and returns it normalised."
+        },
+        {
+          "id": "api-users",
+          "title": "Users",
+          "content": "### `async get_current_user() -> Dict`\n`GET /users/me`.\n\n### `async list_users(query=None, skip=0, top=100, fields=...) -> List[Dict]`\n`GET /users` with `$skip` / `$top` paging.\n\n### `async get_user(user_id, fields=...) -> Dict`\n`GET /users/{user_id}`."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects",
+          "content": "### `async list_projects(skip=0, top=100, fields=...) -> List[Dict]`\n`GET /admin/projects`.\n\n### `async get_project(project_id, fields=None) -> Dict`\n`GET /admin/projects/{project_id}`."
+        },
+        {
+          "id": "api-issues",
+          "title": "Issues",
+          "content": "### `async list_issues(query=None, skip=0, top=100, fields=...) -> List[Dict]`\n`GET /issues` — `query` accepts the YouTrack query language (e.g. `project: ACME #Unresolved`).\n\n### `async get_issue(issue_id, fields=None) -> Dict`\n`GET /issues/{issue_id}` — accepts internal id (`2-15`) or readable id (`ACME-15`).\n\n### `async create_issue(project_id, summary, description='', custom_fields=None, fields=None) -> Dict`\n`POST /issues` — body shape: `{\"project\": {\"id\": project_id}, \"summary\": ..., \"description\": ..., \"customFields\": [...]}`. Falls back to `default_project_id` when `project_id` is blank.\n\n### `async update_issue(issue_id, summary=None, description=None, custom_fields=None) -> Dict`\n`POST /issues/{issue_id}` — only the supplied fields are sent.\n\n### `async delete_issue(issue_id) -> Dict`\n`DELETE /issues/{issue_id}`."
+        },
+        {
+          "id": "api-comments-tags-time",
+          "title": "Comments · Tags · Time Tracking",
+          "content": "### `async add_comment(issue_id, text) -> Dict`\n`POST /issues/{issue_id}/comments` — body `{\"text\": ...}`.\n\n### `async list_comments(issue_id, skip=0, top=100, fields=...) -> List[Dict]`\n`GET /issues/{issue_id}/comments`.\n\n### `async list_tags(skip=0, top=100, fields=...) -> List[Dict]`\n`GET /issueTags` — account-wide tags.\n\n### `async list_time_tracking(issue_id, skip=0, top=100) -> List[Dict]`\n`GET /issues/{issue_id}/timeTracking/workItems`."
+        },
+        {
+          "id": "api-agile-articles",
+          "title": "Agile Boards · Sprints · Articles",
+          "content": "### `async list_boards(skip=0, top=100, fields=...) -> List[Dict]`\n`GET /agiles` — agile boards visible to the token.\n\n### `async list_sprints(board_id, skip=0, top=100, fields=...) -> List[Dict]`\n`GET /agiles/{board_id}/sprints`.\n\n### `async list_articles(query=None, skip=0, top=100, fields=...) -> List[Dict]`\n`GET /articles` — knowledge-base articles."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nYouTrackError                          # base; carries status_code + response_body\n├── YouTrackAuthError                  # 401 / 403\n├── YouTrackBadRequestError            # 400\n├── YouTrackNotFoundError              # 404\n├── YouTrackConflictError              # 409\n├── YouTrackPreconditionError          # 428 (revision mismatch)\n├── YouTrackRateLimitError             # 429 — retry_after_s\n└── YouTrackServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nYouTrackNetworkError = YouTrackServerError   # legacy name\nYouTrackNotFound     = YouTrackNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 428 | Raise immediately |\n| 429 | Exponential backoff `RETRY_DELAY_S * BACKOFF_FACTOR ** attempt` + jitter, capped at `MAX_RETRY_DELAY_S=16s`, retry up to `DEFAULT_MAX_RETRIES=3` |\n| 5xx | Same backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` / connect/read errors | Backoff, retry up to 3, then raise `YouTrackNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `base_url` or `permanent_token` blank | Re-enter both in ACP. Tokens always start with `perm:`. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at install | 401/403 from `/users/me` — token revoked or wrong base_url | Generate a fresh permanent token in YouTrack → Profile → Account Security → Permanent Tokens. Verify the base_url matches the instance the token was issued for. |\n| `ConnectorStatus(OFFLINE, PENDING)` at install | Network error reaching the YouTrack host | Check `base_url` host is reachable from the gateway (DNS, firewall, VPN). |\n| `youtrack.http.retry` warnings spike | Hitting 429 (YouTrack per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_issue` | `issue_id` is wrong, or the token's user lacks read permission on that project | Try the readable id (e.g. `ACME-15`) or the internal id (e.g. `2-15`). Verify project membership. |\n| `create_issue` raises `ValueError: project_id is required` | No `project_id` supplied AND `default_project_id` not set | Pass `project_id` explicitly OR set `default_project_id` in the install fields. |\n| `ImportError: cannot import name 'YouTrackNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `YouTrackNetworkError = YouTrackServerError` alias added in `exceptions.py`. |\n| `from shared.base_connector import ...` fails outside the harness | Connector root or core/ not on `sys.path` | The package `__init__.py` self-bootstraps both. If you import the package via `from connector import ...` directly, ensure `PYTHONPATH` includes both the connector root and the core/ directory. |"
+    }
+  ]
+}
