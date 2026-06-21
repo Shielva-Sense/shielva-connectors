@@ -1,0 +1,263 @@
+{
+  "connector_type": "firebase",
+  "name": "FirebaseConnector",
+  "display_name": "Firebase",
+  "version": "1.0.0",
+  "description": "Connects Shielva to Google Firebase — Firestore (documents), Realtime Database (paths), Cloud Messaging (FCM v1), Identity Toolkit (Auth admin), and Cloud Storage. Authenticates with a service-account JSON via the OAuth2 JWT-bearer flow.",
+  "provider": "firebase",
+  "service": "firebase",
+  "auth_type": "service_account",
+  "install_fields": [
+    {
+      "key": "service_account_json",
+      "label": "Service Account JSON",
+      "type": "secret",
+      "input_type": "textarea",
+      "required": true,
+      "placeholder": "{\n  \"type\": \"service_account\",\n  \"project_id\": \"...\",\n  \"client_email\": \"...\",\n  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\n...\"\n}",
+      "help": "Paste the full service-account JSON from Firebase Console → Project Settings → Service Accounts → Generate New Private Key. project_id, client_email, and private_key are derived from this blob."
+    },
+    {
+      "key": "database_url",
+      "label": "Realtime Database URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://my-project-default-rtdb.firebaseio.com",
+      "help": "Realtime DB URL — required only when get_realtime_db / set_realtime_db are used."
+    },
+    {
+      "key": "storage_bucket",
+      "label": "Default Storage Bucket",
+      "type": "string",
+      "required": false,
+      "placeholder": "my-project.appspot.com",
+      "help": "Default Firebase Storage bucket. Leave blank to fall back to '{project_id}.appspot.com'."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scope Override",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://www.googleapis.com/auth/datastore ...",
+      "help": "Space-separated OAuth2 scope override. Defaults cover Firestore, RTDB, FCM, Identity Toolkit, and Storage."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout. Default is 30 s."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Parses service_account_json, mints an initial OAuth2 access token (proving the credential is live), and persists derived project_id + client_email + bucket defaults.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Returns a TokenInfo wrapping the cached access token. No interactive OAuth — the service-account JWT-bearer flow is automatic.",
+      "method": "POST",
+      "params": [],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Mints / refreshes the access token then probes a sentinel Firestore collection. 404 is treated as success; only auth or network errors degrade.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_documents",
+      "name": "Firestore: List Documents",
+      "description": "GET /v1/projects/{id}/databases/(default)/documents/{collection} — paginated.",
+      "method": "GET",
+      "params": [
+        { "key": "collection", "type": "string", "required": true },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_document",
+      "name": "Firestore: Get Document",
+      "description": "GET /documents/{collection}/{document_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "collection", "type": "string", "required": true },
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_document",
+      "name": "Firestore: Create Document",
+      "description": "POST /documents/{collection} — optional client-supplied documentId. Fields auto-encoded into Firestore Value envelopes.",
+      "method": "POST",
+      "params": [
+        { "key": "collection", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true },
+        { "key": "document_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_document",
+      "name": "Firestore: Update Document",
+      "description": "PATCH /documents/{collection}/{document_id}. Fields auto-encoded into Firestore Value envelopes.",
+      "method": "PATCH",
+      "params": [
+        { "key": "collection", "type": "string", "required": true },
+        { "key": "document_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_document",
+      "name": "Firestore: Delete Document",
+      "description": "DELETE /documents/{collection}/{document_id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "collection", "type": "string", "required": true },
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "Auth: List Users",
+      "description": "POST {identity_base}/accounts:batchGet — paginated via nextPageToken.",
+      "method": "POST",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "next_page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Auth: Get User",
+      "description": "POST {identity_base}/accounts:lookup with {localId: [uid]}.",
+      "method": "POST",
+      "params": [
+        { "key": "uid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Auth: Create User",
+      "description": "POST https://identitytoolkit.googleapis.com/v1/accounts — admin user-create endpoint.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "password", "type": "string", "required": false },
+        { "key": "display_name", "type": "string", "required": false },
+        { "key": "phone_number", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Auth: Update User",
+      "description": "POST {identity_base}/accounts:update — partial update keyed on localId.",
+      "method": "POST",
+      "params": [
+        { "key": "uid", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "password", "type": "string", "required": false },
+        { "key": "display_name", "type": "string", "required": false },
+        { "key": "phone_number", "type": "string", "required": false },
+        { "key": "disabled", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Auth: Delete User",
+      "description": "POST {identity_base}/accounts:delete with {localId: uid}.",
+      "method": "POST",
+      "params": [
+        { "key": "uid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_fcm_notification",
+      "name": "FCM: Send Notification",
+      "description": "POST /v1/projects/{id}/messages:send. Provide exactly one of token (single device) or topic.",
+      "method": "POST",
+      "params": [
+        { "key": "token", "type": "string", "required": false },
+        { "key": "topic", "type": "string", "required": false },
+        { "key": "notification", "type": "object", "required": false },
+        { "key": "data", "type": "object", "required": false },
+        { "key": "android", "type": "object", "required": false },
+        { "key": "apns", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_realtime_db",
+      "name": "RTDB: Get",
+      "description": "GET {database_url}/{path}.json.",
+      "method": "GET",
+      "params": [
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "set_realtime_db",
+      "name": "RTDB: Set",
+      "description": "PUT {database_url}/{path}.json — full overwrite at path.",
+      "method": "PUT",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "data", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_storage_objects",
+      "name": "Storage: List Objects",
+      "description": "GET https://firebasestorage.googleapis.com/v0/b/{bucket}/o — paginated, optional prefix filter.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": false },
+        { "key": "prefix", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upload_storage_object",
+      "name": "Storage: Upload Object",
+      "description": "POST https://firebasestorage.googleapis.com/v0/b/{bucket}/o?name={name} — raw object bytes with the supplied content-type.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "data", "type": "bytes", "required": true },
+        { "key": "content_type", "type": "string", "required": false },
+        { "key": "bucket", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "PyJWT[crypto]>=2.8",
+    "cryptography>=42.0"
+  ]
+}
