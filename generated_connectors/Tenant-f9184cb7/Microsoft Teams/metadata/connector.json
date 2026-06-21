@@ -10,25 +10,29 @@
       "key": "client_id",
       "label": "Application (client) ID",
       "type": "string",
-      "required": true
+      "required": true,
+      "help": "Application (client) ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
-      "required": true
+      "required": true,
+      "help": "Client Secret."
     },
     {
       "key": "tenant_hint",
       "label": "Azure AD Tenant (optional)",
       "type": "string",
-      "required": false
+      "required": false,
+      "help": "Azure AD Tenant (optional)."
     },
     {
       "key": "redirect_uri",
       "label": "Redirect URI (optional)",
       "type": "string",
-      "required": false
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
     }
   ],
   "capabilities": [
@@ -49,5 +53,127 @@
       "https://graph.microsoft.com/ChannelMessage.Read.All",
       "offline_access"
     ]
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync messages from all joined teams and their channels.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "GET /me/joinedTeams \u2014 list all teams the user has joined.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_channels",
+      "name": "List Channels",
+      "description": "GET /teams/{team_id}/channels \u2014 list channels in a team.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "GET /teams/{team_id}/channels/{channel_id}/messages \u2014 list messages.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "channel_id",
+          "label": "Channel Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_channel_messages",
+      "name": "List Channel Messages",
+      "description": "GET /teams/{team_id}/channels/{channel_id}/messages?$top={limit}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "channel_id",
+          "label": "Channel Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_message",
+      "name": "Get Message",
+      "description": "GET /teams/{team_id}/channels/{channel_id}/messages/{message_id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "channel_id",
+          "label": "Channel Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "message_id",
+          "label": "Message Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "display_name": "Teams"
 }
