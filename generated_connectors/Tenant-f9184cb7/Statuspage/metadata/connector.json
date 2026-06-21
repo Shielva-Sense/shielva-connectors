@@ -1,0 +1,294 @@
+{
+  "connector_type": "statuspage",
+  "name": "StatuspageConnector",
+  "display_name": "Statuspage",
+  "version": "1.0.0",
+  "description": "Connects to Atlassian Statuspage for incident communications — manage components (incl. groups), open and update incidents, schedule maintenances, manage subscribers (email/SMS), read metrics and incident templates for a Statuspage page.",
+  "provider": "statuspage",
+  "service": "statuspage",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Statuspage API token",
+      "help": "From Statuspage → User Profile → API Tokens. Sent as `Authorization: OAuth <token>` (literal 'OAuth' prefix — NOT 'Bearer')."
+    },
+    {
+      "key": "page_id",
+      "label": "Page ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. abc123def456",
+      "help": "The Statuspage page UUID this connector is scoped to. Copy from the URL of the Statuspage admin (https://manage.statuspage.io/pages/<PAGE_ID>)."
+    },
+    {
+      "key": "base_url",
+      "label": "Statuspage API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.statuspage.io/v1",
+      "placeholder": "https://api.statuspage.io/v1",
+      "help": "Base URL for the Statuspage REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Client-side soft cap on outbound requests. Default 30 matches Statuspage's published per-token quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the API token by probing GET /pages/{page_id} and persists install-time config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes GET /pages/{page_id} with the configured token.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "GET /pages — list all Statuspage pages accessible to the API token.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "GET /pages/{id} — fetch a single Statuspage page.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_components",
+      "name": "List Components",
+      "description": "GET /pages/{id}/components — list every component on the page.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_component",
+      "name": "Get Component",
+      "description": "GET /pages/{pid}/components/{cid} — fetch a single component.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "component_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_component",
+      "name": "Create Component",
+      "description": "POST /pages/{id}/components — create a new component.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "group_id", "type": "string", "required": false },
+        { "key": "showcase", "type": "boolean", "required": false },
+        { "key": "only_show_if_degraded", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_component",
+      "name": "Update Component",
+      "description": "PATCH /pages/{pid}/components/{cid} — update arbitrary component fields.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "component_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_component_status",
+      "name": "Update Component Status",
+      "description": "PATCH /pages/{pid}/components/{cid} — convenience for status-only updates.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "component_id", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_component",
+      "name": "Delete Component",
+      "description": "DELETE /pages/{pid}/components/{cid} — delete a component.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "component_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_component_groups",
+      "name": "List Component Groups",
+      "description": "GET /pages/{id}/component-groups — list component groups.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_incidents",
+      "name": "List Incidents",
+      "description": "GET /pages/{id}/incidents — list incidents with optional substring search.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "q", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_incident",
+      "name": "Get Incident",
+      "description": "GET /pages/{pid}/incidents/{iid} — fetch a single incident.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "incident_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_incident",
+      "name": "Create Incident",
+      "description": "POST /pages/{id}/incidents — open a new incident.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "impact_override", "type": "string", "required": false },
+        { "key": "body", "type": "string", "required": false },
+        { "key": "component_ids", "type": "array", "required": false },
+        { "key": "components", "type": "object", "required": false },
+        { "key": "deliver_notifications", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_incident",
+      "name": "Update Incident",
+      "description": "PATCH /pages/{pid}/incidents/{iid} — update arbitrary incident fields.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "incident_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_maintenances",
+      "name": "List Maintenances",
+      "description": "GET /pages/{id}/incidents/scheduled — list scheduled maintenance windows.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_subscribers",
+      "name": "List Subscribers",
+      "description": "GET /pages/{id}/subscribers — list subscribers, filterable by type/state.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_subscriber",
+      "name": "Create Subscriber",
+      "description": "POST /pages/{id}/subscribers — create an email/SMS/restricted-page subscriber.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone_number", "type": "string", "required": false },
+        { "key": "phone_country", "type": "string", "required": false },
+        { "key": "page_access_user", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_subscriber",
+      "name": "Delete Subscriber",
+      "description": "DELETE /pages/{id}/subscribers/{sid} — unsubscribe a subscriber.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false },
+        { "key": "subscriber_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_metrics",
+      "name": "List Metrics",
+      "description": "GET /pages/{id}/metrics — list metrics configured on the page.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_incident_templates",
+      "name": "List Incident Templates",
+      "description": "GET /pages/{id}/incident_templates — list incident templates.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
