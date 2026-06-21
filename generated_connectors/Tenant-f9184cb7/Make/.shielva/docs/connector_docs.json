@@ -1,0 +1,74 @@
+{
+  "title": "Make Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Make** (formerly **Integromat**) is a no-code automation / workflow platform — its \"scenarios\" are visual graphs of modules that fire on triggers and call into HTTP services. This connector — `MakeConnector` (`CONNECTOR_TYPE = \"make\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Make workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users` | Current user + list users in an organization |\n| Organizations | `/organizations` | List + read organizations the token can see |\n| Teams | `/teams` | List + read teams in an organization |\n| Scenarios | `/scenarios` | CRUD + start/stop/run |\n| Executions | `/executions` | History + drill-down for runs |\n| Connections | `/connections` | Third-party authentications a team owns |\n| Hooks | `/hooks` | Webhook endpoints (primary inbound trigger surface) |\n| Data Stores | `/data-stores` | Persistent K/V stores |\n| Templates | `/templates` | Public + team-published scenario templates |\n| Devices | `/devices` | Devices registered to a team |\n\nThe connector normalises **scenarios** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces every operation as a standalone `async def` (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::MakeHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Make API token\n\n1. Sign in to https://www.make.com.\n2. Open **Profile → API → Add token**.\n3. Give the token a label and the scopes you need (Scenarios Read+Write, Hooks, Data Stores, Templates, Devices, etc.).\n4. Copy the token value — Make shows it only once.\n5. Note your **Zone** from the URL after login: `eu1`, `eu2`, `us1`, `us2`. The connector resolves this to `https://{zone}.make.com/api/v2`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Make**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | API token from step 4 |\n| `zone` (string) | `eu2` / `us1` / … |\n| `default_team_id` (number, optional) | Team to use when a call omits one — also used by `sync()` |\n| `default_organization_id` (number, optional) | Organization to use when a call omits one |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 60 |\n| `base_url` (string, optional) | Sandbox / proxy override |\n\nClick **Install**. `install()` validates the token shape, saves the config, and probes `GET /users/me`. On 2xx → `HEALTHY + CONNECTED`. On 401/403 → `DEGRADED + INVALID_CREDENTIALS`. Network failure → `DEGRADED + AUTHENTICATED` so the user can retry.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /users/me`. The result is classified by `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Make REST API v2 uses **server-to-server API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry — the token is long-lived and rotated out-of-band at Make → Profile → API.\n\n### Credential model\n\n- `api_token` is sent in the `Authorization` header with the **literal** prefix `Token` — **NOT** `Bearer` (Make-specific gotcha).\n- `zone` controls the base URL host: `https://{zone}.make.com/api/v2`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token`. Saves config. Probes `GET /users/me`. |\n| `authorize(auth_code)` | API-key flow — no OAuth exchange. Accepts a rotated token and returns a synthetic `TokenInfo(token_type=\"Token\")`. |\n| `health_check()` | `GET /users/me` — minimal probe wrapped in `with_retry(max_retries=2)`. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | Synthetic only — for compat with other connectors. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Token <api_token>     ← Make wire format (NOT Bearer)\nContent-Type:  application/json\nAccept:        application/json\n```\n\n### Zone → base URL resolution\n\n`helpers/utils.py::build_base_url(zone)` returns `https://{zone}.make.com/api/v2`. Valid zones today: `eu1`, `eu2`, `us1`, `us2`. Future zones (e.g. `asia1`) are accepted permissively — the connector logs a warning at config-time rather than failing fast."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | `Authorization: Token <api_token>` |\n| `zone` | string | yes (default `eu2`) | `self.zone` | Selects `https://{zone}.make.com/api/v2` |\n| `default_team_id` | number | no | `self.default_team_id` | Default team for `sync()` + helpers |\n| `default_organization_id` | number | no | `self.default_organization_id` | Default org for helpers |\n| `rate_limit_per_min` | number | no (default 60) | `self.rate_limit_per_min` | Client-side soft cap |\n| `base_url` | string | no | `self.base_url` | Sandbox / proxy override; falls back to `build_base_url(zone)` |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_token\", \"zone\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"INVALID_CREDENTIALS\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `MakeConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::MakeHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; save config; probe `GET /users/me`. Surfaces 401/403 immediately as `INVALID_CREDENTIALS`.\n\n### `async authorize(auth_code, state=None) -> TokenInfo`\nNo-op for the api_key flow — returns a synthetic `TokenInfo(token_type=\"Token\")`. Use it to rotate the in-process token without restarting the connector.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /users/me` with `with_retry(max_retries=2)`. Classifies via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through scenarios for `default_team_id` (or every team the token sees), normalises each into a `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), and calls `ingest_document`. Returns `SyncResult(documents_found/_synced/_failed)`."
+        },
+        {
+          "id": "api-users-orgs-teams",
+          "title": "Users · Organizations · Teams",
+          "content": "### `async get_current_user() -> Dict`\n`GET /users/me`.\n\n### `async list_users(organization_id, page=1, pageSize=50) -> Dict`\n`GET /users?organizationId=…`.\n\n### `async list_organizations() -> Dict`\n`GET /organizations`.\n\n### `async get_organization(organization_id) -> Dict`\n`GET /organizations/{id}`.\n\n### `async list_teams(organization_id) -> Dict`\n`GET /teams?organizationId=…`.\n\n### `async get_team(team_id) -> Dict`\n`GET /teams/{id}`."
+        },
+        {
+          "id": "api-scenarios",
+          "title": "Scenarios",
+          "content": "### `async list_scenarios(team_id, page=1, pageSize=50) -> Dict`\n`GET /scenarios?teamId=…`.\n\n### `async get_scenario(scenario_id) -> Dict`\n`GET /scenarios/{id}`.\n\n### `async create_scenario(team_id, name, blueprint, scheduling=None) -> Dict`\n`POST /scenarios` — body: `{teamId, name, blueprint, scheduling?}`.\n\n### `async update_scenario(scenario_id, fields) -> Dict`\n`PATCH /scenarios/{id}`.\n\n### `async delete_scenario(scenario_id) -> Dict`\n`DELETE /scenarios/{id}`.\n\n### `async run_scenario(scenario_id, body=None) -> Dict`\n`POST /scenarios/{id}/run` — one-shot trigger.\n\n### `async start_scenario(scenario_id) -> Dict`\n`POST /scenarios/{id}/start` — enable scheduling.\n\n### `async stop_scenario(scenario_id) -> Dict`\n`POST /scenarios/{id}/stop` — disable scheduling."
+        },
+        {
+          "id": "api-executions-connections",
+          "title": "Executions · Connections",
+          "content": "### `async list_executions(scenario_id=None, team_id=None, page=1, pageSize=50) -> Dict`\n`GET /executions` — optionally filtered.\n\n### `async get_execution(execution_id) -> Dict`\n`GET /executions/{id}`.\n\n### `async list_connections(team_id, page=1, pageSize=50) -> Dict`\n`GET /connections?teamId=…`.\n\n### `async get_connection(connection_id) -> Dict`\n`GET /connections/{id}`."
+        },
+        {
+          "id": "api-hooks-data-stores",
+          "title": "Hooks · Data Stores",
+          "content": "### `async list_hooks(team_id) -> Dict`\n`GET /hooks?teamId=…`.\n\n### `async get_hook(hook_id) -> Dict`\n`GET /hooks/{id}`.\n\n### `async create_hook(team_id, name, type_name=\"webhook\") -> Dict`\n`POST /hooks` — body: `{teamId, name, typeName}`.\n\n### `async delete_hook(hook_id) -> Dict`\n`DELETE /hooks/{id}`.\n\n### `async list_data_stores(team_id, page=1, pageSize=50) -> Dict`\n`GET /data-stores?teamId=…`.\n\n### `async get_data_store(data_store_id) -> Dict`\n`GET /data-stores/{id}`."
+        },
+        {
+          "id": "api-templates-devices",
+          "title": "Templates · Devices",
+          "content": "### `async list_templates(team_id=None, page=1, pageSize=50) -> Dict`\n`GET /templates` — public + team-published.\n\n### `async list_devices(team_id) -> Dict`\n`GET /devices?teamId=…`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nMakeError                              # base; carries status_code + response_body\n├── MakeAuthError                      # 401 / 403\n├── MakeNotFound                       # 404\n├── MakeRateLimitError                 # 429 (honours Retry-After)\n└── MakeNetworkError                   # 5xx + transport / timeout\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After`; exponential backoff `_BACKOFF_BASE * 2 ** attempt + jitter` capped at 8 s, retry up to `_DEFAULT_RETRIES = 3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `MakeNetworkError` |\n\n`helpers/utils.py::with_retry` provides an orchestration-layer retry wrapper for transient JSON-decode flakiness that escapes the HTTP client.\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nNetwork → ConnectorStatus(OFFLINE,  CONNECTED)\nOther   → ConnectorStatus(DEGRADED,  CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Re-enter the token in ACP. Make shows the token only once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at install / health_check | 401 from Make — token revoked or wrong zone | Verify the token is still listed at Make → Profile → API. Verify `zone` matches the host in your Make URL after login (`eu1.make.com` → zone `eu1`). |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` | 403 — token lacks scope | Rotate the token at Make → Profile → API and grant the missing scope (Scenarios, Hooks, etc.). |\n| `make.http.retry` warnings spike | Hitting 429 (Make per-minute rate cap) | Client retries with exponential backoff + `Retry-After`. Lower `rate_limit_per_min` or batch fewer concurrent requests. |\n| `Authorization: Bearer …` in network capture | Wrong scheme | Make wants the literal `Token` prefix, NOT `Bearer`. The client always emits `Token <api_token>`; if you see `Bearer`, you have a code path that bypasses `MakeHTTPClient`. |\n| 404 on `/scenarios/{id}` | Wrong scenario id or token's team isn't the scenario's team | Confirm the id via `list_scenarios(team_id=…)`. Make scenarios are scoped to a team — the token must belong to a user in that team. |\n| Wrong region — calls hit `eu2` instead of `us1` | Default `zone=eu2` not overridden | Set `zone=us1` (or whichever) in install_fields. The base URL is computed once in `__init__` from `zone` unless `base_url` is also set. |\n| `MakeNetworkError` on every call | DNS / TLS / firewall | Confirm outbound HTTPS to `{zone}.make.com` is allowed. If you run behind a proxy, set `base_url` to the proxy. |"
+    }
+  ]
+}
