@@ -1,0 +1,360 @@
+{
+  "connector_type": "document360",
+  "name": "Document360Connector",
+  "display_name": "Document360",
+  "version": "1.0.0",
+  "description": "Connects to the Document360 knowledge-base platform (Projects, Versions, Categories, Articles CRUD + publish + versions, Tags, Drive, Team, Languages, Templates, Search). Authenticates via a single api_token sent in the `api_token` request header. Syncs articles into the Shielva knowledge base as tenant-prefixed NormalizedDocuments.",
+  "provider": "document360",
+  "service": "document360",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Document360 API token",
+      "help": "From Document360 → Settings → API Tokens. Sent as the `api_token` request header (NOT Authorization: Bearer)."
+    },
+    {
+      "key": "default_project_id",
+      "label": "Default Project ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional — sync this project by default",
+      "help": "If set, sync() will pull articles from this project. Leave blank to pick the first project the token can see."
+    },
+    {
+      "key": "default_version_id",
+      "label": "Default Version ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional — sync this version by default",
+      "help": "If set, sync() will pull articles from this version only. Leave blank to walk all versions of the default project."
+    },
+    {
+      "key": "default_language_code",
+      "label": "Default Language Code",
+      "type": "string",
+      "required": false,
+      "default": "en",
+      "placeholder": "en",
+      "help": "ISO 639-1 language code (en, fr, de, ja, …). Defaults to 'en' if blank."
+    },
+    {
+      "key": "project_slug",
+      "label": "Public Site Slug",
+      "type": "string",
+      "required": false,
+      "placeholder": "acme",
+      "help": "Public Document360 site slug. Used to synthesise canonical article URLs of the form https://<slug>.document360.io/<lang>/article/<id>."
+    },
+    {
+      "key": "base_url",
+      "label": "Document360 API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://apihub.document360.io/v2",
+      "placeholder": "https://apihub.document360.io/v2",
+      "help": "Base URL for the Document360 REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Document360 API requests per minute. Document360's standard quota is 100/min per token."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the api_token is present and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Document360 uses a static API token — this method wraps the token in a TokenInfo and stores it via the SDK lifecycle.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Document360 API connectivity by listing projects.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Returns all projects accessible to the api_token.",
+      "method": "GET",
+      "params": [],
+      "returns": "Any"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "Fetches a single project by id.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_versions",
+      "name": "List Versions",
+      "description": "Lists all versions of a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_languages",
+      "name": "List Languages",
+      "description": "Lists the languages enabled for a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "Lists categories for a version, optionally filtered by parent_category_id.",
+      "method": "GET",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true },
+        { "key": "parent_category_id", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "get_category",
+      "name": "Get Category",
+      "description": "Fetches a single category by id.",
+      "method": "GET",
+      "params": [
+        { "key": "category_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "create_category",
+      "name": "Create Category",
+      "description": "Creates a new category under the supplied parent.",
+      "method": "POST",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true },
+        { "key": "parent_category_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "order", "type": "number", "required": false },
+        { "key": "category_type", "type": "string", "required": false },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "update_category",
+      "name": "Update Category",
+      "description": "Renames and/or reorders a category.",
+      "method": "PUT",
+      "params": [
+        { "key": "category_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": false },
+        { "key": "order", "type": "number", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "delete_category",
+      "name": "Delete Category",
+      "description": "Deletes a category.",
+      "method": "DELETE",
+      "params": [
+        { "key": "category_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_articles",
+      "name": "List Articles",
+      "description": "Lists articles in a version, optionally filtered by category and language.",
+      "method": "GET",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true },
+        { "key": "category_id", "type": "string", "required": false },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "get_article",
+      "name": "Get Article",
+      "description": "Fetches a single article by id and returns it as a NormalizedDocument with id = `tenant_id_source_id`.",
+      "method": "GET",
+      "params": [
+        { "key": "article_id", "type": "string", "required": true },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "NormalizedDocument"
+    },
+    {
+      "id": "create_article",
+      "name": "Create Article",
+      "description": "Creates a new article under the supplied category.",
+      "method": "POST",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true },
+        { "key": "category_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": false },
+        { "key": "language_code", "type": "string", "required": false },
+        { "key": "order", "type": "number", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "update_article",
+      "name": "Update Article",
+      "description": "Updates an article's title and/or content.",
+      "method": "PUT",
+      "params": [
+        { "key": "article_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": false },
+        { "key": "content", "type": "string", "required": false },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "delete_article",
+      "name": "Delete Article",
+      "description": "Deletes an article.",
+      "method": "DELETE",
+      "params": [
+        { "key": "article_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "publish_article",
+      "name": "Publish Article",
+      "description": "Publishes (or republishes) an article in a specific language.",
+      "method": "POST",
+      "params": [
+        { "key": "article_id", "type": "string", "required": true },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_article_versions",
+      "name": "List Article Versions",
+      "description": "Lists the historic versions of an article.",
+      "method": "GET",
+      "params": [
+        { "key": "article_id", "type": "string", "required": true },
+        { "key": "language_code", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "search_articles",
+      "name": "Search Articles",
+      "description": "Full-text search across articles in a version.",
+      "method": "GET",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true },
+        { "key": "query", "type": "string", "required": true },
+        { "key": "language_code", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Lists tags defined in a version.",
+      "method": "GET",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_team_members",
+      "name": "List Team Members",
+      "description": "Lists team accounts (members + roles) for the account that owns the api_token.",
+      "method": "GET",
+      "params": [],
+      "returns": "Any"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "Lists article templates available in a version.",
+      "method": "GET",
+      "params": [
+        { "key": "version_id", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_drive_files",
+      "name": "List Drive Files",
+      "description": "Lists Drive (attachment) files, optionally filtered by folder.",
+      "method": "GET",
+      "params": [
+        { "key": "folder_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "upload_drive_file",
+      "name": "Upload Drive File",
+      "description": "Uploads a Drive (attachment) file. Content is sent as base64 in the JSON body.",
+      "method": "POST",
+      "params": [
+        { "key": "file_name", "type": "string", "required": true },
+        { "key": "content_b64", "type": "string", "required": true },
+        { "key": "folder_id", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Articles",
+      "description": "Walks the configured project's versions and articles and ingests each one as a NormalizedDocument (id = `tenant_id_source_id`).",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
