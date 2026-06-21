@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Enter your Customer.io App API key",
-      "help": "Your Customer.io App API key. Found in Customer.io → Account Settings → API Credentials. Use the App API key (not the Track API key)."
+      "help": "Your Customer.io App API key. Found in Customer.io \u2192 Account Settings \u2192 API Credentials. Use the App API key (not the Track API key)."
     }
   ],
   "features": [
@@ -98,14 +98,69 @@
     "segments"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Customers", "id": "list_customers", "category": "customers"},
-    {"name": "Get Customer", "id": "get_customer", "category": "customers"},
-    {"name": "List Campaigns", "id": "list_campaigns", "category": "campaigns"},
-    {"name": "Get Campaign", "id": "get_campaign", "category": "campaigns"},
-    {"name": "List Newsletters", "id": "list_newsletters", "category": "newsletters"},
-    {"name": "List Segments", "id": "list_segments", "category": "segments"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the App API key via GET /workspaces.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /workspaces and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch customers, campaigns, and segments; normalize and ingest.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "GET /customers \u2014 list all customers with optional cursor.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "GET /customers/{customer_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Campaigns",
+      "id": "list_campaigns",
+      "category": "campaigns",
+      "description": "GET /campaigns.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Campaign",
+      "id": "get_campaign",
+      "category": "campaigns",
+      "description": "GET /campaigns/{campaign_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Newsletters",
+      "id": "list_newsletters",
+      "category": "newsletters",
+      "description": "GET /newsletters.",
+      "method": "GET"
+    },
+    {
+      "name": "List Segments",
+      "id": "list_segments",
+      "category": "segments",
+      "description": "GET /segments.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Customerio"
 }
