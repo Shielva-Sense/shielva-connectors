@@ -9,14 +9,16 @@
       "label": "Personal Access Token",
       "type": "password",
       "required": true,
-      "description": "Airtable Personal Access Token (starts with 'pat'). Create at airtable.com/create/tokens with data.records:read and schema.bases:read scopes."
+      "description": "Airtable Personal Access Token (starts with 'pat'). Create at airtable.com/create/tokens with data.records:read and schema.bases:read scopes.",
+      "help": "Personal Access Token."
     },
     {
       "key": "base_id",
       "label": "Default Base ID (optional)",
       "type": "string",
       "required": false,
-      "description": "Default Airtable Base ID to sync from (e.g. appXXXXXXXXXXXXXX). Found in the URL when viewing a base. Leave blank to sync all accessible bases."
+      "description": "Default Airtable Base ID to sync from (e.g. appXXXXXXXXXXXXXX). Found in the URL when viewing a base. Leave blank to sync all accessible bases.",
+      "help": "Default Base ID (optional)."
     }
   ],
   "capabilities": [
@@ -31,5 +33,129 @@
   "provider": "Airtable",
   "service": "Airtable",
   "connector_name": "Airtable",
-  "category": "database"
+  "category": "database",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all bases \u2192 tables \u2192 records into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_bases",
+      "name": "List Bases",
+      "description": "Return a (possibly paginated) list of Airtable bases.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tables",
+      "name": "List Tables",
+      "description": "Return all tables for the given base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "base_id",
+          "label": "Base Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_records",
+      "name": "List Records",
+      "description": "Return a page of records from the given table.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "base_id",
+          "label": "Base Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "table_name",
+          "label": "Table Name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_record",
+      "name": "Get Record",
+      "description": "Return a single record by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "base_id",
+          "label": "Base Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "table_name",
+          "label": "Table Name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "record_id",
+          "label": "Record Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_views",
+      "name": "List Views",
+      "description": "Return all views for the given table in the given base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "base_id",
+          "label": "Base Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "table_id",
+          "label": "Table Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "AirtableConnector",
+  "description": "Shielva connector for Airtable."
 }
