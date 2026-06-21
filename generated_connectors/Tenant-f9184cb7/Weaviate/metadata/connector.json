@@ -1,0 +1,259 @@
+{
+  "connector_type": "weaviate",
+  "name": "WeaviateConnector",
+  "display_name": "Weaviate",
+  "version": "1.0.0",
+  "description": "Connects to a Weaviate vector database cluster (Weaviate Cloud or self-hosted) using an API key. Wraps Schema/Classes, Objects CRUD, Batch insert, GraphQL queries (Get/Aggregate/Explore), Multi-tenancy, Backups, and Cluster meta endpoints. Each tenant points at their own cluster URL.",
+  "provider": "weaviate",
+  "service": "weaviate",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Weaviate Cluster URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://my-cluster.weaviate.network",
+      "help": "Your Weaviate cluster URL — Weaviate Cloud (https://<cluster-id>.weaviate.network) or self-hosted (http://localhost:8080). Per-tenant — every cluster has its own URL."
+    },
+    {
+      "key": "api_key",
+      "label": "Weaviate API Key",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Paste your Weaviate API key",
+      "help": "API key from Weaviate Cloud Console → API Keys, or the value of AUTHENTICATION_APIKEY_ALLOWED_KEYS on a self-hosted cluster. Sent as `Authorization: Bearer <key>`. Leave blank for anonymous self-hosted clusters."
+    },
+    {
+      "key": "grpc_port",
+      "label": "gRPC Port",
+      "type": "number",
+      "required": false,
+      "default": "50051",
+      "placeholder": "50051",
+      "help": "Weaviate gRPC port. Reserved for future high-throughput batch operations; the REST connector does not use this today."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout. Increase for large batch inserts."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates base_url and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /v1/.well-known/ready — Weaviate cluster liveness probe.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_meta",
+      "name": "Get Cluster Meta",
+      "description": "GET /v1/meta — cluster version, hostname, modules.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_classes",
+      "name": "List Classes",
+      "description": "GET /v1/schema — list all classes (collections) in the cluster.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_class",
+      "name": "Create Class",
+      "description": "POST /v1/schema — create a class from a raw class definition.",
+      "method": "POST",
+      "params": [
+        { "key": "class_body", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_class",
+      "name": "Get Class",
+      "description": "GET /v1/schema/{className}.",
+      "method": "GET",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_class",
+      "name": "Delete Class",
+      "description": "DELETE /v1/schema/{className}.",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_objects",
+      "name": "List Objects",
+      "description": "GET /v1/objects — page through objects, optionally filtered by class.",
+      "method": "GET",
+      "params": [
+        { "key": "class_name", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false },
+        { "key": "include", "type": "string", "required": false },
+        { "key": "tenant", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_object",
+      "name": "Create Object",
+      "description": "POST /v1/objects — create a single object.",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": true },
+        { "key": "vector", "type": "array", "required": false },
+        { "key": "object_id", "type": "string", "required": false },
+        { "key": "tenant", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_object",
+      "name": "Get Object",
+      "description": "GET /v1/objects/{className}/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true },
+        { "key": "include", "type": "string", "required": false },
+        { "key": "tenant", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_object",
+      "name": "Update Object",
+      "description": "PATCH /v1/objects/{className}/{id} — partial update of properties / vector.",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": true },
+        { "key": "vector", "type": "array", "required": false },
+        { "key": "tenant", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_object",
+      "name": "Delete Object",
+      "description": "DELETE /v1/objects/{className}/{id}.",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "object_id", "type": "string", "required": true },
+        { "key": "tenant", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "batch_create_objects",
+      "name": "Batch Create Objects",
+      "description": "POST /v1/batch/objects — bulk insert objects.",
+      "method": "POST",
+      "params": [
+        { "key": "objects", "type": "array", "required": true },
+        { "key": "consistency_level", "type": "string", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "graphql_query",
+      "name": "GraphQL Query",
+      "description": "POST /v1/graphql — Get, Aggregate, Explore. Returns the raw {data, errors} envelope.",
+      "method": "POST",
+      "params": [
+        { "key": "query", "type": "string", "required": true },
+        { "key": "variables", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tenants",
+      "name": "List Tenants",
+      "description": "GET /v1/schema/{className}/tenants.",
+      "method": "GET",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "create_tenant",
+      "name": "Create Tenants",
+      "description": "POST /v1/schema/{className}/tenants — body: [{name, activityStatus?}, ...].",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "tenants", "type": "array", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "delete_tenant",
+      "name": "Delete Tenants",
+      "description": "DELETE /v1/schema/{className}/tenants — body: list of tenant names.",
+      "method": "POST",
+      "params": [
+        { "key": "class_name", "type": "string", "required": true },
+        { "key": "tenant_names", "type": "array", "required": true }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "create_backup",
+      "name": "Create Backup",
+      "description": "POST /v1/backups/{backend} — backend is s3 | gcs | azure | filesystem.",
+      "method": "POST",
+      "params": [
+        { "key": "backend", "type": "string", "required": true },
+        { "key": "backup_id", "type": "string", "required": true },
+        { "key": "include", "type": "array", "required": false },
+        { "key": "exclude", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_backup_status",
+      "name": "Get Backup Status",
+      "description": "GET /v1/backups/{backend}/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "backend", "type": "string", "required": true },
+        { "key": "backup_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0,<1.0",
+    "structlog>=24.1"
+  ]
+}
