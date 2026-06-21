@@ -1,0 +1,4 @@
+# Grafana connector — all required runtime deps (httpx, pydantic, structlog) and
+# all test deps (pytest, pytest-asyncio, pytest-mock, respx) are pre-installed
+# in the shared venv. The REST surface is wrapped directly without a first-party
+# SDK, so no additional packages are required.
