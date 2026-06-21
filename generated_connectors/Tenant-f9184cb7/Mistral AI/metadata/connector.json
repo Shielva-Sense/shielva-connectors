@@ -1,0 +1,201 @@
+{
+  "connector_type": "mistral",
+  "name": "MistralConnector",
+  "display_name": "Mistral AI",
+  "version": "1.0.0",
+  "description": "Connects to the Mistral AI REST API (Chat Completions, Embeddings, Files, Fine-tuning, Models, Agents) using a Bearer API key. Supports chat + embeddings inference, fine-tuning lifecycle, file upload management, and KB cataloguing of models + uploaded files.",
+  "provider": "mistral",
+  "service": "mistral",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Mistral API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Mistral API key",
+      "help": "From console.mistral.ai → API Keys. Sent as `Authorization: Bearer <api_key>` on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Mistral API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.mistral.ai/v1",
+      "placeholder": "https://api.mistral.ai/v1",
+      "help": "Base URL for the Mistral REST API. Override only when routing through an approved proxy."
+    },
+    {
+      "key": "default_chat_model",
+      "label": "Default Chat Model",
+      "type": "string",
+      "required": false,
+      "default": "mistral-large-latest",
+      "placeholder": "mistral-large-latest",
+      "help": "Hint for callers — model ID used when create_chat_completion() is invoked without an explicit model argument."
+    },
+    {
+      "key": "default_embed_model",
+      "label": "Default Embeddings Model",
+      "type": "string",
+      "required": false,
+      "default": "mistral-embed",
+      "placeholder": "mistral-embed",
+      "help": "Hint for callers — model ID used when create_embeddings() is invoked without an explicit model argument."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side cap on Mistral API requests per minute. Default 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the API key by probing GET /models and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Mistral API connectivity by issuing GET /models with the stored API key.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "create_chat_completion",
+      "name": "Create Chat Completion",
+      "description": "POST /chat/completions — generates a model response from a list of chat messages.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "messages", "type": "array", "required": true },
+        { "key": "temperature", "type": "number", "required": false },
+        { "key": "max_tokens", "type": "number", "required": false },
+        { "key": "top_p", "type": "number", "required": false },
+        { "key": "stream", "type": "boolean", "required": false },
+        { "key": "response_format", "type": "object", "required": false },
+        { "key": "tools", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_embeddings",
+      "name": "Create Embeddings",
+      "description": "POST /embeddings — returns embedding vectors for one or more inputs. Wire key is `input` (singular).",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "array", "required": true },
+        { "key": "encoding_format", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "GET /models — returns every model visible to the configured API key.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_model",
+      "name": "Get Model",
+      "description": "GET /models/{id} — fetch a single model record.",
+      "method": "GET",
+      "params": [
+        { "key": "model_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_model",
+      "name": "Delete Model",
+      "description": "DELETE /models/{id} — removes a fine-tuned model from the account.",
+      "method": "DELETE",
+      "params": [
+        { "key": "model_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_files",
+      "name": "List Files",
+      "description": "GET /files — paginate uploaded files, optionally filtered by purpose.",
+      "method": "GET",
+      "params": [
+        { "key": "purpose", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upload_file",
+      "name": "Upload File",
+      "description": "POST /files — multipart upload of a training or batch input file.",
+      "method": "POST",
+      "params": [
+        { "key": "purpose", "type": "string", "required": true },
+        { "key": "file_path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file",
+      "name": "Get File",
+      "description": "GET /files/{id} — returns metadata for a single uploaded file.",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_file",
+      "name": "Delete File",
+      "description": "DELETE /files/{id} — removes an uploaded file.",
+      "method": "DELETE",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_fine_tuning_jobs",
+      "name": "List Fine-Tuning Jobs",
+      "description": "GET /fine_tuning/jobs — paginate fine-tuning jobs.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_fine_tuning_job",
+      "name": "Create Fine-Tuning Job",
+      "description": "POST /fine_tuning/jobs — starts a fine-tuning run against a base model and uploaded training files.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "training_files", "type": "array", "required": true },
+        { "key": "hyperparameters", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1"
+  ]
+}
