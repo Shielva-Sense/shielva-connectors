@@ -1,0 +1,69 @@
+{
+  "title": "Workato Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Workato** is an enterprise iPaaS / automation platform exposing a REST API at `https://www.workato.com/api` (US) or `https://app.eu.workato.com/api` (EU). This connector — `WorkatoConnector` (`CONNECTOR_TYPE = \"workato\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Workato workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Recipes | `/recipes` | List, get, start, stop integration recipes |\n| Connections | `/connections` | List, get, create connector connections |\n| Folders | `/folders` | Project / folder navigation |\n| Jobs | `/recipes/{id}/jobs` | Recipe job runs (audit + retry surface) |\n| Lookup Tables | `/lookup_tables` | Configurable runtime data |\n| Tags | `/tags` | Resource tagging |\n| Users | `/users` | Workspace users |\n| On-Prem Agents | `/on_prem_agents` | OPA fleet inventory |\n| Customers | `/managed_users` | White-label / embedded customer accounts |\n\nThe connector normalises recipes + connections + jobs into `NormalizedDocument` (id = `f\"{connector_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::WorkatoHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Workato API token\n\n1. Sign in to https://www.workato.com (or https://app.eu.workato.com for EU).\n2. Open **Workspace Admin → API Clients** (left nav).\n3. Click **Create client** → select scopes (Recipes, Connections, Jobs, etc.) → **Generate Token**.\n4. Copy the token value — Workato shows it only once.\n5. Note the data center you used (US or EU) — you'll set the `region` install field accordingly.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Workato**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | Token from step 4 |\n| `region` (string, optional) | `us` (default) or `eu` |\n| `base_url` (string, optional) | Explicit override — leave blank for the region default |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n| `timeout_s` (number) | HTTP timeout in seconds, default 30 |\n\nClick **Install**. `install()` validates `api_token` is present (it does NOT call the API), initialises the `WorkatoHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which calls `GET /users/me` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Workato REST API uses **server-to-server API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry — tokens live until rotated in Workato Admin.\n\n### Credential model\n\n- `api_token` is sent in the `Authorization` header as `Bearer <api_token>`.\n- `region` selects the base URL (`us` → `https://www.workato.com/api`, `eu` → `https://app.eu.workato.com/api`).\n- `base_url` can override the resolved region URL for sandbox / proxy deployments.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token`. Initialises `WorkatoHTTPClient`. Does **not** call any Workato endpoint. |\n| `authorize(...)` | Returns a TokenInfo wrapping the `api_token` — there is no exchange. |\n| `health_check()` | `GET /users/me` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | Bearer token in Authorization header |\n| `region` | string | no | `self.region` (default `us`) | Selects US or EU base URL |\n| `base_url` | string | no | `self.base_url` (defaults from region) | Override the resolved base URL |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n| `timeout_s` | number | no | `self.timeout_s` (default 30) | Per-request httpx timeout |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"workato\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_WORKATO_BASE_US = \"https://www.workato.com/api\"\n_WORKATO_BASE_EU = \"https://app.eu.workato.com/api\"\n```\n\n### Region resolution\n\nThe HTTP client's `_region_to_base_url(region)` resolves:\n- `\"us\"` (default) → `https://www.workato.com/api`\n- `\"eu\"` → `https://app.eu.workato.com/api`\n- explicit `base_url` install_field — wins over `region` when set."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `WorkatoConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::WorkatoHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; initialise `WorkatoHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping `api_token`.\n\n### `async health_check() -> ConnectorStatus`\nCalls `GET /users/me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Workato recipes, connections, and recent jobs per recipe → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-recipes",
+          "title": "Recipes",
+          "content": "### `async list_recipes(*, page=1, per_page=100, folder_id=None, order=None) -> Dict`\n`GET /recipes?page={N}&per_page={M}&folder_id={F}&order={O}`.\n\n### `async get_recipe(recipe_id) -> Dict`\n`GET /recipes/{recipe_id}`.\n\n### `async start_recipe(recipe_id) -> Dict`\n`PUT /recipes/{recipe_id}/start`.\n\n### `async stop_recipe(recipe_id) -> Dict`\n`PUT /recipes/{recipe_id}/stop`."
+        },
+        {
+          "id": "api-connections",
+          "title": "Connections",
+          "content": "### `async list_connections(*, page=1, per_page=100) -> Dict`\n`GET /connections`.\n\n### `async get_connection(connection_id) -> Dict`\n`GET /connections/{connection_id}`.\n\n### `async create_connection(payload) -> Dict`\n`POST /connections` — body is the raw connection object."
+        },
+        {
+          "id": "api-jobs-folders",
+          "title": "Folders + Jobs",
+          "content": "### `async list_folders(*, page=1, per_page=100, parent_id=None) -> Dict`\n`GET /folders`.\n\n### `async list_jobs(recipe_id, *, page=1, per_page=100, status=None) -> Dict`\n`GET /recipes/{recipe_id}/jobs`.\n\n### `async get_job(recipe_id, job_id) -> Dict`\n`GET /recipes/{recipe_id}/jobs/{job_id}`."
+        },
+        {
+          "id": "api-other",
+          "title": "Lookup Tables · Tags · Users · OPA · Customers",
+          "content": "### `async list_lookup_tables(*, page=1, per_page=100) -> Dict`\n`GET /lookup_tables`.\n\n### `async list_tags(*, page=1, per_page=100) -> Dict`\n`GET /tags`.\n\n### `async list_users(*, page=1, per_page=100) -> Dict`\n`GET /users`.\n\n### `async list_on_prem_agents(*, page=1, per_page=100) -> Dict`\n`GET /on_prem_agents`.\n\n### `async list_customers(*, page=1, per_page=100) -> Dict`\n`GET /managed_users` — embedded / white-label customer accounts."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nWorkatoError                          # base; carries status_code + response_body\n├── WorkatoAuthError                  # 401 / 403\n├── WorkatoBadRequestError            # 400\n├── WorkatoNotFoundError              # 404\n├── WorkatoConflictError              # 409\n├── WorkatoRateLimitError             # 429 — retry_after_s\n└── WorkatoServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nWorkatoNetworkError = WorkatoServerError      # legacy name from older code\nWorkatoNotFound     = WorkatoNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `WorkatoNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Re-enter the token in ACP. Workato shows the token only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Workato — API token lacks the workspace role / scope | In Workato → Workspace Admin → API Clients, edit the client and grant the recipes/connections/jobs read scopes (whichever surfaces you use). |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or wrong region | Verify `region` matches the data center that issued the token. Rotate the token if needed. |\n| `workato.http.retry` warnings spike | Hitting 429 (Workato per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on every call | Wrong `region` — calls hit the US base URL when the token is EU (or vice versa) | Set `region=\"eu\"` (or `region=\"us\"`) in the install form so the client targets the right data center. |\n| Calls land at `https://www.workato.com/api` but token is EU | `region` install_field empty/`us` and `base_url` not set | Set `region=\"eu\"`; the client resolves to `https://app.eu.workato.com/api`. |\n| `ImportError: cannot import name 'WorkatoNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `WorkatoNetworkError = WorkatoServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}
