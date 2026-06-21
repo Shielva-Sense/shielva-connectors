@@ -108,13 +108,62 @@
     "lists"
   ],
   "apis": [
-    { "name": "Install / Configure", "id": "install", "category": "auth" },
-    { "name": "Authorize", "id": "authorize", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
-    { "name": "Get Contact", "id": "get_contact", "category": "contacts" },
-    { "name": "List Campaigns", "id": "list_campaigns", "category": "campaigns" },
-    { "name": "List Contact Lists", "id": "list_contact_lists", "category": "lists" }
-  ]
+    {
+      "name": "Install / Configure",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate install-time config: client_id and client_secret are required.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Constant Contact OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Check Constant Contact API connectivity by fetching account summary.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Full sync of Constant Contact contacts and email campaigns.",
+      "method": "GET"
+    },
+    {
+      "name": "List Contacts",
+      "id": "list_contacts",
+      "category": "contacts",
+      "description": "Return a page of contacts as normalized ConnectorDocuments.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Contact",
+      "id": "get_contact",
+      "category": "contacts",
+      "description": "Fetch and normalize a single contact by ID.",
+      "method": "GET"
+    },
+    {
+      "name": "List Campaigns",
+      "id": "list_campaigns",
+      "category": "campaigns",
+      "description": "Return a page of email campaigns as normalized ConnectorDocuments.",
+      "method": "GET"
+    },
+    {
+      "name": "List Contact Lists",
+      "id": "list_contact_lists",
+      "category": "lists",
+      "description": "Return a page of contact lists as normalized ConnectorDocuments.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Constant Contact"
 }
