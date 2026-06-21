@@ -12,17 +12,164 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Your Freshservice API key. Found in Profile Settings → Your API Key (or Admin → Agents → Your Agent → API Key)."
+      "description": "Your Freshservice API key. Found in Profile Settings \u2192 Your API Key (or Admin \u2192 Agents \u2192 Your Agent \u2192 API Key).",
+      "help": "API Key."
     },
     {
       "key": "subdomain",
       "label": "Subdomain (e.g. mycompany)",
       "type": "string",
       "required": true,
-      "description": "Your Freshservice subdomain. If your URL is https://mycompany.freshservice.com, enter mycompany."
+      "description": "Your Freshservice subdomain. If your URL is https://mycompany.freshservice.com, enter mycompany.",
+      "help": "Subdomain (e.g. mycompany)."
     }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["tickets", "assets", "agents", "groups", "service_catalog_items", "changes"],
-  "category": "itsm"
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "tickets",
+    "assets",
+    "agents",
+    "groups",
+    "service_catalog_items",
+    "changes"
+  ],
+  "category": "itsm",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync tickets, assets, agents, and changes from Freshservice.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "Return one page of ITSM tickets; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "updated_since",
+          "label": "Updated Since",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_ticket",
+      "name": "Get Ticket",
+      "description": "Return a single ITSM ticket by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "ticket_id",
+          "label": "Ticket Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_assets",
+      "name": "List Assets",
+      "description": "Return one page of CMDB assets; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_agents",
+      "name": "List Agents",
+      "description": "Return one page of agents; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_changes",
+      "name": "List Changes",
+      "description": "Return one page of change requests; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "updated_since",
+          "label": "Updated Since",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "FreshserviceConnector"
 }
