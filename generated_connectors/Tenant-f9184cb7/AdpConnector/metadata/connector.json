@@ -1,0 +1,271 @@
+{
+  "connector_type": "adp",
+  "name": "AdpConnector",
+  "display_name": "ADP",
+  "version": "1.0.0",
+  "description": "Connects to the ADP Marketplace REST APIs (Workers/HCM, Payroll, Time, Benefits, Talent) using OAuth 2.0 client-credentials over mutual TLS (mTLS). Supports list_workers / get_worker / list_payments / get_payment_outputs / list_time_cards / list_benefits / list_jobs plus pay distributions, time-off requests, business communications and org units.",
+  "provider": "adp",
+  "service": "adp",
+  "auth_type": "oauth2_client_credentials",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "ADP Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your ADP Client ID",
+      "help": "OAuth2 Client ID from ADP Marketplace → My Apps → your app credentials."
+    },
+    {
+      "key": "client_secret",
+      "label": "ADP Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your ADP Client Secret",
+      "help": "OAuth2 Client Secret. Found alongside the Client ID in ADP Marketplace."
+    },
+    {
+      "key": "client_cert",
+      "label": "SSL Client Certificate (PEM)",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
+      "help": "Inline PEM cert chain ADP issued when you registered the consumer application. mTLS is mandatory — every TLS handshake (including the token mint) must present this certificate."
+    },
+    {
+      "key": "client_key",
+      "label": "SSL Client Private Key (PEM)",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----",
+      "help": "Inline PEM private key paired with the certificate above. Stored encrypted; written to a tmp file at install time so httpx can load it through `cert=(crt, key)`."
+    },
+    {
+      "key": "base_url",
+      "label": "ADP API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.adp.com",
+      "placeholder": "https://api.adp.com",
+      "help": "Base URL for the ADP REST API. Leave blank to use the default."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://accounts.adp.com/auth/oauth/v2/token",
+      "placeholder": "https://accounts.adp.com/auth/oauth/v2/token",
+      "help": "ADP OAuth 2.0 token endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum ADP API requests per minute. Default is 60 — the standard ADP marketplace quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id, client_secret, client_cert and client_key; projects the inline PEM material to a tmp file; marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authenticate",
+      "name": "Authenticate (Client Credentials over mTLS)",
+      "description": "Mints a fresh OAuth 2.0 access token using the client-credentials grant. The TLS handshake presents the ADP-issued client cert/key.",
+      "method": "POST",
+      "params": [],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies ADP API connectivity by listing one worker via GET /hr/v2/workers?$top=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_workers",
+      "name": "List Workers",
+      "description": "GET /hr/v2/workers — paged worker roster with optional OData $filter / $select.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "select", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_worker",
+      "name": "Get Worker",
+      "description": "GET /hr/v2/workers/{aoid} — fetch a single worker by associate OID.",
+      "method": "GET",
+      "params": [
+        { "key": "aoid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "GET /hr/v2/employees — paged employee roster with optional OData $filter.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_employee",
+      "name": "Get Employee",
+      "description": "GET /hr/v2/employees/{aoid}.",
+      "method": "GET",
+      "params": [
+        { "key": "aoid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_payments",
+      "name": "List Payments (Pay Statements)",
+      "description": "GET /payroll/v1/workers/{aoid}/pay-statements — list pay statements with OData $top / $filter.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_payment_outputs",
+      "name": "Get Payment Outputs",
+      "description": "GET /payroll/v1/workers/{aoid}/pay-statements/{id} — fetch a single pay statement.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "pay_statement_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pay_distributions",
+      "name": "List Pay Distributions",
+      "description": "GET /payroll/v1/workers/{aoid}/pay-distributions — list direct-deposit accounts.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_cards",
+      "name": "List Time Cards",
+      "description": "GET /time/v2/workers/{aoid}/time-cards — paginated time cards.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_off_requests",
+      "name": "List Time Off Requests",
+      "description": "GET /time-off/v2/workers/{aoid}/time-off-requests — list pending and historical TOR.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "submit_time_off_request",
+      "name": "Submit Time Off Request",
+      "description": "POST /time-off/v2/workers/{aoid}/time-off-requests — file a new TOR via the ADP Events envelope.",
+      "method": "POST",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "policy_code", "type": "string", "required": true },
+        { "key": "start_date", "type": "string", "required": true },
+        { "key": "end_date", "type": "string", "required": true },
+        { "key": "hours", "type": "number", "required": false },
+        { "key": "comments", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_benefits",
+      "name": "List Benefits Enrollments",
+      "description": "GET /benefits/v1/workers/{aoid}/enrollments — list a worker's benefit enrollments.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_business_communications",
+      "name": "List Business Communications",
+      "description": "GET /hr/v2/workers/{aoid}/business-communications — list a worker's emails / phones.",
+      "method": "GET",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_personal_communications",
+      "name": "Update Personal Communications",
+      "description": "POST /events/hr/v1/worker.business-communication.email.change — update a worker's email/phone via the Events API.",
+      "method": "POST",
+      "params": [
+        { "key": "worker_aoid", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "GET /hr/v2/jobs — list jobs (talent surface).",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_organizational_units",
+      "name": "List Organizational Units",
+      "description": "GET /core/v1/organization-units — list org units / departments.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0",
+    "structlog>=24.1"
+  ]
+}
