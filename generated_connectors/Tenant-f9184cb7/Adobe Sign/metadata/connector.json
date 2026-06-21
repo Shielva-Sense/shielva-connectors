@@ -1,0 +1,232 @@
+{
+  "connector_type": "adobe_sign",
+  "name": "AdobeSignConnector",
+  "display_name": "Adobe Sign",
+  "version": "1.0.0",
+  "description": "Connects to the Adobe Acrobat Sign REST v6 API. Creates, sends, reminds, cancels, and downloads e-signature agreements; manages library templates, users, workflows, and webhook subscriptions. Auto-discovers the caller's shard (na1, eu1, jp1, etc.) via /baseUris after OAuth code exchange.",
+  "provider": "adobe_sign",
+  "service": "adobe_sign",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Adobe Sign Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Paste your Adobe Sign OAuth client ID",
+      "help": "From Adobe Developer Console → Adobe Sign integration → Client ID. Required for OAuth code exchange."
+    },
+    {
+      "key": "client_secret",
+      "label": "Adobe Sign Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Adobe Sign OAuth client secret",
+      "help": "From Adobe Developer Console → Adobe Sign integration → Client Secret. Never logged. Required for OAuth code exchange."
+    },
+    {
+      "key": "oauth_host",
+      "label": "OAuth Host",
+      "type": "string",
+      "required": false,
+      "default": "https://secure.na1.adobesign.com",
+      "placeholder": "https://secure.na1.adobesign.com",
+      "help": "Adobe Sign OAuth host. Most accounts use the NA1 host even when their data lives on EU1 / JP1 / etc. — the per-shard API origin is discovered automatically after token exchange via /baseUris."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth Scopes",
+      "type": "string",
+      "required": false,
+      "default": "user_read user_write agreement_read agreement_write agreement_send library_read library_write workflow_read",
+      "placeholder": "Space-delimited scope string",
+      "help": "Adobe Sign OAuth scopes. The integration in Developer Console must be configured with at least the same scopes — Adobe rejects any scope not registered there."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Per-request httpx timeout for Adobe Sign API calls. Default 60s."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and stores config. Does NOT call Adobe Sign.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "OAuth Authorize",
+      "description": "Exchanges the OAuth authorization code for tokens, then calls /baseUris to discover the home shard and pivots the API base URL.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /users/me — verifies API connectivity and token validity.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_base_uris",
+      "name": "Get Base URIs",
+      "description": "GET /baseUris — shard discovery. Returns apiAccessPoint + webAccessPoint for the caller's home Adobe Sign data centre.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_agreement",
+      "name": "Create Agreement",
+      "description": "POST /agreements — create a new agreement (and optionally send it).",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_agreement",
+      "name": "Get Agreement",
+      "description": "GET /agreements/{agreementId} — fetch a single agreement.",
+      "method": "GET",
+      "params": [
+        { "key": "agreement_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_agreements",
+      "name": "List Agreements",
+      "description": "GET /agreements — cursor-paginated list of agreements visible to the calling user.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_reminder",
+      "name": "Send Reminder",
+      "description": "POST /agreements/{agreementId}/reminders — nudge participants to sign.",
+      "method": "POST",
+      "params": [
+        { "key": "agreement_id", "type": "string", "required": true },
+        { "key": "participant_emails", "type": "array", "required": false },
+        { "key": "note", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "cancel_agreement",
+      "name": "Cancel Agreement",
+      "description": "PUT /agreements/{agreementId}/state — set state to CANCELLED.",
+      "method": "POST",
+      "params": [
+        { "key": "agreement_id", "type": "string", "required": true },
+        { "key": "comment", "type": "string", "required": false },
+        { "key": "notify_signer", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "download_agreement",
+      "name": "Download Agreement",
+      "description": "GET /agreements/{agreementId}/combinedDocument — returns the signed PDF as bytes.",
+      "method": "GET",
+      "params": [
+        { "key": "agreement_id", "type": "string", "required": true }
+      ],
+      "returns": "Bytes"
+    },
+    {
+      "id": "list_library_documents",
+      "name": "List Library Documents",
+      "description": "GET /libraryDocuments — list reusable templates.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_library_document",
+      "name": "Get Library Document",
+      "description": "GET /libraryDocuments/{libraryDocumentId}.",
+      "method": "GET",
+      "params": [
+        { "key": "library_document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — list users in the account.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{userId}.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_workflows",
+      "name": "List Workflows",
+      "description": "GET /workflows — list published custom workflows.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_webhooks",
+      "name": "List Webhooks",
+      "description": "GET /webhooks — list configured webhook subscriptions.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "POST /webhooks — create a new webhook subscription.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}
