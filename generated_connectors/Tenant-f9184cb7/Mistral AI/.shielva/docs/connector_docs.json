@@ -1,0 +1,69 @@
+{
+  "title": "Mistral AI Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Mistral AI** is a hosted LLM provider exposing a stateless REST API under `https://api.mistral.ai/v1`. This connector — `MistralConnector` (`CONNECTOR_TYPE = \"mistral\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from Mistral:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Chat Completions | `/chat/completions` | LLM chat generation (sync + streaming) |\n| Embeddings | `/embeddings` | Vector embeddings for retrieval |\n| Models | `/models` | List, get, delete fine-tuned models |\n| Files | `/files` | Upload + manage training / batch corpora |\n| Fine-tuning | `/fine_tuning/jobs` | Launch + monitor fine-tune runs |\n\nThe connector normalises models + uploaded files + fine-tuning jobs into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (honouring `Retry-After`), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::MistralHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Mistral API key\n\n1. Sign in to https://console.mistral.ai.\n2. Open **API Keys** in the left nav.\n3. Click **Create new key**, name it (e.g. `shielva-prod`), and copy the value — Mistral shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Mistral AI**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 3 |\n| `base_url` (text, optional) | Override `https://api.mistral.ai/v1` (rarely needed) |\n| `default_chat_model` (text, optional) | Hint for callers, default `mistral-large-latest` |\n| `default_embed_model` (text, optional) | Hint for callers, default `mistral-embed` |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_key` is present, probes `GET /models` once to confirm the key is accepted, initialises the `MistralHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists models as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On network failure → `OFFLINE + CONNECTED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Mistral REST API uses **Bearer API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as `Bearer <api_key>`.\n- For `POST /files` the request is `multipart/form-data`; httpx sets `Content-Type` automatically when `files=` is used, so the client only sets `Authorization` + `Accept`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` is present, probes `GET /models` once. Returns `HEALTHY/CONNECTED` on 2xx; `DEGRADED/MISSING_CREDENTIALS` on 401; `DEGRADED/CONNECTED` on transient network failure (installed but probe failed). |\n| `authorize(...)` | Returns a synthetic `TokenInfo(access_token=api_key, token_type=\"Bearer\")` — no token exchange. |\n| `health_check()` | `GET /models` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound JSON request:\n\n```\nAuthorization: Bearer <api_key>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Bearer token sent on every request |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.mistral.ai/v1`) | Override for proxy / sandbox |\n| `default_chat_model` | text | no | `self.default_chat_model` (default `mistral-large-latest`) | Caller hint |\n| `default_embed_model` | text | no | `self.default_embed_model` (default `mistral-embed`) | Caller hint |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_MISTRAL_BASE = \"https://api.mistral.ai/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `MistralConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::MistralHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; persist config; probe `GET /models` once.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a synthetic TokenInfo wrapping `api_key` as `Bearer`.\n\n### `async health_check() -> ConnectorStatus`\nLists models via `GET /models`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nCatalogues models + uploaded files → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with counts. Mistral has no real-time syncable corpus."
+        },
+        {
+          "id": "api-inference",
+          "title": "Inference (Chat + Embeddings)",
+          "content": "### `async create_chat_completion(model, messages, *, temperature=0.7, max_tokens=1024, top_p=1.0, stream=False, response_format=None, tools=None) -> Dict`\n`POST /chat/completions` — body built by `helpers.utils.build_chat_payload`. Optional fields (`response_format`, `tools`) are omitted when `None`.\n\n### `async create_embeddings(model, inputs, *, encoding_format=\"float\") -> Dict`\n`POST /embeddings` — body: `{model, input: inputs, encoding_format}`. Note Mistral wire key is `input` (singular) even though it accepts a list."
+        },
+        {
+          "id": "api-models",
+          "title": "Models",
+          "content": "### `async list_models() -> Dict`\n`GET /models`.\n\n### `async get_model(model_id) -> Dict`\n`GET /models/{model_id}`.\n\n### `async delete_model(model_id) -> Dict`\n`DELETE /models/{model_id}` — only fine-tuned models are deletable."
+        },
+        {
+          "id": "api-files",
+          "title": "Files",
+          "content": "### `async list_files(*, purpose=None, page=0, page_size=100) -> Dict`\n`GET /files?page=N&page_size=M&purpose=...`.\n\n### `async upload_file(purpose, file_path) -> Dict`\n`POST /files` — multipart upload: `file=<bytes>`, `purpose=<string>`.\n\n### `async get_file(file_id) -> Dict`\n`GET /files/{file_id}`.\n\n### `async delete_file(file_id) -> Dict`\n`DELETE /files/{file_id}`."
+        },
+        {
+          "id": "api-fine-tuning",
+          "title": "Fine-tuning",
+          "content": "### `async list_fine_tuning_jobs(*, page=0, page_size=100) -> Dict`\n`GET /fine_tuning/jobs`.\n\n### `async create_fine_tuning_job(model, training_files, *, hyperparameters=None) -> Dict`\n`POST /fine_tuning/jobs` — body: `{model, training_files: [{file_id}], hyperparameters}`. `training_files` may be a list of file_id strings (auto-wrapped) or already-built `{file_id}` dicts."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nMistralError                            # base; carries status_code + response_body\n├── MistralAuthError                    # 401 / 403\n├── MistralBadRequestError              # 400\n├── MistralNotFoundError                # 404\n├── MistralRateLimitError               # 429 — retry_after_s honoured by retry loop\n└── MistralServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nMistralNetworkError = MistralServerError\nMistralNotFound     = MistralNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request_with_retry`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After`; otherwise exponential backoff `_BACKOFF_BASE * 2 ** attempt + jitter(0, 0.25)`, retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff + jitter, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `MistralNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. Mistral shows the key only once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, MISSING_CREDENTIALS)` at install | 401/403 from Mistral — key invalid or revoked | Verify the key in console.mistral.ai → API Keys. Rotate if needed. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — API key revoked | Rotate the key. |\n| `mistral.http.retry` warnings spike | Hitting 429 (Mistral per-minute rate cap) | The client retries with exponential backoff + `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| `MistralBadRequestError` on `create_chat_completion` | Model rejected the payload — e.g. unsupported `response_format`, oversize `messages` | Re-read the API docs; tools/response_format support varies per model. |\n| `MistralError: File not found` from `upload_file` | Local `file_path` is wrong or unreadable | Verify the path; ensure the process has read permission. |\n| `ImportError: cannot import name 'MistralNotFound'` | Older exceptions.py without back-compat alias | Already fixed — `MistralNotFound = MistralNotFoundError` alias added. |"
+    }
+  ]
+}
