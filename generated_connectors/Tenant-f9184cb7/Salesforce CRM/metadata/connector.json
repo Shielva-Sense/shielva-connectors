@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "3MVG9...",
-      "help": "From Salesforce Setup → App Manager → Connected App → Consumer Key"
+      "help": "From Salesforce Setup \u2192 App Manager \u2192 Connected App \u2192 Consumer Key"
     },
     {
       "key": "client_secret",
@@ -51,7 +51,11 @@
     "list_leads",
     "list_cases"
   ],
-  "oauth_scopes": ["api", "refresh_token", "offline_access"],
+  "oauth_scopes": [
+    "api",
+    "refresh_token",
+    "offline_access"
+  ],
   "oauth_auth_url": "https://login.salesforce.com/services/oauth2/authorize",
   "oauth_token_url": "https://login.salesforce.com/services/oauth2/token",
   "oauth_auth_url_sandbox": "https://test.salesforce.com/services/oauth2/authorize",
@@ -125,5 +129,145 @@
       "category": "cases",
       "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Case"
     }
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Salesforce Leads, Contacts, and Opportunities into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "query",
+      "name": "Query",
+      "description": "Execute an arbitrary SOQL query.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "soql",
+          "label": "Soql",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_objects",
+      "name": "List Objects",
+      "description": "List all available SObject types in this org.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_object",
+      "name": "Get Object",
+      "description": "Retrieve a single SObject record by type and ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "object_type",
+          "label": "Object Type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "record_id",
+          "label": "Record Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List Leads via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List Contacts via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List Opportunities via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "List Accounts via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_cases",
+      "name": "List Cases",
+      "description": "List Cases via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Salesforce"
 }
