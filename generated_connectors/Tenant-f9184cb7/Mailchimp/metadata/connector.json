@@ -11,10 +11,169 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Mailchimp API key (e.g. abc123-us10). Found in Account → Extras → API keys."
+      "description": "Mailchimp API key (e.g. abc123-us10). Found in Account \u2192 Extras \u2192 API keys.",
+      "help": "API Key."
     }
   ],
-  "capabilities": ["list_audiences", "get_audience", "list_members", "get_member", "list_campaigns", "sync"],
+  "capabilities": [
+    "list_audiences",
+    "get_audience",
+    "list_members",
+    "get_member",
+    "list_campaigns",
+    "sync"
+  ],
   "provider": "mailchimp",
-  "category": "email_marketing"
+  "category": "email_marketing",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all audiences and their members.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_audiences",
+      "name": "List Audiences",
+      "description": "List all audiences/lists via paginated GET /lists.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_audience",
+      "name": "Get Audience",
+      "description": "GET /lists/{list_id} \u2014 fetch a single audience by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "list_id",
+          "label": "List Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "List all members of an audience via paginated GET /lists/{list_id}/members.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "list_id",
+          "label": "List Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_member",
+      "name": "Get Member",
+      "description": "GET /lists/{list_id}/members/{subscriber_hash} \u2014 fetch a single member.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "list_id",
+          "label": "List Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "subscriber_hash",
+          "label": "Subscriber Hash",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "List all campaigns via paginated GET /campaigns.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "type",
+          "label": "Type",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_campaign",
+      "name": "Get Campaign",
+      "description": "GET /campaigns/{campaign_id} \u2014 fetch a single campaign by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "campaign_id",
+          "label": "Campaign Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_automations",
+      "name": "List Automations",
+      "description": "List all classic automations via paginated GET /automations.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "service": "mailchimp"
 }
