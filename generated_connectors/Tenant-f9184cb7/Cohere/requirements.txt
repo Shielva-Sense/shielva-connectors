@@ -1,0 +1,2 @@
+# Cohere connector — no extra runtime deps beyond the shared shielva-connectors venv.
+# (httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx are pre-installed.)

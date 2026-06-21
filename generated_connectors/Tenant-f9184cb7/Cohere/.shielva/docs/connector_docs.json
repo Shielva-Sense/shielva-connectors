@@ -1,0 +1,64 @@
+{
+  "title": "Cohere Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Cohere** is a multilingual LLM-as-a-service provider exposing a REST API suite under `https://api.cohere.com`. This connector — `CohereConnector` (`CONNECTOR_TYPE = \"cohere\"`, `AUTH_TYPE = \"api_key\"`) — wraps the inference + model-management surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Chat | `/v2/chat` | Multi-turn chat completions (Command R, Command R+, Command A) |\n| Embed | `/v2/embed` | Vector embeddings (Embed v3 / v4) for search/RAG |\n| Rerank | `/v2/rerank` | Cross-encoder relevance reranking (Rerank v3) |\n| Classify | `/v1/classify` | Few-shot text classification |\n| Tokenize / Detokenize | `/v1/tokenize`, `/v1/detokenize` | Per-model tokenisation |\n| Models | `/v1/models` | List + describe available models |\n| Datasets | `/v1/datasets` | List + register fine-tune datasets |\n| Connectors | `/v1/connectors` | Cohere RAG connectors (provider-managed) |\n| Fine-tuning | `/v1/finetuning/finetuned-models` | List + inspect fine-tune jobs |\n\nThe connector surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, capped at 16 s), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::CohereHTTPClient`). Cohere is an inference API — `sync()` is a no-op returning `SyncResult.SUCCESS` with 0 documents."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Cohere API key\n\n1. Sign in to https://dashboard.cohere.com.\n2. Open **API Keys** in the left nav.\n3. Click **Create Production Key** (Trial keys are throttled to 5 RPM and not suitable for live tenants).\n4. Copy the key — Cohere shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Cohere**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 3 |\n| `base_url` (string, optional) | Override `https://api.cohere.com` (rarely needed) |\n| `default_chat_model` (string, optional) | Default `command-r-plus`. Override to `command-a-03-2025` for the larger model. |\n| `default_embed_model` (string, optional) | Default `embed-v4.0`. |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 100 |\n\nClick **Install**. `install()` validates the key by calling `GET /v1/models?page_size=1`, persists config, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 model as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401/403 → `OFFLINE + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Cohere REST API uses **server-to-server Bearer token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as `Bearer <key>` (note: unlike Wix, Cohere REQUIRES the `Bearer ` prefix).\n- `X-Client-Name: shielva-connector` is sent on every request so Cohere's per-client analytics attribute platform traffic correctly.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Calls `GET /v1/models?page_size=1` so a bad key is caught immediately. 401 → `INVALID_CREDENTIALS + OFFLINE`. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the api_key and `token_type` is `\"api_key\"`. No real token exchange. |\n| `health_check()` | `GET /v1/models?page_size=1` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the api_key lives in `self.config`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_key>\nContent-Type:  application/json\nAccept:        application/json\nX-Client-Name: shielva-connector\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `Authorization: Bearer <key>` |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.cohere.com`) | Override for sandbox/proxy |\n| `default_chat_model` | string | no | `self.default_chat_model` (default `command-r-plus`) | Used when caller omits the model arg to `chat()` |\n| `default_embed_model` | string | no | `self.default_embed_model` (default `embed-v4.0`) | Used when caller omits the model arg to `embed()` |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap (informational) |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"INVALID_CREDENTIALS\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_COHERE_BASE        = \"https://api.cohere.com\"\n_DEFAULT_CHAT_MODEL = \"command-r-plus\"\n_DEFAULT_EMBED_MODEL = \"embed-v4.0\"\n```\n\nThe http client auto-strips a trailing `/v1` or `/v2` from `base_url`, so pasting either version of the API base URL is safe."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `CohereConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::CohereHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; call `GET /v1/models?page_size=1` to verify; persist config.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping the api_key.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 model via `GET /v1/models?page_size=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nNo-op (`SyncResult.SUCCESS`, 0 documents). Cohere is inference-only — there is no corpus to ingest."
+        },
+        {
+          "id": "api-inference",
+          "title": "Inference (v2)",
+          "content": "### `async chat(model, messages, *, temperature=0.3, max_tokens=1024, stream=False, p=None, k=None, stop_sequences=None) -> Dict`\n`POST /v2/chat` — body: `{model, messages, temperature, max_tokens, stream, [p, k, stop_sequences]}`. Returns the v2 chat response with `message.content[{type: text, text: ...}]`.\n\n### `async embed(model, texts, *, input_type=\"search_document\", embedding_types=[\"float\"], truncate=\"END\") -> Dict`\n`POST /v2/embed` — body: `{model, texts, input_type, embedding_types, truncate}`. Use `input_type=\"search_query\"` for queries and `search_document` for indexed text.\n\n### `async rerank(model, query, documents, *, top_n=10, return_documents=False) -> Dict`\n`POST /v2/rerank` — body: `{model, query, documents, top_n, return_documents}`."
+        },
+        {
+          "id": "api-utilities",
+          "title": "Inference utilities (v1)",
+          "content": "### `async classify(model, inputs, examples) -> Dict`\n`POST /v1/classify` — body: `{model, inputs, examples}`.\n\n### `async tokenize(model, text) -> Dict`\n`POST /v1/tokenize` — body: `{model, text}`.\n\n### `async detokenize(model, tokens) -> Dict`\n`POST /v1/detokenize` — body: `{model, tokens}`."
+        },
+        {
+          "id": "api-management",
+          "title": "Models, Datasets, Fine-tuning",
+          "content": "### `async list_models(*, page_size=20, page_token=None, endpoint=None) -> Dict`\n`GET /v1/models?page_size={N}&page_token={C}&endpoint={chat|embed|rerank|classify}`.\n\n### `async get_model(model_id) -> Dict`\n`GET /v1/models/{model_id}`.\n\n### `async list_datasets(*, dataset_type=None, limit=50) -> Dict`\n`GET /v1/datasets`.\n\n### `async create_dataset(payload) -> Dict`\n`POST /v1/datasets` — JSON envelope only (file upload is multipart and shaped by the gateway).\n\n### `async list_connectors(*, page_size=20, page_token=None) -> Dict`\n`GET /v1/connectors` — Cohere RAG connectors, not Shielva connectors.\n\n### `async list_finetuned_models(*, page_size=20) -> Dict`\n`GET /v1/finetuning/finetuned-models`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nCohereError                              # base; carries status_code + response_body\n├── CohereAuthError                      # 401 / 403\n├── CohereBadRequestError                # 400 / 422\n├── CohereNotFoundError                  # 404\n├── CohereRateLimitError                 # 429 — retry_after_s\n└── CohereServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nCohereNetworkError = CohereServerError   # legacy name from older code\nCohereNotFound     = CohereNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 422 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt + jitter`, capped at 16 s, retry up to `_max_retries=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `CohereNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 / 403 → ConnectorStatus(OFFLINE / UNHEALTHY, INVALID_CREDENTIALS)\n429       → ConnectorStatus(DEGRADED, CONNECTED)   — logged as warning\nnetwork   → ConnectorStatus(OFFLINE, CONNECTED)\nother     → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. Cohere shows the key only once at generation — rotate if lost. |\n| `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)` at install | 401 — key revoked or typo | Verify the key in Cohere Dashboard → API Keys. Trial keys cap at 5 RPM and may appear to fail under load — promote to Production. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — key lacks scope | Production keys grant all endpoints. Trial keys cannot call fine-tuning APIs — promote to Production. |\n| `cohere.http.retry` warnings spike | Hitting 429 (per-minute rate cap) | The client retries with exponential backoff. Lower request rate or upgrade tier. Trial = 5 RPM, Production = thousands. |\n| 404 on `get_model(model_id)` | Wrong model name (e.g. `command-r+` vs `command-r-plus`) | Call `list_models()` and use the exact `name` value. |\n| `ImportError: cannot import name 'CohereNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `CohereNetworkError = CohereServerError` alias added in `exceptions.py`. |\n| `chat()` returns empty `message.content` | Caller used v1 chat shape with `message`-string | v2 chat expects `messages=[{role, content}]` not the v1 `message=str` shape. Migrate to the v2 envelope. |"
+    }
+  ]
+}
