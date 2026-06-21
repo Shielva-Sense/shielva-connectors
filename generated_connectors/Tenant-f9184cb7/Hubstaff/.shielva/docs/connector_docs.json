@@ -1,0 +1,69 @@
+{
+  "title": "Hubstaff Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Hubstaff** is a time-tracking + workforce-analytics platform exposing a REST API suite under `https://api.hubstaff.com/v2`. This connector — `HubstaffConnector` (`CONNECTOR_TYPE = \"hubstaff\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Hubstaff workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Organizations | `/organizations` | List org workspaces the token belongs to |\n| Users | `/users` + `/organizations/{id}/members` | Caller, by-id and per-org member queries |\n| Teams | `/organizations/{id}/teams` | Teams inside an organization |\n| Projects | `/organizations/{id}/projects`, `/projects/{id}` | List + get + create projects |\n| Tasks | `/projects/{id}/tasks` | Tasks under a project |\n| Activities | `/organizations/{id}/activities` | Tracked-time activity rows |\n| Time Entries | `/organizations/{id}/time_entries` | Manual + tracked entries between dates |\n| Daily Activities | `/organizations/{id}/activities/daily` | Per-user/day rolled-up summaries |\n| Screenshots | `/organizations/{id}/screenshots` | Screenshot metadata (URL + time + user) |\n| App Activity | `/organizations/{id}/application_activities` | App usage rows |\n| URL Activity | `/organizations/{id}/url_activities` | URL/website usage rows |\n| Notes | `/organizations/{id}/notes` | Notes attached to time entries |\n\nThe connector normalises projects + tasks + daily activities into `NormalizedDocument` (id = `f\"{connector_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, honouring `Retry-After`), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HubstaffHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Hubstaff Personal Access Token\n\n1. Sign in to https://app.hubstaff.com.\n2. Open **Settings → Developer → Personal Access Tokens** (or visit https://account.hubstaff.com/personal_access_tokens).\n3. Click **Generate Personal Access Token**, name it (e.g. `shielva-acp`), and copy the value — Hubstaff shows it only once.\n4. Find the numeric **Organization ID** of the workspace you want the connector scoped to (from the organization URL or `GET /organizations`).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Hubstaff**, fill in:\n\n| Field | Value |\n|---|---|\n| `access_token` (secret) | Personal Access Token from step 3 |\n| `default_organization_id` (number, optional) | Numeric Organization ID — methods accept an override per call |\n| `base_url` (text, optional) | Override `https://api.hubstaff.com/v2` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `access_token` is present (it does NOT call the API), initialises the `HubstaffHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /users/me` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx/network → `OFFLINE + CONNECTED` with the underlying error in the `message` field."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Hubstaff REST API uses a **long-lived Personal Access Token (PAT)** sent as a bearer token. The connector treats the PAT as an opaque API key (`AUTH_TYPE = \"api_key\"`) — no OAuth dance, no refresh exchange, no token rotation.\n\n### Credential model\n\n- `access_token` is sent in the `Authorization` header as `Bearer <token>`.\n- `default_organization_id` is an install-time default used by `sync()` and convenience calls when the caller omits an `organization_id` argument.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `access_token`. Initialises `HubstaffHTTPClient`. Does **not** call any Hubstaff endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo` whose `access_token` is the PAT — there is no token exchange. |\n| `health_check()` | `GET /users/me` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None (the PAT lives in `self.config[\"access_token\"]`). |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `access_token` | secret | yes | `self.access_token` | `Authorization: Bearer <...>` header value |\n| `default_organization_id` | number | no | `self.default_organization_id` | Per-call default org id |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.hubstaff.com/v2`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"access_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HUBSTAFF_BASE = \"https://api.hubstaff.com/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HubstaffConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::HubstaffHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `access_token`; initialise `HubstaffHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a synthetic TokenInfo with the PAT.\n\n### `async health_check() -> ConnectorStatus`\nCalls `GET /users/me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Hubstaff projects + their tasks + the org's recent daily-activity slice → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-identity",
+          "title": "Identity & Organizations",
+          "content": "### `async get_current_user() -> Dict`\n`GET /users/me`.\n\n### `async get_user(user_id: int) -> Dict`\n`GET /users/{id}`.\n\n### `async list_organizations(*, page_start_id=None, page_limit=50) -> Dict`\n`GET /organizations?page_limit={N}&page_start_id={S}`.\n\n### `async list_users(organization_id, *, page_start_id=None, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/members`.\n\n### `async list_teams(organization_id) -> Dict`\n`GET /organizations/{organization_id}/teams`."
+        },
+        {
+          "id": "api-projects-tasks",
+          "title": "Projects & Tasks",
+          "content": "### `async list_projects(organization_id, *, status=\"active\", page_start_id=None, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/projects?status={active|archived}`.\n\n### `async get_project(project_id) -> Dict`\n`GET /projects/{project_id}`.\n\n### `async create_project(organization_id, name, description=None) -> Dict`\n`POST /organizations/{organization_id}/projects` — body: `{project: {name, description?}}`.\n\n### `async list_tasks(project_id, *, status=\"open\", page_start_id=None, page_limit=50) -> Dict`\n`GET /projects/{project_id}/tasks?status={open|closed}`."
+        },
+        {
+          "id": "api-activities",
+          "title": "Activities, Time Entries, Daily Activities",
+          "content": "### `async list_activities(organization_id, *, date_start, date_stop, user_ids, project_ids, page_start_id, page_limit=100) -> Dict`\n`GET /organizations/{organization_id}/activities`. user_ids / project_ids are CSV-encoded.\n\n### `async list_time_entries(...) -> Dict`\n`GET /organizations/{organization_id}/time_entries` with the same filter shape.\n\n### `async list_daily_activities(...) -> Dict`\n`GET /organizations/{organization_id}/activities/daily` — per-user/day rolled-up summaries."
+        },
+        {
+          "id": "api-other",
+          "title": "Screenshots · Apps · URLs · Notes",
+          "content": "### `async list_screenshots(organization_id, *, date_start, date_stop, user_ids, project_ids, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/screenshots`.\n\n### `async list_apps(organization_id, *, date_start, date_stop, user_ids, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/application_activities`.\n\n### `async list_urls(organization_id, *, date_start, date_stop, user_ids, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/url_activities`.\n\n### `async list_notes(organization_id, *, date_start, date_stop, user_ids, page_limit=50) -> Dict`\n`GET /organizations/{organization_id}/notes`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHubstaffError                              # base; carries status_code + response_body\n├── HubstaffAuthError                      # 401 / 403\n├── HubstaffBadRequestError                # 400\n├── HubstaffNotFoundError                  # 404\n├── HubstaffConflictError                  # 409\n├── HubstaffRateLimitError                 # 429 — retry_after_s\n└── HubstaffServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nHubstaffNetworkError = HubstaffServerError      # legacy name from older code\nHubstaffNotFound     = HubstaffNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), honouring `Retry-After`, retry up to `_MAX_RETRIES=3` |\n| 5xx | Exponential backoff (same schedule), retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `HubstaffNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps them:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\nnetwork → ConnectorStatus(OFFLINE,   CONNECTED)\nother → ConnectorStatus(DEGRADED,  CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `access_token` blank | Re-paste the Personal Access Token in ACP. Hubstaff shows the token only once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — PAT revoked, expired, or wrong workspace | Regenerate a PAT at https://account.hubstaff.com/personal_access_tokens and re-install. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — PAT lacks role/scope on the requested resource | The PAT inherits the user's permissions — confirm the Hubstaff user has Manager/Owner role on the organization. |\n| `hubstaff.http.retry` warnings spike | Hitting 429 (Hubstaff per-minute rate cap) | The client retries with exponential backoff honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_project(id)` | Project archived or belongs to a different org | Pass an `organization_id` you have access to OR re-list `list_projects` to confirm the id. |\n| `ImportError: cannot import name 'HubstaffNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `HubstaffNetworkError = HubstaffServerError` alias added in `exceptions.py`. |\n| `Sync returned 0 documents` | `default_organization_id` is wrong OR org has no projects | Verify the numeric org id from `list_organizations()`; install a project and re-sync. |"
+    }
+  ]
+}
