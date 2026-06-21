@@ -14,21 +14,24 @@
       "label": "Client ID",
       "type": "string",
       "required": true,
-      "description": "OAuth 2.0 Client ID from your Wrike app (Apps & Integrations → API → Create App)."
+      "description": "OAuth 2.0 Client ID from your Wrike app (Apps & Integrations \u2192 API \u2192 Create App).",
+      "help": "Client ID."
     },
     {
       "key": "client_secret",
       "label": "Client Secret",
       "type": "password",
       "required": true,
-      "description": "OAuth 2.0 Client Secret from your Wrike app."
+      "description": "OAuth 2.0 Client Secret from your Wrike app.",
+      "help": "Client Secret."
     },
     {
       "key": "redirect_uri",
       "label": "Redirect URI",
       "type": "string",
       "required": false,
-      "description": "OAuth redirect URI registered with your Wrike app. Defaults to your Shielva callback URL."
+      "description": "OAuth redirect URI registered with your Wrike app. Defaults to your Shielva callback URL.",
+      "help": "OAuth callback URL. Leave blank to use the default."
     }
   ],
   "capabilities": [
@@ -51,8 +54,87 @@
   "oauth": {
     "authorize_url": "https://login.wrike.com/oauth2/authorize/v4",
     "token_url": "https://login.wrike.com/oauth2/token",
-    "scopes": ["Default"],
+    "scopes": [
+      "Default"
+    ],
     "flow": "authorization_code"
   },
-  "api_base": "https://www.wrike.com/api/v4/"
+  "api_base": "https://www.wrike.com/api/v4/",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Wrike resources: folders, tasks, users, and comments.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_folders",
+      "name": "List Folders",
+      "description": "Return all folders accessible to the authenticated user.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Return tasks, optionally scoped to a folder.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "folder_id",
+          "label": "Folder Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all users (contacts) in the Wrike account.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_comments",
+      "name": "List Comments",
+      "description": "Return all comments, handling pagination via ``nextPageToken``.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "Return a single Wrike task by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "task_id",
+          "label": "Task Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
