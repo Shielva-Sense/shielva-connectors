@@ -1,0 +1,289 @@
+{
+  "connector_type": "supabase",
+  "name": "SupabaseConnector",
+  "display_name": "Supabase",
+  "version": "1.0.0",
+  "description": "Connects to a Supabase project: PostgREST CRUD on tables, Auth Admin user management (GoTrue), Storage buckets/objects, and Edge Functions. Uses the service-role API key for full-access server-side operations.",
+  "provider": "supabase",
+  "service": "supabase",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "project_url",
+      "label": "Project URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://abcdwxyz.supabase.co",
+      "help": "Your Supabase project URL — Supabase Dashboard → Project Settings → API → Project URL."
+    },
+    {
+      "key": "service_role_key",
+      "label": "Service Role Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "eyJhbGciOi...",
+      "help": "Service role JWT (NOT the anon key). Bypasses Row-Level Security — treat as a master secret. Sent as BOTH apikey and Authorization: Bearer headers."
+    },
+    {
+      "key": "schema",
+      "label": "Database Schema",
+      "type": "string",
+      "required": false,
+      "default": "public",
+      "placeholder": "public",
+      "help": "Postgres schema for PostgREST calls. Sent as Accept-Profile / Content-Profile headers."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Client-side soft cap. The Supabase platform enforces its own quotas."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates project_url and service_role_key and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /auth/v1/settings — confirms the service-role key is accepted (RLS-free probe).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_rows",
+      "name": "List Rows",
+      "description": "GET /rest/v1/{table} — list rows with optional filter / order / limit / offset.",
+      "method": "GET",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "columns", "type": "string", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "order", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_row",
+      "name": "Get Row",
+      "description": "GET /rest/v1/{table}?{id_column}=eq.{row_id}&limit=1 — fetch one row.",
+      "method": "GET",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "row_id", "type": "string", "required": true },
+        { "key": "columns", "type": "string", "required": false },
+        { "key": "id_column", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "insert_row",
+      "name": "Insert Rows",
+      "description": "POST /rest/v1/{table} — insert one or more rows (Prefer: return=representation).",
+      "method": "POST",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "rows", "type": "array", "required": true },
+        { "key": "returning", "type": "string", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "update_row",
+      "name": "Update Rows",
+      "description": "PATCH /rest/v1/{table}?<filter> — patch fields on matching rows.",
+      "method": "POST",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "filter", "type": "object", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "delete_row",
+      "name": "Delete Rows",
+      "description": "DELETE /rest/v1/{table}?<filter> — delete matching rows.",
+      "method": "DELETE",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "filter", "type": "object", "required": true }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "upsert",
+      "name": "Upsert Rows",
+      "description": "POST /rest/v1/{table} with Prefer: resolution=merge-duplicates.",
+      "method": "POST",
+      "params": [
+        { "key": "table", "type": "string", "required": true },
+        { "key": "rows", "type": "array", "required": true },
+        { "key": "on_conflict", "type": "string", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "rpc",
+      "name": "Call RPC",
+      "description": "POST /rest/v1/rpc/{function_name} — invoke a Postgres stored function.",
+      "method": "POST",
+      "params": [
+        { "key": "function_name", "type": "string", "required": true },
+        { "key": "params", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /auth/v1/admin/users — paginated user list (admin scope).",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /auth/v1/admin/users/{id} — fetch a single user.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Create User",
+      "description": "POST /auth/v1/admin/users — provision a new user.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "password", "type": "string", "required": false },
+        { "key": "user_metadata", "type": "object", "required": false },
+        { "key": "email_confirm", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Update User",
+      "description": "PUT /auth/v1/admin/users/{id} — update user attributes.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "attrs", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete User",
+      "description": "DELETE /auth/v1/admin/users/{id} — permanently remove a user.",
+      "method": "DELETE",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_buckets",
+      "name": "List Storage Buckets",
+      "description": "GET /storage/v1/bucket — list all storage buckets.",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_objects",
+      "name": "List Storage Objects",
+      "description": "POST /storage/v1/object/list/{bucket} — list objects in a bucket with optional prefix.",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "prefix", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "upload_object",
+      "name": "Upload Object",
+      "description": "POST /storage/v1/object/{bucket}/{path} — upload raw bytes (set x-upsert to overwrite).",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "path", "type": "string", "required": true },
+        { "key": "content", "type": "bytes", "required": true },
+        { "key": "content_type", "type": "string", "required": false },
+        { "key": "upsert", "type": "boolean", "required": false },
+        { "key": "cache_control", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "download_object",
+      "name": "Download Object",
+      "description": "GET /storage/v1/object/{bucket}/{path} — download raw bytes.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "bytes"
+    },
+    {
+      "id": "delete_object",
+      "name": "Delete Object",
+      "description": "DELETE /storage/v1/object/{bucket}/{path} — remove an object.",
+      "method": "DELETE",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_signed_url",
+      "name": "Create Signed URL",
+      "description": "POST /storage/v1/object/sign/{bucket}/{path} — create a time-limited signed URL.",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "path", "type": "string", "required": true },
+        { "key": "expires_in", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "invoke_function",
+      "name": "Invoke Edge Function",
+      "description": "POST /functions/v1/{name} — invoke a Supabase Edge Function.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "payload", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

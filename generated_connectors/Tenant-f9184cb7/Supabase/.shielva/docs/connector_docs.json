@@ -1,0 +1,74 @@
+{
+  "title": "Supabase Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Supabase** is an open-source Firebase alternative — a managed Postgres database fronted by PostgREST, GoTrue (Auth), Storage, Realtime, and Edge Functions, exposed at `https://{project_ref}.supabase.co`. This connector — `SupabaseConnector` (`CONNECTOR_TYPE = \"supabase\"`, `AUTH_TYPE = \"api_key\"`) — wraps every operational surface a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| PostgREST | `/rest/v1/{table}` | CRUD with PostgREST filter syntax |\n| Auth Admin (GoTrue) | `/auth/v1/admin/users` | List, get, create, update, delete users |\n| Storage | `/storage/v1/{bucket,object}` | Buckets + objects (upload/download/delete/sign) |\n| Edge Functions | `/functions/v1/{name}` | Invoke Deno-runtime serverless functions |\n| RPC | `/rest/v1/rpc/{fn}` | Call SQL stored procedures |\n\nThe connector normalises rows + users + storage objects into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces every user-named operation as a standalone `async def` method (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::SupabaseHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Locate your Project URL and Service Role Key\n\n1. Sign in to https://supabase.com and open your project.\n2. Open **Project Settings → API**.\n3. Copy the **Project URL** (e.g. `https://abcdwxyz.supabase.co`).\n4. Under **Project API keys**, copy the **service_role** key (NOT the `anon` key). The service-role key bypasses Row-Level Security — treat it as a master secret.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Supabase**, fill in:\n\n| Field | Value |\n|---|---|\n| `project_url` (text) | Full project URL — e.g. `https://abcdwxyz.supabase.co` |\n| `service_role_key` (secret) | The `eyJ…` service-role JWT |\n| `schema` (text, optional) | Postgres schema (default `public`) |\n| `rate_limit_per_min` (number, optional) | Soft cap, default `100` |\n\nClick **Install**. `install()` validates `project_url` + `service_role_key` are present (it does NOT call the API), initialises the `SupabaseHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /auth/v1/settings` as a lightweight, RLS-free probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + INVALID_CREDENTIALS`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → retried with backoff."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Supabase server-to-server uses **service-role API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `service_role_key` is sent in BOTH the `Authorization: Bearer <key>` header and the `apikey: <key>` header on every request. GoTrue requires the `apikey`; PostgREST requires the `Authorization` Bearer.\n- `project_url` is the full Supabase project URL (`https://{ref}.supabase.co`). The connector also accepts a legacy `project_ref` short form and constructs the URL itself.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `project_url` + `service_role_key`. Initialises `SupabaseHTTPClient`. Does **not** call the API. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured key — no token exchange. |\n| `health_check()` | `GET /auth/v1/settings` — RLS-free probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the key lives in `self.config`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization:   Bearer <service_role_key>\napikey:          <service_role_key>\nContent-Type:    application/json        (when body present)\nAccept-Profile:  <schema>                (PostgREST)\nContent-Profile: <schema>                (PostgREST writes)\n```\n\n### Security\n\nThe service-role key has the same authority as the `postgres` role. NEVER expose it to a browser, NEVER log it. The platform stores it via `BaseConnector.save_config()` → sealed config / vault sidecar (port 8054). Audit middleware redactors include `service_role_key`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `project_url` | string | yes | `self.project_url` | Full project URL |\n| `service_role_key` | secret | yes | `self.service_role_key` | Sent as `apikey` + `Authorization: Bearer` |\n| `schema` | string | no (default `public`) | `self.schema` | PostgREST `Accept-Profile` / `Content-Profile` |\n| `rate_limit_per_min` | number | no (default 100) | `self.rate_limit_per_min` | Client-side soft cap |\n\nLegacy compatibility: `project_ref` short form (e.g. `abcdwxyz`) is also accepted and is expanded to `https://{ref}.supabase.co` automatically.\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"project_url\", \"service_role_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `SupabaseConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::SupabaseHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `project_url` + `service_role_key`; initialise `SupabaseHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose `access_token` is the configured key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /auth/v1/settings`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nNo-op by default. Supabase is not a single-stream resource — the orchestrator picks which tables/buckets/users to ingest via `list_rows()` / `list_users()` / `list_objects()` plus the normalizer helpers."
+        },
+        {
+          "id": "api-postgrest",
+          "title": "PostgREST (REST)",
+          "content": "### `async list_rows(table, columns=\"*\", filter=None, order=None, limit=None, offset=None) -> List[Dict]`\n`GET /rest/v1/{table}` — see Filter Syntax below. Alias: `select(...)`.\n\n### `async get_row(table, row_id, columns=\"*\", id_column=\"id\") -> Optional[Dict]`\nShorthand for `list_rows(filter={id_column: row_id}, limit=1)` returning the first row or `None`.\n\n### `async insert_row(table, rows, returning=\"representation\") -> List[Dict]`\n`POST /rest/v1/{table}` with `Prefer: return=<representation|minimal>`. Alias: `insert(...)`.\n\n### `async update_row(table, filter, fields) -> List[Dict]`\n`PATCH /rest/v1/{table}?<filter>`. Alias: `update(...)`.\n\n### `async delete_row(table, filter) -> List[Dict]`\n`DELETE /rest/v1/{table}?<filter>`. Alias: `delete(...)`.\n\n### `async upsert(table, rows, on_conflict=None) -> List[Dict]`\n`POST /rest/v1/{table}` with `Prefer: resolution=merge-duplicates,return=representation`. `on_conflict` lands as a query param.\n\n### `async rpc(function_name, params=None) -> Any`\n`POST /rest/v1/rpc/{function_name}` — invoke a Postgres stored function."
+        },
+        {
+          "id": "api-auth-admin",
+          "title": "Auth Admin (GoTrue)",
+          "content": "### `async list_users(page=1, per_page=50) -> Dict`\n`GET /auth/v1/admin/users?page=&per_page=`.\n\n### `async get_user(user_id) -> Dict`\n`GET /auth/v1/admin/users/{id}`.\n\n### `async create_user(email, password=None, user_metadata=None, email_confirm=None) -> Dict`\n`POST /auth/v1/admin/users`.\n\n### `async update_user(user_id, attrs) -> Dict`\n`PUT /auth/v1/admin/users/{id}` — partial update of `email`, `password`, `user_metadata`, `app_metadata`, `email_confirm`, `phone`.\n\n### `async delete_user(user_id) -> Dict`\n`DELETE /auth/v1/admin/users/{id}`."
+        },
+        {
+          "id": "api-storage",
+          "title": "Storage",
+          "content": "### `async list_buckets() -> List[Dict]`\n`GET /storage/v1/bucket` — list all buckets in the project.\n\n### `async list_objects(bucket, prefix=\"\", limit=100, offset=0) -> List[Dict]`\n`POST /storage/v1/object/list/{bucket}` — list objects with optional prefix.\n\n### `async upload_object(bucket, path, content, content_type=\"application/octet-stream\", upsert=False, cache_control=None) -> Dict`\n`POST /storage/v1/object/{bucket}/{path}`. Pass `upsert=True` to overwrite (`x-upsert: true` header).\n\n### `async download_object(bucket, path) -> bytes`\n`GET /storage/v1/object/{bucket}/{path}` — raw bytes.\n\n### `async delete_object(bucket, path) -> Dict`\n`DELETE /storage/v1/object/{bucket}/{path}`.\n\n### `async create_signed_url(bucket, path, expires_in=3600) -> Dict`\n`POST /storage/v1/object/sign/{bucket}/{path}` — short-lived signed URL for browser download."
+        },
+        {
+          "id": "api-edge-functions",
+          "title": "Edge Functions",
+          "content": "### `async invoke_function(name, payload=None) -> Any`\n`POST /functions/v1/{name}` — invoke a Deno-runtime Edge Function. Returns parsed JSON when present, else raw text."
+        }
+      ]
+    },
+    {
+      "id": "filter-syntax",
+      "title": "PostgREST Filter Syntax",
+      "content": "All `filter` dicts on `list_rows` / `update_row` / `delete_row` are translated to PostgREST query syntax by `helpers/utils.py::_format_filter_value`:\n\n| Python | URL |\n|---|---|\n| `{\"id\": 5}` | `id=eq.5` |\n| `{\"status\": \"active\"}` | `status=eq.active` |\n| `{\"published\": True}` | `published=eq.true` (lowercase!) |\n| `{\"rating\": {\"gt\": 4}}` | `rating=gt.4` |\n| `{\"id\": [1, 2, 3]}` | `id=in.(1,2,3)` |\n| `{\"name\": {\"like\": \"%foo%\"}}` | `name=like.%foo%` |\n| `{\"title\": {\"ilike\": \"%foo%\"}}` | `title=ilike.%foo%` |\n| `{\"deleted_at\": {\"is\": \"null\"}}` | `deleted_at=is.null` |\n| `{\"tags\": {\"cs\": \"{a,b}\"}}` | `tags=cs.{a,b}` (contains) |\n\nSupported single-key operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `is`, `in`, `cs`, `cd`, `sl`, `sr`, `nxr`, `nxl`, `adj`, `ov`, `fts`, `plfts`, `phfts`, `wfts`, `not`. Unknown operators are passed through verbatim so callers can adopt new PostgREST operators without bumping the connector."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nSupabaseError                       # base; carries status_code + response_body\n├── SupabaseAuthError                # 401 / 403\n├── SupabaseBadRequestError          # 400 / 422\n├── SupabaseNotFoundError            # 404\n├── SupabaseConflictError            # 409 (duplicate key)\n├── SupabaseRateLimitError           # 429 — retry_after_s\n└── SupabaseServerError              # 5xx + transport errors\n```\n\nBack-compat aliases preserved:\n```\nSupabaseNotFound     = SupabaseNotFoundError\nSupabaseNetworkError = SupabaseServerError\n```\n\n### Retry behaviour (`client/http_client.py::_request` + `helpers/utils.py::with_retry`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 422 | Raise immediately |\n| 429 | Exponential backoff (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3`; honours `Retry-After` header |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `SupabaseServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n5xx → ConnectorStatus(OFFLINE,   FAILED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `project_url` or `service_role_key` blank | Re-enter both in ACP. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from GoTrue — using anon key or the JWT is wrong project | Confirm you copied the **service_role** key, not the `anon` key; verify the project URL matches. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 401 from GoTrue — key expired or rotated | Regenerate the service-role key in Supabase Dashboard → Project Settings → API. |\n| 4xx with `\"new row violates row-level security policy\"` | Caller used `anon` key on a RLS-protected table | Make sure the connector is configured with the service_role key — it bypasses RLS. |\n| `supabase.http.retry` warnings spike | Hitting 429 (rate cap) | The client retries with backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `/storage/v1/object/{bucket}/{path}` | Bucket doesn't exist or path typo | Verify via `list_buckets()` / `list_objects(bucket, prefix=...)`. |\n| 400 from PostgREST on a write | Body shape mismatch (e.g. extra column, missing NOT NULL) | Check the column definitions; PostgREST surfaces the Postgres error in `response_body[\"hint\"]`. |\n| `ImportError: cannot import name 'SupabaseNotFound'` | Older callers using the legacy alias | Already preserved — `SupabaseNotFound = SupabaseNotFoundError`. |\n| Edge Function returns 401 | Function expects user JWT, not service-role | Functions can opt to read user JWT — pass the user's token via `Authorization` instead, or change the function's auth model. |"
+    }
+  ]
+}
