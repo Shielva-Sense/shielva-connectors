@@ -1,0 +1,187 @@
+{
+  "connector_type": "drata",
+  "name": "DrataConnector",
+  "display_name": "Drata",
+  "version": "1.0.0",
+  "description": "Connects to the Drata public REST API (Personnel, Controls, Evidence, Risks, Vendors, Audits, Compliance Frameworks, Policies, Devices) using a Bearer API key. Supports listing and reading compliance program data + KB sync of personnel/controls/evidence/risks/vendors.",
+  "provider": "drata",
+  "service": "drata",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Drata API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Drata API key",
+      "help": "Generate at Drata Dashboard → Settings → API Keys → Create. Sent as Authorization: Bearer <api_key>."
+    },
+    {
+      "key": "base_url",
+      "label": "Drata API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://public-api.drata.com",
+      "placeholder": "https://public-api.drata.com",
+      "help": "Base URL for the Drata public REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Drata API requests per minute. Default 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Drata API connectivity by listing one personnel record.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_personnel",
+      "name": "List Personnel",
+      "description": "GET /personnel — list personnel enrolled in the compliance program.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_personnel",
+      "name": "Get Personnel",
+      "description": "GET /personnel/{id} — fetch a single personnel record.",
+      "method": "GET",
+      "params": [
+        { "key": "personnel_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_controls",
+      "name": "List Controls",
+      "description": "GET /controls — list controls across all active frameworks.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_control",
+      "name": "Get Control",
+      "description": "GET /controls/{id} — fetch a single control.",
+      "method": "GET",
+      "params": [
+        { "key": "control_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_evidence",
+      "name": "List Evidence",
+      "description": "GET /evidence — list collected evidence items, optionally filtered by control.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "control_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_risks",
+      "name": "List Risks",
+      "description": "GET /risks — list risk register entries.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "GET /vendors — list tracked vendors.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_vendor",
+      "name": "Get Vendor",
+      "description": "GET /vendors/{id} — fetch a single vendor.",
+      "method": "GET",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_audits",
+      "name": "List Audits",
+      "description": "GET /audits — list audit instances (SOC 2 Type II, etc.).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_policies",
+      "name": "List Policies",
+      "description": "GET /policies — list policy documents.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_devices",
+      "name": "List Devices",
+      "description": "GET /devices — list enrolled / monitored endpoints.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_frameworks",
+      "name": "List Frameworks",
+      "description": "GET /frameworks — list active compliance frameworks.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}
