@@ -1,0 +1,74 @@
+{
+  "title": "EngageBay Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**EngageBay** is an all-in-one SMB CRM + marketing + sales + service + helpdesk SaaS, exposing a REST API under `https://app.engagebay.com/dev/api/panel`. This connector — `EngageBayConnector` (`CONNECTOR_TYPE = \"engagebay\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from an EngageBay account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Contacts (CRM) | `/contacts`, `/contacts/{id}`, `/contacts/update-partial/{id}` | List, get, create, update, delete |\n| Companies | `/companies/list/{page_size}` | List companies |\n| Deals | `/deals`, `/deals/{id}` | List, create, get |\n| Tasks | `/tasks`, `/tasks/{id}` | List, create, get |\n| Tickets | `/tickets` | List support tickets |\n| Notes | `/contacts/{id}/note` | Attach free-text notes to a contact |\n| Subusers | `/subusers/list` | Lightweight auth probe (health check) |\n\nThe connector normalises contacts (and convenience deals/tasks) into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::EngageBayHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate an EngageBay REST API key\n\n1. Sign in to https://app.engagebay.com.\n2. Open **Account → Account Settings → API Settings**.\n3. Copy the **REST API Key** value.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → EngageBay**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | REST API key from step 3 |\n| `base_url` (text, optional) | Override `https://app.engagebay.com/dev/api/panel` (sandbox / self-hosted) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` probes `GET /subusers/list` to validate the key, persists the config, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists subusers as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "EngageBay REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as the **raw key** — **no `Bearer` prefix** (EngageBay-specific gotcha that matches the documented REST contract).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` is non-empty; probes `GET /subusers/list`. Returns `ConnectorStatus(HEALTHY, CONNECTED)` on success. |\n| `authorize(auth_code, state)` | Returns the stored key wrapped in a `TokenInfo` — there is no token exchange. |\n| `health_check()` | `GET /subusers/list` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | The api_key is stored as a `TokenInfo` for surface compatibility, never refreshed. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: <api_key>           ← raw, no Bearer prefix\nContent-Type:   application/json\nAccept:         application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Authorization header value (raw, no Bearer) |\n| `base_url` | text | no | `self.base_url` (defaults to `https://app.engagebay.com/dev/api/panel`) | Override for sandbox / self-hosted |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Soft client-side cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_ENGAGEBAY_BASE_URL = \"https://app.engagebay.com/dev/api/panel\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `EngageBayConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::EngageBayHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; probe `GET /subusers/list`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo over the stored api_key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /subusers/list`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nWalks `/contacts` cursor pages → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(page_size=50, page_cursor=None) -> Dict`\n`GET /contacts?page_size={N}&page_cursor={C}`. Cursor pagination.\n\n### `async get_contact(contact_id) -> Dict`\n`GET /contacts/{id}` → flat dict with email, first_name, last_name, phone, company, tags, properties.\n\n### `async create_contact(properties) -> Dict`\n`POST /contacts` — body `{properties: [{name, value, field_type}, …]}`. `field_type` defaults to `TEXT`.\n\n### `async update_contact(contact_id, properties) -> Dict`\n`PUT /contacts/update-partial/{id}` — partial update via properties list.\n\n### `async delete_contact(contact_id) -> Dict`\n`DELETE /contacts/{id}`.\n\n### `async add_note(contact_id, note) -> Dict`\n`POST /contacts/{id}/note` — attach a free-text note."
+        },
+        {
+          "id": "api-companies",
+          "title": "Companies",
+          "content": "### `async list_companies(page_size=50) -> Dict`\n`GET /companies/list/{page_size}`. Note the page size is path-segment, not query string."
+        },
+        {
+          "id": "api-deals",
+          "title": "Deals",
+          "content": "### `async list_deals(page_size=50) -> Dict`\n`GET /deals?page_size={N}`.\n\n### `async create_deal(name, expected_value, milestone, contact_ids=None) -> Dict`\n`POST /deals` — body `{name, expected_value, milestone, contact_ids}`.\n\n### `async get_deal_normalized(deal_id) -> Dict`\n`GET /deals/{id}` → flat dict view."
+        },
+        {
+          "id": "api-tasks",
+          "title": "Tasks",
+          "content": "### `async list_tasks(page_size=50) -> Dict`\n`GET /tasks?page_size={N}`.\n\n### `async create_task(name, due_date, contact_id=None, owner_id=None) -> Dict`\n`POST /tasks` — `due_date` is a Unix epoch in **milliseconds**.\n\n### `async get_task_normalized(task_id) -> Dict`\n`GET /tasks/{id}` → flat dict view."
+        },
+        {
+          "id": "api-tickets",
+          "title": "Tickets",
+          "content": "### `async list_tickets(page_size=50) -> Dict`\n`GET /tickets?page_size={N}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nEngageBayError                         # base; carries status_code + response_body\n├── EngageBayAuthError                  # 401 / 403\n├── EngageBayBadRequestError            # 400\n├── EngageBayNotFoundError              # 404\n├── EngageBayConflictError              # 409\n├── EngageBayRateLimitError             # 429 — retry_after_s\n├── EngageBayServerError                # 5xx\n└── EngageBayNetworkError               # transport (DNS, timeout, reset)\n```\n\nBack-compat aliases preserved:\n```\nEngageBayNotFound = EngageBayNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After` if present; else exponential backoff with jitter (cap 8s), retry up to `_DEFAULT_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.ConnectError` / `httpx.ReadTimeout` / `httpx.WriteTimeout` | Backoff, retry up to 3, then raise `EngageBayNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the REST API key in ACP. |\n| `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)` at install | 401 from `/subusers/list` | API key revoked or mistyped. Regenerate in EngageBay → Account Settings → API Settings. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — API user lacks permission | Confirm the EngageBay user owning the key has the right roles (Contacts/Deals/Tasks read). |\n| `engagebay.http.retry` warnings spike | Hitting 429 (60 req/min default) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| `Authorization: Bearer …` getting 401 | EngageBay expects RAW key, no Bearer prefix | The connector already sends the raw key — verify no upstream proxy is rewriting the header. |\n| `ImportError: cannot import name 'EngageBayNetworkError'` | Old code path | Already fixed — `EngageBayNetworkError` is a first-class class in `exceptions.py`. |\n| Sync inserts duplicate contacts | KB de-dup key mismatch | NormalizedDocument id = `{tenant_id}_{contact_id}` — verify both values are stable. |"
+    }
+  ]
+}
