@@ -10,7 +10,7 @@
       "type": "password",
       "required": true,
       "placeholder": "ghp_...",
-      "help": "GitHub Personal Access Token (classic) or fine-grained PAT. From GitHub → Settings → Developer settings → Personal access tokens."
+      "help": "GitHub Personal Access Token (classic) or fine-grained PAT. From GitHub \u2192 Settings \u2192 Developer settings \u2192 Personal access tokens."
     },
     {
       "key": "org",
@@ -115,5 +115,209 @@
     "pull_requests",
     "commits",
     "members"
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync GitHub repositories, issues, and pull requests into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_repos",
+      "name": "List Repos",
+      "description": "List repositories \u2014 org-level if org is provided, otherwise user-level.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "org",
+          "label": "Org",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "GET /repos/{owner}/{repo}/issues.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "state",
+          "label": "State",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "GET /repos/{owner}/{repo}/issues/{number}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "number",
+          "label": "Number",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_pull_requests",
+      "name": "List Pull Requests",
+      "description": "GET /repos/{owner}/{repo}/pulls.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "state",
+          "label": "State",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_pull_request",
+      "name": "Get Pull Request",
+      "description": "GET /repos/{owner}/{repo}/pulls/{number}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "number",
+          "label": "Number",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_commits",
+      "name": "List Commits",
+      "description": "GET /repos/{owner}/{repo}/commits.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "GET /orgs/{org}/members \u2014 org defaults to self._org when not provided.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "org",
+          "label": "Org",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_repo",
+      "name": "Get Repo",
+      "description": "GET /repos/{owner}/{repo}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "GitHubConnector",
+  "provider": "github",
+  "service": "github",
+  "description": "Shielva connector for Github."
 }
