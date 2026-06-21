@@ -1,0 +1,129 @@
+{
+  "connector_type": "bandwidth",
+  "display_name": "Bandwidth",
+  "version": "1.0.0",
+  "auth_type": "basic_auth",
+  "provider": "bandwidth",
+  "service": "communications",
+  "description": "CPaaS connector covering Bandwidth Messaging (SMS/MMS/media), Voice (programmable calls + recordings), and Numbers/Dashboard (applications, phone-number inventory).",
+  "install_fields": [
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "5000123",
+      "help": "Numeric Bandwidth account identifier (Dashboard → Account → Account ID)."
+    },
+    {
+      "key": "username",
+      "label": "API Username",
+      "type": "text",
+      "required": true,
+      "help": "API user created in Bandwidth Dashboard → Account → API Credentials."
+    },
+    {
+      "key": "password",
+      "label": "API Password",
+      "type": "password",
+      "required": true,
+      "help": "API user password — stored encrypted, never returned."
+    },
+    {
+      "key": "webhook_secret",
+      "label": "Webhook Signing Secret",
+      "type": "password",
+      "required": false,
+      "help": "HMAC-SHA256 secret used to verify Bandwidth event callbacks. Optional — without it, incoming webhooks are accepted but flagged unverified."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "text",
+      "required": false,
+      "default": "60",
+      "help": "Per-request timeout for outbound calls to Bandwidth APIs."
+    }
+  ],
+  "default_config_fields": [
+    { "key": "account_id",     "label": "Account ID",       "bind": true },
+    { "key": "username",       "label": "API Username",     "bind": true },
+    { "key": "password",       "label": "API Password",     "bind": true },
+    { "key": "webhook_secret", "label": "Webhook Secret",   "bind": true },
+    { "key": "rate_limit_per_min", "label": "Rate Limit / min", "bind": true, "default": "1800" },
+    { "key": "pagination_type", "label": "Pagination Type", "bind": true, "default": "cursor" },
+    { "key": "api_version",    "label": "API Version",      "bind": true, "default": "v2" }
+  ],
+  "methods": [
+    { "name": "install",              "description": "Verify Bandwidth credentials by probing Dashboard /applications.", "params": [] },
+    { "name": "health_check",         "description": "Re-probe Dashboard /applications to confirm Basic-auth is still valid.", "params": [] },
+    { "name": "sync",                 "description": "Sync recent messages + calls into NormalizedDocument format (multi-tenant scoped).", "params": [
+        { "name": "since", "type": "datetime", "required": false },
+        { "name": "full",  "type": "bool",     "required": false, "default": false }
+      ] },
+    { "name": "send_message",         "description": "POST /users/{accountId}/messages — send SMS or MMS.", "params": [{ "name": "payload", "type": "object", "required": true }] },
+    { "name": "get_message",          "description": "GET /users/{accountId}/messages/{messageId}.", "params": [{ "name": "message_id", "type": "string", "required": true }] },
+    { "name": "list_messages",        "description": "GET /users/{accountId}/messages — cursor-paginated.", "params": [
+        { "name": "page_token",    "type": "string", "required": false },
+        { "name": "from_date_time","type": "string", "required": false },
+        { "name": "to_date_time",  "type": "string", "required": false },
+        { "name": "limit",         "type": "integer", "required": false, "default": 100 }
+      ] },
+    { "name": "list_media",           "description": "GET /users/{accountId}/media.", "params": [] },
+    { "name": "upload_media",         "description": "PUT /users/{accountId}/media/{mediaId} — upload binary content.", "params": [
+        { "name": "media_id",    "type": "string", "required": true },
+        { "name": "content",     "type": "bytes",  "required": true },
+        { "name": "content_type","type": "string", "required": false, "default": "application/octet-stream" }
+      ] },
+    { "name": "delete_media",         "description": "DELETE /users/{accountId}/media/{mediaId}.", "params": [{ "name": "media_id", "type": "string", "required": true }] },
+    { "name": "create_call",          "description": "POST /accounts/{accountId}/calls — place an outbound voice call.", "params": [{ "name": "payload", "type": "object", "required": true }] },
+    { "name": "get_call",             "description": "GET /accounts/{accountId}/calls/{callId}.", "params": [{ "name": "call_id", "type": "string", "required": true }] },
+    { "name": "update_call",          "description": "POST /accounts/{accountId}/calls/{callId} — change call state / redirect.", "params": [
+        { "name": "call_id", "type": "string", "required": true },
+        { "name": "payload", "type": "object", "required": true }
+      ] },
+    { "name": "list_calls",           "description": "GET /accounts/{accountId}/calls — cursor-paginated.", "params": [
+        { "name": "page_token",     "type": "string", "required": false },
+        { "name": "min_start_time", "type": "string", "required": false },
+        { "name": "max_start_time", "type": "string", "required": false },
+        { "name": "limit",          "type": "integer", "required": false, "default": 100 }
+      ] },
+    { "name": "get_call_recordings",  "description": "GET /accounts/{accountId}/calls/{callId}/recordings — list recordings for a call.", "params": [{ "name": "call_id", "type": "string", "required": true }] },
+    { "name": "download_recording",   "description": "GET /accounts/{accountId}/calls/{callId}/recordings/{recordingId}/media — returns raw audio bytes.", "params": [
+        { "name": "call_id",      "type": "string", "required": true },
+        { "name": "recording_id", "type": "string", "required": true }
+      ] },
+    { "name": "list_phone_numbers",   "description": "GET /accounts/{accountId}/orders — list phone-number orders (paginated).", "params": [
+        { "name": "page", "type": "integer", "required": false, "default": 1 },
+        { "name": "size", "type": "integer", "required": false, "default": 100 }
+      ] },
+    { "name": "list_applications",    "description": "GET /accounts/{accountId}/applications.", "params": [] },
+    { "name": "handle_webhook",       "description": "Route a Bandwidth event callback through process_callback then per-event handler.", "params": [
+        { "name": "payload", "type": "object", "required": true },
+        { "name": "headers", "type": "object", "required": false }
+      ] },
+    { "name": "process_callback",     "description": "Verify X-Callback-Signature (HMAC-SHA256) against the configured webhook_secret.", "params": [
+        { "name": "payload", "type": "object", "required": true },
+        { "name": "headers", "type": "object", "required": false }
+      ] },
+    { "name": "handle_event",         "description": "Idempotency-keyed event acknowledgement.", "params": [{ "name": "event", "type": "object", "required": true }] },
+    { "name": "batch_processor",      "description": "Iterate a batch of events through handle_event with per-item error capture.", "params": [{ "name": "items", "type": "array", "required": true }] }
+  ],
+  "capabilities": [
+    "send_message", "get_message", "list_messages",
+    "list_media", "upload_media", "delete_media",
+    "create_call", "get_call", "update_call", "list_calls",
+    "get_call_recordings", "download_recording",
+    "list_phone_numbers", "list_applications",
+    "handle_webhook", "process_callback"
+  ],
+  "features": [
+    { "id": "retry_logic",        "label": "Retry Logic",         "category": "resilience",  "recommended": true,  "description": "Exponential backoff on 5xx; honours Retry-After on 429." },
+    { "id": "rate_limiting",      "label": "Rate Limiting",       "category": "performance", "recommended": true,  "description": "Honours Retry-After + per-account quotas." },
+    { "id": "pagination_handling","label": "Pagination",          "category": "performance", "recommended": true,  "description": "Cursor pagination via Link header for Messaging + Voice." },
+    { "id": "circuit_breaker",    "label": "Circuit Breaker",     "category": "resilience",  "recommended": true,  "description": "Future: trip on sustained 5xx; today retry capped at 3." },
+    { "id": "data_normalization", "label": "Normalizer",          "category": "data",        "recommended": true,  "description": "Maps message + call payloads to NormalizedDocument." },
+    { "id": "handle_webhook",     "label": "Webhook Router",      "category": "handlers",    "recommended": true,  "description": "Routes Bandwidth event callbacks to per-event handlers." },
+    { "id": "process_callback",   "label": "Signature Verification","category": "handlers",  "recommended": true,  "description": "HMAC-SHA256 verification with timing-safe compare." }
+  ]
+}
