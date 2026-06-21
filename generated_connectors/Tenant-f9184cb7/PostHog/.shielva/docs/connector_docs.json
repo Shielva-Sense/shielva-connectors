@@ -1,0 +1,74 @@
+{
+  "title": "PostHog Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**PostHog** is an open-source product-analytics + feature-flag + session-replay platform exposing a REST API under `https://app.posthog.com` (or `https://us.posthog.com` / `https://eu.posthog.com` for cloud, or any self-hosted host). This connector — `PostHogConnector` (`CONNECTOR_TYPE = \"posthog\"`, `AUTH_TYPE = \"api_key\"`) — wraps every operational surface a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Projects | `/api/projects` | List + read projects |\n| Events (capture) | `/capture/` + `/batch/` | Send single + batched events; project_api_key in body |\n| Persons | `/api/projects/{id}/persons` | List, get, search, identify, alias users |\n| Cohorts | `/api/projects/{id}/cohorts` | List + read cohort definitions |\n| Feature Flags | `/api/projects/{id}/feature_flags` | List, get, create flags with filter groups |\n| Insights | `/api/projects/{id}/insights` | Saved trends / funnels / retention |\n| Dashboards | `/api/projects/{id}/dashboards` | Dashboard listing + detail |\n| Actions | `/api/projects/{id}/actions` | Saved action definitions |\n| Annotations | `/api/projects/{id}/annotations` | Timeline annotations |\n| Experiments | `/api/projects/{id}/experiments` | A/B experiments |\n| Query (HogQL) | `/api/projects/{id}/query` | Arbitrary HogQL queries |\n\nThe connector normalises persons + events into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff honoring `Retry-After` (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::PostHogHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Personal API Key\n\n1. Sign in to PostHog (US: <https://us.posthog.com>, EU: <https://eu.posthog.com>, or your self-hosted URL).\n2. Click your avatar (bottom-left) → **Personal Settings** → **Personal API Keys**.\n3. Click **Create personal API key**. Label it `Shielva connector`.\n4. Grant scopes you need — typically `project:read`, `feature_flag:read+write`, `cohort:read`, `insight:read`, `person:read`, `query:read`.\n5. Copy the `phx_…` value. **PostHog shows it only once.**\n\n### 2. Find your Project ID and Project API Key\n\n1. From the project picker (top-left), choose the project events should land in.\n2. Open **Project Settings** → top of the page shows **Project ID** (numeric, e.g. `12345`) and the **Project API Key** `phc_…`.\n3. Copy both.\n\n### 3. Install in ACP\n\nIn **ACP → Manage Connectors → PostHog**:\n\n| Field | Value |\n|---|---|\n| `personal_api_key` (secret, required) | `phx_…` from step 1 |\n| `project_id` (text, required) | numeric ID from step 2 |\n| `project_api_key` (secret, optional) | `phc_…` from step 2 — only needed for capture surfaces |\n| `base_url` (text, optional) | default `https://app.posthog.com`; change for EU or self-hosted |\n| `rate_limit_per_min` (number, optional) | soft cap, default 240 |\n\nClick **Install**. `install()` validates `personal_api_key` + `project_id` are present (it does NOT call the API), initialises the `PostHogHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 4. First health check\n\nThe gateway calls `health_check()` next. That probes `GET /api/projects/{project_id}`. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "PostHog uses **two distinct API key types** — the connector wires them independently (`AUTH_TYPE = \"api_key\"`).\n\n### Credential model\n\n- `personal_api_key` (`phx_…`) — issued from **Personal Settings → Personal API Keys**. Sent as `Authorization: Bearer <personal_api_key>` on every management call. Read/write scope per key.\n- `project_api_key` (`phc_…`) — issued from **Project Settings → Project API Key**. **Capture only**. Sent in the JSON body as `api_key`, NEVER as a header. This is the same key shipped in posthog-js client bundles — safe to use from clients.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `personal_api_key` + `project_id`. Initialises `PostHogHTTPClient`. Does **not** call any PostHog endpoint. |\n| `authorize(...)` | Returns a stub `TokenInfo` (access_token = personal_api_key). There is no OAuth exchange. |\n| `health_check()` | `GET /api/projects/{project_id}` — minimal probe verifying both the personal key AND project access. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. The keys are persisted in `self.config` via `save_config(...)` at install time. |\n\n### Header contract\n\nManagement API request:\n\n```\nAuthorization: Bearer <personal_api_key>\nContent-Type:  application/json\nAccept:        application/json\n```\n\nCapture API request (`/capture/`, `/batch/`):\n\n```\nContent-Type:  application/json\nAccept:        application/json\n# NO Authorization header\n# api_key lives in the JSON body\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `personal_api_key` | secret | yes | `self.personal_api_key` | Authorization Bearer for management API |\n| `project_id` | string | yes | `self.project_id` | Default path-segment for `/api/projects/{id}/…`; health probe target |\n| `project_api_key` | secret | no | `self.project_api_key` | Body `api_key` for `/capture/` + `/batch/`; required ONLY for capture surfaces |\n| `base_url` | string | no | `self.base_url` (defaults to `https://app.posthog.com`) | Override for EU Cloud or self-hosted |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 240) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"personal_api_key\", \"project_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_BASE = \"https://app.posthog.com\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `PostHogConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::PostHogHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `personal_api_key` + `project_id`; initialise `PostHogHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a stub TokenInfo carrying the personal key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /api/projects/{project_id}`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates persons + recent events → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects",
+          "content": "### `async list_projects() -> Dict`\n`GET /api/projects` — list all projects visible to the personal API key.\n\n### `async get_project(project_id=None) -> Dict`\n`GET /api/projects/{project_id}`."
+        },
+        {
+          "id": "api-capture",
+          "title": "Events / Capture",
+          "content": "### `async capture_event(distinct_id, event_name, properties=None, timestamp=None) -> Dict`\n`POST /capture/` — single event. `project_api_key` is injected into the body.\n\n### `async batch_capture(events) -> Dict`\n`POST /batch/` — list of capture dicts. `project_api_key` lives at the top level.\n\n### `async identify_person(distinct_id, properties) -> Dict`\nSends `$identify` event; `properties` merged into `$set` on the person.\n\n### `async alias_distinct_ids(distinct_id, alias) -> Dict`\nSends `$create_alias` event to merge two `distinct_ids` onto one person.\n\n### `async list_events(project_id=None, after=None, before=None, limit=100) -> Dict`\n`GET /api/projects/{id}/events` — recent events, optionally bounded by `after`/`before` ISO timestamps.\n\n### `async run_query(query, project_id=None) -> Dict`\n`POST /api/projects/{id}/query` — arbitrary HogQL / insight query body: `{query: {...}}`."
+        },
+        {
+          "id": "api-persons-cohorts",
+          "title": "Persons + Cohorts",
+          "content": "### `async list_persons(project_id=None, search=None, limit=100) -> Dict`\n`GET /api/projects/{id}/persons` — optional `search` substring + `limit`.\n\n### `async get_person(person_id, project_id=None) -> Dict`\n`GET /api/projects/{id}/persons/{person_id}`.\n\n### `async list_cohorts(project_id=None) -> Dict`\n`GET /api/projects/{id}/cohorts`.\n\n### `async get_cohort(cohort_id, project_id=None) -> Dict`\n`GET /api/projects/{id}/cohorts/{cohort_id}`."
+        },
+        {
+          "id": "api-flags",
+          "title": "Feature Flags",
+          "content": "### `async list_feature_flags(project_id=None) -> Dict`\n`GET /api/projects/{id}/feature_flags`.\n\n### `async get_feature_flag(flag_id, project_id=None) -> Dict`\n`GET /api/projects/{id}/feature_flags/{flag_id}`.\n\n### `async create_feature_flag(key, name, filters=None, active=True, project_id=None) -> Dict`\n`POST /api/projects/{id}/feature_flags` — body `{key, name, active, filters}`. If `filters` is omitted the connector injects a default 100%-rollout group."
+        },
+        {
+          "id": "api-other",
+          "title": "Insights · Dashboards · Actions · Annotations · Experiments",
+          "content": "### `async list_insights(project_id=None) -> Dict`\n`GET /api/projects/{id}/insights`.\n\n### `async list_dashboards(project_id=None) -> Dict`\n`GET /api/projects/{id}/dashboards`.\n\n### `async get_dashboard(dashboard_id, project_id=None) -> Dict`\n`GET /api/projects/{id}/dashboards/{dashboard_id}`.\n\n### `async list_actions(project_id=None) -> Dict`\n`GET /api/projects/{id}/actions`.\n\n### `async list_annotations(project_id=None) -> Dict`\n`GET /api/projects/{id}/annotations`.\n\n### `async list_experiments(project_id=None) -> Dict`\n`GET /api/projects/{id}/experiments`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nPostHogError                          # base; carries status_code + response_body\n├── PostHogAuthError                   # 401 / 403\n├── PostHogBadRequestError             # 400\n├── PostHogNotFoundError               # 404\n├── PostHogConflictError               # 409\n├── PostHogRateLimitError              # 429 — retry_after_s\n└── PostHogServerError                 # 5xx\n```\n\nBack-compat aliases preserved:\n```\nPostHogNetworkError = PostHogServerError    # legacy name used by older code\nPostHogNotFound     = PostHogNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honor `Retry-After` (seconds). Fall back to exponential backoff `_BACKOFF_BASE * 2 ** attempt`. Retry up to `_MAX_RETRIES = 3`. |\n| 5xx | Exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` / `httpx.TransportError` | Backoff, retry up to 3, then raise `PostHogNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` maps caught exceptions via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY,  INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,   CONNECTED)            — logged as warning\nnetwork/transport → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `personal_api_key` or `project_id` blank | Re-enter both in ACP. The personal key is shown once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — personal key revoked or wrong host | Verify the key in `Personal Settings → Personal API Keys`. If using EU Cloud, set `base_url=https://eu.posthog.com`. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — key lacks scope or no access to that project | Edit the key in PostHog and grant the scopes (project, persons, flags, etc.). Confirm the `project_id` belongs to an organisation the key can read. |\n| `PostHogError: project_api_key is required to capture events` | `project_api_key` empty in install | Add the `phc_…` key from Project Settings. Capture surfaces (capture_event, batch_capture, identify_person, alias_distinct_ids) need it. |\n| `posthog.http.retry` warnings spike | Hitting 429 (PostHog per-minute cap, default 240) | The client retries with `Retry-After`-aware backoff. Lower `rate_limit_per_min` or batch more aggressively via `batch_capture`. |\n| `404 Not Found` on a per-project call | Wrong `project_id` OR project moved to a different organisation | Confirm `project_id` in PostHog → Project Settings. Pass `project_id=...` explicitly to override the install default. |\n| `ImportError: cannot import name 'PostHogNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `PostHogNetworkError = PostHogServerError` alias preserved in `exceptions.py`. |\n| Events captured but don't show up in PostHog UI | `project_api_key` doesn't match the project you're viewing | The `project_api_key` and the dashboard project must match. Re-check Project Settings → Project API Key. |"
+    }
+  ]
+}
