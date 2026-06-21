@@ -1,0 +1,304 @@
+{
+  "connector_type": "posthog",
+  "name": "PostHogConnector",
+  "display_name": "PostHog",
+  "version": "1.0.0",
+  "description": "Connects to PostHog for product analytics (event capture, persons, queries, insights, cohorts, dashboards, actions, annotations, experiments) and feature-flag management. Supports US Cloud, EU Cloud, and self-hosted instances. Two API key types: personal_api_key (Bearer header for management) and project_api_key (in-body for /capture/ + /batch/).",
+  "provider": "posthog",
+  "service": "posthog",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "personal_api_key",
+      "label": "Personal API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "phx_...",
+      "help": "From PostHog → Personal Settings → Personal API Keys. Sent as `Authorization: Bearer <key>` on every management call (projects, persons, flags, cohorts, insights, queries, dashboards, etc.). Shown once at generation — rotate if lost."
+    },
+    {
+      "key": "project_id",
+      "label": "Project ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "12345",
+      "help": "Numeric project ID. Used as the default project path-segment for every per-project endpoint and as the health-check probe target (`GET /api/projects/{project_id}`)."
+    },
+    {
+      "key": "project_api_key",
+      "label": "Project API Key",
+      "type": "secret",
+      "required": false,
+      "placeholder": "phc_...",
+      "help": "From Project Settings → Project API Key. Required ONLY for capture surfaces (capture_event, batch_capture, identify_person, alias_distinct_ids). Sent inside the JSON body as `api_key` — never as a header. This is the same key shipped in posthog-js client bundles."
+    },
+    {
+      "key": "base_url",
+      "label": "PostHog Host",
+      "type": "string",
+      "required": false,
+      "default": "https://app.posthog.com",
+      "placeholder": "https://app.posthog.com",
+      "help": "https://app.posthog.com (default), https://us.posthog.com (US Cloud explicit), https://eu.posthog.com (EU Cloud), or your self-hosted PostHog URL."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "240",
+      "placeholder": "240",
+      "help": "Client-side soft cap. PostHog management API default is 240/min per personal key. Capture endpoints are much higher."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates personal_api_key + project_id and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies PostHog API connectivity by fetching the configured project (GET /api/projects/{project_id}).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /api/projects — list all projects visible to the personal API key.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /api/projects/{project_id} — fetch a single project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "capture_event",
+      "name": "Capture Event",
+      "description": "POST /capture/ — single event with project_api_key embedded in the body.",
+      "method": "POST",
+      "params": [
+        { "key": "distinct_id", "type": "string", "required": true },
+        { "key": "event_name", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": false },
+        { "key": "timestamp", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "batch_capture",
+      "name": "Batch Capture",
+      "description": "POST /batch/ — list of capture dicts with project_api_key at top level.",
+      "method": "POST",
+      "params": [
+        { "key": "events", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "identify_person",
+      "name": "Identify Person",
+      "description": "Sends an $identify event — properties are merged into $set on the person.",
+      "method": "POST",
+      "params": [
+        { "key": "distinct_id", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "alias_distinct_ids",
+      "name": "Alias Distinct IDs",
+      "description": "Sends a $create_alias event to merge two distinct_ids onto one person.",
+      "method": "POST",
+      "params": [
+        { "key": "distinct_id", "type": "string", "required": true },
+        { "key": "alias", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_persons",
+      "name": "List Persons",
+      "description": "GET /api/projects/{id}/persons — list persons, optionally filtered by search.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_person",
+      "name": "Get Person",
+      "description": "GET /api/projects/{id}/persons/{person_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "person_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_cohorts",
+      "name": "List Cohorts",
+      "description": "GET /api/projects/{id}/cohorts.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_cohort",
+      "name": "Get Cohort",
+      "description": "GET /api/projects/{id}/cohorts/{cohort_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "cohort_id", "type": "number", "required": true },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_feature_flags",
+      "name": "List Feature Flags",
+      "description": "GET /api/projects/{id}/feature_flags — list all flags for a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_feature_flag",
+      "name": "Get Feature Flag",
+      "description": "GET /api/projects/{id}/feature_flags/{flag_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "flag_id", "type": "number", "required": true },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_feature_flag",
+      "name": "Create Feature Flag",
+      "description": "POST /api/projects/{id}/feature_flags — creates a flag with optional filter groups.",
+      "method": "POST",
+      "params": [
+        { "key": "key", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "filters", "type": "object", "required": false },
+        { "key": "active", "type": "boolean", "required": false },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_insights",
+      "name": "List Insights",
+      "description": "GET /api/projects/{id}/insights — list saved insights (trends, funnels, retention).",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "GET /api/projects/{id}/dashboards.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_dashboard",
+      "name": "Get Dashboard",
+      "description": "GET /api/projects/{id}/dashboards/{dashboard_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "dashboard_id", "type": "number", "required": true },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_actions",
+      "name": "List Actions",
+      "description": "GET /api/projects/{id}/actions — list saved action definitions.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_annotations",
+      "name": "List Annotations",
+      "description": "GET /api/projects/{id}/annotations — list timeline annotations.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_experiments",
+      "name": "List Experiments",
+      "description": "GET /api/projects/{id}/experiments — list A/B experiments.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "GET /api/projects/{id}/events — recent events optionally bounded by after/before ISO timestamps.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "after", "type": "string", "required": false },
+        { "key": "before", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_query",
+      "name": "Run HogQL Query",
+      "description": "POST /api/projects/{id}/query — arbitrary HogQL or insight query.",
+      "method": "POST",
+      "params": [
+        { "key": "query", "type": "object", "required": true },
+        { "key": "project_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+    "structlog>=24.1"
+  ]
+}
