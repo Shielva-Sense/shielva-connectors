@@ -1,0 +1,248 @@
+{
+  "connector_type": "snyk",
+  "name": "SnykConnector",
+  "display_name": "Snyk",
+  "version": "1.0.0",
+  "description": "Connects to the Snyk security platform (REST v3 + legacy v1) using an API token. Wraps organizations, projects, targets, issues, dependencies, reporting, and per-user notification settings. Auth header uses the literal 'token' prefix — NOT Bearer.",
+  "provider": "snyk",
+  "service": "snyk",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Snyk API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Snyk API token",
+      "help": "From Snyk → Account Settings → General → Auth Token. Sent as 'Authorization: token <api_token>' on every request (the literal prefix is 'token', NOT 'Bearer')."
+    },
+    {
+      "key": "default_org_id",
+      "label": "Default Organization ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "e.g. 4a18d42f-0706-4ad0-b127-…",
+      "help": "Default Snyk organization slug or UUID. Used by sync() and as a fall-back for shorthand calls."
+    },
+    {
+      "key": "api_version",
+      "label": "REST API Version",
+      "type": "string",
+      "required": false,
+      "default": "2024-10-15",
+      "placeholder": "2024-10-15",
+      "help": "Snyk REST v3 version date. Sent as ?version=YYYY-MM-DD on every REST request."
+    },
+    {
+      "key": "base_url",
+      "label": "REST Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.snyk.io/rest",
+      "placeholder": "https://api.snyk.io/rest",
+      "help": "Override for the REST v3 base URL (rarely needed)."
+    },
+    {
+      "key": "v1_base_url",
+      "label": "Legacy v1 Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.snyk.io/v1",
+      "placeholder": "https://api.snyk.io/v1",
+      "help": "Override for the legacy Snyk v1 base URL (rarely needed)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "200",
+      "placeholder": "200",
+      "help": "Client-side soft cap. Default 200."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token is present and persists the install-time config. Does NOT call the Snyk API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Snyk API connectivity by fetching the token holder via GET /v1/user/me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync projects + issues for default_org_id into the Shielva knowledge base.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "GET /rest/orgs — paginated list of orgs visible to the token.",
+      "method": "GET",
+      "params": [
+        { "key": "version", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "starting_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_organization",
+      "name": "Get Organization",
+      "description": "GET /rest/orgs/{org_id} — fetch a single organization.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /rest/orgs/{org_id}/projects — paginated projects with optional target/type filters.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "target_id", "type": "string", "required": false },
+        { "key": "types", "type": "object", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "starting_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /rest/orgs/{org_id}/projects/{project_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_project",
+      "name": "Delete Project",
+      "description": "DELETE /rest/orgs/{org_id}/projects/{project_id}. Returns {} on 204.",
+      "method": "DELETE",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "GET /rest/orgs/{org_id}/issues — vulnerability and license issues with severity / type / project filters.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "severity", "type": "object", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "starting_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "GET /rest/orgs/{org_id}/issues/{issue_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "issue_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_dependencies",
+      "name": "List Dependencies",
+      "description": "Legacy v1: POST /org/{org_id}/dependencies — list dependencies in an org or project.",
+      "method": "POST",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_targets",
+      "name": "List Targets",
+      "description": "GET /rest/orgs/{org_id}/targets — list the scan targets connected to an org.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "source", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "starting_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_target",
+      "name": "Get Target",
+      "description": "GET /rest/orgs/{org_id}/targets/{target_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "target_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Org Users",
+      "description": "Legacy v1: GET /org/{org_id}/members — list members of an organization.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_org_members",
+      "name": "List Org Members",
+      "description": "Alias for list_users — legacy v1 GET /org/{org_id}/members.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user_settings",
+      "name": "Get User Settings",
+      "description": "Legacy v1: GET /user/me/notification-settings/org/{org_id} — per-org notification preferences for the token holder.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
