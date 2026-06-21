@@ -1,0 +1,285 @@
+{
+  "connector_type": "n8n",
+  "name": "N8nConnector",
+  "display_name": "n8n",
+  "version": "1.0.0",
+  "description": "Connects to a tenant-hosted n8n workflow-automation instance (Cloud or self-hosted) via the public REST API at {instance_url}/api/v1. Supports workflow CRUD + activation + transfer, execution listing / inspection / deletion, credential management, tags, instance users and variables. Sync ingests workflows + executions as NormalizedDocuments. Auth = API key via X-N8N-API-KEY header.",
+  "provider": "n8n",
+  "service": "n8n",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "instance_url",
+      "label": "n8n Instance URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://yourorg.app.n8n.cloud",
+      "help": "Your tenant-hosted n8n base URL. Cloud: https://<workspace>.app.n8n.cloud. Self-hosted: the public hostname (no trailing /api/v1 — the connector appends it)."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "n8n_api_...",
+      "help": "From n8n → Settings → n8n API → Create an API key. Sent as the X-N8N-API-KEY header on every request."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Client-side soft cap. The connector also retries 429 with exponential backoff up to 3 attempts."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout. Increase for large workflow payloads."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates instance_url + api_key and marks the connector as installed. Does NOT call the n8n API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies the API key + instance URL by calling GET /workflows?limit=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_workflows",
+      "name": "List Workflows",
+      "description": "GET /workflows — list workflows with optional filters (active, tags, name, projectId, excludePinnedData) and cursor pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "active", "type": "boolean", "required": false },
+        { "key": "tags", "type": "string", "required": false },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "exclude_pinned_data", "type": "boolean", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_workflow",
+      "name": "Get Workflow",
+      "description": "GET /workflows/{id} — fetch a single workflow.",
+      "method": "GET",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true },
+        { "key": "exclude_pinned_data", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_workflow",
+      "name": "Create Workflow",
+      "description": "POST /workflows — create a new workflow with nodes + connections (and optional settings / staticData).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "nodes", "type": "array", "required": true },
+        { "key": "connections", "type": "object", "required": true },
+        { "key": "settings", "type": "object", "required": false },
+        { "key": "static_data", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_workflow",
+      "name": "Update Workflow",
+      "description": "PUT /workflows/{id} — update name / nodes / connections / settings / active.",
+      "method": "PUT",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "nodes", "type": "array", "required": false },
+        { "key": "connections", "type": "object", "required": false },
+        { "key": "settings", "type": "object", "required": false },
+        { "key": "active", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_workflow",
+      "name": "Delete Workflow",
+      "description": "DELETE /workflows/{id} — permanently delete a workflow.",
+      "method": "DELETE",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "activate_workflow",
+      "name": "Activate Workflow",
+      "description": "POST /workflows/{id}/activate — activate a workflow so its triggers begin firing.",
+      "method": "POST",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "deactivate_workflow",
+      "name": "Deactivate Workflow",
+      "description": "POST /workflows/{id}/deactivate — deactivate a workflow.",
+      "method": "POST",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "transfer_workflow",
+      "name": "Transfer Workflow",
+      "description": "PUT /workflows/{id}/transfer — move a workflow to a different project (Enterprise).",
+      "method": "PUT",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": true },
+        { "key": "destination_project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_executions",
+      "name": "List Executions",
+      "description": "GET /executions — list workflow executions, filterable by workflowId + status, with cursor pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "workflow_id", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "include_data", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_execution",
+      "name": "Get Execution",
+      "description": "GET /executions/{id} — fetch a single execution.",
+      "method": "GET",
+      "params": [
+        { "key": "execution_id", "type": "string", "required": true },
+        { "key": "include_data", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_execution",
+      "name": "Delete Execution",
+      "description": "DELETE /executions/{id} — delete a stored execution.",
+      "method": "DELETE",
+      "params": [
+        { "key": "execution_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_credentials",
+      "name": "List Credentials",
+      "description": "GET /credentials — list credential entries (metadata only).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_credential",
+      "name": "Get Credential",
+      "description": "GET /credentials/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "credential_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_credential",
+      "name": "Create Credential",
+      "description": "POST /credentials — create a new credential entry (name + type + data).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": true },
+        { "key": "data", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_credential",
+      "name": "Delete Credential",
+      "description": "DELETE /credentials/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "credential_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /tags — list workflow tags.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_tag",
+      "name": "Create Tag",
+      "description": "POST /tags — create a new workflow tag.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — list instance users (community/enterprise edition).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_variables",
+      "name": "List Variables",
+      "description": "GET /variables — list instance-level environment variables (enterprise).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}
