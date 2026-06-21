@@ -9,19 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
-try:
-    from shielva_connectors.base import BaseConnector
-except ImportError:
-    class BaseConnector:  # type: ignore[no-redef]
-        def __init__(
-            self,
-            tenant_id: str = "",
-            connector_id: str = "",
-            config: Optional[Dict[str, Any]] = None,
-        ) -> None:
-            self.tenant_id = tenant_id
-            self.connector_id = connector_id
-            self.config = config or {}
+from shared.base_connector import BaseConnector
 
 from client.http_client import MicrosoftTeamsHTTPClient
 from exceptions import (
@@ -339,3 +327,4 @@ class MicrosoftTeamsConnector(BaseConnector):
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.aclose()
+
