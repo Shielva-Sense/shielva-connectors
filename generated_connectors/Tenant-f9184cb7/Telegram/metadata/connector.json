@@ -1,0 +1,328 @@
+{
+  "connector_type": "telegram",
+  "name": "TelegramConnector",
+  "display_name": "Telegram",
+  "version": "1.0.0",
+  "description": "Connects to the Telegram Bot API to send/edit/delete/forward messages, send media, manage webhooks, long-poll updates, inspect chats and admins, and resolve file_ids. Authentication is a bot token embedded in the request URL path (no Authorization header).",
+  "provider": "telegram",
+  "service": "telegram",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "bot_token",
+      "label": "Bot Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+      "help": "Get from @BotFather on Telegram — format like 123456:ABC-DEF... The token is sent as a URL path segment (/bot{token}/{method}); there is no Authorization header."
+    },
+    {
+      "key": "webhook_url",
+      "label": "Webhook URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-app.example.com/telegram/webhook",
+      "help": "Optional HTTPS endpoint Telegram will POST updates to. When set, install() registers it via setWebhook."
+    },
+    {
+      "key": "webhook_secret_token",
+      "label": "Webhook Secret Token",
+      "type": "secret",
+      "required": false,
+      "placeholder": "1-256 chars: A-Z, a-z, 0-9, _, -",
+      "help": "Optional secret that Telegram echoes back in the X-Telegram-Bot-Api-Secret-Token header on every webhook POST. process_callback() verifies it with constant-time compare."
+    },
+    {
+      "key": "base_url",
+      "label": "Telegram API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.telegram.org",
+      "placeholder": "https://api.telegram.org",
+      "help": "Base URL for the Telegram Bot API. Override for a self-hosted Bot API server. Leave blank to use the default."
+    },
+    {
+      "key": "default_parse_mode",
+      "label": "Default Parse Mode",
+      "type": "string",
+      "required": false,
+      "default": "HTML",
+      "placeholder": "HTML",
+      "help": "Default formatting for outgoing message text. Supported values: HTML, MarkdownV2, Markdown."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "1800",
+      "placeholder": "1800",
+      "help": "Client-side soft cap. Telegram's documented global limit is roughly 30 messages/second across all chats."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates bot_token by probing /getMe, then (optionally) registers the configured webhook_url via setWebhook.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "API-key flow has no OAuth exchange. Returns a TokenInfo wrapping the configured bot_token for SDK ABI compatibility.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Telegram API connectivity by calling /getMe.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Updates",
+      "description": "Drains pending updates from getUpdates into the Shielva knowledge base, advancing the last_update_id checkpoint.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "get_me",
+      "name": "Get Bot Identity",
+      "description": "Returns basic information about the bot — id, username, name, capability flags.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_message",
+      "name": "Send Message",
+      "description": "Sends a text message to a chat. Supports HTML / MarkdownV2 / Markdown parse modes and inline keyboards via reply_markup.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": true },
+        { "key": "parse_mode", "type": "string", "required": false },
+        { "key": "disable_web_page_preview", "type": "boolean", "required": false },
+        { "key": "reply_to_message_id", "type": "number", "required": false },
+        { "key": "reply_markup", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "edit_message",
+      "name": "Edit Message Text",
+      "description": "Edits the text of an existing message. Returns the edited Message object.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "number", "required": true },
+        { "key": "text", "type": "string", "required": true },
+        { "key": "parse_mode", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_message",
+      "name": "Delete Message",
+      "description": "Deletes a message. Bots can delete their own messages and messages in groups where they have the right permissions.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "number", "required": true }
+      ],
+      "returns": "Boolean"
+    },
+    {
+      "id": "send_photo",
+      "name": "Send Photo",
+      "description": "Sends a photo by URL with an optional caption.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "photo_url", "type": "string", "required": true },
+        { "key": "caption", "type": "string", "required": false },
+        { "key": "parse_mode", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_document",
+      "name": "Send Document",
+      "description": "Sends a file by URL with an optional caption.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "document_url", "type": "string", "required": true },
+        { "key": "caption", "type": "string", "required": false },
+        { "key": "parse_mode", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "forward_message",
+      "name": "Forward Message",
+      "description": "Forwards a message from one chat to another.",
+      "method": "POST",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "from_chat_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_updates",
+      "name": "Get Updates",
+      "description": "Long-polls or short-polls the Telegram Bot API for new updates. Use offset to acknowledge previously-received updates and timeout > 0 to enable long polling.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "timeout", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "set_webhook",
+      "name": "Set Webhook",
+      "description": "Registers an HTTPS endpoint to receive updates. Optional secret_token is echoed back in the X-Telegram-Bot-Api-Secret-Token header so the receiver can authenticate the source.",
+      "method": "POST",
+      "params": [
+        { "key": "url", "type": "string", "required": true },
+        { "key": "secret_token", "type": "string", "required": false },
+        { "key": "allowed_updates", "type": "array", "required": false }
+      ],
+      "returns": "Boolean"
+    },
+    {
+      "id": "delete_webhook",
+      "name": "Delete Webhook",
+      "description": "Unregisters the webhook so the bot returns to short-polling mode.",
+      "method": "POST",
+      "params": [
+        { "key": "drop_pending_updates", "type": "boolean", "required": false }
+      ],
+      "returns": "Boolean"
+    },
+    {
+      "id": "get_webhook_info",
+      "name": "Get Webhook Info",
+      "description": "Returns the current webhook URL, last error, pending update count, and allowed_updates filter.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "answer_callback_query",
+      "name": "Answer Callback Query",
+      "description": "Responds to a callback query from an inline keyboard. Optionally shows an alert.",
+      "method": "POST",
+      "params": [
+        { "key": "callback_query_id", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": false },
+        { "key": "show_alert", "type": "boolean", "required": false }
+      ],
+      "returns": "Boolean"
+    },
+    {
+      "id": "get_chat",
+      "name": "Get Chat",
+      "description": "Returns up-to-date information about a chat (private, group, supergroup, channel).",
+      "method": "GET",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_chat_member",
+      "name": "Get Chat Member",
+      "description": "Returns information about a single member of a chat — status, role, custom title.",
+      "method": "GET",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_chat_administrators",
+      "name": "Get Chat Administrators",
+      "description": "Lists administrators of a group / supergroup / channel.",
+      "method": "GET",
+      "params": [
+        { "key": "chat_id", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_file",
+      "name": "Get File",
+      "description": "Resolves a file_id to a downloadable file_path. Combine with http_client.file_url(token, file_path) to build the actual download URL.",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "handle_webhook",
+      "name": "Handle Webhook",
+      "description": "Routes an inbound Telegram webhook POST through process_callback (X-Telegram-Bot-Api-Secret-Token verification) and dispatches the populated update subfield to handle_event.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "payload", "type": "object", "required": true },
+        { "key": "headers", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "process_callback",
+      "name": "Process Callback",
+      "description": "Constant-time compares the X-Telegram-Bot-Api-Secret-Token header against the configured webhook_secret_token. Returns {verified: bool, data?: dict, error?: str}.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "payload", "type": "object", "required": true },
+        { "key": "headers", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "handle_event",
+      "name": "Handle Event",
+      "description": "Dispatches one Telegram update kind (message / callback_query / inline_query / …) to its specialised _handle_<kind> method.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "event", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "batch_processor",
+      "name": "Batch Processor",
+      "description": "Processes a batch of queued Telegram updates one-at-a-time, swallowing per-item errors so a single malformed update never poisons the batch.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "items", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": []
+}
