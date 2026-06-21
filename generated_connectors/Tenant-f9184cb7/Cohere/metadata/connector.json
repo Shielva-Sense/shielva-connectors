@@ -1,0 +1,220 @@
+{
+  "connector_type": "cohere",
+  "name": "CohereConnector",
+  "display_name": "Cohere",
+  "version": "1.0.0",
+  "description": "Connects Shielva to the Cohere LLM API (Chat, Embed, Rerank, Classify, Tokenize/Detokenize, Models, Datasets, RAG Connectors, Fine-tuning) using a Bearer API key. v2 inference (chat/embed/rerank) + v1 utilities (classify/tokenize/datasets/finetuning).",
+  "provider": "cohere",
+  "service": "cohere",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Cohere API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Cohere production API key",
+      "help": "From Cohere Dashboard → API Keys → Production Key. Sent as `Authorization: Bearer <key>` on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Cohere API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.cohere.com",
+      "placeholder": "https://api.cohere.com",
+      "help": "Base URL for the Cohere REST API. The connector appends `/v1/*` or `/v2/*` per endpoint, so paste the root host. Leave blank to use the default."
+    },
+    {
+      "key": "default_chat_model",
+      "label": "Default Chat Model",
+      "type": "string",
+      "required": false,
+      "default": "command-r-plus",
+      "placeholder": "command-r-plus",
+      "help": "Model used by chat() when the caller does not specify one."
+    },
+    {
+      "key": "default_embed_model",
+      "label": "Default Embed Model",
+      "type": "string",
+      "required": false,
+      "default": "embed-v4.0",
+      "placeholder": "embed-v4.0",
+      "help": "Model used by embed() when the caller does not specify one."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Cohere API requests per minute. Default 100 matches the production tier; trial keys are typically 5 RPM."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates `api_key` (calls GET /v1/models?page_size=1 to confirm) and persists config. Returns ConnectorStatus(HEALTHY, CONNECTED) on success.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Cohere API connectivity by listing one model (GET /v1/models?page_size=1).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "chat",
+      "name": "Chat",
+      "description": "POST /v2/chat — run a Cohere chat completion. Returns the v2 chat response with assistant content.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "messages", "type": "array", "required": true },
+        { "key": "temperature", "type": "number", "required": false },
+        { "key": "max_tokens", "type": "number", "required": false },
+        { "key": "stream", "type": "boolean", "required": false },
+        { "key": "p", "type": "number", "required": false },
+        { "key": "k", "type": "number", "required": false },
+        { "key": "stop_sequences", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "embed",
+      "name": "Embed",
+      "description": "POST /v2/embed — generate vector embeddings for one or more texts.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "texts", "type": "array", "required": true },
+        { "key": "input_type", "type": "string", "required": false },
+        { "key": "embedding_types", "type": "array", "required": false },
+        { "key": "truncate", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "rerank",
+      "name": "Rerank",
+      "description": "POST /v2/rerank — rerank documents by relevance to a query.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "query", "type": "string", "required": true },
+        { "key": "documents", "type": "array", "required": true },
+        { "key": "top_n", "type": "number", "required": false },
+        { "key": "return_documents", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "classify",
+      "name": "Classify",
+      "description": "POST /v1/classify — classify inputs using few-shot labelled examples.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "inputs", "type": "array", "required": true },
+        { "key": "examples", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "tokenize",
+      "name": "Tokenize",
+      "description": "POST /v1/tokenize — return Cohere tokens for `text` under the named model's tokenizer.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "detokenize",
+      "name": "Detokenize",
+      "description": "POST /v1/detokenize — convert token IDs back into text under the named model.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "tokens", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "GET /v1/models — list available Cohere models. Supports paging + endpoint filter.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_token", "type": "string", "required": false },
+        { "key": "endpoint", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_model",
+      "name": "Get Model",
+      "description": "GET /v1/models/{model_id} — fetch a single model's metadata.",
+      "method": "GET",
+      "params": [
+        { "key": "model_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "description": "GET /v1/datasets — list fine-tune datasets uploaded to the Cohere account.",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_type", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_dataset",
+      "name": "Create Dataset",
+      "description": "POST /v1/datasets — register a new fine-tune dataset envelope. (File upload itself is multipart; the gateway shapes that.)",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_connectors",
+      "name": "List Cohere RAG Connectors",
+      "description": "GET /v1/connectors — list Cohere RAG connectors (provider-managed, not Shielva connectors).",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_finetuned_models",
+      "name": "List Fine-tuned Models",
+      "description": "GET /v1/finetuning/finetuned-models — list fine-tuned model jobs for the Cohere account.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
