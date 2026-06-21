@@ -1,0 +1,3 @@
+# HiBob connector has no connector-specific runtime dependencies.
+# httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx
+# are all pre-installed by the gateway / shared venv.
