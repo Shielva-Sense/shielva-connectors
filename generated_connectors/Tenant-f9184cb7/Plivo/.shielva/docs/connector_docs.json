@@ -1,0 +1,79 @@
+{
+  "title": "Plivo Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Plivo** is a cloud communications platform exposing a REST API for voice + messaging at `https://api.plivo.com/v1/Account/{auth_id}`. This connector — `PlivoConnector` (`CONNECTOR_TYPE = \"plivo\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Plivo account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Account | `/Account/{auth_id}/` | Fetch account record (used as health probe) |\n| Messages | `/Account/{auth_id}/Message/` | Send/list SMS + MMS, fetch by UUID |\n| Calls | `/Account/{auth_id}/Call/` | Initiate, list, fetch, hangup, transfer calls |\n| Recordings | `/Account/{auth_id}/Recording/` | List + fetch call recordings |\n| Numbers | `/Account/{auth_id}/Number/` + `/PhoneNumber/` | List owned numbers, search marketplace, buy, fetch |\n| Applications | `/Account/{auth_id}/Application/` | List + create + fetch voice applications (webhook configs) |\n| Pricing | `/Account/{auth_id}/Pricing/` | Per-country voice + SMS rates |\n| Subaccounts | `/Account/{auth_id}/Subaccount/` | List subaccounts under the master |\n| Endpoints | `/Account/{auth_id}/Endpoint/` | List SIP endpoints |\n\nThe connector normalises messages + calls into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::PlivoHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Obtain Plivo credentials\n\n1. Sign in to the [Plivo Console](https://console.plivo.com/).\n2. Open **Account → Account Settings → Account**.\n3. Copy the **Auth ID** (looks like `MAxxxxxxxxxxxxxxxxxx`).\n4. Copy the **Auth Token** (treat as a password — never share or commit).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Plivo**, fill in:\n\n| Field | Value |\n|---|---|\n| `auth_id` (text) | Plivo Account Auth ID |\n| `auth_token` (secret) | Plivo Account Auth Token |\n| `base_url` (text, optional) | Override `https://api.plivo.com/v1` for regional endpoints |\n| `default_caller_id` (text, optional) | Default sender number for `send_sms` / `make_call` |\n| `rate_limit_per_min` (number, optional) | Client-side soft cap, default 60 |\n\nClick **Install**. `install()` validates `auth_id` + `auth_token` are present (it does NOT call the API), initialises the `PlivoHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which fetches `GET /Account/{auth_id}/` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + FAILED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Plivo REST API uses **HTTP Basic authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `auth_id` and `auth_token` are concatenated as `auth_id:auth_token`, base64-encoded, and sent as `Authorization: Basic <b64>` on every request.\n- The `auth_id` is also embedded as a path segment in every account-scoped URL: `/v1/Account/{auth_id}/...`.\n- `PlivoHTTPClient._basic_auth_header()` rebuilds the header on every request — there is no persistent session state.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `auth_id` + `auth_token`. Initialises `PlivoHTTPClient`. Does **not** call any Plivo endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo` whose `access_token` is the configured `auth_token` (for interface compatibility — there is no token exchange). |\n| `health_check()` | `GET /Account/{auth_id}/` — minimal probe. |\n| `on_token_refresh()` | No-op — Basic-auth credentials never expire. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(auth_id:auth_token)\nAccept:        application/json\nContent-Type:  application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `auth_id` | text | yes | `self.auth_id` | Basic-auth username + URL path segment |\n| `auth_token` | secret | yes | `self.auth_token` | Basic-auth password |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.plivo.com/v1`) | Override for Plivo regional endpoints / sandbox / proxy |\n| `default_caller_id` | text | no | `self.default_caller_id` | Default sender number for outbound SMS / calls |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"auth_id\", \"auth_token\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"FAILED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    404: (\"DEGRADED\",  \"CONNECTED\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_BASE_URL = \"https://api.plivo.com/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `PlivoConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::PlivoHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `auth_id` + `auth_token`; initialise `PlivoHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` whose `access_token` is the configured `auth_token`.\n\n### `async health_check() -> ConnectorStatus`\nFetches the account record via `GET /Account/{auth_id}/`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages recent Plivo messages + calls → `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`) → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-messaging",
+          "title": "Messaging (SMS / MMS)",
+          "content": "### `async send_sms(src, dst, text, type=\"sms\", url=None, method=\"POST\", log=True, trackable=False, message_uuid=None) -> Dict`\n`POST /Message/`. Mirrors Plivo's documented body — pass `type=\"mms\"` (or use `send_mms`) for media.\n\n### `async send_mms(src, dst, text, url=None, ...) -> Dict`\nThin wrapper that forces `type=\"mms\"`.\n\n### `async get_message(message_uuid) -> Dict`\n`GET /Message/{message_uuid}/`.\n\n### `async list_messages(message_state=None, message_direction=None, from_=None, to=None, message_time__gte=None, message_time__lte=None, limit=20, offset=0) -> Dict`\n`GET /Message/?…` — supports state/direction/sender/recipient/date-range filters."
+        },
+        {
+          "id": "api-voice",
+          "title": "Voice (Calls)",
+          "content": "### `async make_call(from_, to, answer_url, answer_method=\"POST\", hangup_url=None, time_limit=14400, machine_detection=\"false\", machine_detection_url=None) -> Dict`\n`POST /Call/`. Plivo fetches XML instructions from `answer_url` when the callee answers.\n\n### `async get_call(call_uuid) -> Dict`\n`GET /Call/{call_uuid}/`.\n\n### `async list_calls(subaccount=None, call_direction=None, from_=None, to=None, end_time__gte=None, end_time__lte=None, limit=20, offset=0) -> Dict`\n`GET /Call/?…`.\n\n### `async hangup_call(call_uuid) -> Dict`\n`DELETE /Call/{call_uuid}/`. Plivo returns 204 — surfaced as `{}`.\n\n### `async transfer_call(call_uuid, legs=\"aleg\", aleg_url=None, aleg_method=\"POST\", bleg_url=None) -> Dict`\n`POST /Call/{call_uuid}/`."
+        },
+        {
+          "id": "api-recordings",
+          "title": "Recordings",
+          "content": "### `async list_recordings(call_uuid=None, from_number=None, to_number=None, add_time__gte=None, add_time__lte=None, limit=20, offset=0) -> Dict`\n`GET /Recording/?…`.\n\n### `async get_recording(recording_id) -> Dict`\n`GET /Recording/{recording_id}/`."
+        },
+        {
+          "id": "api-numbers",
+          "title": "Numbers",
+          "content": "### `async list_numbers(type=None, number_startswith=None, subaccount=None, limit=20, offset=0) -> Dict`\n`GET /Number/?…` — numbers attached to the account.\n\n### `async get_number(number) -> Dict`\n`GET /Number/{number}/`.\n\n### `async search_phone_numbers(country_iso, type=\"local\", pattern=None, region=None, services=None, limit=20, offset=0) -> Dict`\n`GET /PhoneNumber/?country_iso=…` — search the Plivo marketplace. NOTE: this endpoint hits `/v1/PhoneNumber/` at the root, not under `/Account/{auth_id}/`.\n\n### `async buy_phone_number(number) -> Dict`\n`POST /PhoneNumber/{number}/`."
+        },
+        {
+          "id": "api-applications",
+          "title": "Applications",
+          "content": "### `async list_applications(subaccount=None, limit=20, offset=0) -> Dict`\n`GET /Application/?…`.\n\n### `async get_application(app_id) -> Dict`\n`GET /Application/{app_id}/`.\n\n### `async create_application(app_name, answer_url, answer_method=\"POST\", hangup_url=None, message_url=None, message_method=\"POST\") -> Dict`\n`POST /Application/`."
+        },
+        {
+          "id": "api-other",
+          "title": "Pricing · Subaccounts · Endpoints",
+          "content": "### `async get_pricing(country_iso) -> Dict`\n`GET /Pricing/?country_iso=…` — per-country voice + SMS rates.\n\n### `async list_subaccounts(limit=20, offset=0) -> Dict`\n`GET /Subaccount/`.\n\n### `async list_endpoints(limit=20, offset=0) -> Dict`\n`GET /Endpoint/` — SIP endpoints under the account."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nPlivoError                            # base; carries status_code + response_body\n├── PlivoAuthError                    # 401\n├── PlivoNotFound                     # 404\n├── PlivoRateLimitError               # 429\n└── PlivoNetworkError                 # transport failure / 5xx\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 4xx | Raise immediately (typed exception) |\n| 429 / 500 / 502 / 503 / 504 | Exponential backoff `_BACKOFF_BASE_S * 2 ** attempt + jitter` capped at `_BACKOFF_MAX_S=8.0`, retry up to `_max_retries=3` |\n| `httpx.HTTPError` (timeout / connection refused / DNS) | Backoff, retry up to 3, then raise `PlivoNetworkError` |\n\nA second tier of retry lives in `helpers/utils.py::with_retry()` — every connector public method wraps the HTTP call in `with_retry(..., max_retries=3)` so transient `PlivoRateLimitError` / `PlivoNetworkError` that escape the client also get a second chance.\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401  → ConnectorStatus(DEGRADED,  FAILED)               — \"Invalid Plivo credentials\"\n403  → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)  — sub-account forbidden\n429  → ConnectorStatus(DEGRADED,  CONNECTED)            — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)           — Plivo unreachable\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `auth_id` or `auth_token` blank | Re-enter both in ACP. Plivo Console → Account → Account Settings shows them — rotate the token if lost. |\n| `ConnectorStatus(DEGRADED, FAILED)` at health_check | 401 from Plivo — bad `auth_id` / `auth_token` combination | Verify the Auth ID matches the account that minted the token. Rotate the token if you suspect compromise. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — subaccount disabled or the auth_id has been quarantined | Open a ticket with Plivo support and re-enable the subaccount. |\n| `plivo.http.retry` warnings spike | Hitting 429 (Plivo per-account rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min`, batch fewer messages, or move to a higher Plivo plan. |\n| `send_sms` returns 202 but no SMS arrives | `src` is not a Plivo number on this account, or destination country is restricted | Verify `src` is in the account's `list_numbers()` and that the destination country is enabled (Console → Messaging → Permissions). |\n| `make_call` returns 201 but call never rings | `answer_url` is not reachable from Plivo's edge, or returns non-XML | Test the URL with `curl -X POST <answer_url>` from a public host. Plivo expects HTTP 200 + valid PlivoXML. |\n| `buy_phone_number` 422 | Number not available, or KYC documents missing for that country | Re-run `search_phone_numbers(country_iso=…)` to confirm availability, then upload KYC docs in the Plivo Console. |\n| 4xx with `message_uuid` containing a list | Plivo returns `message_uuid` as a 1-element list for `POST /Message/` — by design, not an error | The connector returns the raw body. Index `[0]` if you need the scalar. |"
+    }
+  ]
+}
