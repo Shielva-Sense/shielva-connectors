@@ -1,1 +1,15 @@
-{"current_step": 7, "max_step": 7, "completed_steps": [0, 1, 2, 3, 4, 5, 6, 7]}
+{
+  "total_steps": 7,
+  "completed_steps": 7,
+  "status": "completed",
+  "phase": "documentation",
+  "ui_tabs": {
+    "Prompt": "completed",
+    "Review Plan": "completed",
+    "Execute": "completed",
+    "Review Methods": "completed",
+    "Test Results": "completed",
+    "Vulnerability Scan": "completed",
+    "Documentation": "completed"
+  }
+}
