@@ -12,7 +12,7 @@
       "label": "Client ID",
       "type": "string",
       "required": true,
-      "help": "The Client ID from your Miro developer app (Miro Profile → Settings → Your apps → Create App)."
+      "help": "The Client ID from your Miro developer app (Miro Profile \u2192 Settings \u2192 Your apps \u2192 Create App)."
     },
     {
       "key": "client_secret",
@@ -58,5 +58,69 @@
       "name": "board_items",
       "description": "Items on each board: sticky notes, cards, shapes, text, frames, and images."
     }
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Miro boards and their items.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Return all boards accessible to the token, following cursor pagination.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_board_items",
+      "name": "List Board Items",
+      "description": "Return all items on a board, following cursor pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_board",
+      "name": "Get Board",
+      "description": "Retrieve a single Miro board by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "MiroConnector"
 }
