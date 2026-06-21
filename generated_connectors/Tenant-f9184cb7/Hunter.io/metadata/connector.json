@@ -1,0 +1,233 @@
+{
+  "connector_type": "hunter",
+  "name": "HunterConnector",
+  "display_name": "Hunter.io",
+  "version": "1.0.0",
+  "description": "Connects to Hunter.io v2 for domain search, email finding, email verification, enrichment, and lead management.",
+  "provider": "hunter",
+  "service": "hunter",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Hunter.io API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Hunter.io API key",
+      "help": "Found in Hunter.io → API → API Key"
+    },
+    {
+      "key": "base_url",
+      "label": "Hunter.io API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.hunter.io/v2",
+      "placeholder": "https://api.hunter.io/v2",
+      "help": "Base URL for the Hunter.io REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side ceiling for requests per minute. The Hunter API also enforces its own quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the api_key, persists it, and marks the connector connected.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Hunter.io API connectivity by calling GET /account.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "Returns the Hunter.io account information for the configured api_key.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "domain_search",
+      "name": "Domain Search",
+      "description": "Lists email addresses for a domain or company, with optional type / seniority / department filters.",
+      "method": "GET",
+      "params": [
+        { "key": "domain", "type": "string", "required": false },
+        { "key": "company", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "seniority", "type": "string", "required": false },
+        { "key": "department", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "email_finder",
+      "name": "Email Finder",
+      "description": "Finds the most likely email address for a person at a given domain or company.",
+      "method": "GET",
+      "params": [
+        { "key": "domain", "type": "string", "required": false },
+        { "key": "company", "type": "string", "required": false },
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "full_name", "type": "string", "required": false },
+        { "key": "max_duration", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "email_verifier",
+      "name": "Email Verifier",
+      "description": "Verifies the deliverability and status of an email address.",
+      "method": "GET",
+      "params": [
+        { "key": "email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "email_count",
+      "name": "Email Count",
+      "description": "Counts the public email addresses Hunter knows for a domain or company.",
+      "method": "GET",
+      "params": [
+        { "key": "domain", "type": "string", "required": false },
+        { "key": "company", "type": "string", "required": false },
+        { "key": "type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "combined_enrichment",
+      "name": "Combined Enrichment",
+      "description": "Returns combined person + company enrichment for an email.",
+      "method": "GET",
+      "params": [
+        { "key": "email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "company_enrichment",
+      "name": "Company Enrichment",
+      "description": "Returns company enrichment information for a domain.",
+      "method": "GET",
+      "params": [
+        { "key": "domain", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "person_enrichment",
+      "name": "Person Enrichment",
+      "description": "Returns person enrichment information for an email.",
+      "method": "GET",
+      "params": [
+        { "key": "email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Lists leads in the configured account with optional filters.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "lead_list_id", "type": "number", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "domain", "type": "string", "required": false },
+        { "key": "company", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_lead",
+      "name": "Get Lead",
+      "description": "Fetches a single lead by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "Creates a new lead in the configured account.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "company", "type": "string", "required": false },
+        { "key": "lead_list_id", "type": "number", "required": false },
+        { "key": "source", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_lead",
+      "name": "Update Lead",
+      "description": "Updates an existing lead with arbitrary fields.",
+      "method": "PUT",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_lead",
+      "name": "Delete Lead",
+      "description": "Deletes a lead by ID.",
+      "method": "DELETE",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_lead_lists",
+      "name": "List Lead Lists",
+      "description": "Lists lead-lists in the configured account.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_lead_list",
+      "name": "Create Lead List",
+      "description": "Creates a new lead-list in the configured account.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "team_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
