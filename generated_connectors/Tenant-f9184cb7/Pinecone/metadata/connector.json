@@ -1,0 +1,271 @@
+{
+  "connector_type": "pinecone",
+  "name": "PineconeConnector",
+  "display_name": "Pinecone",
+  "version": "1.0.0",
+  "description": "Connects to the Pinecone vector database. Wraps the control plane (https://api.pinecone.io — indexes, collections) and per-index data plane (vectors upsert/query/fetch/update/delete, stats, namespaces) behind a single API-key install. Auto-caches the index→host map after the first describe_index call.",
+  "provider": "pinecone",
+  "service": "pinecone",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Pinecone API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "pcsk_...",
+      "help": "From Pinecone Console → API Keys. The key is sent RAW in the `Api-Key` header (NOT Authorization) on every control- and data-plane request."
+    },
+    {
+      "key": "environment",
+      "label": "Environment",
+      "type": "string",
+      "required": true,
+      "placeholder": "us-east-1-aws",
+      "help": "Pinecone environment / region tag for the project (e.g. `us-east-1-aws`, `gcp-starter`). Used as a fallback when building legacy data-plane hosts."
+    },
+    {
+      "key": "project_id",
+      "label": "Project ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "",
+      "help": "Optional Pinecone project ID. Used as a fallback to build `https://{index}-{project_id}.svc.{environment}.pinecone.io` when the control plane does not return a host."
+    },
+    {
+      "key": "default_index",
+      "label": "Default Index",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "placeholder": "my-index",
+      "help": "Index name used when an API call omits index_name. Leave blank to require it on every call."
+    },
+    {
+      "key": "default_namespace",
+      "label": "Default Namespace",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "placeholder": "",
+      "help": "Namespace used when an API call omits namespace. Empty string targets the default namespace."
+    },
+    {
+      "key": "control_url",
+      "label": "Control Plane Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.pinecone.io",
+      "placeholder": "https://api.pinecone.io",
+      "help": "Pinecone control-plane base URL for index/collection CRUD. Leave blank to use the default."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "default": "2025-01",
+      "placeholder": "2025-01",
+      "help": "Value sent as X-Pinecone-API-Version. Pin to a known-good date for stability."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Soft cap on outbound requests per minute. Pinecone's serverless plan rate limit is 100/min by default."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key + environment and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Pinecone connectivity by listing indexes on the control plane.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_indexes",
+      "name": "List Indexes",
+      "description": "GET /indexes — list all indexes in the Pinecone project.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "describe_index",
+      "name": "Describe Index",
+      "description": "GET /indexes/{name} — fetch index spec including the data-plane host. Caches host for subsequent vector calls.",
+      "method": "GET",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_index",
+      "name": "Create Index",
+      "description": "POST /indexes — create a serverless index with the given dimension and metric.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "dimension", "type": "number", "required": true },
+        { "key": "metric", "type": "string", "required": false },
+        { "key": "cloud", "type": "string", "required": false },
+        { "key": "region", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_index",
+      "name": "Delete Index",
+      "description": "DELETE /indexes/{name} — permanently delete an index and all its vectors.",
+      "method": "DELETE",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "configure_index",
+      "name": "Configure Index",
+      "description": "PATCH /indexes/{name} — change replicas / pod_type for pod-based indexes.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "replicas", "type": "number", "required": false },
+        { "key": "pod_type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_collections",
+      "name": "List Collections",
+      "description": "GET /collections — list all collections (index snapshots) in the project.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_collection",
+      "name": "Create Collection",
+      "description": "POST /collections — create a collection (snapshot) from a source index.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "source", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_collection",
+      "name": "Delete Collection",
+      "description": "DELETE /collections/{name} — delete a collection.",
+      "method": "DELETE",
+      "params": [
+        { "key": "collection_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upsert_vectors",
+      "name": "Upsert Vectors",
+      "description": "POST {host}/vectors/upsert — insert or update vectors. Auto-batches into chunks of 100.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "vectors", "type": "array", "required": true },
+        { "key": "namespace", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "query",
+      "name": "Query Vectors",
+      "description": "POST {host}/query — nearest-neighbor search on the data plane.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "vector", "type": "array", "required": true },
+        { "key": "top_k", "type": "number", "required": false },
+        { "key": "namespace", "type": "string", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "include_metadata", "type": "boolean", "required": false },
+        { "key": "include_values", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "fetch_vectors",
+      "name": "Fetch Vectors",
+      "description": "GET {host}/vectors/fetch — fetch one or more vectors by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "ids", "type": "array", "required": true },
+        { "key": "namespace", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_vectors",
+      "name": "Delete Vectors",
+      "description": "POST {host}/vectors/delete — delete by ID list, or all vectors in a namespace when delete_all=true.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "ids", "type": "array", "required": false },
+        { "key": "delete_all", "type": "boolean", "required": false },
+        { "key": "namespace", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_vector",
+      "name": "Update Vector",
+      "description": "POST {host}/vectors/update — partial update of a single vector (values and/or metadata).",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "id", "type": "string", "required": true },
+        { "key": "values", "type": "array", "required": false },
+        { "key": "metadata", "type": "object", "required": false },
+        { "key": "namespace", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "describe_index_stats",
+      "name": "Describe Index Stats",
+      "description": "POST {host}/describe_index_stats — dimension, total vector count, namespaces, fullness.",
+      "method": "POST",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_namespaces",
+      "name": "List Namespaces",
+      "description": "GET {host}/namespaces — list namespaces inside an index (falls back to describe_index_stats on older indexes).",
+      "method": "GET",
+      "params": [
+        { "key": "index_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": []
+}
