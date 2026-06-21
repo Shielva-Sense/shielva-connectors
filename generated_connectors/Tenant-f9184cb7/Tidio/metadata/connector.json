@@ -6,9 +6,136 @@
   "auth_type": "api_key",
   "version": "1.0.0",
   "install_fields": [
-    {"key": "api_key", "label": "API Key", "type": "password", "required": true}
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "API Key."
+    }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["conversations", "visitors", "chatbots", "operators", "messages"],
-  "api_base": "https://api.tidio.co"
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "conversations",
+    "visitors",
+    "chatbots",
+    "operators",
+    "messages"
+  ],
+  "api_base": "https://api.tidio.co",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync conversations, visitors, and chatbots from Tidio.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "Return a paginated list of Tidio conversations.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "Return a single conversation by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_conversation_messages",
+      "name": "Get Conversation Messages",
+      "description": "Return all messages for a conversation.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_visitors",
+      "name": "List Visitors",
+      "description": "Return a paginated list of Tidio visitors.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_operators",
+      "name": "List Operators",
+      "description": "Return all Tidio operators.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_chatbots",
+      "name": "List Chatbots",
+      "description": "Return all Tidio chatbots.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "TidioConnector",
+  "description": "Shielva connector for Tidio."
 }
