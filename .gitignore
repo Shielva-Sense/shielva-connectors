@@ -55,3 +55,18 @@ Thumbs.db
 */shared/__pycache__/
 core/legacy_integration_service/
 legacy_integration_service/
+
+# .shielva/ — connector-builder scratch (mirrors Electron's SHIELVA_SYNC_ALLOW)
+# Only connector_docs.json is the canonical artefact; everything else is
+# local cache (vuln scan reports, pytest logs, step prompts, terminal logs,
+# builder UI prefs) and must NEVER be committed to generated_connectors/.
+generated_connectors/**/.shielva/scan_cache.json
+generated_connectors/**/.shielva/scan_report.html
+generated_connectors/**/.shielva/scan_report.xlsx
+generated_connectors/**/.shielva/unit_test.log
+generated_connectors/**/.shielva/integration_test.log
+generated_connectors/**/.shielva/terminal.log
+generated_connectors/**/.shielva/step_*.md
+generated_connectors/**/.shielva/master_prompt.md
+generated_connectors/**/.shielva/builder_prefs.json
+generated_connectors/**/.shielva/.keep
