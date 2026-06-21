@@ -7,14 +7,155 @@
   "version": "1.0.0",
   "description": "Gusto payroll and HR connector for employees, payrolls, and departments",
   "install_fields": [
-    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
-    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
-    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false}
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
   ],
-  "capabilities": ["employees", "payrolls", "departments", "companies", "sync"],
+  "capabilities": [
+    "employees",
+    "payrolls",
+    "departments",
+    "companies",
+    "sync"
+  ],
   "oauth": {
     "auth_url": "https://api.gusto.com/oauth/authorize",
     "token_url": "https://api.gusto.com/oauth/token",
     "scopes": []
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all employees and payrolls across all accessible companies.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "Return the current Gusto user record via GET /v1/me.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "Return all companies accessible to the authorized account.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "Return one page of employees for the given company.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "company_id",
+          "label": "Company Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_employee",
+      "name": "Get Employee",
+      "description": "Return a single employee record.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "company_id",
+          "label": "Company Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "employee_id",
+          "label": "Employee Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_payrolls",
+      "name": "List Payrolls",
+      "description": "Return all payrolls for the given company.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "company_id",
+          "label": "Company Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "processed",
+          "label": "Processed",
+          "type": "boolean",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "Return all departments for the given company.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "company_id",
+          "label": "Company Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "display_name": "Gusto"
 }
