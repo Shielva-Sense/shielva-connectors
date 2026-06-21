@@ -4,8 +4,142 @@
   "auth_type": "api_key",
   "version": "1.0.0",
   "install_fields": [
-    {"key": "api_key", "label": "Personal Access Token", "type": "password", "required": true},
-    {"key": "base_url", "label": "GitLab URL (default: https://gitlab.com)", "type": "string", "required": false},
-    {"key": "group_id", "label": "Group ID or Path (optional)", "type": "string", "required": false}
-  ]
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Personal Access Token."
+    },
+    {
+      "key": "base_url",
+      "label": "GitLab URL (default: https://gitlab.com)",
+      "type": "string",
+      "required": false,
+      "help": "Base URL for the REST API. Leave blank to use the default."
+    },
+    {
+      "key": "group_id",
+      "label": "Group ID or Path (optional)",
+      "type": "string",
+      "required": false,
+      "help": "Group ID or Path (optional)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync GitLab projects, issues, merge requests, pipelines, and groups.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "List all accessible projects.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "List issues \u2014 project-scoped when project_id is given, global otherwise.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_merge_requests",
+      "name": "List Merge Requests",
+      "description": "List merge requests \u2014 project-scoped when project_id is given, global otherwise.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "List pipelines for a specific project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "List all accessible groups.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "List members of a group \u2014 uses config group_id when group_id param is not given.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "group_id",
+          "label": "Group Id",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "Get a single project by ID or URL-encoded path.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "GitLabConnector",
+  "provider": "gitlab",
+  "service": "gitlab",
+  "description": "Shielva connector for Gitlab."
 }
