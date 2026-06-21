@@ -14,7 +14,7 @@
       "type": "text",
       "required": true,
       "placeholder": "sq0idp-...",
-      "help": "Your Square application ID. From developer.squareup.com → Applications → your app → Credentials."
+      "help": "Your Square application ID. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials."
     },
     {
       "key": "application_secret",
@@ -22,7 +22,7 @@
       "type": "secret",
       "required": true,
       "placeholder": "sq0csp-...",
-      "help": "Your Square application secret. From developer.squareup.com → Applications → your app → Credentials."
+      "help": "Your Square application secret. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials."
     },
     {
       "key": "redirect_uri",
@@ -129,15 +129,76 @@
     "catalog"
   ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Authorize", "id": "authorize", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Payments", "id": "list_payments", "category": "payments" },
-    { "name": "Get Payment", "id": "get_payment", "category": "payments" },
-    { "name": "List Orders", "id": "list_orders", "category": "orders" },
-    { "name": "List Customers", "id": "list_customers", "category": "customers" },
-    { "name": "Get Customer", "id": "get_customer", "category": "customers" },
-    { "name": "List Catalog Items", "id": "list_catalog_items", "category": "catalog" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate application_id/application_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Square OAuth2 authorization URL for the configured app.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Probe GET /merchants/me and return current health with merchant name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Square payments, orders (skipped without a location_id), and customers.",
+      "method": "GET"
+    },
+    {
+      "name": "List Payments",
+      "id": "list_payments",
+      "category": "payments",
+      "description": "Calls list_payments() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Payment",
+      "id": "get_payment",
+      "category": "payments",
+      "description": "Calls get_payment() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Orders",
+      "id": "list_orders",
+      "category": "orders",
+      "description": "Calls list_orders() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "Calls list_customers() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "Calls get_customer() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Catalog Items",
+      "id": "list_catalog_items",
+      "category": "catalog",
+      "description": "Calls list_catalog_items() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Square"
 }
