@@ -13,7 +13,7 @@
       "type": "string",
       "required": true,
       "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "help": "From Marketo Admin → LaunchPoint → your Custom service → View Details → Client ID."
+      "help": "From Marketo Admin \u2192 LaunchPoint \u2192 your Custom service \u2192 View Details \u2192 Client ID."
     },
     {
       "key": "client_secret",
@@ -21,7 +21,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Client secret from your LaunchPoint service",
-      "help": "From Marketo Admin → LaunchPoint → your Custom service → View Details → Client Secret."
+      "help": "From Marketo Admin \u2192 LaunchPoint \u2192 your Custom service \u2192 View Details \u2192 Client Secret."
     },
     {
       "key": "munchkin_id",
@@ -29,12 +29,21 @@
       "type": "string",
       "required": true,
       "placeholder": "abc-123-xyz",
-      "help": "From Marketo Admin → Munchkin. Format: three alphanumeric segments separated by hyphens (e.g. abc-123-xyz)."
+      "help": "From Marketo Admin \u2192 Munchkin. Format: three alphanumeric segments separated by hyphens (e.g. abc-123-xyz)."
     }
   ],
   "oauth_token_url": "https://{munchkin_id}.mktorest.com/identity/oauth/token?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
-  "capabilities": ["sync", "health_check"],
-  "resources": ["leads", "lists", "campaigns", "programs", "activities"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "leads",
+    "lists",
+    "campaigns",
+    "programs",
+    "activities"
+  ],
   "features": [
     "oauth2_client_credentials",
     "token_auto_refresh",
@@ -99,5 +108,84 @@
       "endpoint": "GET /programs.json"
     }
   ],
-  "categories": ["auth", "health", "sync", "leads", "lists", "campaigns", "programs"]
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "leads",
+    "lists",
+    "campaigns",
+    "programs"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Marketo leads, lists, campaigns, and programs into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Return all leads (full paginated fetch).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Return all static lists.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Return all campaigns.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_programs",
+      "name": "List Programs",
+      "description": "Return all programs.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_lead",
+      "name": "Get Lead",
+      "description": "Retrieve a single lead by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "lead_id",
+          "label": "Lead Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "MarketoConnector"
 }
