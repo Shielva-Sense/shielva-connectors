@@ -1,0 +1,69 @@
+{
+  "title": "Nutshell Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Nutshell** is an SMB-focused sales CRM exposing a JSON-RPC 2.0 API at `https://app.nutshell.com/api/v1/json` (and a REST beta at `https://api.nutshell.com/v1/rest`). This connector — `NutshellConnector` (`CONNECTOR_TYPE = \"nutshell\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational CRM surfaces a Shielva tenant typically needs:\n\n| Surface | RPC methods | Capability |\n|---|---|---|\n| Contacts | `findContacts`, `getContact`, `newContact`, `editContact`, `deleteContact` | List/get/create/edit/delete person records |\n| Leads | `findLeads`, `newLead` | Pipeline opportunities |\n| Accounts | `findAccounts` | Company records |\n| Activities | `findActivities`, `newActivity` | Calls, meetings, emails, notes |\n| Users | `findUsers`, `getUser` | Nutshell seat list (assignment, ownership) |\n\nThe connector normalises contacts + leads + accounts via thin dataclasses in `models.py`, surfaces standalone `async def` methods per RPC (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::NutshellHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Nutshell API key\n\n1. Sign in to https://app.nutshell.com.\n2. Open **Setup → API Keys**.\n3. Click **Generate API Key**. Copy the key value — Nutshell shows it only once.\n4. Note your **Nutshell login email** — it pairs with the key as the HTTP Basic username.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Nutshell**, fill in:\n\n| Field | Value |\n|---|---|\n| `email` (string) | Your Nutshell login email |\n| `api_key` (secret) | API key from step 3 |\n| `base_url` (string, optional) | Override `https://app.nutshell.com/api/v1/json` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `email` + `api_key` are present, then calls the JSON-RPC `getUser` method as a credential probe. On 2xx → `(HEALTHY, CONNECTED)`. On 401 or RPC `error` → `(OFFLINE, MISSING_CREDENTIALS)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which invokes `getUser` again as a lightweight authenticated probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx → `OFFLINE + AUTHENTICATED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Nutshell uses **HTTP Basic** authentication (`AUTH_TYPE = \"api_key\"`). The login email is the Basic username; the API key is the Basic password.\n\n### Credential model\n\n- `email` is the Nutshell login email of the user the key was issued for.\n- `api_key` is the secret issued from **Setup → API Keys**. It is sent as the Basic password.\n- No OAuth, no token refresh, no expiry — rotation is done by re-running install with a new key.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `email` + `api_key`. Initialises `NutshellHTTPClient`. Calls `getUser` as a credential probe. |\n| `authorize(...)` | Returns a placeholder `TokenInfo(access_token=api_key, token_type=\"api_key\")`. |\n| `health_check()` | Calls `getUser` again — cheapest authenticated probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — credentials live in the persisted connector config. |\n\n### Wire format\n\nEvery outbound request is a JSON-RPC POST:\n\n```\nPOST https://app.nutshell.com/api/v1/json\nAuthorization: Basic base64(email:api_key)\nContent-Type:  application/json\nAccept:        application/json\n\n{\n  \"jsonrpc\": \"2.0\",\n  \"id\": <int>,\n  \"method\": \"<rpcName>\",\n  \"params\": {...}\n}\n```\n\nSuccessful response: `{\"jsonrpc\": \"2.0\", \"id\": N, \"result\": <any>}`.\nError response (often HTTP **200**): `{\"jsonrpc\": \"2.0\", \"id\": N, \"error\": {\"code\": <int>, \"message\": \"...\"}}`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `email` | string | yes | `self.username` | HTTP Basic username (Nutshell login email) |\n| `api_key` | secret | yes | `self.api_key` | HTTP Basic password (Nutshell API key) |\n| `base_url` | string | no | `self.base_url` (defaults to `https://app.nutshell.com/api/v1/json`) | Override for sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n`username` is also honoured as a legacy alias for `email` so already-stored connector sessions keep working after the rename.\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"email\", \"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_NUTSHELL_BASE = \"https://app.nutshell.com/api/v1/json\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `NutshellConnector`. SOC: connector.py orchestrates only; HTTP + envelope parsing lives in `client/http_client.py::NutshellHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `email` + `api_key`; initialise `NutshellHTTPClient`; call `getUser` as a credential probe.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo(access_token=api_key, token_type=\"api_key\")`.\n\n### `async health_check() -> ConnectorStatus`\nCalls `getUser`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Nutshell contacts, leads, accounts and reports counts. Returns `SyncResult` with `documents_synced / _failed / _found`. Failures on any one resource type are recorded as PARTIAL."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(*, page=1, limit=50, query=None, order_by=\"lastName\") -> List[Dict]`\nRPC `findContacts` — body `{page, limit, orderBy, query?}`. Returns a list of normalized contact dicts.\n\n### `async get_contact(contact_id, contact_rev=None) -> Dict`\nRPC `getContact` — body `{contactId, rev?}`.\n\n### `async create_contact(contact) -> Dict`\nRPC `newContact` — body `{contact: {...}}`. Returns the normalized created record.\n\n### `async update_contact(contact_id, rev, fields) -> Dict`\nRPC `editContact` — body `{contactId, rev, contact: fields}`. `rev` required (Nutshell uses optimistic locking).\n\n### `async delete_contact(contact_id, rev) -> Dict`\nRPC `deleteContact` — body `{contactId, rev}`. Returns `{deleted, contact_id, result}`."
+        },
+        {
+          "id": "api-leads",
+          "title": "Leads",
+          "content": "### `async list_leads(*, page=1, limit=50, query=None) -> List[Dict]`\nRPC `findLeads` — body `{page, limit, query?}`.\n\n### `async create_lead(lead) -> Dict`\nRPC `newLead` — body `{lead: {...}}`."
+        },
+        {
+          "id": "api-accounts",
+          "title": "Accounts",
+          "content": "### `async list_accounts(*, page=1, limit=50) -> List[Dict]`\nRPC `findAccounts` — body `{page, limit}`. Returns normalized account dicts including industry and territory."
+        },
+        {
+          "id": "api-activities-users",
+          "title": "Activities + Users",
+          "content": "### `async list_activities(*, page=1, limit=50) -> List[Dict]`\nRPC `findActivities` — body `{page, limit}`.\n\n### `async log_activity(activity) -> Dict`\nRPC `newActivity` — body `{activity: {...}}`.\n\n### `async list_users() -> List[Dict]`\nRPC `findUsers` — body `{}`. Returns all Nutshell seats."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Nutshell surfaces errors in **two** shapes — the connector inspects both.\n\n| HTTP / RPC | Mapped to | Behaviour |\n|---|---|---|\n| 401 Unauthorized | `NutshellAuthError` | `(OFFLINE, MISSING_CREDENTIALS)` at install/health-check; raised elsewhere. |\n| 404 Not Found | `NutshellNotFound` | Raised; gateway returns 404. |\n| 429 Rate limited | `NutshellRateLimitError` | Retried with exponential backoff + jitter; honors `Retry-After`. |\n| 5xx Server error | `NutshellNetworkError` | Retried; surfaced after exhaustion. |\n| RPC `error.code` in {-32000, -32001, 401} | `NutshellAuthError` | Auth failure embedded in HTTP 200. |\n| RPC `error.message` contains \"not found\" | `NutshellNotFound` | |\n| Any other RPC error | `NutshellError(rpc_code, message)` | Generic envelope failure. |\n| Transport (httpx) error | `NutshellNetworkError` | Retried; surfaced after exhaustion. |\n\nRetry policy (in `client/http_client.py`): `max_retries=3`, `delay = min(1 * 2**attempt + uniform(0, 0.25), 32)` seconds. The first attempt honors `Retry-After` when present."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### `install()` returns `(OFFLINE, MISSING_CREDENTIALS)` with no message\nThe `email` or `api_key` install field was left blank. Re-open the install form and fill both.\n\n### `install()` returns `Authentication failed: Invalid API key`\nThe key was rotated or revoked in Nutshell. Generate a new key from **Setup → API Keys** and re-run install.\n\n### `health_check()` flips to `DEGRADED + TOKEN_EXPIRED`\nNutshell returned 401 — the key is no longer valid. Same fix as install auth failure.\n\n### Repeated 429s in the logs\nYour tenant is hitting the per-key rate limit (60 RPM on the standard tier). Lower `rate_limit_per_min` to throttle outbound RPC calls, or stagger the sync schedule.\n\n### `editContact` raises `Invalid params` or `revision mismatch`\nNutshell uses CouchDB-style optimistic locking: edits MUST include the latest `rev` value. Re-fetch the contact via `get_contact()` to get the current `rev`, then retry the edit.\n\n### Tests fail with `ModuleNotFoundError: shared.base_connector`\nExport `PYTHONPATH=/Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/core:.` before invoking pytest, or rely on `tests/conftest.py` which inserts the path automatically."
+    }
+  ]
+}

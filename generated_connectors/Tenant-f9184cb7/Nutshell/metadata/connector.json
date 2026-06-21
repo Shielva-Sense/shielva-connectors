@@ -1,0 +1,184 @@
+{
+  "connector_type": "nutshell",
+  "name": "NutshellConnector",
+  "display_name": "Nutshell",
+  "version": "1.0.0",
+  "description": "Connects to the Nutshell SMB sales CRM via its JSON-RPC 2.0 API to read and manage contacts, leads, accounts, activities, and users. Authenticates with HTTP Basic (login email + API key).",
+  "provider": "nutshell",
+  "service": "nutshell",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "email",
+      "label": "Nutshell Login Email",
+      "type": "string",
+      "required": true,
+      "placeholder": "you@yourcompany.com",
+      "help": "Your Nutshell login email — used as the HTTP Basic username when calling the JSON-RPC API."
+    },
+    {
+      "key": "api_key",
+      "label": "Nutshell API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste the API key from Nutshell → Setup → API Keys",
+      "help": "Generate from Nutshell → Setup → API Keys. Stored encrypted and used as the HTTP Basic password."
+    },
+    {
+      "key": "base_url",
+      "label": "Nutshell API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://app.nutshell.com/api/v1/json",
+      "placeholder": "https://app.nutshell.com/api/v1/json",
+      "help": "JSON-RPC endpoint. Leave blank to use the public production URL."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum requests per minute. Nutshell's standard tier is 60 RPM; reduce if you share the key across services."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates email + api_key and calls getUser to confirm credentials. Saves config and marks the connector connected on success.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Nutshell API connectivity by calling the JSON-RPC getUser method.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Page through Nutshell contacts. Supports server-side ordering (default lastName) and an optional query filter.",
+      "method": "POST",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "query", "type": "object", "required": false },
+        { "key": "order_by", "type": "string", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Fetch a single contact by Nutshell ID. Optionally pin the specific revision via contact_rev.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "contact_rev", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "Create a new contact. The body follows Nutshell's contact schema (name object, email[], phone[], accounts[]).",
+      "method": "POST",
+      "params": [
+        { "key": "contact", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "Patch a contact. Nutshell uses optimistic locking; the current rev string is required.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "rev", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "Delete a contact by ID + rev.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "rev", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Page through Nutshell leads with an optional Nutshell query filter object.",
+      "method": "POST",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "query", "type": "object", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "Create a new lead. The body follows Nutshell's lead schema (description, primaryAccount, contacts[], value).",
+      "method": "POST",
+      "params": [
+        { "key": "lead", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Page through Nutshell accounts (companies).",
+      "method": "POST",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_activities",
+      "name": "List Activities",
+      "description": "Page through Nutshell activities (calls, meetings, notes).",
+      "method": "POST",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "log_activity",
+      "name": "Log Activity",
+      "description": "Create a new activity record (call / meeting / note) on a Nutshell lead or contact.",
+      "method": "POST",
+      "params": [
+        { "key": "activity", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all Nutshell users — useful for assigning leads or filtering activities by owner.",
+      "method": "POST",
+      "params": [],
+      "returns": "List[Dict]"
+    }
+  ],
+  "dependencies": []
+}
