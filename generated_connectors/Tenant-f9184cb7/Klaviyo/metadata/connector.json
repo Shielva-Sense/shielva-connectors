@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "pk_...",
-      "help": "Your Klaviyo Private API key starting with 'pk_'. Found in Klaviyo → Account → Settings → API Keys."
+      "help": "Your Klaviyo Private API key starting with 'pk_'. Found in Klaviyo \u2192 Account \u2192 Settings \u2192 API Keys."
     }
   ],
   "features": [
@@ -98,14 +98,69 @@
     "segments"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Profiles", "id": "list_profiles", "category": "profiles"},
-    {"name": "Get Profile", "id": "get_profile", "category": "profiles"},
-    {"name": "List Lists", "id": "list_lists", "category": "lists"},
-    {"name": "Get List", "id": "get_list", "category": "lists"},
-    {"name": "List Campaigns", "id": "list_campaigns", "category": "campaigns"},
-    {"name": "List Segments", "id": "list_segments", "category": "segments"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the API key via GET /accounts.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /accounts and return current health with account name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch profiles, campaigns, and lists; normalize and ingest.",
+      "method": "GET"
+    },
+    {
+      "name": "List Profiles",
+      "id": "list_profiles",
+      "category": "profiles",
+      "description": "Calls list_profiles() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Profile",
+      "id": "get_profile",
+      "category": "profiles",
+      "description": "Calls get_profile() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Lists",
+      "id": "list_lists",
+      "category": "lists",
+      "description": "Calls list_lists() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get List",
+      "id": "get_list",
+      "category": "lists",
+      "description": "Calls get_list() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Campaigns",
+      "id": "list_campaigns",
+      "category": "campaigns",
+      "description": "Calls list_campaigns() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Segments",
+      "id": "list_segments",
+      "category": "segments",
+      "description": "Calls list_segments() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Klaviyo"
 }
