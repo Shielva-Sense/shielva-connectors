@@ -1,0 +1,280 @@
+{
+  "connector_type": "attio",
+  "name": "AttioConnector",
+  "display_name": "Attio",
+  "version": "1.0.0",
+  "description": "Connects to the Attio CRM REST API (v2) — Objects, Records (CRUD + assert), Attributes, Lists, Notes, Tasks, Workspaces — using a long-lived Attio access token. Normalises records / notes / tasks into NormalizedDocument for KB sync.",
+  "provider": "attio",
+  "service": "attio",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Attio Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Attio access token",
+      "help": "Workspace settings → Developers → Access tokens → Create token. Sent as `Authorization: Bearer <token>` on every request."
+    },
+    {
+      "key": "workspace_slug",
+      "label": "Workspace Slug",
+      "type": "string",
+      "required": false,
+      "placeholder": "acme",
+      "help": "Display-only label. Attio scopes every access token to a single workspace automatically — this is only used for UI clarity."
+    },
+    {
+      "key": "base_url",
+      "label": "Attio API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.attio.com/v2",
+      "placeholder": "https://api.attio.com/v2",
+      "help": "Override for Attio sandbox or proxy. Leave blank to use the default."
+    },
+    {
+      "key": "sync_objects",
+      "label": "Sync Objects (comma-separated)",
+      "type": "string",
+      "required": false,
+      "default": "people,companies",
+      "placeholder": "people,companies,deals",
+      "help": "Comma-separated list of object slugs to ingest during sync(). Default: people,companies."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Client-side soft cap. Attio enforces its own per-token rate limit."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key is present and marks the connector installed. Does not call the API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Attio API connectivity by calling GET /self.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Iterates records for each configured object slug, normalises, and batch-ingests.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "GET /self — returns the single-workspace envelope.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_objects",
+      "name": "List Objects",
+      "description": "GET /objects — list all object schemas (people, companies, deals, custom).",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_attributes",
+      "name": "List Attributes",
+      "description": "GET /objects/{slug}/attributes.",
+      "method": "GET",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_attribute",
+      "name": "Get Attribute",
+      "description": "GET /objects/{slug}/attributes/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "attribute_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_records",
+      "name": "List / Query Records",
+      "description": "POST /objects/{slug}/records/query.",
+      "method": "POST",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "sorts", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_record",
+      "name": "Get Record",
+      "description": "GET /objects/{slug}/records/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "record_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_record",
+      "name": "Create Record",
+      "description": "POST /objects/{slug}/records — body: {data:{values:{…}}}.",
+      "method": "POST",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "values", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_record",
+      "name": "Update Record",
+      "description": "PATCH /objects/{slug}/records/{id}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "record_id", "type": "string", "required": true },
+        { "key": "values", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "assert_record",
+      "name": "Assert (Upsert) Record",
+      "description": "PUT /objects/{slug}/records?matching_attribute={attr} — upsert by matching attribute.",
+      "method": "PUT",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "matching_attribute", "type": "string", "required": true },
+        { "key": "values", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_record",
+      "name": "Delete Record",
+      "description": "DELETE /objects/{slug}/records/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "object_slug", "type": "string", "required": true },
+        { "key": "record_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "GET /lists.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_list",
+      "name": "Get List",
+      "description": "GET /lists/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "list_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_list_entries",
+      "name": "List List Entries",
+      "description": "POST /lists/{id}/entries/query.",
+      "method": "POST",
+      "params": [
+        { "key": "list_id", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "GET /notes — optionally scoped to a parent record.",
+      "method": "GET",
+      "params": [
+        { "key": "parent_object", "type": "string", "required": false },
+        { "key": "parent_record_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_note",
+      "name": "Create Note",
+      "description": "POST /notes.",
+      "method": "POST",
+      "params": [
+        { "key": "parent_object", "type": "string", "required": true },
+        { "key": "parent_record_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true },
+        { "key": "format", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /tasks.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_task",
+      "name": "Create Task",
+      "description": "POST /tasks.",
+      "method": "POST",
+      "params": [
+        { "key": "content", "type": "string", "required": true },
+        { "key": "format", "type": "string", "required": false },
+        { "key": "deadline_at", "type": "string", "required": false },
+        { "key": "assignees", "type": "array", "required": false },
+        { "key": "linked_records", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}
