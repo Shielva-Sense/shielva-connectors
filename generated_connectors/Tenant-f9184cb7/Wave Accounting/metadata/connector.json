@@ -1,0 +1,238 @@
+{
+  "connector_type": "wave",
+  "name": "WaveConnector",
+  "display_name": "Wave Accounting",
+  "version": "1.0.0",
+  "description": "Connects to the Wave Accounting GraphQL API (Businesses, Customers, Invoices, Products, Accounts, Transactions, Sales Taxes, Users) using a personal access token. Supports customer/invoice/product creation, business and ledger queries, and KB sync of customers + invoices.",
+  "provider": "wave",
+  "service": "wave",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Wave Personal Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Wave full-access token",
+      "help": "From Wave Dashboard → Settings → API Access → Manage Applications → Create / view tokens. Sent as 'Authorization: Bearer <token>' on every GraphQL request."
+    },
+    {
+      "key": "business_id",
+      "label": "Default Business ID",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "placeholder": "Optional default Business UUID",
+      "help": "Default Wave Business ID for methods that take a business_id arg. When set, the per-call argument can be omitted."
+    },
+    {
+      "key": "base_url",
+      "label": "Wave GraphQL Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://gql.waveapps.com/graphql/public",
+      "placeholder": "https://gql.waveapps.com/graphql/public",
+      "help": "Wave public GraphQL endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Client-side soft cap. Wave's documented limit is 60/min/token."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates access_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Wave GraphQL connectivity by querying { user { id } }.",
+      "method": "POST",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_businesses",
+      "name": "List Businesses",
+      "description": "Pages through the authenticated user's businesses via the GraphQL `businesses` query.",
+      "method": "POST",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_business",
+      "name": "Get Business",
+      "description": "Fetches a single business by ID via the `business(id)` query.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Pages through customers of a business via `business.customers`.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Fetches a single customer via `business.customer(id)`.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_customer",
+      "name": "Create Customer",
+      "description": "Creates a customer in a business via the `customerCreate` mutation.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Pages through invoices via `business.invoices`. Optional status filter (DRAFT, SAVED, SENT, PAID, OVERDUE).",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "Fetches a single invoice via `business.invoice(id)`.",
+      "method": "POST",
+      "params": [
+        { "key": "invoice_id", "type": "string", "required": true },
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_invoice",
+      "name": "Create Invoice",
+      "description": "Creates a draft invoice via the `invoiceCreate` mutation. items: [{product_id, quantity?, unit_price?, description?}].",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "items", "type": "array", "required": true },
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "due_date", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Pages through products via `business.products`.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_product",
+      "name": "Create Product",
+      "description": "Creates a product via the `productCreate` mutation.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "unit_price", "type": "number", "required": true },
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "income_account_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Returns the chart of accounts via `business.accounts`.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Transactions",
+      "description": "Pages through ledger transactions via `business.transactions`, with optional from/to ISO dates.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false },
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sales_taxes",
+      "name": "List Sales Taxes",
+      "description": "Returns the configured sales tax rates via `business.salesTaxes`.",
+      "method": "POST",
+      "params": [
+        { "key": "business_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Returns the authenticated user wrapped in a connection-style envelope (Wave's public schema exposes only the auth'd user).",
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Returns the authenticated Wave user node (id, defaultEmail, firstName, lastName).",
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1.0"
+  ]
+}

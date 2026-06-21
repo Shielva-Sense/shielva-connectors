@@ -1,0 +1,5 @@
+# Wave connector — connector-specific dependencies only.
+# httpx, structlog, pydantic, pytest, pytest-asyncio, pytest-mock, respx are
+# pre-installed in the shared connector venv (see implementation_plan.md §7).
+# Wave's GraphQL surface is small enough that a plain httpx POST is the right
+# size — no gql / graphql-core dependency needed.
