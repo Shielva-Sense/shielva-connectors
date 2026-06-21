@@ -13,7 +13,7 @@
       "type": "password",
       "required": true,
       "placeholder": "00abc_DEF-...",
-      "help": "Okta API token. From Okta Admin Console: Security → API → Tokens → Create Token."
+      "help": "Okta API token. From Okta Admin Console: Security \u2192 API \u2192 Tokens \u2192 Create Token."
     },
     {
       "key": "domain",
@@ -21,10 +21,13 @@
       "type": "string",
       "required": true,
       "placeholder": "dev-123456.okta.com",
-      "help": "Your Okta organization domain. Find it in the Okta Admin Console URL bar or under Settings → Account."
+      "help": "Your Okta organization domain. Find it in the Okta Admin Console URL bar or under Settings \u2192 Account."
     }
   ],
-  "capabilities": ["sync", "health_check"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
   "features": [
     "retry",
     "cursor_pagination",
@@ -99,13 +102,62 @@
     "logs"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync Records", "id": "sync", "category": "sync"},
-    {"name": "List Users", "id": "list_users", "category": "users"},
-    {"name": "Get User", "id": "get_user", "category": "users"},
-    {"name": "List Groups", "id": "list_groups", "category": "groups"},
-    {"name": "List Applications", "id": "list_apps", "category": "apps"},
-    {"name": "List System Logs", "id": "list_logs", "category": "logs"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate credentials \u2014 api_token and domain must both be present.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /users/me and return current health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Full sync of Okta users, groups, applications, and system logs.",
+      "method": "GET"
+    },
+    {
+      "name": "List Users",
+      "id": "list_users",
+      "category": "users",
+      "description": "Fetch all users via cursor pagination (GET /users).",
+      "method": "GET"
+    },
+    {
+      "name": "Get User",
+      "id": "get_user",
+      "category": "users",
+      "description": "GET /users/{user_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Groups",
+      "id": "list_groups",
+      "category": "groups",
+      "description": "Fetch all groups via cursor pagination (GET /groups).",
+      "method": "GET"
+    },
+    {
+      "name": "List Applications",
+      "id": "list_apps",
+      "category": "apps",
+      "description": "Fetch all applications via cursor pagination (GET /apps).",
+      "method": "GET"
+    },
+    {
+      "name": "List System Logs",
+      "id": "list_logs",
+      "category": "logs",
+      "description": "Fetch system log events via cursor pagination (GET /logs).",
+      "method": "GET"
+    }
+  ],
+  "name": "OktaConnector"
 }
