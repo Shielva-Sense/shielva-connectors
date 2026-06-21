@@ -1,0 +1,413 @@
+{
+  "connector_type": "iterable",
+  "name": "IterableConnector",
+  "display_name": "Iterable",
+  "version": "1.0.0",
+  "description": "Connects to the Iterable cross-channel marketing API (Users, Events, Campaigns, Templates, Channels, Lists, Catalogs, Workflows, Push, Email, SMS, In-App) using a server-side API key. Supports profile upsert, event ingestion, audience management, transactional sends, and KB-sync of templates + lists.",
+  "provider": "iterable",
+  "service": "iterable",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Iterable API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Iterable Server-Side API key",
+      "help": "Iterable → Integrations → API Keys → Server-Side. Sent in the `Api-Key` header on every request — NOT as `Authorization: Bearer`."
+    },
+    {
+      "key": "region",
+      "label": "Data Center Region",
+      "type": "string",
+      "required": false,
+      "default": "us",
+      "placeholder": "us",
+      "help": "'us' for the US data center, 'eu' for EU. Picks the base URL when `base_url` is left blank."
+    },
+    {
+      "key": "base_url",
+      "label": "API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.iterable.com/api",
+      "placeholder": "https://api.iterable.com/api",
+      "help": "Explicit base URL override. Leave blank to derive from `region` (US → https://api.iterable.com/api, EU → https://api.eu.iterable.com/api)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Iterable API requests per minute. Default 100. Informational; the SDK honours the server's Retry-After on 429."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the API key and persists non-secret config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Confirms the API key by calling GET /lists.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Fetch a single Iterable user by email or userId. Returns the flattened user record.",
+      "method": "GET",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Update User",
+      "description": "POST /users/update — upsert user profile fields with optional deep-merge.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "data_fields", "type": "object", "required": false },
+        { "key": "merge_nested_objects", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "bulk_update_users",
+      "name": "Bulk Update Users",
+      "description": "POST /users/bulkUpdate — upsert up to 1 000 users in one call.",
+      "method": "POST",
+      "params": [
+        { "key": "users", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users In List",
+      "description": "GET /lists/getUsers — return the emails in a list as a plain list of strings.",
+      "method": "GET",
+      "params": [
+        { "key": "list_id", "type": "number", "required": true }
+      ],
+      "returns": "Array"
+    },
+    {
+      "id": "register_browser_token",
+      "name": "Register Browser Token",
+      "description": "POST /users/registerBrowserToken — register a Web push browser token for a user.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "browser_token", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_email",
+      "name": "Update Email",
+      "description": "POST /users/updateEmail — migrate a user's primary email identifier.",
+      "method": "POST",
+      "params": [
+        { "key": "current_email", "type": "string", "required": true },
+        { "key": "new_email", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete User",
+      "description": "DELETE /users/{email} or /users/byUserId/{userId} — GDPR delete.",
+      "method": "DELETE",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "track_event",
+      "name": "Track Event",
+      "description": "POST /events/track — record a custom event for a user.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "event_name", "type": "string", "required": true },
+        { "key": "data_fields", "type": "object", "required": false },
+        { "key": "campaign_id", "type": "number", "required": false },
+        { "key": "template_id", "type": "number", "required": false },
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "event_id", "type": "string", "required": false },
+        { "key": "created_at", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "bulk_track_events",
+      "name": "Bulk Track Events",
+      "description": "POST /events/trackBulk — record many events in one round trip.",
+      "method": "POST",
+      "params": [
+        { "key": "events", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "GET /campaigns — return all campaigns for the workspace.",
+      "method": "GET",
+      "params": [],
+      "returns": "Array"
+    },
+    {
+      "id": "get_campaign",
+      "name": "Get Campaign",
+      "description": "GET /campaigns/{id} — fetch campaign metadata; falls back to /campaigns/metrics for legacy workspaces.",
+      "method": "GET",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_triggered_campaign",
+      "name": "Create Triggered Campaign",
+      "description": "POST /campaigns/create — create a triggered/blast campaign.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "list_ids", "type": "array", "required": true },
+        { "key": "template_id", "type": "number", "required": true },
+        { "key": "send_at", "type": "string", "required": false },
+        { "key": "suppression_list_ids", "type": "array", "required": false },
+        { "key": "data_fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "GET /templates — list message templates filtered by templateType and messageMedium.",
+      "method": "GET",
+      "params": [
+        { "key": "template_type", "type": "string", "required": false },
+        { "key": "message_medium", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "GET /templates/{id} — fetch a single template by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "template_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_channels",
+      "name": "List Channels",
+      "description": "GET /channels — list all messaging channels in the workspace.",
+      "method": "GET",
+      "params": [],
+      "returns": "Array"
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "GET /lists — return all static + dynamic lists.",
+      "method": "GET",
+      "params": [],
+      "returns": "Array"
+    },
+    {
+      "id": "create_list",
+      "name": "Create List",
+      "description": "POST /lists — create a new static list.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_list",
+      "name": "Delete List",
+      "description": "DELETE /lists/{listId} — delete a static list.",
+      "method": "DELETE",
+      "params": [
+        { "key": "list_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "subscribe_to_list",
+      "name": "Subscribe To List",
+      "description": "POST /lists/subscribe — add subscribers to a list.",
+      "method": "POST",
+      "params": [
+        { "key": "list_id", "type": "number", "required": true },
+        { "key": "subscribers", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "unsubscribe_from_list",
+      "name": "Unsubscribe From List",
+      "description": "POST /lists/unsubscribe — remove subscribers from a list.",
+      "method": "POST",
+      "params": [
+        { "key": "list_id", "type": "number", "required": true },
+        { "key": "subscribers", "type": "array", "required": true },
+        { "key": "campaign_id", "type": "number", "required": false },
+        { "key": "channel_unsubscribe", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_catalogs",
+      "name": "List Catalogs",
+      "description": "GET /catalogs — list catalog names (legacy + modern shapes).",
+      "method": "GET",
+      "params": [],
+      "returns": "Array"
+    },
+    {
+      "id": "list_catalog_items",
+      "name": "List Catalog Items",
+      "description": "GET /catalogs/{name}/items — list items in a catalog.",
+      "method": "GET",
+      "params": [
+        { "key": "catalog_name", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upsert_catalog_item",
+      "name": "Upsert Catalog Item",
+      "description": "PUT /catalogs/{name}/items/{itemId} — upsert a single catalog item.",
+      "method": "PUT",
+      "params": [
+        { "key": "catalog_name", "type": "string", "required": true },
+        { "key": "item_id", "type": "string", "required": true },
+        { "key": "value", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "bulk_upsert_catalog_items",
+      "name": "Bulk Upsert Catalog Items",
+      "description": "POST /catalogs/{name}/items — bulk upsert items keyed by id.",
+      "method": "POST",
+      "params": [
+        { "key": "catalog_name", "type": "string", "required": true },
+        { "key": "documents", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "trigger_workflow",
+      "name": "Trigger Workflow",
+      "description": "POST /workflows/triggerWorkflow — kick off a workflow for a user, list, or anonymous target.",
+      "method": "POST",
+      "params": [
+        { "key": "workflow_id", "type": "number", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "list_id", "type": "number", "required": false },
+        { "key": "data_fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_email",
+      "name": "Send Email",
+      "description": "POST /email/target — trigger a transactional email to a recipient.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "recipient_email", "type": "string", "required": true },
+        { "key": "data_fields", "type": "object", "required": false },
+        { "key": "send_at", "type": "string", "required": false },
+        { "key": "allow_repeat_marketing_sends", "type": "boolean", "required": false },
+        { "key": "metadata", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_sms",
+      "name": "Send SMS",
+      "description": "POST /sms/target — trigger a transactional SMS.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "recipient_email", "type": "string", "required": true },
+        { "key": "data_fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_push",
+      "name": "Send Push",
+      "description": "POST /push/target — trigger a transactional mobile push notification.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "recipient_email", "type": "string", "required": false },
+        { "key": "recipient_user_id", "type": "string", "required": false },
+        { "key": "data_fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_in_app_messages",
+      "name": "Get In-App Messages",
+      "description": "GET /inApp/getMessages — fetch a user's pending in-app messages.",
+      "method": "GET",
+      "params": [
+        { "key": "email", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "count", "type": "number", "required": false },
+        { "key": "platform", "type": "string", "required": false },
+        { "key": "sdk_version", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_in_app",
+      "name": "Send In-App",
+      "description": "POST /inApp/target — trigger an in-app message.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "recipient_email", "type": "string", "required": false },
+        { "key": "recipient_user_id", "type": "string", "required": false },
+        { "key": "data_fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27",
+    "structlog>=24",
+    "pydantic>=2.6"
+  ]
+}

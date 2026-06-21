@@ -1,0 +1,84 @@
+{
+  "title": "Iterable Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Iterable** is a cross-channel growth-marketing platform exposing a REST API suite under `https://api.iterable.com/api` (US) and `https://api.eu.iterable.com/api` (EU). This connector — `IterableConnector` (`CONNECTOR_TYPE = \"iterable\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from an Iterable workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users` | Get/upsert/bulk-update profiles, export by list, token registration, identifier merge, GDPR delete |\n| Events | `/events` | Track single + bulk custom events for the analytics stream |\n| Campaigns | `/campaigns` | List + get + create blast/triggered/recurring campaigns |\n| Templates | `/templates` | List + get email/push/SMS/in-app message templates |\n| Channels | `/channels` | List Iterable messaging channels (email/SMS/push/in-app/web push) |\n| Lists | `/lists` | List + create + delete static lists; subscribe / unsubscribe; export users |\n| Catalogs | `/catalogs` | List catalogs, list items, upsert single + bulk items |\n| Workflows | `/workflows` | Trigger a workflow for a user with optional dataFields |\n| Send (Email) | `/email/target` | Trigger a one-off transactional email |\n| Send (SMS) | `/sms/target` | Trigger a one-off transactional SMS |\n| Send (Push) | `/push/target` | Trigger a transactional mobile push |\n| In-App | `/inApp/target` + `/inApp/getMessages` | Trigger and retrieve in-app messages |\n\nThe connector normalises **templates + lists** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + Retry-After awareness (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::IterableHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Server-Side API Key\n\n1. Sign in to [Iterable](https://app.iterable.com/) (or `https://app.eu.iterable.com/` for EU workspaces).\n2. Open **Integrations → API Keys**.\n3. Click **New API Key** and choose **Server-Side** as the key type. Mobile / JWT keys will be rejected — this connector calls server-only endpoints (`/users/update`, `/events/track`, `/email/target`, …).\n4. Name it (e.g. `shielva-iterable-prod`) and grant scopes for Users, Events, Lists, Templates, Catalogs, Workflows, Channels, Campaigns, Send.\n5. Copy the key value — Iterable shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Iterable**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | the key from step 5 |\n| `region` (string, optional) | `us` (default) or `eu` |\n| `base_url` (string, optional) | leave blank unless Iterable assigned you a custom endpoint |\n| `rate_limit_per_min` (number, optional) | informational soft cap, default 100 |\n\nClick **Install**. `install()` validates `api_key` is present, persists non-secret config, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`. It does NOT call any Iterable endpoint at install time.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which performs `GET /lists` as a lightweight probe. Outcomes:\n\n| HTTP | Result |\n|---|---|\n| 2xx | `ConnectorStatus(HEALTHY, CONNECTED)` |\n| 401 | `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` — key revoked / wrong workspace |\n| 403 | `ConnectorStatus(UNHEALTHY, FAILED)` — key lacks scope |\n| 429 | `ConnectorStatus(DEGRADED, CONNECTED)` + structured-log warning |\n| network | `ConnectorStatus(OFFLINE, CONNECTED)` — transport error |"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Iterable REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the **`Api-Key`** header on every request.\n- `Authorization: Bearer <key>` is explicitly **rejected** by Iterable — do not use it.\n- The base URL is derived from `region` (`us` → `https://api.iterable.com/api`, `eu` → `https://api.eu.iterable.com/api`), with `base_url` taking precedence when set.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Persists `region`, `base_url`, `rate_limit_per_min` via `save_config`. Does **not** call any Iterable endpoint. |\n| `authorize(...)` | Returns a `TokenInfo(access_token=api_key, token_type=\"api_key\")` for ABI compat. |\n| `health_check()` | `GET /lists` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nApi-Key: <api_key>\nContent-Type: application/json\nAccept: application/json\n```\n\nFor the user-export endpoint (`/lists/getUsers`) the client switches `Accept: text/plain` and parses newline-delimited emails via `helpers.utils.parse_user_export`."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `Api-Key` header value |\n| `region` | string | no | `self.region` (default `\"us\"`) | Picks the base URL when `base_url` is blank |\n| `base_url` | string | no | `self.base_url` | Explicit base URL override |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Informational soft cap |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"iterable\"\nCONNECTOR_NAME = \"Iterable\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_ITERABLE_BASE_URL    = \"https://api.iterable.com/api\"\n_ITERABLE_EU_BASE_URL = \"https://api.eu.iterable.com/api\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `IterableConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::IterableHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; persist `region`, `base_url`, `rate_limit_per_min`. No API call.\n\n### `async authorize(auth_code=\"\", state=\"\") -> TokenInfo`\nNo-op for api_key auth — returns `TokenInfo(access_token=api_key, token_type=\"api_key\")`.\n\n### `async health_check() -> ConnectorStatus`\nCalls `GET /lists`; classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates `list_templates(template_type=\"Triggered\")` + `list_lists()`, normalises each (`normalize_template` / `normalize_list_as_document`), calls `ingest_document`. Returns `SyncResult` with `documents_found / _synced / _failed`."
+        },
+        {
+          "id": "api-users",
+          "title": "Users",
+          "content": "### `async get_user(*, email=None, user_id=None) -> Dict`\n`GET /users/getByEmail?email=...` OR `GET /users/byUserId/{user_id}`. Returns the flattened user dict (unwraps `{\"user\": {...}}`).\n\n### `async update_user(email=None, user_id=None, data_fields=None, merge_nested_objects=True) -> Dict`\n`POST /users/update` body: `{email|userId, dataFields, mergeNestedObjects}`.\n\n### `async bulk_update_users(users) -> Dict`\n`POST /users/bulkUpdate` body: `{users: [...]}` — up to 1 000 users.\n\n### `async list_users(list_id) -> List[str]`\n`GET /lists/getUsers?listId={N}` — newline-delimited email export.\n\n### `async register_browser_token(email|user_id, browser_token) -> Dict`\n`POST /users/registerBrowserToken`.\n\n### `async update_email(current_email, new_email) -> Dict`\n`POST /users/updateEmail` — migrate identifier without losing history.\n\n### `async delete_user(email=None, user_id=None) -> Dict`\n`DELETE /users/{email}` or `DELETE /users/byUserId/{userId}` — GDPR delete."
+        },
+        {
+          "id": "api-events",
+          "title": "Events",
+          "content": "### `async track_event(email, event_name, data_fields=None, campaign_id=None, template_id=None, user_id=None, event_id=None, created_at=None) -> Dict`\n`POST /events/track`. Body built by `helpers.utils.build_event_payload`.\n\n### `async bulk_track_events(events) -> Dict`\n`POST /events/trackBulk` body: `{events: [...]}`. Non-empty list enforced."
+        },
+        {
+          "id": "api-campaigns",
+          "title": "Campaigns",
+          "content": "### `async list_campaigns() -> List[Dict]`\n`GET /campaigns` — unwraps `{\"campaigns\": [...]}`.\n\n### `async get_campaign(campaign_id) -> Dict`\n`GET /campaigns/{id}` — falls back to `GET /campaigns/metrics?campaignId=` on 404 (legacy workspaces).\n\n### `async create_triggered_campaign(name, list_ids, template_id, send_at=None, suppression_list_ids=None, data_fields=None) -> Dict`\n`POST /campaigns/create`."
+        },
+        {
+          "id": "api-templates-channels",
+          "title": "Templates + Channels",
+          "content": "### `async list_templates(template_type=\"Triggered\", message_medium=\"Email\") -> Dict`\n`GET /templates?templateType=&messageMedium=`.\n\n### `async get_template(template_id) -> Dict`\n`GET /templates/{id}`.\n\n### `async list_channels() -> List[Dict]`\n`GET /channels` — unwraps `{\"channels\": [...]}`."
+        },
+        {
+          "id": "api-lists",
+          "title": "Lists",
+          "content": "### `async list_lists() -> List[Dict]`\n`GET /lists` — unwraps `{\"lists\": [...]}`.\n\n### `async create_list(name) -> Dict`\n`POST /lists` body: `{name}`. Returns `{\"listId\": N}`.\n\n### `async delete_list(list_id) -> Dict`\n`DELETE /lists/{listId}`.\n\n### `async subscribe_to_list(list_id, subscribers) -> Dict`\n`POST /lists/subscribe`. Each subscriber must carry `email` or `userId` (validated via `normalize_subscribers`).\n\n### `async unsubscribe_from_list(list_id, subscribers, campaign_id=None, channel_unsubscribe=False) -> Dict`\n`POST /lists/unsubscribe`."
+        },
+        {
+          "id": "api-catalogs",
+          "title": "Catalogs",
+          "content": "### `async list_catalogs() -> List[str]`\n`GET /catalogs` — handles both `{params: {catalogNames: [...]}}` (legacy) and `{catalogs: [...]}` (modern) shapes via `normalize_catalogs`.\n\n### `async list_catalog_items(catalog_name, page=1, page_size=100) -> Dict`\n`GET /catalogs/{name}/items`.\n\n### `async upsert_catalog_item(catalog_name, item_id, value) -> Dict`\n`PUT /catalogs/{name}/items/{itemId}` body: `{value}`.\n\n### `async bulk_upsert_catalog_items(catalog_name, documents) -> Dict`\n`POST /catalogs/{name}/items` body: `{documents: {...}}`."
+        },
+        {
+          "id": "api-workflows-sends",
+          "title": "Workflows + Send APIs",
+          "content": "### `async trigger_workflow(workflow_id, email=None, user_id=None, list_id=None, data_fields=None) -> Dict`\n`POST /workflows/triggerWorkflow`. Requires at least one target identifier.\n\n### `async send_email(campaign_id, recipient_email, data_fields=None, send_at=None, allow_repeat_marketing_sends=None, metadata=None) -> Dict`\n`POST /email/target`. The target campaign must be a Triggered (transactional) campaign.\n\n### `async send_sms(campaign_id, recipient_email, data_fields=None) -> Dict`\n`POST /sms/target`.\n\n### `async send_push(campaign_id, recipient_email=None, recipient_user_id=None, data_fields=None) -> Dict`\n`POST /push/target`. Requires at least one recipient identifier.\n\n### `async get_in_app_messages(email=None, user_id=None, count=100, platform=\"All\", sdk_version=None) -> Dict`\n`GET /inApp/getMessages`.\n\n### `async send_in_app(campaign_id, recipient_email=None, recipient_user_id=None, data_fields=None) -> Dict`\n`POST /inApp/target`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nIterableError                          # base; carries status_code + response_body\n├── IterableAuthError                   # 401 / 403\n├── IterableBadRequestError             # 400\n├── IterableNotFoundError               # 404\n├── IterableConflictError               # 409\n├── IterableRateLimitError              # 429 — retry_after_s\n├── IterableServerError                 # 5xx\n└── IterableNetworkError                # transport / timeout\n```\n\nBack-compat aliases preserved:\n```\nIterableNotFound = IterableNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status / condition | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately (typed exception) |\n| 429 | Honour `Retry-After` (capped at 30 s); otherwise `0.5 * 2 ** attempt + jitter`; retry up to 3 |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.HTTPError` | Backoff, retry up to 3, then raise `IterableNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches and maps:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, FAILED)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)            (logged warning)\nnetwork → ConnectorStatus(OFFLINE,  CONNECTED)\nother  → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the Server-Side key in ACP. Iterable shows the key only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, FAILED)` at health_check | 403 from Iterable — key lacks the required project scope | In Iterable → Integrations → API Keys, edit the key and grant Users / Events / Lists / Templates scopes for the surfaces you use. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — key revoked, wrong workspace, or pointed at the wrong region | Verify `region` matches the workspace (US vs EU). Rotate the key if needed. |\n| `iterable.http.retry` warnings spike | Hitting 429 (Iterable per-minute rate cap) | The client honours `Retry-After` and backs off. Lower throughput, batch via `bulk_track_events` / `bulk_update_users`, or shard by `workflow_id`. |\n| 404 from `get_campaign(id)` then 200 from `/campaigns/metrics` | Legacy workspace exposes campaign detail under `/campaigns/metrics` | No action — the connector's automatic fallback handles this. |\n| `ImportError: cannot import name 'IterableNotFound'` | Older import path used | Already fixed — `IterableNotFound = IterableNotFoundError` alias preserved in `exceptions.py`. |\n| `Authorization: Bearer ...` ends up in the request | Wrong header in a custom override | Never set `Authorization`. Iterable expects `Api-Key: <key>` and rejects bearer-style headers with 401. |\n| `list_users` returns an empty list for a known list | `text/plain` parsing failure or list emptied recently | Verify the listId; manually `curl -H \"Api-Key: $KEY\" $BASE/lists/getUsers?listId=N`. The helper handles both newline-delimited text and `{emails: [...]}` JSON. |"
+    }
+  ]
+}
