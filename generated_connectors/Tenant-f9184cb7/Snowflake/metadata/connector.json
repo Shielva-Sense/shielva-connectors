@@ -55,6 +55,131 @@
       "help": "Snowflake role to activate for the session. Uses the user's default role if not set."
     }
   ],
-  "capabilities": ["sync", "health_check", "query"],
-  "resources": ["databases", "schemas", "tables", "query_history"]
+  "capabilities": [
+    "sync",
+    "health_check",
+    "query"
+  ],
+  "resources": [
+    "databases",
+    "schemas",
+    "tables",
+    "query_history"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Snowflake databases, schemas (as metadata), and tables into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_databases",
+      "name": "List Databases",
+      "description": "GET /api/v2/databases \u2014 list all accessible Snowflake databases.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_schemas",
+      "name": "List Schemas",
+      "description": "GET /api/v2/databases/{database}/schemas \u2014 list schemas in a database.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tables",
+      "name": "List Tables",
+      "description": "GET /api/v2/databases/{database}/schemas/{schema}/tables \u2014 list tables.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "schema",
+          "label": "Schema",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "execute_query",
+      "name": "Execute Query",
+      "description": "POST /api/v2/statements \u2014 execute a SQL statement and return the result.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sql",
+          "label": "Sql",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "warehouse",
+          "label": "Warehouse",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "schema",
+          "label": "Schema",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "role",
+          "label": "Role",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "timeout",
+          "label": "Timeout",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_query_result",
+      "name": "Get Query Result",
+      "description": "GET /api/v2/statements/{handle} \u2014 poll for an async statement result.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "statement_handle",
+          "label": "Statement Handle",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "SnowflakeConnector"
 }
