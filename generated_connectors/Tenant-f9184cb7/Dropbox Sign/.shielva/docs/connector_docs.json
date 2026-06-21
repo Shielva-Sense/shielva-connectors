@@ -1,0 +1,74 @@
+{
+  "title": "Dropbox Sign Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Dropbox Sign** (formerly **HelloSign**) is a transactional e-signature platform. This connector — `DropboxSignConnector` (`CONNECTOR_TYPE = \"dropbox_sign\"`, `AUTH_TYPE = \"api_key\"`) — wraps the REST surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Account | `/account` | Get authenticated account metadata + quotas |\n| Signature Requests | `/signature_request/*` | Send, list, get, cancel, remind, download |\n| Templates | `/template/*` | List, get, send-with-template |\n| Team | `/team` | List team members |\n| Unclaimed Drafts | `/unclaimed_draft/list` | List drafts awaiting claim |\n| Embedded Signing | `/signature_request/create_embedded` | Generate iframe sign URLs |\n| API Apps | `/api_app` | Register an API App (required for embedded signing) |\n\nThe connector normalizes signature requests + templates into `NormalizedDocument` with **tenant-scoped ids** (`id = f\"{tenant_id}_{source_id}\"`), surfaces every user operation as a standalone `async def` method (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::DropboxSignHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Dropbox Sign API key\n\n1. Sign in to https://app.hellosign.com (the Dropbox Sign console).\n2. Open **Settings → API → API Keys**.\n3. Click **Create API Key**, label it (e.g. `shielva-prod`), and copy the value — Dropbox Sign shows it only once.\n4. (Optional, for embedded signing) **Settings → API → API Apps → Create API App**. Capture the **Client ID** for the embedded `client_id`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Dropbox Sign**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 3 |\n| `client_id` (text, optional) | API App Client ID — only for embedded signing |\n| `test_mode_default` (boolean) | `true` for dev/test, `false` for production |\n| `base_url` (text, optional) | Override `https://api.hellosign.com/v3` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_key` is present, then probes `GET /account` to confirm the key is live. A green status means the credential works.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /account` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Dropbox Sign uses **HTTP Basic** authentication (`AUTH_TYPE = \"api_key\"`) where the API key is the username and the password is empty. No OAuth, no refresh, no expiry — the key stays valid until you revoke it.\n\n### Credential model\n\n```\nAuthorization: Basic base64(api_key:)\n```\n\nConcretely, with the example key `test-api-key-deadbeef`:\n\n```\nbase64(\"test-api-key-deadbeef:\") = dGVzdC1hcGkta2V5LWRlYWRiZWVmOg==\nAuthorization: Basic dGVzdC1hcGkta2V5LWRlYWRiZWVmOg==\n```\n\nNote the trailing colon — Dropbox Sign requires the empty-password separator even though no password is sent.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`, persists non-secret config, probes `GET /account`. Fails fast on 401/403. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the api_key (surface compatibility — no exchange). |\n| `health_check()` | `GET /account` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. The api_key lives in the install config blob. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(api_key:)\nAccept:        application/json    (or application/pdf / application/zip on download)\nUser-Agent:    shielva-dropbox-sign-connector/1.0\n```\n\nPOST bodies use `application/x-www-form-urlencoded` with bracket-indexed nested keys (`signers[0][email_address]=…`). File uploads use `multipart/form-data` with `file[0]`, `file[1]`, … fields."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | HTTP Basic username |\n| `client_id` | text | no | `self.client_id` | Default API App Client ID for embedded signing |\n| `test_mode_default` | boolean | no | `self.test_mode_default` (default `true`) | Default `test_mode` for signature requests |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.hellosign.com/v3`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\nOPTIONAL_CONFIG_KEYS = [\"client_id\", \"test_mode_default\", \"base_url\", \"rate_limit_per_min\"]\n\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DROPBOX_SIGN_BASE = \"https://api.hellosign.com/v3\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `DropboxSignConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::DropboxSignHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`, persist non-secret config, probe `GET /account`. Returns `HEALTHY + CONNECTED` on success, `OFFLINE + FAILED` on 401/403, `DEGRADED + AUTHENTICATED` on other transient probe failures.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose `access_token` is the configured api_key (surface compatibility).\n\n### `async health_check() -> ConnectorStatus`\n`GET /account`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/signature_request/list`, normalizes each entry → `NormalizedDocument` (tenant-scoped id), and ingests. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-account",
+          "title": "Account",
+          "content": "### `async get_account() -> Dict`\n`GET /account` — returns the authenticated account payload, including `account_id`, `email_address`, `is_paid_hs`, and quota counters."
+        },
+        {
+          "id": "api-signature-requests",
+          "title": "Signature Requests",
+          "content": "### `async list_signature_requests(page=1, page_size=20, query=None) -> Dict`\n`GET /signature_request/list?page={N}&page_size={P}&query={Q}`. The `query` field is a Dropbox Sign DSL — e.g. `status:pending`, `from:owner@example.com`.\n\n### `async get_signature_request(signature_request_id) -> Dict`\n`GET /signature_request/{id}`.\n\n### `async send_signature_request(title, subject, message, signers, file_urls=None, files=None, test_mode=None) -> Dict`\n`POST /signature_request/send`. `signers` is `[{name, email_address}, ...]`. Provide either `file_urls` (publicly downloadable PDFs) or `files` (list of `(filename, bytes, content_type)` tuples for multipart upload). `test_mode` defaults to the install-time `test_mode_default`.\n\n### `async cancel_signature_request(signature_request_id) -> Dict`\n`POST /signature_request/cancel/{id}`.\n\n### `async remind_signature_request(signature_request_id, email_address) -> Dict`\n`POST /signature_request/remind/{id}` with `email_address={signer}`.\n\n### `async download_files(signature_request_id, file_type='pdf') -> bytes`\n`GET /signature_request/files/{id}?file_type={pdf|zip}`. Returns raw bytes. (`download_signature_request` remains as a back-compat alias.)"
+        },
+        {
+          "id": "api-templates",
+          "title": "Templates",
+          "content": "### `async list_templates(page=1, page_size=20) -> Dict`\n`GET /template/list`.\n\n### `async get_template(template_id) -> Dict`\n`GET /template/{id}`.\n\n### `async send_with_template(template_id, title, subject, message, signers, custom_fields=None, test_mode=None) -> Dict`\n`POST /signature_request/send_with_template`. `signers` is `[{role, name, email_address}, ...]` — every signer role defined on the template must be filled."
+        },
+        {
+          "id": "api-team-drafts",
+          "title": "Team · Unclaimed Drafts",
+          "content": "### `async list_team_members(page=1) -> Dict`\n`GET /team` — returns `{team: {name, accounts: [...]}}`.\n\n### `async list_unclaimed_drafts() -> Dict`\n`GET /unclaimed_draft/list`."
+        },
+        {
+          "id": "api-embedded-apiapp",
+          "title": "Embedded · API Apps",
+          "content": "### `async create_embedded_signature_request(client_id, title, signers, file_urls=None, test_mode=None) -> Dict`\n`POST /signature_request/create_embedded`. Requires an API App `client_id`. Response contains a `signing_url` that can be loaded inside the Dropbox Sign embedded iframe.\n\n### `async create_api_app(name, domain, callback_url=None) -> Dict`\n`POST /api_app` — register a new API App. Returns `{api_app: {client_id, ...}}`. Use the returned `client_id` for embedded sign requests."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nDropboxSignError                            # base; carries status_code + response_body\n├── DropboxSignAuthError                    # 401 / 403\n├── DropboxSignBadRequestError              # 400\n├── DropboxSignNotFoundError                # 404\n├── DropboxSignConflictError                # 409\n├── DropboxSignRateLimitError               # 429 — retry_after_s\n├── DropboxSignServerError                  # 5xx\n└── DropboxSignNetworkError                 # transport (timeout / DNS / reset)\n```\n\nBack-compat aliases:\n```\nDropboxSignNotFound = DropboxSignNotFoundError\n```\n\nDropbox Sign uses a single error envelope:\n\n```json\n{\"error\": {\"error_msg\": \"...\", \"error_name\": \"...\"}}\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `0.5s, 1s, 2s`, retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `DropboxSignNetworkError` |\n\n`Retry-After` headers are honoured for 429 responses when present (clamped to a sane minimum).\n\n### How errors surface to the gateway\n\n`health_check()` catches typed exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nNetwork → ConnectorStatus(OFFLINE, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Generate a new API key in Settings → API → API Keys; paste it into ACP. |\n| `ConnectorStatus(OFFLINE, FAILED)` at install | 401 — API key invalid | Verify the key was copied verbatim. Dropbox Sign keys have no prefix; trailing whitespace can break HTTP Basic. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — API key revoked | Generate a new key in the Dropbox Sign dashboard and re-install. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — account suspended or key disabled | Check billing status in Dropbox Sign; re-enable or rotate the key. |\n| `dropbox_sign.http.retry` warnings spike | Hitting 429 (Dropbox Sign per-minute cap) | Client retries with backoff. Reduce `rate_limit_per_min` install field or batch fewer concurrent requests. |\n| `send_signature_request requires file_urls or files` ValueError | Call missing both inputs | Provide `file_urls=[...]` (publicly accessible PDFs) OR `files=[(name, bytes, content_type), ...]` (multipart upload). |\n| 404 on `download_files` | Signature request not yet complete | Files are only downloadable once `is_complete=true`. Poll `get_signature_request` first. |\n| Embedded sign URL returns 'Application not found' | Missing or wrong `client_id` | Pass the API App Client ID from Settings → API → API Apps. Falls back to install-time `client_id` if not passed. |\n| `signers must be a non-empty list` ValueError | Empty / malformed signers list | Pass `[{name: '...', email_address: '...'}, ...]`. Empty lists, non-dict entries, or missing keys are rejected client-side. |\n| Webhook payloads land but signature mismatch | Webhook signing key mismatch | Webhook verification is not yet a connector responsibility — wire it on the gateway side using the Dropbox Sign `event_hash` HMAC scheme. |"
+    }
+  ]
+}

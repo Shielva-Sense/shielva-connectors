@@ -1,0 +1,236 @@
+{
+  "connector_type": "dropbox_sign",
+  "name": "DropboxSignConnector",
+  "display_name": "Dropbox Sign",
+  "version": "1.0.0",
+  "description": "Connects to the Dropbox Sign (formerly HelloSign) REST API (Signature Requests, Templates, Team, Account, Embedded signing, API Apps) using an API key. HTTP Basic auth — api_key as username, empty password.",
+  "provider": "dropbox_sign",
+  "service": "dropbox_sign",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Dropbox Sign API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Dropbox Sign API key",
+      "help": "From Dropbox Sign → Settings → API → API Keys. The key is sent as the username in HTTP Basic auth (empty password)."
+    },
+    {
+      "key": "client_id",
+      "label": "API App Client ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional — only for embedded signing",
+      "help": "Required only for embedded signature requests. Create an API App in Dropbox Sign → Settings → API Apps."
+    },
+    {
+      "key": "test_mode_default",
+      "label": "Default Test Mode",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "help": "Default test_mode for all signature requests — production should set to false."
+    },
+    {
+      "key": "base_url",
+      "label": "Dropbox Sign API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.hellosign.com/v3",
+      "placeholder": "https://api.hellosign.com/v3",
+      "help": "Base URL for the Dropbox Sign REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": 60,
+      "placeholder": "60",
+      "help": "Maximum Dropbox Sign API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the API key and probes /account to confirm the credential works.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Dropbox Sign API connectivity by hitting /account.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "GET /account — returns the authenticated account payload.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_signature_requests",
+      "name": "List Signature Requests",
+      "description": "GET /signature_request/list — paginated list of signature requests, optionally filtered by query.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_signature_request",
+      "name": "Get Signature Request",
+      "description": "GET /signature_request/{id} — full signature request payload.",
+      "method": "GET",
+      "params": [
+        { "key": "signature_request_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_signature_request",
+      "name": "Send Signature Request",
+      "description": "POST /signature_request/send — kick off a new signature request. Provide file_urls or files; signers is a list of {name,email_address} dicts.",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": true },
+        { "key": "signers", "type": "array", "required": true },
+        { "key": "file_urls", "type": "array", "required": false },
+        { "key": "files", "type": "array", "required": false },
+        { "key": "test_mode", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "cancel_signature_request",
+      "name": "Cancel Signature Request",
+      "description": "POST /signature_request/cancel/{id} — cancel an in-flight signature request.",
+      "method": "POST",
+      "params": [
+        { "key": "signature_request_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "remind_signature_request",
+      "name": "Remind Signature Request",
+      "description": "POST /signature_request/remind/{id} — send a reminder email to the named signer.",
+      "method": "POST",
+      "params": [
+        { "key": "signature_request_id", "type": "string", "required": true },
+        { "key": "email_address", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "download_files",
+      "name": "Download Files",
+      "description": "GET /signature_request/files/{id}?file_type=… — returns the signed PDF (or ZIP) bytes for a signature request.",
+      "method": "GET",
+      "params": [
+        { "key": "signature_request_id", "type": "string", "required": true },
+        { "key": "file_type", "type": "string", "required": false }
+      ],
+      "returns": "Bytes"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "GET /template/list — paginated list of templates available to the authenticated account.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "GET /template/{id} — full template payload.",
+      "method": "GET",
+      "params": [
+        { "key": "template_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_with_template",
+      "name": "Send With Template",
+      "description": "POST /signature_request/send_with_template — create a signature request from a template.",
+      "method": "POST",
+      "params": [
+        { "key": "template_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": true },
+        { "key": "signers", "type": "array", "required": true },
+        { "key": "custom_fields", "type": "array", "required": false },
+        { "key": "test_mode", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_team_members",
+      "name": "List Team Members",
+      "description": "GET /team — list members of the authenticated user's team.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_unclaimed_drafts",
+      "name": "List Unclaimed Drafts",
+      "description": "GET /unclaimed_draft/list — drafts awaiting claim.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_embedded_signature_request",
+      "name": "Create Embedded Signature Request",
+      "description": "POST /signature_request/create_embedded — create an embedded signature request. Returns a sign URL renderable inside an iframe. Requires the API app client_id.",
+      "method": "POST",
+      "params": [
+        { "key": "client_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "signers", "type": "array", "required": true },
+        { "key": "file_urls", "type": "array", "required": false },
+        { "key": "test_mode", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_api_app",
+      "name": "Create API App",
+      "description": "POST /api_app — register a new API App (required for embedded signing).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "domain", "type": "string", "required": true },
+        { "key": "callback_url", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1",
+    "pydantic>=2.0"
+  ]
+}
