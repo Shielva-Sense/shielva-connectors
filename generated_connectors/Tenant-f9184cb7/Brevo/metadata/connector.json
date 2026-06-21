@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Brevo API key",
-      "help": "Your Brevo API key. Found in Settings → API Keys in your Brevo account."
+      "help": "Your Brevo API key. Found in Settings \u2192 API Keys in your Brevo account."
     }
   ],
   "features": [
@@ -90,13 +90,62 @@
     "senders"
   ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Contacts", "id": "list_contacts", "category": "contacts" },
-    { "name": "Get Contact", "id": "get_contact", "category": "contacts" },
-    { "name": "List Contact Lists", "id": "list_contact_lists", "category": "lists" },
-    { "name": "List Campaigns", "id": "list_campaigns", "category": "campaigns" },
-    { "name": "List Senders", "id": "list_senders", "category": "senders" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the api_key by calling GET /v3/account.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /v3/account and return current health with email/plan.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Brevo contacts and email campaigns into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Contacts",
+      "id": "list_contacts",
+      "category": "contacts",
+      "description": "Paginated list of Brevo contacts.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Contact",
+      "id": "get_contact",
+      "category": "contacts",
+      "description": "Retrieve a single contact by email or id.",
+      "method": "GET"
+    },
+    {
+      "name": "List Contact Lists",
+      "id": "list_contact_lists",
+      "category": "lists",
+      "description": "Paginated list of Brevo contact lists.",
+      "method": "GET"
+    },
+    {
+      "name": "List Campaigns",
+      "id": "list_campaigns",
+      "category": "campaigns",
+      "description": "Paginated list of Brevo email campaigns, optionally filtered by status.",
+      "method": "GET"
+    },
+    {
+      "name": "List Senders",
+      "id": "list_senders",
+      "category": "senders",
+      "description": "List all Brevo senders.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Brevo"
 }
