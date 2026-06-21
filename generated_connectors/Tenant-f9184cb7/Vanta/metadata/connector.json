@@ -1,0 +1,243 @@
+{
+  "connector_type": "vanta",
+  "name": "VantaConnector",
+  "display_name": "Vanta",
+  "version": "1.0.0",
+  "description": "Connects to the Vanta compliance-automation REST API (Frameworks, Controls, Vendors, Personnel, Risks, Incidents, Documents, Tests, Findings, Audits) using OAuth 2.0 client_credentials. Mints + caches a short-lived bearer token, exposes standalone async methods per surface, and ingests frameworks + controls + vendors + personnel into the Shielva KB.",
+  "provider": "vanta",
+  "service": "vanta",
+  "auth_type": "oauth2_client_credentials",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Vanta OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "vc_xxxxxxxxxxxxxxxxxxxxxxxx",
+      "help": "From Vanta → Settings → API → Create OAuth App. The client_id is sent to the token endpoint along with client_secret to mint an access token."
+    },
+    {
+      "key": "client_secret",
+      "label": "Vanta OAuth Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Vanta OAuth client secret",
+      "help": "Paired secret for the OAuth client. Stored encrypted at rest by the gateway secret store; sent to the token endpoint as form-encoded body."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth Scopes",
+      "type": "string",
+      "required": false,
+      "default": "vanta-api.all:read vanta-api.vendors:write",
+      "placeholder": "vanta-api.all:read vanta-api.vendors:write",
+      "help": "Space-separated list of OAuth scopes granted to the client_credentials grant. Leave default unless your Vanta admin has scoped the OAuth app more tightly."
+    },
+    {
+      "key": "base_url",
+      "label": "Vanta API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.vanta.com/v1",
+      "placeholder": "https://api.vanta.com/v1",
+      "help": "Base URL for the Vanta REST API. Override only for Vanta sandbox or a private proxy."
+    },
+    {
+      "key": "token_url",
+      "label": "Vanta OAuth Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.vanta.com/oauth/token",
+      "placeholder": "https://api.vanta.com/oauth/token",
+      "help": "OAuth 2.0 token endpoint. Override only for sandbox / private proxy."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Vanta API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id + client_secret, mints an access token, and persists install-time config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Vanta API connectivity by listing 1 framework (GET /frameworks?pageSize=1).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_frameworks",
+      "name": "List Frameworks",
+      "description": "GET /frameworks — list compliance frameworks (SOC 2, ISO 27001, HIPAA, GDPR, PCI DSS, etc.).",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_framework",
+      "name": "Get Framework",
+      "description": "GET /frameworks/{framework_id} — fetch a single framework.",
+      "method": "GET",
+      "params": [
+        { "key": "framework_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_controls",
+      "name": "List Controls",
+      "description": "GET /controls — list controls, optionally scoped to a framework.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false },
+        { "key": "framework_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_control",
+      "name": "Get Control",
+      "description": "GET /controls/{control_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "control_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "GET /vendors — list third-party vendors with risk metadata.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_vendor",
+      "name": "Get Vendor",
+      "description": "GET /vendors/{vendor_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_personnel",
+      "name": "List Personnel",
+      "description": "GET /personnel — list employees + contractors with role assignments.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false },
+        { "key": "includes_inactive", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_personnel",
+      "name": "Get Personnel",
+      "description": "GET /personnel/{person_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "person_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_risks",
+      "name": "List Risks",
+      "description": "GET /risks — list risk register entries with likelihood + impact.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_incidents",
+      "name": "List Incidents",
+      "description": "GET /incidents — list security incidents (optionally filtered by severity + status).",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false },
+        { "key": "severity", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_documents",
+      "name": "List Documents",
+      "description": "GET /documents — list policies and SOPs under version control.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tests",
+      "name": "List Tests",
+      "description": "GET /tests — list continuous control tests, optionally filtered by status.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false },
+        { "key": "test_status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_findings",
+      "name": "List Findings",
+      "description": "GET /findings — list open findings flagged by Vanta scanners.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false },
+        { "key": "severity", "type": "string", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_audits",
+      "name": "List Audits",
+      "description": "GET /audits — list active and historical audit engagements.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}
