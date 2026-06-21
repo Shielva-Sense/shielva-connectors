@@ -1,14 +1,14 @@
 """Copper CRM Shielva connector."""
 
-from .connector import AUTH_TYPE, CONNECTOR_TYPE, CopperConnector
-from .exceptions import (
+from connector import AUTH_TYPE, CONNECTOR_TYPE, CopperConnector
+from exceptions import (
     CopperAuthError,
     CopperError,
     CopperNetworkError,
     CopperNotFoundError,
     CopperRateLimitError,
 )
-from .models import (
+from models import (
     ConnectorDocument,
     CopperCompany,
     CopperOpportunity,

@@ -7,8 +7,8 @@ import hashlib
 import logging
 from typing import Any, Awaitable, Callable, TypeVar
 
-from ..exceptions import CopperAuthError, CopperError
-from ..models import ConnectorDocument, ResourceType
+from exceptions import CopperAuthError, CopperError
+from models import ConnectorDocument, ResourceType
 
 logger = logging.getLogger(__name__)
 
