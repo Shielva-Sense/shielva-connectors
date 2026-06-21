@@ -1,0 +1,212 @@
+{
+  "connector_type": "engagebay",
+  "name": "EngageBayConnector",
+  "display_name": "EngageBay",
+  "version": "1.0.0",
+  "description": "Connects to the EngageBay all-in-one SMB CRM (Contacts, Companies, Deals, Tasks, Tickets, Notes) via the documented REST API at app.engagebay.com/dev/api/panel. Sends the API key RAW in the Authorization header (no Bearer prefix). Supports contact CRUD, deal/task/company/ticket queries, deal + task creation, note attachment, and KB sync of contacts.",
+  "provider": "engagebay",
+  "service": "engagebay",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "EngageBay REST API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your EngageBay REST API key",
+      "help": "From EngageBay → Account → Account Settings → API Settings → REST API Key. The key is sent RAW in the Authorization header (no Bearer prefix)."
+    },
+    {
+      "key": "base_url",
+      "label": "EngageBay API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://app.engagebay.com/dev/api/panel",
+      "placeholder": "https://app.engagebay.com/dev/api/panel",
+      "help": "Override only for sandbox or self-hosted environments. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft rate-limit hint used by sync/batch operations. EngageBay's documented quota is 60 req/min for most plans."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the EngageBay API key by hitting /subusers/list and persists the connector config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (API Key)",
+      "description": "API-key connectors have no OAuth dance — returns the stored key wrapped in a TokenInfo.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies EngageBay API connectivity by calling GET /subusers/list.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "GET /contacts — cursor-paginated. Returns the raw EngageBay payload (items + cursor).",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "page_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /contacts/{id} — fetch a single contact and return a flat normalized dict.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /contacts — properties is a list of {name, value, field_type} entries.",
+      "method": "POST",
+      "params": [
+        { "key": "properties", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact (Partial)",
+      "description": "PUT /contacts/update-partial/{id} — partial update via properties list.",
+      "method": "PUT",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true },
+        { "key": "properties", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "DELETE /contacts/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "GET /companies/list/{page_size}.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "GET /deals.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_deal",
+      "name": "Create Deal",
+      "description": "POST /deals.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "expected_value", "type": "number", "required": true },
+        { "key": "milestone", "type": "string", "required": true },
+        { "key": "contact_ids", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /tasks.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_task",
+      "name": "Create Task",
+      "description": "POST /tasks. due_date is a Unix epoch (ms).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "due_date", "type": "number", "required": true },
+        { "key": "contact_id", "type": "string", "required": false },
+        { "key": "owner_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "GET /tickets.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_note",
+      "name": "Add Note to Contact",
+      "description": "POST /contacts/{id}/note — attach a free-text note to a contact.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true },
+        { "key": "note", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Contacts",
+      "description": "Walks /contacts page-by-page (cursor pagination) and ingests each as a NormalizedDocument into the Shielva KB.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
