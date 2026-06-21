@@ -1,0 +1,7 @@
+# Pinecone connector — connector-specific dependencies only.
+# httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx are
+# pre-installed in the shared connector venv (do NOT re-add them here).
+#
+# Pinecone REST API needs no additional packages — we hit it via httpx directly
+# rather than pull in pinecone-client to keep the connector single-process and
+# match the SOC pattern used by Wix / Bandwidth.
