@@ -1,0 +1,339 @@
+{
+  "connector_type": "onelogin",
+  "name": "OneLoginConnector",
+  "display_name": "OneLogin",
+  "version": "1.0.0",
+  "description": "Connects to the OneLogin SSO/IAM REST API (v2). Supports Users, Apps, Roles, Groups, Privileges, Mappings, Events, and per-user role/app assignment via OAuth2 client_credentials. Caches Bearer tokens with silent refresh on 401.",
+  "provider": "onelogin",
+  "service": "onelogin",
+  "auth_type": "oauth2_client_credentials",
+  "install_fields": [
+    {
+      "key": "subdomain",
+      "label": "OneLogin Subdomain",
+      "type": "string",
+      "required": true,
+      "placeholder": "acme",
+      "help": "Your OneLogin subdomain — if URL is acme.onelogin.com, enter 'acme'. Used to build https://{subdomain}.onelogin.com."
+    },
+    {
+      "key": "client_id",
+      "label": "API Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your OneLogin API Client ID",
+      "help": "Generate at OneLogin → Developers → API Credentials with 'Manage All' or scoped permissions."
+    },
+    {
+      "key": "client_secret",
+      "label": "API Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your OneLogin API Client Secret",
+      "help": "Generated alongside the API Client ID. Stored encrypted via the platform secret vault."
+    },
+    {
+      "key": "base_url",
+      "label": "Base URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://acme.onelogin.com",
+      "help": "Override the per-tenant subdomain URL (staging / region). Leave blank to derive from subdomain."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Client-side soft cap. OneLogin enforces a per-tenant API rate limit."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates subdomain, client_id, client_secret and marks the connector ready for auth. Does NOT call the OneLogin API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Surface-compat wrapper around authenticate() — OneLogin has no auth-code exchange.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "authenticate",
+      "name": "Authenticate (Client Credentials)",
+      "description": "POST /auth/oauth2/v2/token with HTTP Basic client_id:client_secret + grant_type=client_credentials. Caches the resulting access_token until expires_at - 60s.",
+      "method": "POST",
+      "params": [],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies OneLogin API connectivity by listing one user (GET /api/2/users?limit=1).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync to KB",
+      "description": "Cursor-paginated iteration over /api/2/users → NormalizedDocument → ingest_document. Persists after_cursor in metadata for incremental syncs.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /api/2/users — list OneLogin users with optional email filter and cursor pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after_cursor", "type": "string", "required": false },
+        { "key": "email", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /api/2/users/{id} — fetch a single user by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Create User",
+      "description": "POST /api/2/users — provision a new user with optional username, password, and role assignments.",
+      "method": "POST",
+      "params": [
+        { "key": "email", "type": "string", "required": true },
+        { "key": "firstname", "type": "string", "required": true },
+        { "key": "lastname", "type": "string", "required": true },
+        { "key": "username", "type": "string", "required": false },
+        { "key": "password", "type": "string", "required": false },
+        { "key": "role_ids", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Update User",
+      "description": "PUT /api/2/users/{id} — patch arbitrary user fields.",
+      "method": "PUT",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete User",
+      "description": "DELETE /api/2/users/{id} — permanently remove a user.",
+      "method": "DELETE",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_users",
+      "name": "Search Users",
+      "description": "GET /api/2/users with ?email= when query contains @ else ?username=.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "set_user_state",
+      "name": "Set User State",
+      "description": "PUT /api/2/users/{id}/state — activate (state=1) or deactivate (state=0). Raises ValueError on any other value.",
+      "method": "PUT",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "state", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "assign_role_to_user",
+      "name": "Assign Roles to User",
+      "description": "POST /api/2/users/{id}/add_roles — append the given role IDs to a user.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "role_ids", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_user_apps",
+      "name": "List User Apps",
+      "description": "GET /api/2/users/{id}/apps — apps assigned to the given user.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_user_roles",
+      "name": "List User Roles",
+      "description": "GET /api/2/users/{id}/roles — role IDs assigned to the given user.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "set_user_roles",
+      "name": "Set User Roles",
+      "description": "PUT /api/2/users/{id}/roles — replace the user's role assignments with the given role IDs.",
+      "method": "PUT",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "role_ids", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_apps",
+      "name": "List Apps",
+      "description": "GET /api/2/apps — list all SAML/OIDC apps configured in the tenant.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_app",
+      "name": "Get App",
+      "description": "GET /api/2/apps/{id} — fetch a single app definition.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "assign_app_to_user",
+      "name": "Assign App to User",
+      "description": "POST /api/2/users/{id}/apps — grant a user access to an app.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "app_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_roles",
+      "name": "List Roles",
+      "description": "GET /api/2/roles — list all roles in the tenant with cursor pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after_cursor", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_role",
+      "name": "Get Role",
+      "description": "GET /api/2/roles/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "role_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "GET /api/2/groups — list directory groups in the tenant.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_group",
+      "name": "Get Group",
+      "description": "GET /api/2/groups/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "group_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_privileges",
+      "name": "List Privileges",
+      "description": "GET /api/2/privileges — list custom privileges defined in the tenant.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_mappings",
+      "name": "List Mappings",
+      "description": "GET /api/2/mappings — list user-to-app mapping rules.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "GET /api/2/events — audit log of OneLogin events, filterable by since / event_type_id.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "since", "type": "string", "required": false },
+        { "key": "event_type_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_event",
+      "name": "Get Event",
+      "description": "GET /api/2/events/{id} — fetch a single audit event.",
+      "method": "GET",
+      "params": [
+        { "key": "event_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27",
+    "structlog>=24.1"
+  ]
+}
