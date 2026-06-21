@@ -1,0 +1,271 @@
+{
+  "connector_type": "hubstaff",
+  "name": "HubstaffConnector",
+  "display_name": "Hubstaff",
+  "version": "2.0.0",
+  "description": "Connects to the Hubstaff v2 REST API for time tracking and workforce analytics. Reads organizations, users, teams, projects, tasks, activities, time entries, daily activities, screenshots, application + URL usage, and notes; creates projects. Authenticates via a Hubstaff Personal Access Token sent as 'Authorization: Bearer <token>'.",
+  "provider": "hubstaff",
+  "service": "hubstaff",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Hubstaff Personal Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Hubstaff Personal Access Token",
+      "help": "From Hubstaff Settings → Developer → Personal Access Tokens. Sent as 'Authorization: Bearer <token>' on every request."
+    },
+    {
+      "key": "default_organization_id",
+      "label": "Default Organization ID",
+      "type": "number",
+      "required": false,
+      "placeholder": "123456",
+      "help": "Default organization used by sync() and convenience API calls when no organization_id is supplied."
+    },
+    {
+      "key": "base_url",
+      "label": "Hubstaff API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.hubstaff.com/v2",
+      "placeholder": "https://api.hubstaff.com/v2",
+      "help": "Base URL of the Hubstaff v2 REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft cap for Hubstaff API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the Personal Access Token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Hubstaff API connectivity by calling GET /users/me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "GET /users/me — returns the authenticated Hubstaff user envelope.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{id} — returns a Hubstaff user record by id.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "GET /organizations — lists organizations the token has access to.",
+      "method": "GET",
+      "params": [
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /organizations/{id}/members — lists users in an organization.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "GET /organizations/{id}/teams — lists teams in an organization.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /organizations/{id}/projects — lists projects in an organization, filtered by status (active/archived).",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /projects/{id} — returns a single project envelope.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_project",
+      "name": "Create Project",
+      "description": "POST /organizations/{id}/projects — creates a project under an organization.",
+      "method": "POST",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /projects/{id}/tasks — lists tasks under a project, filtered by status (open/closed).",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_activities",
+      "name": "List Activities",
+      "description": "GET /organizations/{id}/activities — tracked-time activity rows. Supports user_ids/project_ids/date filters.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "project_ids", "type": "string", "required": false },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_entries",
+      "name": "List Time Entries",
+      "description": "GET /organizations/{id}/time_entries — manual + tracked time entries between dates.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "project_ids", "type": "string", "required": false },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_daily_activities",
+      "name": "List Daily Activities",
+      "description": "GET /organizations/{id}/activities/daily — per-user/day rolled-up summaries.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "project_ids", "type": "string", "required": false },
+        { "key": "page_start_id", "type": "number", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_screenshots",
+      "name": "List Screenshots",
+      "description": "GET /organizations/{id}/screenshots — screenshot metadata (URL, taken_at, user, project). Image URLs are time-limited.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "project_ids", "type": "string", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_apps",
+      "name": "List App Activity",
+      "description": "GET /organizations/{id}/application_activities — app usage rows per user.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_urls",
+      "name": "List URL Activity",
+      "description": "GET /organizations/{id}/url_activities — URL/website usage rows per user.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "GET /organizations/{id}/notes — notes attached to time entries.",
+      "method": "GET",
+      "params": [
+        { "key": "organization_id", "type": "number", "required": true },
+        { "key": "date_start", "type": "string", "required": false },
+        { "key": "date_stop", "type": "string", "required": false },
+        { "key": "user_ids", "type": "string", "required": false },
+        { "key": "page_limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
