@@ -1,5 +1,5 @@
 {
-  "connector_type": "entra_id",
+  "connector_type": "entra_id_connector",
   "name": "EntraIdConnector",
   "display_name": "Microsoft Entra ID",
   "version": "1.0.0",
@@ -7,6 +7,7 @@
   "provider": "microsoft",
   "service": "entra_id",
   "auth_type": "oauth2_client_credentials",
+  "connector_name": "Microsoft Entra ID",
   "install_fields": [
     {
       "key": "azure_tenant_id",

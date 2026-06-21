@@ -53,7 +53,7 @@ _DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 class EntraIdConnector(BaseConnector):
     """Shielva connector for Microsoft Entra ID via the Microsoft Graph API."""
 
-    CONNECTOR_TYPE = "entra_id"
+    CONNECTOR_TYPE = "entra_id_connector"
     CONNECTOR_NAME = "Microsoft Entra ID"
     AUTH_TYPE = "oauth2_client_credentials"
 
