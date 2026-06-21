@@ -1,0 +1,74 @@
+{
+  "title": "JazzHR Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**JazzHR** (branded internally as **Resumator**) is a small-business applicant-tracking system. Its REST API lives at `https://api.resumatorapi.com/v1`. This connector — `JazzHRConnector` (`CONNECTOR_TYPE = \"jazzhr\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a JazzHR account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users` | Recruiters + hiring managers |\n| Jobs | `/jobs` | Job postings (list / get / create) |\n| Applicants | `/applicants` | Candidate records (list / get / create / search) |\n| Applicant↔Job | `/applicants2jobs` | Attach applicant to job |\n| Notes | `/notes` | Internal applicant notes |\n| Activities | `/activities` | Audit feed (global or per applicant) |\n| Rating | `/ratings` | Hiring-team rating steps |\n| Categories | `/categories` | Workflow categories (Sales, Engineering, …) |\n| Workflows | `/workflows` | Workflow stages |\n| Contacts | `/contacts` | External contacts (referrers, vendors) |\n| Tasks | `/tasks` | Recruiter to-do items |\n\nThe connector normalises jobs + applicants + notes into `NormalizedDocument` (id = `f\"{connector_id}_<kind>_{source_id}\"`), exposes every user-requested operation as a standalone `async def` (OCP), pages list endpoints via JazzHR's `?page=N` cursor (≤50 rows/page), retries 429/5xx with jittered exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::JazzHRHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a JazzHR API key\n\n1. Sign in at https://app.jazz.co.\n2. Open **Settings → Integrations → API**.\n3. Click **Generate** (or copy the existing key if one is already present).\n4. Copy the key value — JazzHR keys do NOT expire automatically, but rotate them on a schedule.\n5. (Optional) Note your default recruiter's user UUID from **Settings → Users** — used for `default_user_id` so `add_note()` works without an explicit user.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → JazzHR**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret, required) | API key from step 3 |\n| `base_url` (text, optional) | Override `https://api.resumatorapi.com/v1` (rarely needed) |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 60 |\n| `default_user_id` (text, optional) | Recruiter UUID — fallback author for `add_note()` |\n\nClick **Install**. `install()` validates `api_key` is present, persists config, and probes `GET /jobs?page=1` to verify the key. On 200 → `ConnectorStatus(HEALTHY, CONNECTED)`. On 401/403 → `OFFLINE + MISSING_CREDENTIALS`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 page of `/jobs` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On persistent 5xx → `DEGRADED + CONNECTED` (with structured warn-log)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "JazzHR REST API uses **server-to-server API key authentication carried as a query parameter** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent on EVERY request as `?apikey=<api_key>` in the URL query string — **never** in an `Authorization` header, **never** as `Bearer <key>`. This is JazzHR's documented quirk and the most common reason connectors written from a generic API-key template fail.\n- POST bodies are sent as `application/x-www-form-urlencoded` — JazzHR rejects `application/json`.\n- No site / org / account scoping headers.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Persists config. Probes `GET /jobs?page=1` to verify. |\n| `authorize(...)` | Stores the api_key as a `TokenInfo(access_token=<api_key>, token_type=\"ApiKey\")` for ABI uniformity. No code exchange. |\n| `health_check()` | `GET /jobs?page=1` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | The api_key is the only credential; ACP encrypts it at rest. |\n\n### Wire contract\n\n```\nGET  https://api.resumatorapi.com/v1/<resource>?apikey=<api_key>&<other params>\nPOST https://api.resumatorapi.com/v1/<resource>?apikey=<api_key>\nContent-Type: application/x-www-form-urlencoded\n\n<form_field>=<urlencoded_value>&<form_field>=<urlencoded_value>...\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `?apikey=` query parameter on every request |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.resumatorapi.com/v1`) | Override for sandbox / proxy / regional endpoint |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n| `default_user_id` | text | no | `self.config[\"default_user_id\"]` | Fallback author for `add_note()` when caller omits `user_id` |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_JAZZHR_BASE = \"https://api.resumatorapi.com/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `JazzHRConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::JazzHRHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; persist config; probe `GET /jobs?page=1` to verify the key. 401/403 → `MISSING_CREDENTIALS`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns `TokenInfo(access_token=<api_key>, token_type=\"ApiKey\")`.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 page of `/jobs`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/jobs` and `/applicants`, normalises each row → `NormalizedDocument`, calls `ingest_document(...)`. Returns `SyncResult` with `documents_found / _synced / _failed`."
+        },
+        {
+          "id": "api-users-jobs",
+          "title": "Users + Jobs",
+          "content": "### `async list_users(page=1) -> List[Dict]`\n`GET /users?page=N`.\n\n### `async get_user(user_id) -> Dict`\n`GET /users/{id}`.\n\n### `async list_jobs(page=1, status=None, title=None, type=None, city=None, dept=None, board_code=None) -> List[Dict]`\n`GET /jobs?page=N&<filter>=...`. `dept` is mapped to the wire `department` param.\n\n### `async get_job(job_id) -> Dict`\n`GET /jobs/{id}`.\n\n### `async create_job(title, hiring_lead_id, type=\"Full Time\", description=\"\", city=None, state=None, country_id=\"US\", workflow_id=None) -> Dict`\n`POST /jobs` — form-encoded. Requires `title`, `hiring_lead`, and `type`."
+        },
+        {
+          "id": "api-applicants-notes",
+          "title": "Applicants + Notes",
+          "content": "### `async list_applicants(page=1, status=None, name=None, city=None, state=None, from_apply_date=None, to_apply_date=None) -> List[Dict]`\n`GET /applicants?page=N&<filter>=...`.\n\n### `async get_applicant(applicant_id) -> Dict`\n`GET /applicants/{id}`.\n\n### `async create_applicant(first_name, last_name, email, phone=None, address=None, city=None, state=None, country_id=\"US\") -> Dict`\n`POST /applicants` — form-encoded.\n\n### `async assign_applicant_to_job(applicant_id, job_id) -> Dict`\n`POST /applicants2jobs` — form-encoded.\n\n### `async list_applicants_by_job(job_id, page=1) -> List[Dict]`\n`GET /applicants/job_id/{id}?page=N`.\n\n### `async list_notes(applicant_id, page=1) -> List[Dict]`\n`GET /notes/applicant_id/{id}?page=N`.\n\n### `async add_note(applicant_id, contents, security=\"public\", user_id=None) -> Dict`\n`POST /notes` — form-encoded. When `user_id` is omitted the connector falls back to `config[\"default_user_id\"]`."
+        },
+        {
+          "id": "api-activities-rating",
+          "title": "Activities + Rating",
+          "content": "### `async list_activities(applicant_id=None, page=1) -> List[Dict]`\nGlobal feed: `GET /activities?page=N`. Per-applicant feed: `GET /activities/applicant_id/{id}?page=N`.\n\n### `async list_rating_steps() -> List[Dict]`\n`GET /ratings` — the hiring-team rating steps configured for the account."
+        },
+        {
+          "id": "api-categories-workflows",
+          "title": "Categories + Workflows",
+          "content": "### `async list_categories() -> List[Dict]`\n`GET /categories` — high-level workflow buckets (Sales, Engineering, …).\n\n### `async list_workflows() -> List[Dict]`\nAlias of `list_categories()` — categories ARE workflow buckets in JazzHR's terminology.\n\n### `async list_workflow_steps() -> List[Dict]`\n`GET /workflows` — stages within a workflow (Phone Screen, Onsite, Offer)."
+        },
+        {
+          "id": "api-contacts-tasks",
+          "title": "Contacts + Tasks",
+          "content": "### `async list_contacts(page=1) -> List[Dict]`\n`GET /contacts?page=N` — external contacts (referrers, vendors).\n\n### `async list_tasks(page=1) -> List[Dict]`\n`GET /tasks?page=N` — recruiter to-do items."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nJazzHRError                          # base; carries status_code + response_body\n├── JazzHRAuthError                  # 401 / 403\n├── JazzHRBadRequestError            # 400\n├── JazzHRNotFound                   # 404\n├── JazzHRRateLimitError             # 429 — retry_after_s\n└── JazzHRServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nJazzHRNetworkError = JazzHRServerError      # legacy name from older code\nJazzHRNotFoundError = JazzHRNotFound\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 | Raise `JazzHRBadRequestError` immediately |\n| 401 / 403 | Raise `JazzHRAuthError` immediately |\n| 404 | Raise `JazzHRNotFound` immediately |\n| 429 | Honour `Retry-After` on first retry, then jittered exponential backoff `RETRY_DELAY_S * BACKOFF_FACTOR ** attempt + jitter` (capped at `MAX_RETRY_DELAY_S = 32s`), `_max_retries = 3`. On exhaustion → raise `JazzHRNetworkError`. |\n| 5xx | Same exponential backoff, `_max_retries = 3`. On exhaustion → raise `JazzHRNetworkError`. |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `JazzHRNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n429 → ConnectorStatus(DEGRADED, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank or JazzHR returned 401/403 | Re-enter the key in ACP. Generate a fresh one in JazzHR → Settings → Integrations → API. |\n| `Invalid API key` 401 even with the correct key | Key sent in `Authorization` header instead of `?apikey=` | Should never happen with this connector — `client/http_client.py::_inject_apikey` injects it into the query string. If you're calling the API by hand, check that the URL contains `?apikey=...`. |\n| `400 Bad Request` on `create_job` / `create_applicant` | Body posted as JSON instead of form-encoded | The connector posts as `application/x-www-form-urlencoded`. If you bypassed it, switch to form-encoding. |\n| `jazzhr.retry` warnings spike | Hitting 429 (rate cap) | The client retries with jittered exponential backoff honoring `Retry-After`. Lower `rate_limit_per_min` in install fields or batch fewer requests. |\n| 404 on `add_note` even though the applicant exists | JazzHR requires `user_id` on every note | Either pass `user_id=` explicitly or set the `default_user_id` install field. |\n| `list_workflows` returns the same data as `list_categories` | By design | Categories ARE the workflow buckets in JazzHR. Use `list_workflow_steps()` for the stages within a workflow. |\n| Sync ingests 0 documents | JazzHR account has no open jobs or applicants | Check the JazzHR dashboard. `sync()` pages through `/jobs` + `/applicants` only. |"
+    }
+  ]
+}
