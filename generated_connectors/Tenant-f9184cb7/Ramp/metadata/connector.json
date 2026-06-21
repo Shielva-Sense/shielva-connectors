@@ -1,0 +1,262 @@
+{
+  "connector_type": "ramp",
+  "name": "RampConnector",
+  "display_name": "Ramp",
+  "version": "1.0.0",
+  "description": "Connects to the Ramp Developer API (Users, Cards, Transactions, Departments, Locations, Reimbursements, Bills, Vendors, Limits, Memos) using OAuth2 client-credentials authentication. Supports user invites, card lifecycle, transaction queries, and KB sync of users + transactions.",
+  "provider": "ramp",
+  "service": "ramp",
+  "auth_type": "oauth2_client_credentials",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Ramp Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "ramp_id_xxxxxxxxxxxxxxxx",
+      "help": "OAuth2 client_id from Ramp Dashboard -> Developer -> API. Used as the username in the HTTP Basic header on the /token request."
+    },
+    {
+      "key": "client_secret",
+      "label": "Ramp Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Ramp client secret",
+      "help": "OAuth2 client_secret from Ramp Dashboard -> Developer -> API. Used as the password in the HTTP Basic header on the /token request. Shown once at creation."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "placeholder": "users:read users:write cards:read ...",
+      "help": "Space-separated OAuth2 scopes granted to the client. Leave blank to use the connector default set."
+    },
+    {
+      "key": "base_url",
+      "label": "Ramp API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.ramp.com/developer/v1",
+      "placeholder": "https://api.ramp.com/developer/v1",
+      "help": "Base URL for the Ramp Developer API. Leave blank to use the default."
+    },
+    {
+      "key": "token_url",
+      "label": "Ramp Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.ramp.com/developer/v1/token",
+      "placeholder": "https://api.ramp.com/developer/v1/token",
+      "help": "OAuth2 token endpoint. Override only if Ramp directs you to a regional or sandbox URL."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Ramp API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id + client_secret by minting an OAuth2 access_token.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Ramp API connectivity by listing one user (GET /users?page_size=1).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users - list Ramp users with optional filters.",
+      "method": "GET",
+      "params": [
+        { "key": "department_id", "type": "string", "required": false },
+        { "key": "location_id", "type": "string", "required": false },
+        { "key": "role", "type": "string", "required": false },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{id} - fetch a single Ramp user.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "invite_user",
+      "name": "Invite User",
+      "description": "POST /users/deferred - invite a new Ramp user.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": true },
+        { "key": "role", "type": "string", "required": false },
+        { "key": "department_id", "type": "string", "required": false },
+        { "key": "location_id", "type": "string", "required": false },
+        { "key": "idempotency_key", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_cards",
+      "name": "List Cards",
+      "description": "GET /cards - list cards with optional user / physical filters.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": false },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "is_physical", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_card",
+      "name": "Get Card",
+      "description": "GET /cards/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "card_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Transactions",
+      "description": "GET /transactions - list transactions filtered by ISO-8601 date range, category, merchant.",
+      "method": "GET",
+      "params": [
+        { "key": "start", "type": "string", "required": false },
+        { "key": "end", "type": "string", "required": false },
+        { "key": "sk_category_id", "type": "string", "required": false },
+        { "key": "merchant_id", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_transaction",
+      "name": "Get Transaction",
+      "description": "GET /transactions/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "transaction_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "GET /departments.",
+      "method": "GET",
+      "params": [
+        { "key": "start", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "GET /locations.",
+      "method": "GET",
+      "params": [
+        { "key": "start", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_reimbursements",
+      "name": "List Reimbursements",
+      "description": "GET /reimbursements.",
+      "method": "GET",
+      "params": [
+        { "key": "start", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_bills",
+      "name": "List Bills",
+      "description": "GET /bills.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "start", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "GET /vendors.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "start", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_limits",
+      "name": "List Limits",
+      "description": "GET /limits.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_memos",
+      "name": "List Memos",
+      "description": "GET /memos.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "start", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_memo",
+      "name": "Get Memo",
+      "description": "GET /memos/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "memo_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+    "structlog>=24.1"
+  ]
+}
