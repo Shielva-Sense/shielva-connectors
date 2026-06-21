@@ -1,0 +1,296 @@
+{
+  "connector_type": "personio",
+  "name": "PersonioConnector",
+  "display_name": "Personio",
+  "version": "1.0.0",
+  "description": "Connects to the Personio HR platform (Employees, Attendances, Time-Offs, Documents, Custom Attributes, Departments, Offices, Projects, Recruitment Applications + Applicants). Uses OAuth2 client-credentials authentication with rotating bearer tokens — the bearer changes on every response, so the connector captures the Authorization response header and uses it on the next request.",
+  "provider": "personio",
+  "service": "personio",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Personio Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Personio API Client ID",
+      "help": "Generate at Personio → Settings → API Credentials. Shown alongside the secret at creation time."
+    },
+    {
+      "key": "client_secret",
+      "label": "Personio Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Personio API Client Secret",
+      "help": "Paired secret for the Client ID. Shown once at creation — store it securely. The connector encrypts it at rest."
+    },
+    {
+      "key": "partner_id",
+      "label": "Partner ID",
+      "type": "string",
+      "required": false,
+      "default": "SHIELVA",
+      "placeholder": "SHIELVA",
+      "help": "X-Personio-Partner-ID header value. Leave blank to use the Shielva default."
+    },
+    {
+      "key": "app_id",
+      "label": "App ID",
+      "type": "string",
+      "required": false,
+      "default": "shielva-connector",
+      "placeholder": "shielva-connector",
+      "help": "X-Personio-App-ID header value. Leave blank to use the Shielva default."
+    },
+    {
+      "key": "base_url",
+      "label": "Personio API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.personio.de/v1",
+      "placeholder": "https://api.personio.de/v1",
+      "help": "Base URL for the Personio REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Personio API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and persists install-time config. Does not call Personio.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authenticate",
+      "name": "Authenticate",
+      "description": "POST /auth — exchanges client_id + client_secret for a rotating bearer token. The token is captured from the Authorization response header.",
+      "method": "POST",
+      "params": [],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Personio API connectivity by listing one employee (GET /company/employees?limit=1).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "GET /company/employees — paginated employee list with optional email / updated_since filters.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "updated_since", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_employee",
+      "name": "Get Employee",
+      "description": "GET /company/employees/{id} — fetch a single employee by Personio numeric ID.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_employee",
+      "name": "Create Employee",
+      "description": "POST /company/employees — create a new employee record.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": true },
+        { "key": "hire_date", "type": "string", "required": true },
+        { "key": "department", "type": "string", "required": false },
+        { "key": "position", "type": "string", "required": false },
+        { "key": "extra", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_employee",
+      "name": "Update Employee",
+      "description": "PATCH /company/employees/{id} — patch one or more attributes on an existing employee.",
+      "method": "PATCH",
+      "params": [
+        { "key": "employee_id", "type": "number", "required": true },
+        { "key": "attributes", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_attendances",
+      "name": "List Attendances",
+      "description": "GET /company/attendances — list attendance entries for the given employees and date range.",
+      "method": "GET",
+      "params": [
+        { "key": "employees", "type": "array", "required": false },
+        { "key": "start_date", "type": "string", "required": false },
+        { "key": "end_date", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_attendance",
+      "name": "Create Attendance",
+      "description": "POST /company/attendances — record a single attendance entry for an employee.",
+      "method": "POST",
+      "params": [
+        { "key": "employee", "type": "number", "required": true },
+        { "key": "date", "type": "string", "required": true },
+        { "key": "start_time", "type": "string", "required": true },
+        { "key": "end_time", "type": "string", "required": true },
+        { "key": "break_time", "type": "number", "required": false },
+        { "key": "comment", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_attendance",
+      "name": "Update Attendance",
+      "description": "PATCH /company/attendances/{id} — patch attributes on an attendance entry.",
+      "method": "PATCH",
+      "params": [
+        { "key": "attendance_id", "type": "number", "required": true },
+        { "key": "attributes", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_offs",
+      "name": "List Time-Offs",
+      "description": "GET /company/time-offs — list time-off (absence) entries, optionally filtered by date range.",
+      "method": "GET",
+      "params": [
+        { "key": "start_date", "type": "string", "required": false },
+        { "key": "end_date", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_time_off",
+      "name": "Create Time-Off",
+      "description": "POST /company/time-offs — book a time-off entry for an employee.",
+      "method": "POST",
+      "params": [
+        { "key": "employee_id", "type": "number", "required": true },
+        { "key": "time_off_type_id", "type": "number", "required": true },
+        { "key": "start_date", "type": "string", "required": true },
+        { "key": "end_date", "type": "string", "required": true },
+        { "key": "half_day_start", "type": "boolean", "required": false },
+        { "key": "half_day_end", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_off_types",
+      "name": "List Time-Off Types",
+      "description": "GET /company/time-off-types — list the time-off types configured in the account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_documents",
+      "name": "List Documents",
+      "description": "GET /company/document-categories — list document categories visible to the given employee.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "number", "required": true },
+        { "key": "category_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upload_document",
+      "name": "Upload Document",
+      "description": "POST /company/employees/{id}/documents — multipart upload of a document into the employee file.",
+      "method": "POST",
+      "params": [
+        { "key": "employee_id", "type": "number", "required": true },
+        { "key": "file_bytes", "type": "binary", "required": true },
+        { "key": "filename", "type": "string", "required": true },
+        { "key": "category_id", "type": "number", "required": true },
+        { "key": "title", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_custom_attributes",
+      "name": "List Custom Attributes",
+      "description": "GET /company/employees/custom-attributes — list the custom employee attributes configured in Personio.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "GET /company/departments — list the departments configured in Personio.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_offices",
+      "name": "List Offices",
+      "description": "GET /company/offices — list the offices configured in Personio.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /company/projects — list the projects configured in Personio.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applications",
+      "name": "List Recruitment Applications",
+      "description": "GET /recruiting/applications — list ATS applications, optionally filtered by status.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_applicant",
+      "name": "Get Applicant",
+      "description": "GET /recruiting/applicants/{id} — fetch an applicant profile.",
+      "method": "GET",
+      "params": [
+        { "key": "applicant_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": []
+}
