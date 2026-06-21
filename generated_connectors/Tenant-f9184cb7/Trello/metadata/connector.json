@@ -8,13 +8,138 @@
       "key": "api_key",
       "label": "API Key",
       "type": "string",
-      "required": true
+      "required": true,
+      "help": "API Key."
     },
     {
       "key": "token",
       "label": "Token",
       "type": "password",
-      "required": true
+      "required": true,
+      "help": "Token."
     }
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync boards and cards from the authenticated Trello member.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Return list of board dicts for the authenticated member.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "filter",
+          "label": "Filter",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_board",
+      "name": "Get Board",
+      "description": "Return a single board dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_board_lists",
+      "name": "List Board Lists",
+      "description": "Return list of list dicts for a board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_board_cards",
+      "name": "List Board Cards",
+      "description": "Return list of card dicts for a board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_card",
+      "name": "Get Card",
+      "description": "Return a single card dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "card_id",
+          "label": "Card Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_board_members",
+      "name": "List Board Members",
+      "description": "Return list of member dicts for a board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_board_labels",
+      "name": "List Board Labels",
+      "description": "Return list of label dicts for a board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "TrelloConnector",
+  "provider": "trello",
+  "service": "trello",
+  "description": "Shielva connector for Trello."
 }
