@@ -15,7 +15,7 @@ try:
 except ImportError:
     _AIOHTTP_AVAILABLE = False
 
-from ..exceptions import (
+from exceptions import (
     CopperAuthError,
     CopperError,
     CopperNetworkError,
