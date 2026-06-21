@@ -1,0 +1,84 @@
+{
+  "title": "Weaviate Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Weaviate** is an open-source vector database with REST + GraphQL surfaces. Each tenant points at their own cluster — Weaviate Cloud (`https://<cluster-id>.weaviate.network`), self-hosted (`http://localhost:8080`), or any operator-managed deployment. Because cluster URLs differ per customer, `base_url` is a **per-tenant install field**, NOT a class constant.\n\nThis connector — `WeaviateConnector` (`CONNECTOR_TYPE = \"weaviate\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Weaviate cluster:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Schema | `/v1/schema` | List / create / get / delete classes (collections) |\n| Objects | `/v1/objects` | CRUD a single object by UUID inside a class |\n| Batch | `/v1/batch/objects` | Bulk insert objects (KB sync hot-path) |\n| GraphQL | `/v1/graphql` | `Get`, `Aggregate`, `Explore` queries (vector + hybrid search) |\n| Multi-tenancy | `/v1/schema/{class}/tenants` | List / create / delete tenant slices in a class |\n| Backups | `/v1/backups/{backend}` | Create + status of cluster backups (s3 / gcs / azure / filesystem) |\n| Cluster | `/v1/.well-known/ready` + `/v1/meta` | Liveness + version probe |\n\nThe connector normalises Weaviate objects into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::WeaviateHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Get your cluster URL + API key\n\n**Weaviate Cloud:**\n1. Sign in at https://console.weaviate.cloud.\n2. Open your cluster, copy the **REST endpoint** (e.g. `https://my-cluster-abc123.weaviate.network`).\n3. Open **API Keys**, generate or copy the key (UUID-format string).\n\n**Self-hosted (Docker / Kubernetes):**\n1. The URL is whatever you bound — typically `http://localhost:8080` for `docker run -p 8080:8080 semitechnologies/weaviate`.\n2. If you set the env var `AUTHENTICATION_APIKEY_ALLOWED_KEYS=<key>`, that key is the API key.\n3. If you run with `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`, leave the API key field blank.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Weaviate**, fill in:\n\n| Field | Value |\n|---|---|\n| `base_url` (text, **required**) | Cluster URL from step 1 — e.g. `https://my-cluster-abc123.weaviate.network` |\n| `api_key` (secret, optional) | API key from step 1. Omit for anonymous self-hosted clusters. |\n| `grpc_port` (number, optional) | gRPC port — default 50051. Reserved for future high-throughput batch. |\n| `timeout_s` (number, optional) | Per-request timeout — default 30 seconds. |\n\nClick **Install**. `install()` validates `base_url` is non-empty and a valid HTTP(S) URL (does NOT call the cluster), initialises the `WeaviateHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /v1/.well-known/ready`. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Weaviate supports three auth modes; the connector handles all three with a single api-key surface (`AUTH_TYPE = \"api_key\"`).\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as `Bearer <key>`.\n- Anonymous self-hosted clusters omit the `Authorization` header entirely (the connector skips it when `api_key` is blank).\n- OIDC mode is reachable via the same Bearer header when callers inject a pre-minted JWT into the `api_key` field, but the connector itself does not perform the OIDC handshake (Weaviate Cloud uses simple API keys).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `base_url` (required, must start with http:// or https://). Initialises `WeaviateHTTPClient`. Does **not** call any Weaviate endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured `api_key` — there is no token exchange. |\n| `health_check()` | `GET /v1/.well-known/ready` — Weaviate's standard liveness probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_key>     ← omitted when api_key is blank\nContent-Type:  application/json\nAccept:        application/json\n```\n\n**Per-tenant base URL**: every tenant's `base_url` lives in their config row; the connector never hardcodes a cluster URL. This is the multi-tenant contract — tenant A pointing at `cluster-a.weaviate.network` and tenant B pointing at `cluster-b.weaviate.network` never share a client instance."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `base_url` | text | **yes** | `self.base_url` | Cluster URL — `https://<cluster>.weaviate.network` or `http://localhost:8080`. Per-tenant. |\n| `api_key` | secret | no | `self.api_key` | Bearer token. Blank → anonymous cluster. |\n| `grpc_port` | number | no | `self.grpc_port` (default 50051) | Reserved for future batch-over-gRPC. |\n| `timeout_s` | number | no | `self.timeout_s` (default 30) | Per-request httpx timeout. |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"weaviate\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"base_url\", \"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```\n\nNote: `api_key` is listed in `REQUIRED_CONFIG_KEYS` for the common Weaviate Cloud case, but `install()` only hard-fails when `base_url` is missing — anonymous self-hosted clusters install successfully with a blank api_key."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `WeaviateConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::WeaviateHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `base_url`; initialise `WeaviateHTTPClient`. Does NOT call the cluster.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo carrying the configured api_key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /v1/.well-known/ready`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates every class, pages through `/v1/objects?class={c}&limit=100&after={uuid}`, normalises each object → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with counters."
+        },
+        {
+          "id": "api-cluster",
+          "title": "Cluster",
+          "content": "### `async get_meta() -> Dict`\n`GET /v1/meta` — returns `{version, hostname, modules}`. Useful for compatibility checks before issuing version-sensitive queries."
+        },
+        {
+          "id": "api-schema",
+          "title": "Schema (Classes)",
+          "content": "### `async list_classes() -> Dict`\n`GET /v1/schema` — `{classes: [...]}`.\n\n### `async create_class(class_body: Dict) -> Dict`\n`POST /v1/schema` — body is the raw [class definition](https://weaviate.io/developers/weaviate/api/rest/schema). Vectorizer, properties, multi-tenancy config all live inside `class_body`.\n\n### `async get_class(class_name: str) -> Dict`\n`GET /v1/schema/{className}`.\n\n### `async delete_class(class_name: str) -> Dict`\n`DELETE /v1/schema/{className}`. Removes the class AND every object in it — destructive."
+        },
+        {
+          "id": "api-objects",
+          "title": "Objects (CRUD)",
+          "content": "### `async list_objects(*, class_name=None, limit=100, after=None, include=None, tenant=None) -> Dict`\n`GET /v1/objects?class={c}&limit={N}&after={uuid}&include={vector,classification}`. `after` is the last UUID returned — Weaviate's cursor pagination.\n\n### `async create_object(class_name, properties, *, vector=None, object_id=None, tenant=None) -> Dict`\n`POST /v1/objects` — body: `{class, properties, vector?, id?, tenant?}`. When `vector` is omitted Weaviate uses the class's configured vectorizer (e.g. text2vec-openai).\n\n### `async get_object(class_name, object_id, *, include=None, tenant=None) -> Dict`\n`GET /v1/objects/{className}/{id}`. Pass `include=\"vector\"` to fetch the embedding.\n\n### `async update_object(class_name, object_id, properties, *, vector=None, tenant=None) -> Dict`\n`PATCH /v1/objects/{className}/{id}` — partial update. Only the supplied properties are written.\n\n### `async delete_object(class_name, object_id, *, tenant=None) -> Dict`\n`DELETE /v1/objects/{className}/{id}`."
+        },
+        {
+          "id": "api-batch",
+          "title": "Batch",
+          "content": "### `async batch_create_objects(objects: List[Dict], *, consistency_level=None) -> Any`\n`POST /v1/batch/objects` — body: `{objects: [{class, properties, vector?, id?, tenant?}, ...]}`. Optional `?consistency_level=ONE|QUORUM|ALL` query param. The batch endpoint is the hot path for KB sync — a single call can ingest hundreds of objects with one round-trip."
+        },
+        {
+          "id": "api-graphql",
+          "title": "GraphQL Search",
+          "content": "### `async graphql_query(query: str, variables: Dict | None = None) -> Dict`\n`POST /v1/graphql` — body: `{query, variables?}`. Returns the raw `{data, errors}` envelope. Use for:\n\n- **`Get`** — vector / hybrid / bm25 search. Example:\n  ```graphql\n  { Get { Article(nearText: {concepts: [\"machine learning\"]}, limit: 5) { title _additional { distance } } } }\n  ```\n- **`Aggregate`** — count, sum, mean, group-by.\n- **`Explore`** — cross-class semantic search.\n\nThe connector does not parse the GraphQL shape — callers consume `data.Get.{Class}` etc. themselves."
+        },
+        {
+          "id": "api-multi-tenancy",
+          "title": "Multi-tenancy",
+          "content": "Weaviate supports class-level multi-tenancy where each tenant gets its own shard inside the same class. The class must be created with `multiTenancyConfig: {enabled: true}`.\n\n### `async list_tenants(class_name: str) -> Any`\n`GET /v1/schema/{className}/tenants` — returns `[{name, activityStatus}, ...]`.\n\n### `async create_tenant(class_name: str, tenants: List[Dict]) -> Any`\n`POST /v1/schema/{className}/tenants` — body: `[{name, activityStatus?}, ...]`. `activityStatus` is `HOT | COLD | FROZEN`.\n\n### `async delete_tenant(class_name: str, tenant_names: List[str]) -> Any`\n`DELETE /v1/schema/{className}/tenants` — body: list of names to drop."
+        },
+        {
+          "id": "api-backups",
+          "title": "Backups",
+          "content": "### `async create_backup(backend: str, backup_id: str, *, include=None, exclude=None) -> Dict`\n`POST /v1/backups/{backend}` — `backend` is `s3 | gcs | azure | filesystem`. Body: `{id, include?, exclude?}`. Returns `{id, status: STARTED, ...}` immediately; the actual upload runs async on the cluster.\n\n### `async get_backup_status(backend: str, backup_id: str) -> Dict`\n`GET /v1/backups/{backend}/{id}` — returns `{status: STARTED|TRANSFERRING|SUCCESS|FAILED, error?}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nWeaviateError                            # base; carries status_code + response_body\n├── WeaviateAuthError                    # 401 / 403\n├── WeaviateBadRequestError              # 400\n├── WeaviateNotFoundError                # 404\n├── WeaviateConflictError                # 409 (class exists / id duplicate)\n├── WeaviateValidationError              # 422 (schema validation failure)\n├── WeaviateRateLimitError               # 429 — retry_after_s\n└── WeaviateServerError                  # 5xx\n```\n\nBack-compat aliases:\n```\nWeaviateNetworkError = WeaviateServerError    # legacy name\nWeaviateNotFound     = WeaviateNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 422 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `WeaviateNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `base_url` blank or not http(s) | Re-enter the full cluster URL with scheme (https:// for Cloud, http:// for `localhost:8080`). |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Weaviate — API key lacks RBAC scope (Weaviate Cloud) | In Weaviate Cloud Console → API Keys, upgrade the key to admin role or grant the specific permissions you need. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — API key wrong or revoked | Verify the api_key install field matches the key shown in Weaviate Cloud Console. Rotate if lost. For self-hosted, confirm `AUTHENTICATION_APIKEY_ALLOWED_KEYS` matches. |\n| `ConnectorStatus(OFFLINE, CONNECTED)` with \"network error\" | Cluster URL unreachable | Check the cluster is running (`curl {base_url}/v1/.well-known/ready` from your shell). For self-hosted, confirm port 8080 is bound and reachable from the connector host. |\n| 422 \"invalid property\" on create_object | Property name not declared in the class schema | Either add the property to the class (`PATCH /v1/schema/{className}/properties`) or remove it from your `properties` dict. |\n| 409 \"class exists\" on create_class | Class with that name is already created | Use `get_class` to inspect, then `delete_class` (destroys all objects) + `create_class`, or simply update properties. |\n| `weaviate.http.retry` warnings spike | 429s from Weaviate Cloud rate limits | The client retries with exponential backoff. Throttle your call site or upgrade your Weaviate Cloud tier. |\n| GraphQL response has `errors` but HTTP 200 | Weaviate returns GraphQL-style errors in the body, not via HTTP status | Inspect `result[\"errors\"]` — common causes: unknown class, syntactically invalid GraphQL, vectorizer module disabled. |\n| Multi-tenancy ops fail with `multiTenancyConfig not enabled` | The class was created without `multiTenancyConfig.enabled=true` | Recreate the class with `multiTenancyConfig: {enabled: true}`, or skip the `tenant` parameter on object ops. |\n| Backup `FAILED` immediately | Backend module disabled OR credentials missing on the cluster | Self-hosted: enable `backup-s3` / `backup-gcs` / `backup-azure` / `backup-filesystem` modules via env vars at cluster boot. Weaviate Cloud: contact support — backups are configured at cluster level. |"
+    }
+  ]
+}
