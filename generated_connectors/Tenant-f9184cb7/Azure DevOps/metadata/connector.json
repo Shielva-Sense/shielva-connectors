@@ -1,0 +1,299 @@
+{
+  "connector_type": "azure_devops",
+  "name": "AzureDevopsConnector",
+  "display_name": "Azure DevOps",
+  "version": "1.0.0",
+  "description": "Connects to the Azure DevOps Services REST API (Projects, Teams, Users, Repos, Pull Requests, Work Items via WIQL, Builds, Pipelines, Releases) using Personal Access Token (PAT) authentication. Auth is HTTP Basic with an empty username + the PAT as the password. Every request carries the api-version query parameter.",
+  "provider": "azure_devops",
+  "service": "azure_devops",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "organization",
+      "label": "Organization",
+      "type": "string",
+      "required": true,
+      "placeholder": "your-org",
+      "help": "Your Azure DevOps organization slug — the {org} segment of https://dev.azure.com/{org}."
+    },
+    {
+      "key": "pat",
+      "label": "Personal Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Personal Access Token",
+      "help": "Create at User Settings → Personal Access Tokens. Scope the PAT to the surfaces you need (Code, Work Items, Build, Release). The PAT is sent HTTP-Basic-encoded with an empty username — never as a Bearer token."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "default": "7.1",
+      "placeholder": "7.1",
+      "help": "Azure DevOps REST API version. Sent as ?api-version=<value> on every request. Leave blank to use 7.1."
+    },
+    {
+      "key": "default_project",
+      "label": "Default Project",
+      "type": "string",
+      "required": false,
+      "placeholder": "MyProject",
+      "help": "Default project name used by sync() and by methods that omit the project argument."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "200",
+      "placeholder": "200",
+      "help": "Maximum Azure DevOps API requests per minute. Default is 200."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates organization + pat (Personal Access Token) and persists the install-time configuration. Does NOT call the API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes GET /_apis/projects?$top=1&api-version=7.1 with the configured PAT to verify connectivity + auth.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /_apis/projects — list Azure DevOps projects in the organization. Supports stateFilter + $top + continuationToken.",
+      "method": "GET",
+      "params": [
+        { "key": "state_filter", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "continuation_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /_apis/projects/{idOrName} — fetch a single project by ID or name.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id_or_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "GET /_apis/projects/{project}/teams — list teams under a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET https://vssps.dev.azure.com/{org}/_apis/graph/users — list users via the Graph API host.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "continuation_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_repos",
+      "name": "List Repositories",
+      "description": "GET /{project}/_apis/git/repositories — list Git repositories for a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_repo",
+      "name": "Get Repository",
+      "description": "GET /{project}/_apis/git/repositories/{repositoryId} — fetch a single Git repository.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "repository_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pull_requests",
+      "name": "List Pull Requests",
+      "description": "GET /{project}/_apis/git/repositories/{repo}/pullrequests — list PRs. Filter by status (active|completed|abandoned|all).",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "repository_id", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_pull_request",
+      "name": "Get Pull Request",
+      "description": "GET /{project}/_apis/git/repositories/{repo}/pullrequests/{pullRequestId}.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "repository_id", "type": "string", "required": true },
+        { "key": "pull_request_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_pull_request",
+      "name": "Create Pull Request",
+      "description": "POST /{project}/_apis/git/repositories/{repo}/pullrequests — open a PR between two branches.",
+      "method": "POST",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "repository_id", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "source_ref", "type": "string", "required": true },
+        { "key": "target_ref", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "reviewers", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "query_work_items",
+      "name": "Query Work Items (WIQL)",
+      "description": "POST /{project}/_apis/wit/wiql — execute a WIQL query and return work-item REFs (id+url) only.",
+      "method": "POST",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "wiql", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_work_items",
+      "name": "List Work Items (WIQL + batch fetch)",
+      "description": "Runs a WIQL query against a project, then batch-fetches the full work items via GET /_apis/wit/workitems?ids=...",
+      "method": "POST",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "wiql", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_work_item",
+      "name": "Get Work Item",
+      "description": "GET /_apis/wit/workitems/{id} — fetch a single work item with optional field projection.",
+      "method": "GET",
+      "params": [
+        { "key": "work_item_id", "type": "number", "required": true },
+        { "key": "fields", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_work_item",
+      "name": "Create Work Item",
+      "description": "POST /{project}/_apis/wit/workitems/${type} — JSON-patch body (Content-Type: application/json-patch+json).",
+      "method": "POST",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "work_item_type", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_work_item",
+      "name": "Update Work Item",
+      "description": "PATCH /_apis/wit/workitems/{id} — JSON-patch body (Content-Type: application/json-patch+json).",
+      "method": "PATCH",
+      "params": [
+        { "key": "work_item_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_builds",
+      "name": "List Builds",
+      "description": "GET /{project}/_apis/build/builds — list builds with optional statusFilter (inProgress|completed|cancelling|...).",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "status_filter", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_build",
+      "name": "Get Build",
+      "description": "GET /{project}/_apis/build/builds/{buildId} — fetch a single build.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "build_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "queue_build",
+      "name": "Queue Build",
+      "description": "POST /{project}/_apis/build/builds — queue a new build for a given definition. parameters is JSON-encoded into the body string.",
+      "method": "POST",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "definition_id", "type": "number", "required": true },
+        { "key": "source_branch", "type": "string", "required": false },
+        { "key": "parameters", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "GET /{project}/_apis/pipelines — list YAML pipelines in a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "continuation_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_releases",
+      "name": "List Releases",
+      "description": "GET https://vsrm.dev.azure.com/{org}/{project}/_apis/release/releases — list classic-RM releases.",
+      "method": "GET",
+      "params": [
+        { "key": "project", "type": "string", "required": true },
+        { "key": "definition_id", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}
