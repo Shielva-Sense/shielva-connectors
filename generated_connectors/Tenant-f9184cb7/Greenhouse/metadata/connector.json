@@ -11,7 +11,8 @@
       "label": "Harvest API Key",
       "type": "password",
       "required": true,
-      "description": "Your Greenhouse Harvest API key. Found in Greenhouse → Configure → Dev Center → API Credential Management."
+      "description": "Your Greenhouse Harvest API key. Found in Greenhouse \u2192 Configure \u2192 Dev Center \u2192 API Credential Management.",
+      "help": "Harvest API Key."
     }
   ],
   "capabilities": [
@@ -26,5 +27,169 @@
   ],
   "provider": "greenhouse",
   "service": "greenhouse",
-  "category": "ats"
+  "category": "ats",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all jobs, candidates, and applications from Greenhouse.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "List jobs (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_job",
+      "name": "Get Job",
+      "description": "Return a single job by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "job_id",
+          "label": "Job Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_candidates",
+      "name": "List Candidates",
+      "description": "List candidates (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_candidate",
+      "name": "Get Candidate",
+      "description": "Return a single candidate by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "candidate_id",
+          "label": "Candidate Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_applications",
+      "name": "List Applications",
+      "description": "List applications (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_application",
+      "name": "Get Application",
+      "description": "Return a single application by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "application_id",
+          "label": "Application Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "Return all departments.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_offices",
+      "name": "List Offices",
+      "description": "Return all offices.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "List users (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ]
 }
