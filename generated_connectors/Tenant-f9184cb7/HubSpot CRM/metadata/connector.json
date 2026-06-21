@@ -7,12 +7,42 @@
   "version": "1.0.0",
   "description": "HubSpot CRM connector for contacts, companies, deals, and tickets",
   "install_fields": [
-    {"key": "client_id", "label": "Client ID", "type": "string", "required": true},
-    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": true},
-    {"key": "redirect_uri", "label": "Redirect URI", "type": "string", "required": false},
-    {"key": "portal_id", "label": "Portal ID", "type": "string", "required": false}
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
+    },
+    {
+      "key": "portal_id",
+      "label": "Portal ID",
+      "type": "string",
+      "required": false,
+      "help": "Portal ID."
+    }
   ],
-  "capabilities": ["contacts", "companies", "deals", "tickets", "sync"],
+  "capabilities": [
+    "contacts",
+    "companies",
+    "deals",
+    "tickets",
+    "sync"
+  ],
   "oauth": {
     "auth_url": "https://app.hubspot.com/oauth/authorize",
     "token_url": "https://api.hubapi.com/oauth/v1/token",
@@ -23,5 +53,123 @@
       "tickets",
       "offline_access"
     ]
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync contacts, companies, deals, and tickets from HubSpot.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return all contacts, following the `after` cursor for pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "Return all companies, following the `after` cursor for pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Return all deals, following the `after` cursor for pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "Return all tickets, following the `after` cursor for pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Calls get_contact().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Calls get_deal().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "deal_id",
+          "label": "Deal Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "display_name": "Hubspot"
 }
