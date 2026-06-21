@@ -13,7 +13,7 @@
       "type": "string",
       "required": true,
       "placeholder": "Your Zendesk Sell OAuth application Client ID",
-      "help": "Find your Client ID in Zendesk Sell Settings → OAuth → Registered Applications."
+      "help": "Find your Client ID in Zendesk Sell Settings \u2192 OAuth \u2192 Registered Applications."
     },
     {
       "key": "client_secret",
@@ -35,12 +35,27 @@
   "oauth": {
     "authorization_url": "https://api.getbase.com/oauth2/authorize",
     "token_url": "https://api.getbase.com/oauth2/token",
-    "scopes": ["read"],
+    "scopes": [
+      "read"
+    ],
     "grant_type": "authorization_code"
   },
-  "scopes": ["read"],
-  "capabilities": ["sync", "health_check", "oauth2"],
-  "resources": ["contacts", "leads", "deals", "notes", "tasks", "pipelines"],
+  "scopes": [
+    "read"
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "resources": [
+    "contacts",
+    "leads",
+    "deals",
+    "notes",
+    "tasks",
+    "pipelines"
+  ],
   "features": [
     "retry",
     "pagination",
@@ -117,5 +132,141 @@
       "category": "pipelines",
       "endpoint": "GET /v3/pipelines"
     }
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Zendesk Sell resources into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return a single page of contacts from Zendesk Sell.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Return a single page of leads from Zendesk Sell.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Return a single page of deals from Zendesk Sell.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "Return a single page of notes from Zendesk Sell.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Return a single page of tasks from Zendesk Sell.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "Return all pipelines from Zendesk Sell.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "ZendeskSellConnector"
 }
