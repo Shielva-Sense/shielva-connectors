@@ -1,0 +1,4 @@
+# Connector-specific dependencies. httpx, pydantic, structlog, pytest,
+# pytest-asyncio, pytest-mock are pre-installed in the shared venv —
+# do NOT re-pin them here.
+respx>=0.21

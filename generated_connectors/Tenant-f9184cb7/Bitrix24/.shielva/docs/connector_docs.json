@@ -1,0 +1,84 @@
+{
+  "title": "Bitrix24 Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Bitrix24** is a unified CRM + collaboration suite (CRM leads/contacts/deals/companies, Tasks, Drive, Calendar, Messaging, Lists) exposing a REST API at tenant-scoped portals such as `https://{portal}.bitrix24.com/rest/`. This connector — `Bitrix24Connector` (`CONNECTOR_TYPE = \"bitrix24\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Bitrix24 portal:\n\n| Surface | Methods | Capability |\n|---|---|---|\n| User | `user.current`, `user.get` | Identify the caller + portal users |\n| CRM Leads | `crm.lead.list/get/add/update/delete` | Full lead lifecycle |\n| CRM Contacts | `crm.contact.list/get/add/update/delete` | Contacts with PHONE/EMAIL multi-value envelopes |\n| CRM Companies | `crm.company.list/add` | Companies |\n| CRM Deals | `crm.deal.list/get/add/update/delete` | Deal lifecycle |\n| CRM Quotes / Invoices | `crm.quote.list`, `crm.invoice.list` | Read quotes + invoices |\n| CRM Activities | `crm.activity.list/add` | Audit + log activities |\n| Tasks | `tasks.task.list/get/add/update` | Task list, create, update (camelCase keys) |\n| Disk | `disk.folder.getchildren` | List Bitrix24 Drive folder children |\n| Im (Messaging) | `im.message.add` | Send chat messages |\n| Lists | `lists.element.get` | Read Lists-module rows |\n| Calendar | `calendar.event.get` | Calendar events |\n\nThe connector normalises leads + contacts + deals + tasks into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::Bitrix24HTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate an inbound webhook URL\n\n1. Sign in to your Bitrix24 portal (`https://{portal}.bitrix24.com`).\n2. Open **Developer resources → Other → Inbound webhook**.\n3. Tick the permissions you need (`CRM`, `Tasks`, `User`, `Im`, `Disk`, `Calendar`, `Lists`).\n4. Click **Save** — Bitrix24 generates a URL of the form:\n\n```\nhttps://{portal}.bitrix24.com/rest/{user_id}/{webhook_code}/\n```\n\nCopy the URL — it is the credential. Treat it like a password; anyone with the URL can call the granted methods.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Bitrix24**, fill in:\n\n| Field | Value |\n|---|---|\n| `webhook_url` (secret, required) | URL from step 4 |\n| `access_token` (secret, optional) | Only when using OAuth mode instead of a webhook |\n| `portal` (text, optional) | Auto-derived from `webhook_url` |\n| `base_url` (text, optional) | Override the REST base |\n| `rate_limit_per_min` (number) | Soft cap, default 2 (Bitrix24 free tier) |\n| `timeout_s` (number) | Per-request timeout, default 30 |\n\nClick **Install**. `install()` validates the URL is well-formed (it does NOT call the API), initialises the `Bitrix24HTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which posts `user.current.json` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 / `QUERY_LIMIT_EXCEEDED` → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Bitrix24 supports two server-to-server auth modes — this connector treats both as `AUTH_TYPE = \"api_key\"`.\n\n### Mode A — Inbound webhook URL (default)\n\nThe webhook URL itself is the credential. Every method is invoked by POSTing to:\n\n```\n{webhook_url}{method}.json\n```\n\nNo additional headers or query params are required.\n\n### Mode B — OAuth2 access token\n\nApps that perform the OAuth dance externally end up with an `access_token`. The connector accepts that token + the portal subdomain and calls:\n\n```\nPOST https://{portal}.bitrix24.com/rest/{method}.json?auth={access_token}\n```\n\nMode A is preferred for tenant-installed integrations; Mode B is for marketplace apps.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `webhook_url` is well-formed OR `access_token` + `portal` are present. Initialises `Bitrix24HTTPClient`. Does **not** call Bitrix24. |\n| `authorize(...)` | Returns a `TokenInfo(access_token=credential, token_type=\"webhook\"|\"oauth\")` — there is no code exchange. |\n| `health_check()` | `POST user.current.json` — minimal probe. |\n| `ensure_token()` | Not called — credentials are static. |\n| token storage | None (webhook URL) or in install_fields (access_token). |\n\n### Header contract\n\nEvery outbound request:\n\n```\nContent-Type: application/json\nAccept:       application/json\n```\n\nNo `Authorization` header. In Mode B, auth travels in the `?auth=` query string."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `webhook_url` | secret | yes (Mode A) | `self.webhook_url` | Inbound webhook URL |\n| `access_token` | secret | optional (Mode B) | `self.access_token` | OAuth access token |\n| `portal` | text | no | `self.portal` | Auto-derived from `webhook_url` |\n| `base_url` | text | no | `self.base_url` | REST base override |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 2) | Client-side soft cap |\n| `timeout_s` | number | no | `self.timeout_s` (default 30) | httpx timeout |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"webhook_url\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```\n\nThe HTTP base URL is resolved per-request — there is no provider-wide `_BITRIX24_BASE`, every portal has its own host."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `Bitrix24Connector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::Bitrix24HTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `webhook_url` (Mode A) OR `access_token` + `portal`/`base_url` (Mode B); initialise `Bitrix24HTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` whose `access_token` is the configured credential and `token_type` is `\"webhook\"` or `\"oauth\"`.\n\n### `async health_check() -> ConnectorStatus`\nPOSTs `user.current.json`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages CRM leads + contacts + deals + tasks → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-user",
+          "title": "User",
+          "content": "### `async user_current() -> Dict`\n`POST user.current.json`.\n\n### `async list_users(*, start=0) -> Dict`\n`POST user.get.json` — Bitrix24 pages by 50."
+        },
+        {
+          "id": "api-crm-leads",
+          "title": "CRM — Leads",
+          "content": "### `async list_leads(*, start=0, select=None, filter=None, order=None) -> Dict`\n`POST crm.lead.list.json` — body: `{start, select?, filter?, order?}`.\n\n### `async get_lead(lead_id) -> Dict`\n`POST crm.lead.get.json` — body: `{id: lead_id}`.\n\n### `async create_lead(fields) -> Dict`\n`POST crm.lead.add.json` — body: `{fields: {...}}`.\n\n### `async update_lead(lead_id, fields) -> Dict`\n`POST crm.lead.update.json` — body: `{id, fields}`.\n\n### `async delete_lead(lead_id) -> Dict`\n`POST crm.lead.delete.json`."
+        },
+        {
+          "id": "api-crm-contacts",
+          "title": "CRM — Contacts",
+          "content": "### `async list_contacts(*, start=0, select=None, filter=None, order=None) -> Dict`\n`POST crm.contact.list.json` — defaults `select=['*','PHONE','EMAIL']`.\n\n### `async get_contact(contact_id) -> Dict`\n`POST crm.contact.get.json`.\n\n### `async create_contact(name='', last_name=None, phone=None, email=None, fields=None) -> Dict`\n`POST crm.contact.add.json`. Accepts `name`/`last_name`/`phone`/`email` shortcuts — phone/email are normalised to Bitrix24's `[{VALUE, VALUE_TYPE}]` envelopes — or raw `fields`.\n\n### `async update_contact(contact_id, fields) -> Dict`\n`POST crm.contact.update.json`.\n\n### `async delete_contact(contact_id) -> Dict`\n`POST crm.contact.delete.json`."
+        },
+        {
+          "id": "api-crm-deals-companies",
+          "title": "CRM — Deals + Companies",
+          "content": "### `async list_companies(*, start=0, select=None, filter=None) -> Dict`\n`POST crm.company.list.json`.\n\n### `async create_company(fields) -> Dict`\n`POST crm.company.add.json`.\n\n### `async list_deals(*, start=0, select=None, filter=None, order=None) -> Dict`\n`POST crm.deal.list.json`.\n\n### `async get_deal(deal_id) -> Dict`\n`POST crm.deal.get.json`.\n\n### `async create_deal(fields) -> Dict`\n`POST crm.deal.add.json`.\n\n### `async update_deal(deal_id, fields) -> Dict`\n`POST crm.deal.update.json`.\n\n### `async delete_deal(deal_id) -> Dict`\n`POST crm.deal.delete.json`."
+        },
+        {
+          "id": "api-crm-other",
+          "title": "CRM — Quotes / Invoices / Activities",
+          "content": "### `async list_quotes(*, start=0) -> Dict`\n`POST crm.quote.list.json`.\n\n### `async list_invoices(*, start=0) -> Dict`\n`POST crm.invoice.list.json`.\n\n### `async list_activities(*, start=0, filter=None) -> Dict`\n`POST crm.activity.list.json`.\n\n### `async create_activity(fields) -> Dict`\n`POST crm.activity.add.json`."
+        },
+        {
+          "id": "api-tasks",
+          "title": "Tasks",
+          "content": "### `async list_tasks(*, start=0, filter=None, select=None, order=None) -> Dict`\n`POST tasks.task.list.json` — result rows nested under `result.tasks`. Keys are camelCase (`id`, `title`, `responsibleId`).\n\n### `async get_task(task_id) -> Dict`\n`POST tasks.task.get.json` — body: `{taskId: task_id}`.\n\n### `async create_task(title, responsible_id, description=None, fields=None) -> Dict`\n`POST tasks.task.add.json` — body: `{fields: {TITLE, RESPONSIBLE_ID, DESCRIPTION?, ...}}`.\n\n### `async update_task(task_id, fields) -> Dict`\n`POST tasks.task.update.json`."
+        },
+        {
+          "id": "api-other",
+          "title": "Disk · Im · Lists · Calendar",
+          "content": "### `async list_disk_children(folder_id) -> Dict`\n`POST disk.folder.getchildren.json`.\n\n### `async send_im_message(*, dialog_id, message, system=False) -> Dict`\n`POST im.message.add.json` — body: `{DIALOG_ID, MESSAGE, SYSTEM?}`.\n\n### `async list_lists_elements(iblock_id, *, filter=None) -> Dict`\n`POST lists.element.get.json`.\n\n### `async list_calendar_events(*, owner_id, type='user', from_date=None, to_date=None) -> Dict`\n`POST calendar.event.get.json`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nBitrix24Error                          # base; carries status_code + response_body\n├── Bitrix24AuthError                  # 401 / 403 / expired_token / NO_AUTH_FOUND\n├── Bitrix24BadRequestError            # 400\n├── Bitrix24NotFoundError              # 404 / ERROR_NOT_FOUND\n├── Bitrix24ConflictError              # 409\n├── Bitrix24RateLimitError             # 429 / QUERY_LIMIT_EXCEEDED — retry_after_s\n└── Bitrix24ServerError                # 5xx / transport\n```\n\nBack-compat aliases preserved:\n```\nBitrix24NetworkError    = Bitrix24ServerError    # legacy name\nBitrix24NotFound        = Bitrix24NotFoundError\nBitrix24APIError        = Bitrix24Error\nBitrix24ConnectorError  = Bitrix24Error\n```\n\n### Bitrix24's embedded-error envelope\n\nBitrix24 returns app-level errors as **HTTP 200** with a JSON body:\n\n```json\n{ \"error\": \"QUERY_LIMIT_EXCEEDED\", \"error_description\": \"too many requests\" }\n```\n\nThe HTTP client maps:\n\n| `error` token | Raises |\n|---|---|\n| `expired_token`, `invalid_token`, `NO_AUTH_FOUND`, `ACCESS_DENIED`, `INVALID_CREDENTIALS` | `Bitrix24AuthError` |\n| `QUERY_LIMIT_EXCEEDED`, `OPERATION_TIME_LIMIT` | `Bitrix24RateLimitError` (retried) |\n| `ERROR_NOT_FOUND`, `NOT_FOUND` | `Bitrix24NotFound` |\n| any other | `Bitrix24Error` |\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Trigger | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 (HTTP) or `QUERY_LIMIT_EXCEEDED` (embedded) | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `Bitrix24NetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `webhook_url` blank or malformed (missing `/rest/` segment) | Re-paste the full URL from Bitrix24 → Developer resources → Inbound webhook. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — webhook URL has been revoked or lacks scope | In Bitrix24 → Developer resources → Inbound webhook → Edit, tick the permissions you need (CRM/Tasks/User/etc.) and save. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — webhook URL deleted, or `access_token` expired (Mode B) | Re-issue the webhook URL OR refresh the OAuth token. |\n| `Bitrix24RateLimitError: QUERY_LIMIT_EXCEEDED` | Hitting the per-second operating quota | The client retries 3× with exponential backoff. Lower `rate_limit_per_min` or chunk your calls. The free tier is 2 req/s. |\n| 404 on `crm.*.get` | Wrong ID or the record was deleted | Verify the ID exists by calling `crm.*.list` first. |\n| `tasks.task.list` returns empty `result.tasks` | `tasks.task.list` requires `select`/`filter` in some plans | Pass `select=['ID','TITLE','STATUS','RESPONSIBLE_ID']` explicitly. |\n| `Bitrix24Error: NO_AUTH_FOUND` despite a valid URL | URL got truncated when pasted into a form field | Ensure the trailing slash is present and no characters were dropped. |\n| `ImportError: cannot import name 'Bitrix24NetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `Bitrix24NetworkError = Bitrix24ServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}
