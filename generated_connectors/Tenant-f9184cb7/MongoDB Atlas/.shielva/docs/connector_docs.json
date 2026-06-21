@@ -1,0 +1,84 @@
+{
+  "title": "MongoDB Atlas Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**MongoDB Atlas** is the managed-MongoDB SaaS from MongoDB, Inc. Its **Admin API v2** (control plane) lives at `https://cloud.mongodb.com/api/atlas/v2`. This connector — `MongoDBAtlasConnector` (`CONNECTOR_TYPE = \"mongodb_atlas\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs to manage their Atlas footprint:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Organizations | `/orgs` | List + read |\n| Projects (Groups) | `/groups` | List, read, create, delete |\n| Clusters | `/groups/{id}/clusters` | List, read, create, modify (PATCH), delete |\n| Database Users | `/groups/{id}/databaseUsers` | List + SCRAM user CRUD |\n| Network Access List | `/groups/{id}/accessList` | List + add IP/CIDR/AWS security group entries |\n| Cloud Backup Snapshots | `/groups/{id}/clusters/{name}/backup/snapshots` | List |\n| Alerts | `/groups/{id}/alerts` | List + filter by status |\n| Programmatic API Keys | `/orgs/{id}/apiKeys` | List (read-only) |\n| Billing | `/orgs/{id}/invoices` | List invoices |\n\nThe connector retries 429/5xx with exponential backoff (3 attempts) honouring `Retry-After`, and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::MongoDBAtlasHTTPClient`). The MongoDB **wire protocol** (data plane, `mongodb://`) is out of scope — this is an admin-plane connector. Tenants that want alerts or cluster descriptions in their KB can use `helpers.normalizer.normalize_alert` / `normalize_cluster` directly."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create an Atlas Programmatic API Key\n\n1. Sign in to https://cloud.mongodb.com.\n2. Pick the **Organization** you want this connector to manage.\n3. **Access Manager → API Keys → Create API Key**.\n4. Give it a descriptive name (e.g. `shielva-atlas-connector`).\n5. Grant roles — for full management capability choose **Organization Owner**, or **Organization Project Creator** + per-project **Project Owner** as a tighter alternative.\n6. Click **Next**. Atlas shows you the **Public Key** and **Private Key**.\n7. **Copy the private key now** — Atlas only displays it once.\n\n### 2. Whitelist the caller IP\n\nOn the same API Key page, scroll to **Access List** and add the egress IP(s) of the host that will run the connector (or `0.0.0.0/0` for unrestricted — discouraged in production).\n\n### 3. Install in ACP\n\nIn **ACP → Manage Connectors → MongoDB Atlas**, fill in:\n\n| Field | Value |\n|---|---|\n| `public_key` (string) | Atlas public key (8-char) |\n| `private_key` (secret) | Atlas private key (UUID-shaped) |\n| `default_org_id` (string, optional) | 24-char hex from URL |\n| `default_project_id` (string, optional) | 24-char hex from URL |\n| `base_url` (string, optional) | Override `https://cloud.mongodb.com/api/atlas/v2` (rarely needed) |\n| `api_version` (string, optional) | Default `2025-03-12` |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n\nClick **Install**. `install()` validates `public_key` + `private_key` are present (it does NOT call the API), initialises the `MongoDBAtlasHTTPClient` with `httpx.DigestAuth`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 4. First health check\n\nThe gateway calls `health_check()` which lists 1 org as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + INVALID_CREDENTIALS`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "MongoDB Atlas Admin API uses **HTTP Digest authentication** (RFC 7616) with a `(public_key, private_key)` pair issued from **Organization → Access Manager → API Keys** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry until the key is rotated.\n\n### Credential model\n\n- `public_key` is the Digest username.\n- `private_key` is the Digest password.\n- `httpx.DigestAuth(public_key, private_key)` handles the 401-challenge → 200-success two-round-trip dance natively — no manual nonce/HA1/HA2 work needed.\n\n### Versioned Accept header\n\nAtlas REQUIRES a versioned media-type in the `Accept` header:\n\n```\nAccept: application/vnd.atlas.<YYYY-MM-DD>+json\n```\n\nThe connector defaults to `2025-03-12` and exposes it as the `api_version` install field for future bumps.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `public_key` + `private_key`. Initialises `MongoDBAtlasHTTPClient`. Does **not** call any Atlas endpoint. |\n| `authorize(...)` | Returns an empty `TokenInfo(token_type=\"digest\")` — there is no token exchange. |\n| `health_check()` | `GET /orgs?itemsPerPage=1` — minimal Digest probe. |\n| `ensure_token()` | Not called — Digest has no token lifecycle. |\n| token storage | None. Credentials live in `self.config` and are re-read at request time. |\n\n### Wire contract\n\nEvery outbound request:\n\n```\nAccept:        application/vnd.atlas.2025-03-12+json\nContent-Type:  application/json\nAuthorization: Digest username=<public_key>, realm=\"MongoDB Atlas\", nonce=…, uri=…, response=…, qop=auth, nc=…, cnonce=…\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `public_key` | string | yes | `self.public_key` | Digest username |\n| `private_key` | secret | yes | `self.private_key` | Digest password |\n| `default_org_id` | string | no | `self.default_org_id` | Per-call default org for shorthand ops |\n| `default_project_id` | string | no | `self.default_project_id` | Per-call default project for shorthand ops |\n| `base_url` | string | no | `self.base_url` (defaults to `https://cloud.mongodb.com/api/atlas/v2`) | Override for private Atlas deployments |\n| `api_version` | string | no | `self.api_version` (default `2025-03-12`) | Versioned Accept header |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"public_key\", \"private_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_BASE_URL = \"https://cloud.mongodb.com/api/atlas/v2\"\n_DEFAULT_API_VERSION = \"2025-03-12\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `MongoDBAtlasConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::MongoDBAtlasHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `public_key` + `private_key`; initialise `MongoDBAtlasHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for Digest auth — returns an empty `TokenInfo(token_type=\"digest\")`.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 org via `GET /orgs?itemsPerPage=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nAtlas admin API is a control plane — no documents to ingest. Returns `SyncResult(COMPLETED, 0, 0, 0)`. Callers that want alerts/clusters projected into a KB should use `helpers.normalizer.normalize_alert` / `normalize_cluster` directly."
+        },
+        {
+          "id": "api-organizations",
+          "title": "Organizations",
+          "content": "### `async list_organizations(*, page_num=1, items_per_page=100) -> Dict`\n`GET /orgs?pageNum={N}&itemsPerPage={N}`.\n\n### `async get_organization(org_id: str) -> Dict`\n`GET /orgs/{org_id}`."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects (Groups)",
+          "content": "### `async list_projects(*, page_num=1, items_per_page=100) -> Dict`\n`GET /groups?pageNum={N}&itemsPerPage={N}`.\n\n### `async get_project(project_id) -> Dict`\n`GET /groups/{project_id}`.\n\n### `async create_project(name, org_id, with_default_alerts_settings=True) -> Dict`\n`POST /groups` — body `{name, orgId, withDefaultAlertsSettings}`.\n\n### `async delete_project(project_id) -> Dict`\n`DELETE /groups/{project_id}`."
+        },
+        {
+          "id": "api-clusters",
+          "title": "Clusters",
+          "content": "### `async list_clusters(project_id) -> Dict`\n`GET /groups/{project_id}/clusters`.\n\n### `async get_cluster(project_id, cluster_name) -> Dict`\n`GET /groups/{project_id}/clusters/{cluster_name}`.\n\n### `async create_cluster(project_id, name, cluster_type='REPLICASET', provider_settings=None, num_shards=1, mongo_db_major_version='7.0') -> Dict`\n`POST /groups/{project_id}/clusters` — body built by `helpers.utils.build_cluster_payload`. Defaults to AWS US_EAST_1 / M10 / MongoDB 7.0 when `provider_settings` is omitted.\n\n### `async modify_cluster(project_id, cluster_name, patch) -> Dict`\n`PATCH /groups/{project_id}/clusters/{cluster_name}` — partial update with the `patch` dict.\n\n### `async delete_cluster(project_id, cluster_name) -> Dict`\n`DELETE /groups/{project_id}/clusters/{cluster_name}` — irreversible teardown."
+        },
+        {
+          "id": "api-db-users",
+          "title": "Database Users",
+          "content": "### `async list_database_users(project_id, items_per_page=100) -> Dict`\n`GET /groups/{project_id}/databaseUsers`.\n\n### `async create_database_user(project_id, username, password, database_name='admin', roles=None, scopes=None) -> Dict`\n`POST /groups/{project_id}/databaseUsers` — body built by `helpers.utils.build_database_user_payload`. Default role is `readWriteAnyDatabase`.\n\n### `async delete_database_user(project_id, username, database_name='admin') -> Dict`\n`DELETE /groups/{project_id}/databaseUsers/{database_name}/{username}`."
+        },
+        {
+          "id": "api-network-access",
+          "title": "Network Access List",
+          "content": "### `async list_network_access(project_id) -> Dict`\n`GET /groups/{project_id}/accessList`.\n\n### `async add_network_access(project_id, entries) -> Dict`\n`POST /groups/{project_id}/accessList` — body is a JSON **array** of entries (Atlas convention). Each entry:\n`{\"cidrBlock\": \"10.0.0.0/24\", \"comment\": \"office-vpn\"}` or `{\"ipAddress\": \"1.2.3.4\", \"comment\": \"bastion\"}` or `{\"awsSecurityGroup\": \"sg-…\", \"comment\": \"…\"}`."
+        },
+        {
+          "id": "api-snapshots-alerts",
+          "title": "Snapshots · Alerts",
+          "content": "### `async list_snapshots(project_id, cluster_name) -> Dict`\n`GET /groups/{project_id}/clusters/{cluster_name}/backup/snapshots` — Cloud Backup snapshot index for a single cluster.\n\n### `async list_alerts(project_id, status=None, page_num=1, items_per_page=100) -> Dict`\n`GET /groups/{project_id}/alerts` — optional `status` filter (`OPEN`, `CLOSED`, `TRACKING`)."
+        },
+        {
+          "id": "api-keys-billing",
+          "title": "API Keys · Billing",
+          "content": "### `async list_api_keys(org_id, page_num=1, items_per_page=100) -> Dict`\n`GET /orgs/{org_id}/apiKeys` — list org-level programmatic keys. Read-only here; key provisioning is intentionally out of scope to avoid privilege-escalation surfaces.\n\n### `async list_invoices(org_id, page_num=1, items_per_page=100) -> Dict`\n`GET /orgs/{org_id}/invoices` — list org billing invoices."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nMongoDBAtlasError                       # base; carries status_code + response_body\n├── MongoDBAtlasAuthError                # 401 / 403\n├── MongoDBAtlasBadRequestError          # 400\n├── MongoDBAtlasNotFoundError            # 404  (alias: MongoDBAtlasNotFound)\n├── MongoDBAtlasConflictError            # 409  (duplicate cluster name, etc.)\n├── MongoDBAtlasRateLimitError           # 429  (retry_after_s)\n├── MongoDBAtlasServerError              # 5xx\n└── MongoDBAtlasNetworkError             # transport (DNS, timeout, refused)\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff honouring `Retry-After` header when present; otherwise `_BACKOFF_BASE_S * 2 ** attempt` (0.5s, 1s, 2s). Retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `MongoDBAtlasNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)            — logged as warning\nnetwork → ConnectorStatus(OFFLINE, AUTHENTICATED)\nother   → ConnectorStatus(DEGRADED, AUTHENTICATED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `public_key` or `private_key` blank | Re-enter both in ACP. Atlas shows the private key only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Atlas — API key lacks the role | In Atlas → Access Manager → API Keys, grant `Organization Owner` (or `Organization Project Creator` + per-project `Project Owner`). |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 401 — Digest credentials wrong or key revoked | Verify `public_key` / `private_key` exactly. Atlas Digest fails silently for typos. Re-generate the key if needed. |\n| Persistent 401 after correct keys | Caller IP not on the API key's access list | In Atlas → API Key detail → Access List, add the egress IP of the host running the connector. |\n| `mongodb_atlas.retry` warnings spike | Hitting 429 (Atlas per-minute quota) | The client retries honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_cluster` / `get_project` | Wrong project_id or cluster_name | Verify with `list_projects` / `list_clusters`; Atlas IDs are 24-char hex from the URL. |\n| `MongoDBAtlasConflictError` on `create_cluster` | Cluster name already in use in this project | Pick a different name or `delete_cluster` first (irreversible). |\n| `ImportError: cannot import name 'MongoDBAtlasNotFound'` | Older callers using legacy name | Already fixed — `MongoDBAtlasNotFound = MongoDBAtlasNotFoundError` alias added in `exceptions.py`. |\n| Versioned Accept rejected by Atlas | Atlas deprecated the version date set in `api_version` | Bump `api_version` in install field to the current supported date (Atlas publishes changes at https://www.mongodb.com/docs/atlas/reference/api-versioning). |\n| Wire-protocol queries needed (data plane) | Atlas Admin API doesn't expose data plane | Use `pymongo` / `motor` with the connection string from `get_cluster(...)['connectionStrings']`. This connector is admin-only by design. |"
+    }
+  ]
+}
