@@ -11,7 +11,8 @@
       "label": "API Token",
       "type": "password",
       "required": true,
-      "description": "Lattice API token generated from your Lattice account settings."
+      "description": "Lattice API token generated from your Lattice account settings.",
+      "help": "API Token."
     }
   ],
   "capabilities": [
@@ -25,5 +26,82 @@
   ],
   "provider": "Lattice",
   "service": "Lattice",
-  "category": "hr"
+  "category": "hr",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Lattice users, goals, and performance reviews into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all Lattice users/employees (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_goals",
+      "name": "List Goals",
+      "description": "Return all Lattice goals/OKRs (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_reviews",
+      "name": "List Reviews",
+      "description": "Return all Lattice performance reviews (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_feedback",
+      "name": "List Feedback",
+      "description": "Return all Lattice feedback/praise entries (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "Return all Lattice departments (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Return a single Lattice user as a ConnectorDocument.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
