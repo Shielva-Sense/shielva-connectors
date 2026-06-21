@@ -1,0 +1,74 @@
+{
+  "title": "Discord Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Discord** is a chat / voice / community platform exposing a REST API at `https://discord.com/api/v10`. This connector — `DiscordConnector` (`CONNECTOR_TYPE = \"discord\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Discord bot or OAuth app:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users/@me`, `/users/{user.id}` | Identify the bot/user, look up other users |\n| Guilds | `/users/@me/guilds`, `/guilds/{guild.id}` | List + read guilds (servers) the bot belongs to |\n| Channels | `/guilds/{guild.id}/channels`, `/channels/{channel.id}` | List + read text/voice/thread channels |\n| Messages | `/channels/{channel.id}/messages` | Send / read / edit / delete channel messages |\n| Members | `/guilds/{guild.id}/members` | List + read members |\n| Roles | `/guilds/{guild.id}/members/{user.id}/roles/{role.id}` | Add / remove role from member |\n| Webhooks | `/channels/{channel.id}/webhooks`, `/webhooks/{webhook.id}/{webhook.token}` | Create + execute server-side webhooks |\n\nThe connector normalises guilds + channels + messages into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff that honours Discord's `retry_after` body field (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::DiscordHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Mint a Discord bot token\n\n1. Sign in to the **Discord Developer Portal** at https://discord.com/developers/applications.\n2. Click **New Application**, name it (e.g. `Shielva Connector`), accept the ToS.\n3. In the left nav open **Bot** → click **Reset Token** → confirm. Copy the token immediately (Discord shows it only once).\n4. Optional but typical: enable the **Privileged Gateway Intents** you need (Server Members, Message Content) — required for `list_guild_members` and reading message bodies in non-DM channels.\n5. Open **OAuth2 → URL Generator**, tick `bot` scope, pick the bot permissions you need (Send Messages, Read Message History, Manage Roles, …), and open the generated URL to invite the bot to your guild(s).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Discord**, fill in:\n\n| Field | Value |\n|---|---|\n| `bot_token` (secret) | Bot token from step 3 |\n| `oauth_token` (secret, optional) | Bearer OAuth2 user-token override |\n| `base_url` (text, optional) | Override `https://discord.com/api/v10` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 50 |\n\nClick **Install**. `install()` validates `bot_token` (or `oauth_token`) is present (it does NOT call the API), initialises the `DiscordHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which issues `GET /users/@me` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Discord REST API supports two server-friendly auth schemes; this connector exposes one install field (`bot_token`) and treats it as the api_key (`AUTH_TYPE = \"api_key\"`).\n\n### Credential model\n\n- `bot_token` is sent as `Authorization: Bot <bot_token>` (Discord-specific prefix).\n- `oauth_token` (when set) overrides the header to `Authorization: Bearer <oauth_token>` — useful when the integration needs to act on behalf of a Discord user instead of a bot.\n- `User-Agent: DiscordBot (https://shielva.ai, 1.0)` is sent on every request (Discord requires a non-empty UA on REST calls).\n\n### Bot vs OAuth side-by-side\n\n| Aspect | Bot token (default) | OAuth user token (override) |\n|---|---|---|\n| Header | `Authorization: Bot <token>` | `Authorization: Bearer <token>` |\n| Lifetime | Long-lived; rotates only on Reset Token | Short-lived; refresh out of scope for this revision |\n| Acts as | Bot user | The end user who granted consent |\n| Required scope | `bot` (at invite time) | `identify guilds messages.read` (typical) |\n| Install field | `bot_token` (required) | `oauth_token` (optional) |\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `bot_token` or `oauth_token` is present. Initialises `DiscordHTTPClient`. Does **not** call any Discord endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo(access_token=<token>, token_type=\"Bot\"|\"Bearer\")` — no exchange is performed. |\n| `health_check()` | `GET /users/@me` — minimal probe. |\n| `ensure_token()` | Not called — bot tokens are long-lived; OAuth refresh is out of scope. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bot <bot_token>            ← default\n            OR Bearer <oauth_token>        ← when oauth_token is set\nUser-Agent:    DiscordBot (https://shielva.ai, 1.0)\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `bot_token` | secret | yes | `self.bot_token` | Authorization header value (Bot prefix added by HTTP client) |\n| `oauth_token` | secret | no | `self.oauth_token` | Optional Bearer override |\n| `base_url` | text | no | `self.base_url` (defaults to `https://discord.com/api/v10`) | API base URL |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 50) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"bot_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\nDISCORD_BASE_URL = \"https://discord.com/api/v10\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `DiscordConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::DiscordHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `bot_token` (or `oauth_token`); initialise `DiscordHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` whose access_token is the configured bot/OAuth token.\n\n### `async health_check() -> ConnectorStatus`\nIssues `GET /users/@me` as a lightweight probe. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates guilds → channels (text-typed only) → most recent 50 messages → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-guilds",
+          "title": "Guilds",
+          "content": "### `async list_guilds(limit=100, before=None, after=None) -> List`\n`GET /users/@me/guilds?limit={N}&before={S}&after={S}` — snowflake cursor pagination.\n\n### `async get_guild(guild_id) -> Dict`\n`GET /guilds/{guild_id}`."
+        },
+        {
+          "id": "api-channels",
+          "title": "Channels",
+          "content": "### `async list_channels(guild_id) -> List`\n`GET /guilds/{guild_id}/channels`.\n\n### `async get_channel(channel_id) -> Dict`\n`GET /channels/{channel_id}`."
+        },
+        {
+          "id": "api-messages",
+          "title": "Messages",
+          "content": "### `async send_message(channel_id, content, embeds=None, components=None) -> Dict`\n`POST /channels/{channel_id}/messages` — body: `{content, embeds?, components?}`.\n\n### `async get_message(channel_id, message_id) -> Dict`\n`GET /channels/{channel_id}/messages/{message_id}`.\n\n### `async list_messages(channel_id, limit=50, before=None, after=None, around=None) -> List`\n`GET /channels/{channel_id}/messages?limit={N}` — snowflake cursor pagination.\n\n### `async edit_message(channel_id, message_id, content) -> Dict`\n`PATCH /channels/{channel_id}/messages/{message_id}` — body: `{content}`.\n\n### `async delete_message(channel_id, message_id) -> Dict`\n`DELETE /channels/{channel_id}/messages/{message_id}`."
+        },
+        {
+          "id": "api-members-roles-users",
+          "title": "Members · Roles · Users",
+          "content": "### `async list_guild_members(guild_id, limit=100, after=None) -> List`\n`GET /guilds/{guild_id}/members`.\n\n### `async get_user(user_id) -> Dict`\n`GET /users/{user_id}`.\n\n### `async add_role(guild_id, user_id, role_id) -> Dict`\n`PUT /guilds/{guild_id}/members/{user_id}/roles/{role_id}`.\n\n### `async remove_role(guild_id, user_id, role_id) -> Dict`\n`DELETE /guilds/{guild_id}/members/{user_id}/roles/{role_id}`."
+        },
+        {
+          "id": "api-webhooks",
+          "title": "Webhooks",
+          "content": "### `async create_webhook(channel_id, name) -> Dict`\n`POST /channels/{channel_id}/webhooks` — body: `{name}`.\n\n### `async execute_webhook(webhook_id, webhook_token, content, embeds=None) -> Dict`\n`POST /webhooks/{webhook_id}/{webhook_token}` — body: `{content, embeds?}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nDiscordError                          # base; carries status_code + response_body\n├── DiscordAuthError                  # 401 / 403\n├── DiscordBadRequestError            # 400\n├── DiscordNotFoundError              # 404\n├── DiscordConflictError              # 409\n├── DiscordRateLimitError             # 429 — retry_after\n└── DiscordServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nDiscordNetworkError = DiscordServerError      # legacy name\nDiscordNotFound     = DiscordNotFoundError\nDiscordAPIError     = DiscordError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Sleep for the body's `retry_after` (capped at `_MAX_RETRY_AFTER=10s`), then retry up to `_MAX_RETRIES=3` |\n| 5xx | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `DiscordNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `bot_token` and `oauth_token` both blank | Re-enter the bot token in ACP. Developer Portal shows the token only once at generation — Reset Token if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Discord — bot lacks the required intent or guild permission | In the Developer Portal → Bot → enable Server Members / Message Content intents. Re-invite the bot to the guild with the right permissions. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — bot token rotated or OAuth token expired | Reset the bot token in the Developer Portal and re-enter, or refresh the OAuth token out-of-band. |\n| `discord.http.rate_limited` warnings spike | Hitting 429 (Discord per-route bucket) | The client sleeps `retry_after` (capped at 10s) and retries. Lower request volume or batch fewer per minute. |\n| 404 on a channel/message call | `channel_id`/`message_id` wrong, OR bot not in the channel | Verify the snowflake. Verify the bot was invited to the guild with channel-read permission. |\n| `ImportError: cannot import name 'DiscordNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `DiscordNetworkError = DiscordServerError` alias added in `exceptions.py`. |\n| Webhook returns 401 on execute_webhook | Wrong webhook_token | Tokens belong to the specific webhook id; re-fetch via the channel's webhooks list. |"
+    }
+  ]
+}
