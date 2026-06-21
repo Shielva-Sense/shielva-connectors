@@ -104,37 +104,52 @@
     {
       "name": "Install / Authenticate",
       "id": "install",
-      "category": "auth"
+      "category": "auth",
+      "description": "Validate client_id/client_secret by acquiring an OAuth2 token.",
+      "method": "GET"
     },
     {
       "name": "Health Check",
       "id": "health_check",
-      "category": "health"
+      "category": "health",
+      "description": "POST /v1/oauth2/token to verify credentials are still valid.",
+      "method": "GET"
     },
     {
       "name": "Sync Transactions & Orders",
       "id": "sync",
-      "category": "sync"
+      "category": "sync",
+      "description": "Sync PayPal transactions and orders into the knowledge base.",
+      "method": "GET"
     },
     {
       "name": "List Transactions",
       "id": "list_transactions",
-      "category": "transactions"
+      "category": "transactions",
+      "description": "GET /v1/reporting/transactions \u2014 paginated transaction list.",
+      "method": "GET"
     },
     {
       "name": "Get Order",
       "id": "get_order",
-      "category": "orders"
+      "category": "orders",
+      "description": "GET /v2/checkout/orders/{order_id}",
+      "method": "GET"
     },
     {
       "name": "List Payments",
       "id": "list_payments",
-      "category": "payments"
+      "category": "payments",
+      "description": "GET /v1/payments/payment \u2014 paginated payment list.",
+      "method": "GET"
     },
     {
       "name": "Get Balance",
       "id": "get_balance",
-      "category": "balance"
+      "category": "balance",
+      "description": "GET /v1/reporting/balances",
+      "method": "GET"
     }
-  ]
+  ],
+  "display_name": "Paypal"
 }
