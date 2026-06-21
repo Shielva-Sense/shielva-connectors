@@ -1,0 +1,261 @@
+{
+  "connector_type": "elasticsearch",
+  "name": "ElasticsearchConnector",
+  "display_name": "Elasticsearch",
+  "version": "1.0.0",
+  "description": "Connects to Elasticsearch (self-hosted or Elastic Cloud) to manage indices, index and search documents (full DSL), run bulk operations (NDJSON), maintain mappings, and inspect aliases + snapshots. Authenticates via Kibana-issued API keys, HTTP Basic, or anonymous self-hosted clusters. Streams JSON for all single-document endpoints and application/x-ndjson for /_bulk. Per-tenant cluster URL — every tenant brings their own base_url.",
+  "provider": "elasticsearch",
+  "service": "elasticsearch",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Cluster URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://my-cluster.es.us-east-1.aws.elastic-cloud.com:9243",
+      "help": "Full URL — Elastic Cloud (https://*.cloud.es.io:9243) or self-hosted (https://es.internal:9200). Per-tenant, no default."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Paste the encoded API key from Kibana",
+      "help": "Generate from Kibana → Stack Management → API Keys. Preferred over basic auth. Sent as 'Authorization: ApiKey <key>' (NOT Bearer). Leave blank for anonymous self-hosted clusters."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "string",
+      "required": false,
+      "placeholder": "elastic",
+      "help": "HTTP Basic fallback — required only if not using api_key."
+    },
+    {
+      "key": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Enter the password for the user above",
+      "help": "Required with username."
+    },
+    {
+      "key": "verify_ssl",
+      "label": "Verify TLS",
+      "type": "boolean",
+      "required": false,
+      "default": "true",
+      "placeholder": "true",
+      "help": "Disable only for self-signed dev clusters — never in production."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "600",
+      "placeholder": "600",
+      "help": "Soft client-side rate limit. Elasticsearch's hard limit depends on cluster sizing and circuit breakers."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates base_url and probes GET / to verify reachability, then persists config.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes GET /_cluster/health — returns even on yellow/red status (DEGRADED instead of OFFLINE).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_cluster_health",
+      "name": "Get Cluster Health",
+      "description": "GET /_cluster/health?level=… — green/yellow/red status, shard counts, node counts.",
+      "method": "GET",
+      "params": [
+        { "key": "level", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_indices",
+      "name": "List Indices",
+      "description": "GET /_cat/indices/{pattern}?format=json — list indices matching a glob.",
+      "method": "GET",
+      "params": [
+        { "key": "index_pattern", "type": "string", "required": false },
+        { "key": "format", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_index",
+      "name": "Get Index",
+      "description": "GET /{index} — full index info (settings + mappings + aliases).",
+      "method": "GET",
+      "params": [
+        { "key": "index", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_index",
+      "name": "Create Index",
+      "description": "PUT /{index} — create index with optional settings and mappings.",
+      "method": "PUT",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "settings", "type": "object", "required": false },
+        { "key": "mappings", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_index",
+      "name": "Delete Index",
+      "description": "DELETE /{index} — irreversible.",
+      "method": "DELETE",
+      "params": [
+        { "key": "index", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "index_document",
+      "name": "Index Document",
+      "description": "POST /{index}/_doc (auto-id) or PUT /{index}/_doc/{id} (upsert). refresh=true|false|wait_for.",
+      "method": "POST",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "document", "type": "object", "required": true },
+        { "key": "doc_id", "type": "string", "required": false },
+        { "key": "refresh", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_document",
+      "name": "Get Document",
+      "description": "GET /{index}/_doc/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "doc_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_document",
+      "name": "Update Document",
+      "description": "POST /{index}/_update/{id} — partial update or upsert (doc_as_upsert=true).",
+      "method": "POST",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "doc_id", "type": "string", "required": true },
+        { "key": "doc", "type": "object", "required": true },
+        { "key": "doc_as_upsert", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_document",
+      "name": "Delete Document",
+      "description": "DELETE /{index}/_doc/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "doc_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search",
+      "name": "Search",
+      "description": "POST /{index}/_search — execute a query DSL with size, from, sort, and aggs.",
+      "method": "POST",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "query", "type": "object", "required": true },
+        { "key": "size", "type": "number", "required": false },
+        { "key": "from_", "type": "number", "required": false },
+        { "key": "sort", "type": "array", "required": false },
+        { "key": "aggs", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "bulk",
+      "name": "Bulk",
+      "description": "POST /_bulk — paired action+source NDJSON. Caller supplies the paired list; the client serialises and sets Content-Type=application/x-ndjson.",
+      "method": "POST",
+      "params": [
+        { "key": "operations", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "count",
+      "name": "Count",
+      "description": "POST /{index}/_count — count documents (optionally filtered by query).",
+      "method": "POST",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "query", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_mapping",
+      "name": "Get Mapping",
+      "description": "GET /{index}/_mapping.",
+      "method": "GET",
+      "params": [
+        { "key": "index", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "put_mapping",
+      "name": "Put Mapping",
+      "description": "PUT /{index}/_mapping — add or update field mappings.",
+      "method": "PUT",
+      "params": [
+        { "key": "index", "type": "string", "required": true },
+        { "key": "properties", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_aliases",
+      "name": "List Aliases",
+      "description": "GET /_cat/aliases[/{name}]?format=json — list aliases for an index or globally.",
+      "method": "GET",
+      "params": [
+        { "key": "name", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_snapshots",
+      "name": "List Snapshots",
+      "description": "GET /_snapshot/{repository}/_all — list snapshots in a repository.",
+      "method": "GET",
+      "params": [
+        { "key": "repository", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
