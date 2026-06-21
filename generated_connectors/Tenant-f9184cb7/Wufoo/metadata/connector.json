@@ -1,0 +1,253 @@
+{
+  "connector_type": "wufoo",
+  "name": "WufooConnector",
+  "display_name": "Wufoo",
+  "version": "1.0.0",
+  "description": "Connects to the Wufoo REST API (v3) — Forms, Entries, Fields, Reports, Users, Webhooks, Comments — using an account API key over HTTP Basic. The base URL is subdomain-specific: https://{subdomain}.wufoo.com/api/v3.",
+  "provider": "wufoo",
+  "service": "wufoo",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "subdomain",
+      "label": "Wufoo Subdomain",
+      "type": "string",
+      "required": true,
+      "placeholder": "acme",
+      "help": "Your Wufoo subdomain — if your dashboard URL is acme.wufoo.com, enter 'acme'. The connector constructs https://{subdomain}.wufoo.com/api/v3 from this value."
+    },
+    {
+      "key": "api_key",
+      "label": "Wufoo API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "AAAA-BBBB-CCCC-DDDD",
+      "help": "From Wufoo → Account → API Information. Sent as the HTTP Basic auth username; the password is the literal placeholder string 'footastic' (any non-empty string is accepted by Wufoo)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft cap on Wufoo REST requests per minute. Default 60 matches Wufoo's standard quota."
+    },
+    {
+      "key": "base_url",
+      "label": "Wufoo API Base URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://acme.wufoo.com/api/v3",
+      "help": "Override the default subdomain-derived base URL. Leave blank for production; useful for proxies and integration tests."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates subdomain + api_key and probes /users.json before marking the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Wufoo API connectivity by fetching the list of users.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users.json — returns every user the API key can see (used as the health probe).",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "GET /forms.json — returns summary metadata for every form on the account.",
+      "method": "GET",
+      "params": [
+        { "key": "include_todays_count", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_form",
+      "name": "Get Form",
+      "description": "GET /forms/{form_id}.json — returns a single form's metadata by ID or hash.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_fields",
+      "name": "List Fields",
+      "description": "GET /forms/{form_id}/fields.json — returns the field definitions (id, type, required, sub-fields) for a form.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "system", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_entries",
+      "name": "List Entries",
+      "description": "GET /forms/{form_id}/entries.json — paginated, filterable, sortable entries for a form. Filter list is forwarded as Filter1, Filter2, … with match=AND.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "page_start", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "filter", "type": "array", "required": false },
+        { "key": "sort", "type": "string", "required": false },
+        { "key": "sort_direction", "type": "string", "required": false },
+        { "key": "system", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_entry",
+      "name": "Get Entry",
+      "description": "Resolves a single entry by EntryId via the filtered entries endpoint (Wufoo v3 has no canonical /entries/{id} route).",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_entry",
+      "name": "Create Entry",
+      "description": "POST /forms/{form_id}/entries.json — submits a new entry. field_values must be keyed by Wufoo field IDs (Field1, Field2, …); sent as application/x-www-form-urlencoded.",
+      "method": "POST",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "field_values", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "count_entries",
+      "name": "Count Entries",
+      "description": "GET /forms/{form_id}/entries/count.json — returns the total number of entries for a form.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_entry",
+      "name": "Delete Entry",
+      "description": "DELETE /forms/{form_id}/entries/{entry_id}.json — removes a single entry from a form.",
+      "method": "DELETE",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_comments",
+      "name": "List Comments",
+      "description": "GET /forms/{form_id}/comments.json — paginated comments attached to a form's entries.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "page_start", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_comment",
+      "name": "Add Comment",
+      "description": "POST /forms/{form_id}/comments.json — attaches a comment to an entry on a form.",
+      "method": "POST",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "number", "required": true },
+        { "key": "text", "type": "string", "required": true },
+        { "key": "commenter_name", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_reports",
+      "name": "List Reports",
+      "description": "GET /reports.json — returns summary metadata for every report on the account.",
+      "method": "GET",
+      "params": [
+        { "key": "include_todays_count", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_report",
+      "name": "Get Report",
+      "description": "GET /reports/{report_id}.json — returns a single report by ID or hash.",
+      "method": "GET",
+      "params": [
+        { "key": "report_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_report_widgets",
+      "name": "List Report Widgets",
+      "description": "GET /reports/{report_id}/widgets.json — returns the widgets that make up a report (charts, tallies, etc.).",
+      "method": "GET",
+      "params": [
+        { "key": "report_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_webhooks",
+      "name": "List Webhooks",
+      "description": "GET /forms/{form_id}/webhooks.json — returns every webhook registered against a form.",
+      "method": "GET",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "PUT /forms/{form_id}/webhooks.json — registers a new webhook URL on a form. Optional handshake_key signs incoming payloads; metadata=true sends the form field schema with each delivery.",
+      "method": "PUT",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "handshake_key", "type": "string", "required": false },
+        { "key": "metadata", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_webhook",
+      "name": "Delete Webhook",
+      "description": "DELETE /forms/{form_id}/webhooks/{webhook_hash}.json — unregisters a previously-registered webhook.",
+      "method": "DELETE",
+      "params": [
+        { "key": "form_id", "type": "string", "required": true },
+        { "key": "webhook_hash", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

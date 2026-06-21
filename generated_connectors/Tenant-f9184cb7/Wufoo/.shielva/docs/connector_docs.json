@@ -1,0 +1,69 @@
+{
+  "title": "Wufoo Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Wufoo** is an online form-builder (a SurveyMonkey company) that exposes a REST API (v3) over a per-account, subdomain-specific base URL. This connector — `WufooConnector` (`CONNECTOR_TYPE = \"wufoo\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Wufoo account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users.json` | List API-key-visible users (health probe) |\n| Forms | `/forms.json` + `/forms/{id}.json` | List + read forms |\n| Fields | `/forms/{id}/fields.json` | Field definitions for a form |\n| Entries | `/forms/{id}/entries.json` | List + filter + create + delete + count entries |\n| Comments | `/forms/{id}/comments.json` | Read + write comments on entries |\n| Reports | `/reports.json` + `/reports/{id}.json` | List + read reports + widgets |\n| Webhooks | `/forms/{id}/webhooks.json` + `/forms/{id}/webhooks/{hash}.json` | Register / list / unregister webhooks |\n\nThe connector normalises form entries into `NormalizedDocument` (composed id `f\"{connector_id}_{form_hash}_{entry_id}\"` keeps entries unique across forms), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429 / 5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::WufooHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Find your Wufoo subdomain and API key\n\n1. Sign in to https://www.wufoo.com.\n2. The browser URL bar will read `https://{subdomain}.wufoo.com/admin/`. Copy the `{subdomain}` segment — that's the install field.\n3. Open **Account → API Information** (top-right account menu).\n4. Click **Create API Key** if you don't already have one. Copy the key value.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Wufoo**, fill in:\n\n| Field | Value |\n|---|---|\n| `subdomain` (string) | Your Wufoo subdomain (e.g. `acme`) |\n| `api_key` (secret) | The API key from step 4 |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n| `base_url` (string, optional) | Override `https://{subdomain}.wufoo.com/api/v3` for testing |\n\nClick **Install**. `install()` validates `subdomain` + `api_key` are present, then probes `GET /users.json` to verify both the subdomain (URL) and the API key (Basic-auth header) in a single round-trip. On success it returns `ConnectorStatus(HEALTHY, CONNECTED)` and persists the config.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which re-runs the `/users.json` probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED` (the key was rotated). On 403 → `UNHEALTHY + INVALID_CREDENTIALS` (the key lacks scope). On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Wufoo REST API (v3) uses **HTTP Basic authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- The API key is sent as the **HTTP Basic username**.\n- The Basic password is the documented placeholder string `\"footastic\"` — Wufoo accepts any non-empty string here in practice, but the connector ships the placeholder to match the official docs.\n- The base URL is built from the install-time `subdomain` field: `https://{subdomain}.wufoo.com/api/v3`. There is no shared, account-agnostic base URL.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `subdomain` + `api_key`. Probes `GET /users.json` to verify both at once. Persists config on success. |\n| `authorize(...)` | Returns a synthetic `TokenInfo(access_token=api_key, token_type=\"Basic\")` for ABI parity — no real code-exchange. |\n| `health_check()` | `GET /users.json` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(<api_key>:footastic)\nAccept:        application/json\nContent-Type:  application/x-www-form-urlencoded     ← POST / PUT only\n```\n\nThe `Content-Type` header is set automatically when `form_data` is non-empty — Wufoo rejects `application/json` on POST/PUT to /entries, /comments, and /webhooks."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `subdomain` | string | yes | `self.subdomain` | Builds base URL `https://{subdomain}.wufoo.com/api/v3` |\n| `api_key` | secret | yes | `self.api_key` | HTTP Basic auth username |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n| `base_url` | string | no | overrides the subdomain-derived URL | Testing / proxy override |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"subdomain\", \"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_WUFOO_PASSWORD_PLACEHOLDER = \"footastic\"   # Wufoo's documented placeholder\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `WufooConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::WufooHTTPClient`. Method names match the Wufoo connector spec exactly: `list_forms`, `get_form`, `list_fields`, `list_entries`, `get_entry`, `create_entry`, `count_entries`, `delete_entry`, `list_reports`, `get_report`, `list_users`, `list_webhooks`, `create_webhook`, `delete_webhook`, `list_comments`, `add_comment`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `subdomain` + `api_key`, then `GET /users.json` to verify creds. Persists config on success.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a synthetic TokenInfo with `access_token=api_key`.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /users.json`. Classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates `/forms.json` → for each form pages through `/forms/{id}/entries.json` → normalizes each entry → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-users-forms",
+          "title": "Users + Forms",
+          "content": "### `async list_users() -> Dict`\n`GET /users.json` — every user the API key can see (also the health-probe surface).\n\n### `async list_forms(*, include_todays_count=False) -> Dict`\n`GET /forms.json` — summary metadata for all forms on the account.\n\n### `async get_form(form_id: str) -> Dict`\n`GET /forms/{form_id}.json`.\n\n### `async list_fields(form_id, *, system=False) -> Dict`\n`GET /forms/{form_id}/fields.json` — field definitions (`ID`, `Title`, `Type`, `IsRequired`, …)."
+        },
+        {
+          "id": "api-entries",
+          "title": "Entries",
+          "content": "### `async list_entries(form_id, *, page_start=0, page_size=25, filter=None, sort=None, sort_direction=\"DESC\", system=False) -> Dict`\n`GET /forms/{form_id}/entries.json`. `filter` is a list of pre-built Wufoo filter strings (e.g. `\"Field1 Is_equal_to John\"`); the client forwards them as `Filter1, Filter2, …` with `match=AND`.\n\n### `async get_entry(form_id, entry_id) -> Dict`\nResolves a single entry by `EntryId` — Wufoo v3 has no canonical `/entries/{id}` route, so the connector issues `GET /forms/{form_id}/entries.json?Filter1=EntryId Is_equal_to {entry_id}` with `pageSize=1`.\n\n### `async create_entry(form_id, field_values: Dict[str, Any]) -> Dict`\n`POST /forms/{form_id}/entries.json`. `field_values` keys must be Wufoo field IDs (`Field1`, `Field2`, … or composite IDs like `Field5-first`). Body is sent as `application/x-www-form-urlencoded`. Raises `ValueError` on an empty dict.\n\n### `async count_entries(form_id) -> Dict`\n`GET /forms/{form_id}/entries/count.json` — returns `{\"EntryCount\": \"N\"}`.\n\n### `async delete_entry(form_id, entry_id) -> Dict`\n`DELETE /forms/{form_id}/entries/{entry_id}.json`."
+        },
+        {
+          "id": "api-comments-reports",
+          "title": "Comments + Reports",
+          "content": "### `async list_comments(form_id, *, page_start=0, page_size=25) -> Dict`\n`GET /forms/{form_id}/comments.json`.\n\n### `async add_comment(form_id, entry_id, text, *, commenter_name=None) -> Dict`\n`POST /forms/{form_id}/comments.json` — `application/x-www-form-urlencoded`.\n\n### `async list_reports(*, include_todays_count=False) -> Dict`\n`GET /reports.json`.\n\n### `async get_report(report_id) -> Dict`\n`GET /reports/{report_id}.json`.\n\n### `async list_report_widgets(report_id) -> Dict`\n`GET /reports/{report_id}/widgets.json`."
+        },
+        {
+          "id": "api-webhooks",
+          "title": "Webhooks",
+          "content": "### `async list_webhooks(form_id) -> Dict`\n`GET /forms/{form_id}/webhooks.json`.\n\n### `async create_webhook(form_id, url, *, handshake_key=None, metadata=False) -> Dict`\n`PUT /forms/{form_id}/webhooks.json` — body is `application/x-www-form-urlencoded` (`url`, `handshakeKey`, `metadata`). `handshake_key` is an HMAC shared secret Wufoo signs deliveries with; `metadata=true` instructs Wufoo to include the form's field schema with each delivery payload.\n\n### `async delete_webhook(form_id, webhook_hash) -> Dict`\n`DELETE /forms/{form_id}/webhooks/{webhook_hash}.json` — unregister a previously-registered webhook."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nWufooError                            # base; carries status_code + response_body\n├── WufooAuthError                    # 401 / 403\n├── WufooBadRequestError              # 400\n├── WufooNotFoundError                # 404\n├── WufooConflictError                # 409\n├── WufooRateLimitError               # 429 — retry_after_s\n└── WufooServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nWufooNetworkError = WufooServerError    # legacy name from older code\nWufooNotFound     = WufooNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honour `Retry-After` if set; otherwise exponential backoff `_RETRY_BASE_DELAY_S * 2 ** attempt + jitter` clamped to `_RETRY_MAX_DELAY_S = 16s`. Retry up to `_MAX_TRANSPORT_RETRIES = 3`. |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `WufooNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)        — same surface as 401\n429 → ConnectorStatus(DEGRADED, CONNECTED)            — logged as warning\n5xx → ConnectorStatus(DEGRADED, CONNECTED)\nNetwork → ConnectorStatus(OFFLINE, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `subdomain` or `api_key` blank | Re-enter both in ACP. The subdomain is the prefix of your dashboard URL — `acme.wufoo.com` → `acme`. |\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install with key set | The probe `GET /users.json` returned 401 — Wufoo rejected the key | Generate a new API key from **Account → API Information**. The old key may have been deleted or rotated. |\n| DNS / network error at install | The `subdomain` doesn't match a real Wufoo account | Verify the subdomain matches your dashboard URL exactly (lowercase, no dots). |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — API key revoked | Rotate the API key in Wufoo and update the secret in ACP. |\n| `wufoo.http.retry` warnings spike | Hitting 429 (Wufoo's per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| `create_entry` returns `{\"Success\": 0, ...}` with `FieldErrors` | Field IDs don't match Wufoo's schema | Call `list_fields(form_id)` first and key `field_values` by the `ID` (`Field1`, `Field2`, … or composite IDs like `Field5-first`). |\n| `get_entry` returns an empty `Entries: []` | EntryId doesn't exist on that form | Confirm the `EntryId` (Wufoo IDs are per-form, not global). |\n| `ImportError: cannot import name 'WufooNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `WufooNetworkError = WufooServerError` alias added in `exceptions.py`. |\n| Webhook payloads land but signature mismatch | `handshake_key` doesn't match what Wufoo signs with | Re-pass the same secret in both `create_webhook(handshake_key=...)` and your downstream verifier. |"
+    }
+  ]
+}
