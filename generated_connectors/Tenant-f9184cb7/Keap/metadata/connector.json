@@ -1,0 +1,244 @@
+{
+  "connector_type": "keap",
+  "name": "KeapConnector",
+  "display_name": "Keap",
+  "version": "1.0.0",
+  "description": "Connects to the Keap (formerly Infusionsoft) REST API (v1) to read and write contacts, opportunities, orders, tags, and campaigns via OAuth 2.0. Supports OAuth refresh-on-401 and Retry-After-aware 429/5xx retry.",
+  "provider": "keap",
+  "service": "keap",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Keap OAuth2 Client ID",
+      "help": "Found in Keap → Developer Portal → your application → Keys → Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Keap OAuth2 Client Secret",
+      "help": "Found alongside the Client ID in the Keap Developer Portal. Stored encrypted by Shielva."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "full",
+      "placeholder": "full",
+      "help": "Space-separated list of Keap OAuth scopes. Keap currently exposes the catch-all 'full' scope for the REST API."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth2 Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-shielva-instance.example.com/oauth/callback",
+      "help": "Must match the redirect URI registered in your Keap OAuth application exactly. Leave blank to use the value the gateway injects at deploy time."
+    },
+    {
+      "key": "authorization_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://accounts.infusionsoft.com/app/oauth/authorize",
+      "placeholder": "https://accounts.infusionsoft.com/app/oauth/authorize",
+      "help": "Keap's OAuth2 authorization endpoint. Override only if Keap publishes a new URL."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.infusionsoft.com/token",
+      "placeholder": "https://api.infusionsoft.com/token",
+      "help": "Keap's OAuth2 token endpoint. Override only if Keap publishes a new URL."
+    },
+    {
+      "key": "base_url",
+      "label": "Keap REST API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.infusionsoft.com/crm/rest/v1",
+      "placeholder": "https://api.infusionsoft.com/crm/rest/v1",
+      "help": "Base URL for the Keap REST API v1. Override only when routing through an approved proxy."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Keap API requests per minute. Default 60 mirrors Keap's published quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "InstallResult"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Keap API connectivity by calling GET /account/profile with the current access token.",
+      "method": "GET",
+      "params": [],
+      "returns": "HealthCheckResult"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "GET /contacts — paginated list of contacts, optionally filtered by email / given_name / family_name.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "given_name", "type": "string", "required": false },
+        { "key": "family_name", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /contacts/{id} — retrieve a single contact by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /contacts — create a new contact. Accepts given_name, family_name, email_addresses, and phone_numbers per Keap's schema.",
+      "method": "POST",
+      "params": [
+        { "key": "given_name", "type": "string", "required": false },
+        { "key": "family_name", "type": "string", "required": false },
+        { "key": "email_addresses", "type": "array", "required": false },
+        { "key": "phone_numbers", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "PATCH /contacts/{id} — partially update a contact. Pass any subset of contact fields.",
+      "method": "PATCH",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "DELETE /contacts/{id} — permanently delete a contact.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "GET /opportunities — paginated list of sales opportunities.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_opportunity",
+      "name": "Create Opportunity",
+      "description": "POST /opportunities — create a new sales opportunity for a contact at a given stage.",
+      "method": "POST",
+      "params": [
+        { "key": "opportunity_title", "type": "string", "required": true },
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "stage_id", "type": "number", "required": true },
+        { "key": "projected_revenue", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "GET /orders — paginated list of e-commerce orders.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /tags — return all tags defined in the Keap account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "apply_tag",
+      "name": "Apply Tag",
+      "description": "POST /tags/{id}/contacts — apply a tag to one or more contacts.",
+      "method": "POST",
+      "params": [
+        { "key": "tag_id", "type": "number", "required": true },
+        { "key": "contact_ids", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "GET /campaigns — paginated list of marketing campaigns.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_contact_to_campaign",
+      "name": "Add Contact to Campaign",
+      "description": "POST /campaigns/{campaign_id}/sequences/{sequence_id}/contacts/{contact_id} — enroll a contact into a campaign sequence.",
+      "method": "POST",
+      "params": [
+        { "key": "campaign_id", "type": "number", "required": true },
+        { "key": "sequence_id", "type": "number", "required": true },
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ]
+}
