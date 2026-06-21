@@ -1,0 +1,69 @@
+{
+  "title": "Harvest Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Harvest** is a time-tracking + invoicing SaaS exposing a REST API under `https://api.harvestapp.com/v2`. This connector — `HarvestConnector` (`CONNECTOR_TYPE = \"harvest\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Harvest account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Time Entries | `/time_entries` | List, get, create, update, delete (the core Harvest signal) |\n| Projects | `/projects` | List + read active projects |\n| Tasks | `/tasks` | List task definitions |\n| Clients | `/clients` | List + read clients (engagements) |\n| Users | `/users`, `/users/me` | List users; identify the authenticated user |\n| Invoices | `/invoices` | List invoices (drafts / open / paid / closed) |\n| Estimates | `/estimates` | List estimates / quotes |\n| Expenses | `/expenses` | List logged expenses |\n\nThe connector normalises time entries + invoices + clients into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HarvestHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Harvest Personal Access Token\n\n1. Sign in to https://id.getharvest.com/developers.\n2. Click **Create New Personal Access Token**.\n3. Name it (e.g. `Shielva ACP`) and choose the Harvest account it should authorise.\n4. Copy the **token value** — Harvest shows it only once.\n5. Copy the **Account ID** from the same page (numeric, e.g. `1234567`).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Harvest**, fill in:\n\n| Field | Value |\n|---|---|\n| `access_token` (secret) | PAT from step 4 |\n| `account_id` (text) | Numeric Account ID |\n| `user_agent` (text, optional) | Defaults to `Shielva Harvest Connector (support@shielva.ai)` |\n| `base_url` (text, optional) | Override `https://api.harvestapp.com/v2` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 100 (Harvest's documented limit) |\n\nClick **Install**. `install()` validates `access_token` + `account_id` are present (it does NOT call the API), initialises the `HarvestHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which fetches `GET /users/me` as a lightweight authenticated probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Harvest REST API uses **Personal Access Token + Account ID** for server-to-server access (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry — PATs are revoked manually.\n\n### Credential model\n\n- `access_token` is sent in the `Authorization` header as `Bearer <token>`.\n- `account_id` is sent in the `Harvest-Account-Id` header (Harvest's per-account routing).\n- `user_agent` is sent in the `User-Agent` header — **Harvest requires this** and recommends naming the integration plus a contact address.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `access_token` + `account_id`. Initialises `HarvestHTTPClient`. Does **not** call any Harvest endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo` carrying the PAT — there is no token exchange. |\n| `health_check()` | `GET /users/me` — minimal authenticated probe. |\n| `ensure_token()` | Not called — PATs do not expire. |\n| token storage | None — the PAT lives in the install config. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization:       Bearer <access_token>\nHarvest-Account-Id:  <account_id>\nUser-Agent:          <user_agent>\nContent-Type:        application/json\nAccept:              application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `access_token` | secret | yes | `self.access_token` | `Authorization: Bearer …` header value |\n| `account_id` | text | yes | `self.account_id` | `Harvest-Account-Id` header |\n| `user_agent` | text | no | `self.user_agent` (default `Shielva Harvest Connector (support@shielva.ai)`) | `User-Agent` header (required by Harvest) |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.harvestapp.com/v2`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"access_token\", \"account_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HARVEST_BASE = \"https://api.harvestapp.com/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HarvestConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::HarvestHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `access_token` + `account_id`; initialise `HarvestHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` carrying the PAT for ABI compatibility.\n\n### `async health_check() -> ConnectorStatus`\nFetches `GET /users/me` as a lightweight authenticated probe. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Harvest `/time_entries`, `/invoices`, `/clients` → `NormalizedDocument` → `ingest_document`. Walks `next_page` until exhausted. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-users",
+          "title": "Users",
+          "content": "### `async get_user_me() -> Dict`\n`GET /users/me` — authenticated user.\n\n### `async list_users(*, is_active=True, page=1, per_page=100) -> Dict`\n`GET /users` — paginated user list."
+        },
+        {
+          "id": "api-clients-projects-tasks",
+          "title": "Clients · Projects · Tasks",
+          "content": "### `async list_clients(*, is_active=True, page=1, per_page=100) -> Dict`\n`GET /clients`.\n\n### `async list_projects(*, is_active=True, client_id=None, page=1, per_page=100) -> Dict`\n`GET /projects` — optionally scoped to a client.\n\n### `async get_project(project_id) -> Dict`\n`GET /projects/{project_id}`.\n\n### `async list_tasks(*, is_active=True, page=1, per_page=100) -> Dict`\n`GET /tasks` — task definitions."
+        },
+        {
+          "id": "api-time-entries",
+          "title": "Time Entries",
+          "content": "### `async list_time_entries(*, from_date=None, to_date=None, user_id=None, project_id=None, client_id=None, is_billed=None, page=1, per_page=100) -> Dict`\n`GET /time_entries` — filter by date range, user, project, client, or billed state. Date params are coerced to `YYYY-MM-DD` via `iso_date()`.\n\n### `async get_time_entry(time_entry_id) -> Dict`\n`GET /time_entries/{id}`.\n\n### `async create_time_entry(project_id, task_id, spent_date, *, hours=None, notes=None, user_id=None) -> Dict`\n`POST /time_entries` — body: `{project_id, task_id, spent_date, hours?, notes?, user_id?}`.\n\n### `async update_time_entry(time_entry_id, fields) -> Dict`\n`PATCH /time_entries/{id}` — arbitrary field map.\n\n### `async delete_time_entry(time_entry_id) -> Dict`\n`DELETE /time_entries/{id}`."
+        },
+        {
+          "id": "api-invoices-estimates-expenses",
+          "title": "Invoices · Estimates · Expenses",
+          "content": "### `async list_invoices(*, state=None, client_id=None, page=1, per_page=100) -> Dict`\n`GET /invoices` — filter by state (draft/open/paid/closed) or client.\n\n### `async list_estimates(*, state=None, client_id=None, page=1, per_page=100) -> Dict`\n`GET /estimates`.\n\n### `async list_expenses(*, from_date=None, to_date=None, user_id=None, project_id=None, page=1, per_page=100) -> Dict`\n`GET /expenses` — paginated expenses, optional date range / scope."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHarvestError                          # base; carries status_code + response_body\n├── HarvestAuthError                  # 401 / 403\n├── HarvestBadRequestError            # 400 / 422\n├── HarvestNotFoundError              # 404\n├── HarvestConflictError              # 409\n├── HarvestRateLimitError             # 429 — retry_after_s\n└── HarvestServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nHarvestNetworkError = HarvestServerError    # legacy name from older code\nHarvestNotFound     = HarvestNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 422 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3`. Honours `Retry-After` header if present. |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `HarvestNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED, CONNECTED)     — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `access_token` or `account_id` blank | Re-enter both in ACP. Harvest shows the PAT only once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 from Harvest — PAT revoked or wrong account_id | Verify `account_id` matches the account that owns the PAT. Rotate the PAT if needed. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — PAT lacks scope on this account | Recreate the PAT scoped to the correct Harvest account. |\n| `harvest.http.retry` warnings spike | Hitting 429 (Harvest's 100 req/min cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 422 on `create_time_entry` | Validation — missing `project_id`/`task_id` or invalid `spent_date` | `iso_date()` accepts `YYYY-MM-DD`, `date`, or `datetime`. Ensure `project_id` and `task_id` are integers from `list_projects` / `list_tasks`. |\n| `User-Agent` warnings in Harvest support emails | Default UA was overridden with an empty string | Leave `user_agent` blank to use the Shielva default, or set a string that names your integration + a contact email. |\n| `ImportError: cannot import name 'HarvestNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `HarvestNetworkError = HarvestServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}
