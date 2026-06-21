@@ -12,8 +12,8 @@ import hashlib
 import logging
 from typing import Any, Callable, TypeVar
 
-from ..exceptions import RingCentralAuthError, RingCentralError
-from ..models import ConnectorDocument, ResourceType
+from exceptions import RingCentralAuthError, RingCentralError
+from models import ConnectorDocument, ResourceType
 
 logger = logging.getLogger(__name__)
 

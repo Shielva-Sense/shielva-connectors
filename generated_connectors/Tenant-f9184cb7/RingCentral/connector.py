@@ -15,9 +15,9 @@ from urllib.parse import urlencode
 from shared.base_connector import BaseConnector
 
 
-from .client.http_client import DEFAULT_SERVER_URL, RingCentralHTTPClient
-from .exceptions import RingCentralAuthError, RingCentralError
-from .helpers.utils import (
+from client.http_client import DEFAULT_SERVER_URL, RingCentralHTTPClient
+from exceptions import RingCentralAuthError, RingCentralError
+from helpers.utils import (
     normalize_call_log,
     normalize_contact,
     normalize_extension,
@@ -25,7 +25,7 @@ from .helpers.utils import (
     normalize_message,
     with_retry,
 )
-from .models import (
+from models import (
     ConnectorDocument,
     HealthCheckResult,
     HealthStatus,
@@ -286,3 +286,4 @@ class RingCentralConnector(BaseConnector):
             **kwargs,
         )
         return [normalize_meeting(r) for r in records]
+

@@ -20,7 +20,7 @@ try:
 except ImportError:
     _HAS_AIOHTTP = False
 
-from ..exceptions import (
+from exceptions import (
     RingCentralAuthError,
     RingCentralError,
     RingCentralNetworkError,
