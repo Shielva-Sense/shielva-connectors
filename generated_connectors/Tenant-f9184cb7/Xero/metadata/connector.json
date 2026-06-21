@@ -42,11 +42,27 @@
       "help": "The Xero organisation (tenant) ID. Set automatically after OAuth2 authorization from GET /connections. Only fill in manually if you need to target a specific organisation."
     }
   ],
-  "capabilities": ["sync", "health_check", "authorize", "list_contacts", "list_invoices", "list_accounts", "get_connections"],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "authorize",
+    "list_contacts",
+    "list_invoices",
+    "list_accounts",
+    "get_connections"
+  ],
   "oauth2": {
     "auth_url": "https://login.xero.com/identity/connect/authorize",
     "token_url": "https://identity.xero.com/connect/token",
-    "scopes": ["accounting.transactions.read", "accounting.contacts.read", "accounting.reports.read", "offline_access", "openid", "profile", "email"],
+    "scopes": [
+      "accounting.transactions.read",
+      "accounting.contacts.read",
+      "accounting.reports.read",
+      "offline_access",
+      "openid",
+      "profile",
+      "email"
+    ],
     "pkce": true,
     "code_challenge_method": "S256"
   },
@@ -63,7 +79,7 @@
     {
       "id": "install",
       "name": "Install / Validate",
-      "description": "Validate that client_id and client_secret are present. Returns HEALTHY/PENDING — OAuth must be completed to fully connect.",
+      "description": "Validate that client_id and client_secret are present. Returns HEALTHY/PENDING \u2014 OAuth must be completed to fully connect.",
       "category": "auth"
     },
     {
@@ -135,7 +151,7 @@
     {
       "id": "get_connections",
       "name": "Get Connections",
-      "description": "GET https://api.xero.com/connections — returns list of Xero tenants the user is connected to. No Xero-Tenant-Id header required.",
+      "description": "GET https://api.xero.com/connections \u2014 returns list of Xero tenants the user is connected to. No Xero-Tenant-Id header required.",
       "category": "auth",
       "endpoint": "GET https://api.xero.com/connections"
     }
@@ -147,5 +163,124 @@
     "invoices",
     "contacts",
     "accounts"
+  ],
+  "apis": [
+    {
+      "id": "exchange_code",
+      "name": "Exchange Code",
+      "description": "Exchange an OAuth2 authorization code for access + refresh tokens.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "code",
+          "label": "Code",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "refresh_token",
+      "name": "Refresh Token",
+      "description": "Refresh the OAuth2 access token using the stored refresh token.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Xero invoices, contacts, and accounts into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "GET /Invoices \u2014 paginated, optionally filtered by If-Modified-Since.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "GET /Invoices/{invoice_id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "invoice_id",
+          "label": "Invoice Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "GET /Contacts \u2014 paginated, optionally filtered by If-Modified-Since.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /Contacts/{contact_id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "GET /Accounts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_connections",
+      "name": "Get Connections",
+      "description": "GET https://api.xero.com/connections \u2014 returns list of tenants the user is connected to.",
+      "method": "GET",
+      "params": []
+    }
   ]
 }
