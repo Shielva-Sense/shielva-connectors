@@ -14,7 +14,7 @@
       "type": "text",
       "required": true,
       "placeholder": "your-box-client-id",
-      "help": "From Box Developer Console → My Apps → Your App → OAuth 2.0 Credentials → Client ID"
+      "help": "From Box Developer Console \u2192 My Apps \u2192 Your App \u2192 OAuth 2.0 Credentials \u2192 Client ID"
     },
     {
       "key": "client_secret",
@@ -33,7 +33,9 @@
       "help": "Must match exactly what is registered in your Box app Redirect URIs"
     }
   ],
-  "oauth_scopes": ["root_readonly"],
+  "oauth_scopes": [
+    "root_readonly"
+  ],
   "oauth_auth_url": "https://account.box.com/api/oauth2/authorize",
   "oauth_token_url": "https://api.box.com/api/oauth2/token",
   "apis": [
@@ -51,8 +53,16 @@
       "description": "Returns the Box OAuth2 authorization URL, or exchanges an authorization code for access and refresh tokens.",
       "method": "POST",
       "params": [
-        { "key": "auth_code", "type": "string", "required": false },
-        { "key": "state", "type": "string", "required": false }
+        {
+          "key": "auth_code",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "state",
+          "type": "string",
+          "required": false
+        }
       ],
       "returns": "str | TokenInfo"
     },
@@ -70,10 +80,26 @@
       "description": "Syncs all files recursively from the Box root folder into the Shielva knowledge base using BFS folder traversal.",
       "method": "GET",
       "params": [
-        { "key": "full", "type": "boolean", "required": false },
-        { "key": "since", "type": "string", "required": false },
-        { "key": "kb_id", "type": "string", "required": false },
-        { "key": "webhook_url", "type": "string", "required": false }
+        {
+          "key": "full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "webhook_url",
+          "type": "string",
+          "required": false
+        }
       ],
       "returns": "SyncResult"
     },
@@ -83,9 +109,21 @@
       "description": "Lists items in a Box folder by folder_id. Defaults to root (folder_id='0').",
       "method": "GET",
       "params": [
-        { "key": "folder_id", "type": "string", "required": false },
-        { "key": "limit", "type": "number", "required": false },
-        { "key": "offset", "type": "number", "required": false }
+        {
+          "key": "folder_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "type": "number",
+          "required": false
+        }
       ],
       "returns": "Dict"
     },
@@ -95,7 +133,11 @@
       "description": "Fetches metadata for a single Box file by file_id.",
       "method": "GET",
       "params": [
-        { "key": "file_id", "type": "string", "required": true }
+        {
+          "key": "file_id",
+          "type": "string",
+          "required": true
+        }
       ],
       "returns": "Dict"
     },
@@ -105,7 +147,11 @@
       "description": "Fetches metadata for a single Box folder by folder_id.",
       "method": "GET",
       "params": [
-        { "key": "folder_id", "type": "string", "required": true }
+        {
+          "key": "folder_id",
+          "type": "string",
+          "required": true
+        }
       ],
       "returns": "Dict"
     },
@@ -115,9 +161,21 @@
       "description": "Searches Box for files and folders matching a query string.",
       "method": "GET",
       "params": [
-        { "key": "query", "type": "string", "required": true },
-        { "key": "limit", "type": "number", "required": false },
-        { "key": "offset", "type": "number", "required": false }
+        {
+          "key": "query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "type": "number",
+          "required": false
+        }
       ],
       "returns": "Dict"
     }
@@ -125,5 +183,6 @@
   "dependencies": [
     "httpx>=0.27.0",
     "structlog>=24.0.0"
-  ]
+  ],
+  "display_name": "Box"
 }
