@@ -11,7 +11,8 @@
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "15Five API key generated from your account settings."
+      "description": "15Five API key generated from your account settings.",
+      "help": "API Key."
     }
   ],
   "capabilities": [
@@ -25,5 +26,56 @@
   ],
   "provider": "15Five",
   "service": "15Five",
-  "category": "performance"
+  "category": "performance",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync check-in reports, OKR objectives, and high fives into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all 15Five users, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_reports",
+      "name": "List Reports",
+      "description": "Return all 15Five check-in reports, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_objectives",
+      "name": "List Objectives",
+      "description": "Return all 15Five OKR objectives, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Return all 15Five 1-on-1 meetings, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_high_fives",
+      "name": "List High Fives",
+      "description": "Return all 15Five high fives/recognition, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "Return all 15Five groups/teams, paginating through all pages.",
+      "method": "GET",
+      "params": []
+    }
+  ]
 }
