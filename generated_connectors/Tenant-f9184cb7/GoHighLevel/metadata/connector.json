@@ -1,0 +1,279 @@
+{
+  "connector_type": "gohighlevel",
+  "name": "GoHighLevelConnector",
+  "display_name": "GoHighLevel",
+  "version": "1.0.0",
+  "description": "Connects to the GoHighLevel (HighLevel / LeadConnector) REST API using a location- or agency-level API key. Wraps Contacts, Opportunities, Conversations, Locations, Pipelines, Calendars, Users, Campaigns, Custom Fields and Tags surfaces, and syncs contacts + opportunities + conversations into the Shielva KB.",
+  "provider": "gohighlevel",
+  "service": "gohighlevel",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "GoHighLevel API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your HighLevel API key",
+      "help": "From HighLevel → Settings → Business Profile → API Key (location) or Agency Settings → API Key (agency). Sent as 'Authorization: Bearer <key>'."
+    },
+    {
+      "key": "base_url",
+      "label": "GoHighLevel API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://services.leadconnectorhq.com",
+      "placeholder": "https://services.leadconnectorhq.com",
+      "help": "Base URL for the HighLevel REST API. Leave blank to use the default."
+    },
+    {
+      "key": "location_id",
+      "label": "Default Location ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional default location (sub-account) ID",
+      "help": "When set, methods that omit location_id will use this value, and create_* calls will inject it automatically."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "default": "2021-07-28",
+      "placeholder": "2021-07-28",
+      "help": "Value of the 'Version' header — HighLevel uses dated versions; 2021-07-28 is the current GA contract."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes GET /locations/{id} (or /locations/search) to verify connectivity.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "GET /locations/search — list sub-accounts visible to the API key.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_location",
+      "name": "Get Location",
+      "description": "GET /locations/{locationId} — fetch a single location.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List / Search Contacts",
+      "description": "GET /contacts/?locationId=&limit=&page=&query=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /contacts/{contactId}.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /contacts/ — locationId is injected from install field if absent.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "PUT /contacts/{contactId}.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true },
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "DELETE /contacts/{contactId}.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List / Search Opportunities",
+      "description": "GET /opportunities/search?location_id=&pipeline_id=&limit=&page=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false },
+        { "key": "pipeline_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_opportunity",
+      "name": "Get Opportunity",
+      "description": "GET /opportunities/{opportunityId}.",
+      "method": "GET",
+      "params": [
+        { "key": "opportunity_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_opportunity",
+      "name": "Create Opportunity",
+      "description": "POST /opportunities/.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_opportunity",
+      "name": "Update Opportunity",
+      "description": "PUT /opportunities/{opportunityId}.",
+      "method": "POST",
+      "params": [
+        { "key": "opportunity_id", "type": "string", "required": true },
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_conversations",
+      "name": "List / Search Conversations",
+      "description": "GET /conversations/search?locationId=&contactId=&limit=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false },
+        { "key": "contact_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "GET /conversations/{conversationId}.",
+      "method": "GET",
+      "params": [
+        { "key": "conversation_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_message",
+      "name": "Send Message",
+      "description": "POST /conversations/messages — SMS/Email/IG/FB. conversationId is injected.",
+      "method": "POST",
+      "params": [
+        { "key": "conversation_id", "type": "string", "required": true },
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_calendars",
+      "name": "List Calendars",
+      "description": "GET /calendars/?locationId=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "GET /opportunities/pipelines?locationId=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users/?locationId=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "GET /campaigns/?locationId=.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_custom_fields",
+      "name": "List Custom Fields",
+      "description": "GET /locations/{locationId}/customFields.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /locations/{locationId}/tags.",
+      "method": "GET",
+      "params": [
+        { "key": "location_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
