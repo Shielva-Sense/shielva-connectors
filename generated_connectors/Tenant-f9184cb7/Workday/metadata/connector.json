@@ -14,14 +14,16 @@
       "label": "OAuth Client ID",
       "type": "string",
       "required": true,
-      "description": "The OAuth 2.0 Client ID from your Workday API Client configuration."
+      "description": "The OAuth 2.0 Client ID from your Workday API Client configuration.",
+      "help": "OAuth Client ID."
     },
     {
       "key": "client_secret",
       "label": "OAuth Client Secret",
       "type": "password",
       "required": true,
-      "description": "The OAuth 2.0 Client Secret from your Workday API Client configuration."
+      "description": "The OAuth 2.0 Client Secret from your Workday API Client configuration.",
+      "help": "OAuth Client Secret."
     },
     {
       "key": "hostname",
@@ -29,16 +31,85 @@
       "type": "string",
       "required": true,
       "placeholder": "wd2-impl-services1.workday.com",
-      "description": "Your Workday API hostname (e.g. 'wd2-impl-services1.workday.com')."
+      "description": "Your Workday API hostname (e.g. 'wd2-impl-services1.workday.com').",
+      "help": "Workday Hostname."
     },
     {
       "key": "tenant",
       "label": "Tenant Name",
       "type": "string",
       "required": true,
-      "description": "Your Workday tenant name (the subdomain in your Workday URL)."
+      "description": "Your Workday tenant name (the subdomain in your Workday URL).",
+      "help": "Tenant Name."
     }
   ],
-  "capabilities": ["sync", "health_check", "list_workers", "list_organizations", "list_locations"],
-  "resources": ["workers", "organizations", "jobProfiles", "locations"]
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_workers",
+    "list_organizations",
+    "list_locations"
+  ],
+  "resources": [
+    "workers",
+    "organizations",
+    "jobProfiles",
+    "locations"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Workday resources into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_workers",
+      "name": "List Workers",
+      "description": "Return all Workday workers as raw API records.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "Return all Workday organizations as raw API records.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_job_profiles",
+      "name": "List Job Profiles",
+      "description": "Return all Workday job profiles as raw API records.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "Return all Workday locations as raw API records.",
+      "method": "GET",
+      "params": []
+    }
+  ]
 }
