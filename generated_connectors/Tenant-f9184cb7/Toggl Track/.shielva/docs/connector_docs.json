@@ -1,0 +1,69 @@
+{
+  "title": "Toggl Track Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Toggl Track** is a time-tracking SaaS exposing a REST API v9 under `https://api.track.toggl.com/api/v9`. This connector — `TogglConnector` (`CONNECTOR_TYPE = \"toggl\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from Toggl:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Me | `/me` | Authenticated user profile, default workspace |\n| Workspaces | `/workspaces` | List + read workspaces |\n| Projects | `/workspaces/{wid}/projects` | List, get, create projects |\n| Time Entries | `/me/time_entries`, `/workspaces/{wid}/time_entries` | List, current, create, update, stop, delete |\n| Tags | `/workspaces/{wid}/tags` | List tags |\n| Clients | `/workspaces/{wid}/clients` | List + create clients |\n| Tasks | `/workspaces/{wid}/projects/{pid}/tasks` | List project tasks (premium feature) |\n\nThe connector normalises projects + time entries into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429 / 5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::TogglHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Toggl Track API token\n\n1. Sign in to https://track.toggl.com.\n2. Open **Profile Settings** (top-right account menu → Profile Settings).\n3. Scroll to the **API Token** section.\n4. Click **Reveal** and copy the token value (or click **Reset** to mint a fresh one).\n5. From the **Workspaces** sidebar, copy the numeric **Workspace ID** of the workspace you want to default to (visible in the URL after `/workspaces/`).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Toggl Track**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | Token from step 4 |\n| `default_workspace_id` (text, optional) | Numeric default workspace ID — methods accept workspace_id override per call |\n| `base_url` (text, optional) | Override `https://api.track.toggl.com/api/v9` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_token` is present (it does NOT call the API), initialises the `TogglHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /me`. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Toggl Track REST API v9 uses **HTTP Basic authentication with a Toggl-specific quirk** (`AUTH_TYPE = \"api_key\"`).\n\n### The \"api_token\" password quirk\n\nThe `api_token` is sent as the **username** in HTTP Basic auth, and the **literal string `\"api_token\"`** is sent as the **password**:\n\n```\nAuthorization: Basic base64(\"<api_token>:api_token\")\n```\n\nThis is NOT a bearer token. If you send `Authorization: Bearer <token>` Toggl returns 403. The `httpx` client used here passes `auth=(api_token, \"api_token\")` which produces the correct header automatically.\n\n### Credential model\n\n- `api_token` — Toggl Track personal API token from **Profile Settings → API Token**.\n- No OAuth, no refresh token, no expiry.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token`. Initialises `TogglHTTPClient`. Does **not** call any Toggl endpoint. |\n| `authorize(...)` | Returns a TokenInfo wrapping the api_token — there is no token exchange. |\n| `health_check()` | `GET /me` — lightest authenticated probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(\"<api_token>:api_token\")    ← Toggl quirk\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | Basic-auth username; \"api_token\" literal is the password |\n| `default_workspace_id` | text | no | `self.default_workspace_id` | Per-call default workspace |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.track.toggl.com/api/v9`) | Override for Toggl sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_TOGGL_BASE = \"https://api.track.toggl.com/api/v9\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `TogglConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::TogglHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; initialise `TogglHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping the configured api_token.\n\n### `async health_check() -> ConnectorStatus`\nCalls `GET /me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Toggl projects per workspace + time entries from `/me/time_entries` → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-me-workspaces",
+          "title": "Me + Workspaces",
+          "content": "### `async get_me() -> Dict`\n`GET /me`.\n\n### `async list_workspaces() -> List`\n`GET /workspaces`.\n\n### `async get_workspace(workspace_id) -> Dict`\n`GET /workspaces/{wid}`."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects",
+          "content": "### `async list_projects(workspace_id, active=None, page=None, per_page=None) -> List`\n`GET /workspaces/{wid}/projects?active=&page=&per_page=`.\n\n### `async get_project(workspace_id, project_id) -> Dict`\n`GET /workspaces/{wid}/projects/{pid}`.\n\n### `async create_project(workspace_id, project) -> Dict`\n`POST /workspaces/{wid}/projects` — body is the project JSON directly (no envelope)."
+        },
+        {
+          "id": "api-time-entries",
+          "title": "Time Entries",
+          "content": "### `async list_time_entries(start_date=None, end_date=None, since=None) -> List`\n`GET /me/time_entries?start_date=&end_date=&since=`. Dates are RFC 3339 / ISO 8601.\n\n### `async get_current_time_entry() -> Dict`\n`GET /me/time_entries/current` — returns the currently-running entry or null.\n\n### `async create_time_entry(workspace_id, entry) -> Dict`\n`POST /workspaces/{wid}/time_entries`. Use `duration: -1` and `start` set to now to start a running entry.\n\n### `async update_time_entry(workspace_id, time_entry_id, entry) -> Dict`\n`PUT /workspaces/{wid}/time_entries/{teid}`.\n\n### `async stop_time_entry(workspace_id, time_entry_id) -> Dict`\n`PATCH /workspaces/{wid}/time_entries/{teid}/stop` — stops a running entry, sets `stop` to now.\n\n### `async delete_time_entry(workspace_id, time_entry_id) -> Dict`\n`DELETE /workspaces/{wid}/time_entries/{teid}`."
+        },
+        {
+          "id": "api-tags-clients-tasks",
+          "title": "Tags · Clients · Tasks",
+          "content": "### `async list_tags(workspace_id) -> List`\n`GET /workspaces/{wid}/tags`.\n\n### `async list_clients(workspace_id) -> List`\n`GET /workspaces/{wid}/clients`.\n\n### `async create_client(workspace_id, client) -> Dict`\n`POST /workspaces/{wid}/clients`.\n\n### `async list_tasks(workspace_id, project_id) -> List`\n`GET /workspaces/{wid}/projects/{pid}/tasks` — premium feature; 402 surfaces as `TogglError`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nTogglError                              # base; carries status_code + response_body\n├── TogglAuthError                      # 401 / 403\n├── TogglBadRequestError                # 400\n├── TogglNotFoundError                  # 404\n├── TogglConflictError                  # 409\n├── TogglRateLimitError                 # 429 — retry_after_s\n└── TogglServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nTogglNetworkError = TogglServerError    # legacy name from older code\nTogglNotFound     = TogglNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `TogglNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)    — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Re-enter the token. Toggl shows the token in Profile Settings indefinitely — copy then paste into ACP. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — token invalid or revoked | Reset the token in Toggl Profile Settings and update the install field. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — wrong password literal (someone replaced \"api_token\" with the actual token) | Verify the HTTP client uses `httpx.BasicAuth(api_token, \"api_token\")` — the literal string \"api_token\" MUST be the password. |\n| `toggl.http.retry` warnings spike | Hitting 429 (Toggl ~1 req/sec per IP) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on a workspace-scoped call | Wrong `workspace_id`, or workspace not visible to this token | Confirm `workspace_id` is numeric and visible via `list_workspaces()`. The token only sees workspaces its user belongs to. |\n| 402 Payment Required on `list_tasks` | Tasks are a Toggl Track premium feature | Upgrade the Toggl workspace to a premium plan, or stop calling `list_tasks` for free-tier workspaces. |\n| `ImportError: cannot import name 'TogglNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `TogglNetworkError = TogglServerError` alias added in `exceptions.py`. |\n| Time entry created but `start_date` filter returns nothing | Filter expects `YYYY-MM-DD` or RFC 3339; `2026-06-21T10:00` (no Z) sometimes fails | Always pass dates with timezone designator (`Z` or `+00:00`). |"
+    }
+  ]
+}

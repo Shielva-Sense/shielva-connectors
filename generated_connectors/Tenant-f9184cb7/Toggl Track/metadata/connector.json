@@ -1,0 +1,235 @@
+{
+  "connector_type": "toggl",
+  "name": "TogglConnector",
+  "display_name": "Toggl Track",
+  "version": "1.0.0",
+  "description": "Connects to the Toggl Track REST API v9 (Me, Workspaces, Projects, Time Entries, Tags, Clients, Tasks) using an API token. Supports time-entry CRUD, project CRUD, client creation, and KB sync of projects + time entries.",
+  "provider": "toggl",
+  "service": "toggl",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Toggl API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Toggl Track personal API token",
+      "help": "From Toggl Track → Profile → API Token (https://track.toggl.com/profile). The token is used as the username in HTTP Basic auth; the literal string \"api_token\" is the password. Do NOT prefix with 'Bearer '."
+    },
+    {
+      "key": "default_workspace_id",
+      "label": "Default Workspace ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional default workspace ID",
+      "help": "Numeric workspace ID used when a method omits workspace_id. Find it in the workspace URL or via /me.default_workspace_id."
+    },
+    {
+      "key": "base_url",
+      "label": "Toggl API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.track.toggl.com/api/v9",
+      "placeholder": "https://api.track.toggl.com/api/v9",
+      "help": "Base URL for the Toggl Track REST API v9. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side cap. Toggl enforces roughly 1 request/sec per IP; 429 responses trigger automatic exponential backoff."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Toggl API connectivity via GET /me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_me",
+      "name": "Get Me",
+      "description": "GET /me — authenticated user profile.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "GET /workspaces — workspaces the user belongs to.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "get_workspace",
+      "name": "Get Workspace",
+      "description": "GET /workspaces/{wid} — fetch a single workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /workspaces/{wid}/projects — list projects in a workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "active", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /workspaces/{wid}/projects/{pid}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_project",
+      "name": "Create Project",
+      "description": "POST /workspaces/{wid}/projects.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "project", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_entries",
+      "name": "List Time Entries",
+      "description": "GET /me/time_entries — list the authenticated user's time entries.",
+      "method": "GET",
+      "params": [
+        { "key": "start_date", "type": "string", "required": false },
+        { "key": "end_date", "type": "string", "required": false },
+        { "key": "since", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_current_time_entry",
+      "name": "Get Current Time Entry",
+      "description": "GET /me/time_entries/current — currently-running entry or null.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_time_entry",
+      "name": "Create Time Entry",
+      "description": "POST /workspaces/{wid}/time_entries.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "entry", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_time_entry",
+      "name": "Update Time Entry",
+      "description": "PUT /workspaces/{wid}/time_entries/{teid}.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "time_entry_id", "type": "string", "required": true },
+        { "key": "entry", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "stop_time_entry",
+      "name": "Stop Time Entry",
+      "description": "PATCH /workspaces/{wid}/time_entries/{teid}/stop.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "time_entry_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_time_entry",
+      "name": "Delete Time Entry",
+      "description": "DELETE /workspaces/{wid}/time_entries/{teid}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "time_entry_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /workspaces/{wid}/tags.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_clients",
+      "name": "List Clients",
+      "description": "GET /workspaces/{wid}/clients.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_client",
+      "name": "Create Client",
+      "description": "POST /workspaces/{wid}/clients.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "client", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /workspaces/{wid}/projects/{pid}/tasks.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
