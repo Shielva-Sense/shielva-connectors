@@ -1,0 +1,69 @@
+{
+  "title": "Statuspage Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Atlassian Statuspage** is the incident-communications SaaS used by ops teams to publish service-health updates to their customers. This connector — `StatuspageConnector` (`CONNECTOR_TYPE = \"statuspage\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Statuspage page:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Pages | `/pages` | List + read pages under the token |\n| Components | `/pages/{id}/components` | List, get, create, patch, delete components |\n| Component Groups | `/pages/{id}/component-groups` | List grouped components |\n| Incidents | `/pages/{id}/incidents` | List, get, create, patch incidents |\n| Maintenances | `/pages/{id}/incidents/scheduled` | List scheduled maintenance windows |\n| Subscribers | `/pages/{id}/subscribers` | List, create, delete email/SMS subscribers |\n| Metrics | `/pages/{id}/metrics` | List metrics configured on the page |\n| Incident Templates | `/pages/{id}/incident_templates` | List incident templates |\n\nThe connector normalises incidents + maintenances into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::StatuspageHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Statuspage API token\n\n1. Sign in to https://manage.statuspage.io.\n2. Open **User Profile → API Tokens**.\n3. Click **Create API Token**, name it (e.g. `shielva-prod`), and copy the value — Statuspage shows it only once.\n4. From **Pages → your page**, copy the **Page ID** out of the admin URL: `https://manage.statuspage.io/pages/<PAGE_ID>`.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Statuspage**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | Token from step 3 |\n| `page_id` (text) | Page ID from step 4 |\n| `base_url` (text, optional) | Override `https://api.statuspage.io/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 30 |\n\nClick **Install**. `install()` probes `GET /pages/{page_id}` to verify the token + page binding, then persists the config and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()`, which re-runs the same probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + INVALID_CREDENTIALS`. On 404 (wrong page_id) → `DEGRADED + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Statuspage uses **server-to-server API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### ⚠️ Statuspage gotcha — `OAuth` not `Bearer`\n\nThe published auth header uses the literal keyword **`OAuth`**, not `Bearer`. Sending `Authorization: Bearer <token>` is silently rejected with a 401.\n\n```\nAuthorization: OAuth <api_key>          ← literal 'OAuth' prefix\nContent-Type:  application/json\nAccept:        application/json\n```\n\nThe HTTP client enforces the `OAuth ` prefix; the unit test `test_install_auth_error_uses_oauth_header` asserts it explicitly.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Probes `GET /pages/{page_id}` (or `/pages` if no page_id). Validates token + page binding. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token = api_key` and `token_type = \"OAuth\"` — there is no exchange. |\n| `health_check()` | Same `GET /pages/{page_id}` probe — cheapest reachable endpoint. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | The API token is passed through to `set_token` for parity with OAuth connectors. |"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `Authorization: OAuth <api_key>` header value |\n| `page_id` | string | yes | `self.page_id` | Default page UUID scoping every call (overrideable per-method) |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.statuspage.io/v1`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 30) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\", \"page_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_BASE_URL = \"https://api.statuspage.io/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `StatuspageConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::StatuspageHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; probe `GET /pages/{page_id}` (or `/pages` if no page_id). Returns `HEALTHY + CONNECTED` on 2xx; classifies 401/403/404 via `_STATUS_MAP`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key — returns a `TokenInfo` wrapping the configured token (`token_type=\"OAuth\"`).\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /pages/{page_id}` (the same call as `install()`).\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Statuspage incidents + scheduled maintenances → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-pages",
+          "title": "Pages",
+          "content": "### `async list_pages(*, page=1, per_page=100) -> List`\n`GET /pages?page={N}&per_page={M}`.\n\n### `async get_page(page_id=\"\") -> Dict`\n`GET /pages/{page_id}` — falls back to `self.page_id` when arg is empty."
+        },
+        {
+          "id": "api-components",
+          "title": "Components",
+          "content": "### `async list_components(page_id=\"\") -> List`\n`GET /pages/{page_id}/components`.\n\n### `async get_component(page_id, component_id) -> Dict`\n`GET /pages/{pid}/components/{cid}`.\n\n### `async create_component(page_id, name, description=None, status='operational', group_id=None, showcase=True, only_show_if_degraded=False) -> Dict`\n`POST /pages/{id}/components` — body: `{\"component\": {...}}`.\n\n### `async update_component(page_id, component_id, fields) -> Dict`\n`PATCH /pages/{pid}/components/{cid}` — body: `{\"component\": {...fields}}`.\n\n### `async update_component_status(page_id, component_id, status) -> Dict`\nConvenience for the common case: `{\"component\": {\"status\": status}}`.\n\n### `async delete_component(page_id, component_id) -> Dict`\n`DELETE /pages/{pid}/components/{cid}`.\n\n### `async list_component_groups(page_id=\"\") -> List`\n`GET /pages/{id}/component-groups`."
+        },
+        {
+          "id": "api-incidents",
+          "title": "Incidents & Maintenances",
+          "content": "### `async list_incidents(page_id, *, q=None, limit=100, page=1) -> List`\n`GET /pages/{id}/incidents` — optional substring search via `q`.\n\n### `async get_incident(page_id, incident_id) -> Dict`\n`GET /pages/{pid}/incidents/{iid}`.\n\n### `async create_incident(page_id, name, *, status='investigating', impact_override=None, body='', component_ids=None, components=None, deliver_notifications=True) -> Dict`\n`POST /pages/{id}/incidents` — body: `{\"incident\": {...}}`. `components` is an `{component_id: new_status}` map Statuspage will apply atomically when the incident is created.\n\n### `async update_incident(page_id, incident_id, fields) -> Dict`\n`PATCH /pages/{pid}/incidents/{iid}` — body: `{\"incident\": {...fields}}`.\n\n### `async list_maintenances(page_id, *, limit=100, page=1) -> List`\n`GET /pages/{id}/incidents/scheduled` — list scheduled maintenance windows."
+        },
+        {
+          "id": "api-subscribers",
+          "title": "Subscribers, Metrics, Templates",
+          "content": "### `async list_subscribers(page_id, *, type=None, state=None, limit=100, page=1) -> List`\n`GET /pages/{id}/subscribers` — filterable by `type` (email/sms/webhook/slack) and `state` (active/unconfirmed/quarantined).\n\n### `async create_subscriber(page_id, *, email=None, phone_number=None, phone_country=None, page_access_user=None) -> Dict`\n`POST /pages/{id}/subscribers` — body: `{\"subscriber\": {...}}`. Pass `email` for email subs, `phone_number`+`phone_country` for SMS, `page_access_user` for restricted-page audience subs.\n\n### `async delete_subscriber(page_id, subscriber_id) -> Dict`\n`DELETE /pages/{id}/subscribers/{sid}`.\n\n### `async list_metrics(page_id=\"\") -> List`\n`GET /pages/{id}/metrics`.\n\n### `async list_incident_templates(page_id=\"\") -> List`\n`GET /pages/{id}/incident_templates`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nStatuspageError                       # base; carries status_code + response_body\n├── StatuspageAuthError               # 401 / 403\n├── StatuspageBadRequestError         # 400\n├── StatuspageNotFoundError           # 404\n├── StatuspageConflictError           # 409\n├── StatuspageRateLimitError          # 429 — retry_after_s\n└── StatuspageServerError             # 5xx\n```\n\nBack-compat aliases preserved:\n```\nStatuspageNetworkError = StatuspageServerError    # legacy name\nStatuspageNotFound      = StatuspageNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honour `Retry-After`; otherwise exponential backoff `_BASE_DELAY * 2 ** attempt` (0.5s → 1s → 2s) + jitter, up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `StatuspageNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n403 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n404 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)   — page_id wrong\n429 → ConnectorStatus(DEGRADED,  CONNECTED)             — logged as warning\n5xx → ConnectorStatus(DEGRADED,  CONNECTED)             — provider outage\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the token in ACP. Statuspage shows the token only once at creation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` w/ 'not found' in message | `page_id` doesn't match a page the token can see | Copy the page UUID from `https://manage.statuspage.io/pages/<PAGE_ID>` and re-install. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 401 — token revoked or sent as `Bearer` | Confirm the HTTP client sends `Authorization: OAuth …`. Rotate the token in **User Profile → API Tokens** if needed. |\n| `statuspage.http.retry` warnings spike | Hitting 429 (Statuspage per-token rate cap, ~1 req/sec) | The client retries with `Retry-After`-aware exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| `ValueError: page_id is required` at runtime | Method called with empty `page_id` arg and no `page_id` install_field configured | Set `page_id` at install time, or pass `page_id=\"…\"` to each call. |\n| `ImportError: cannot import name 'StatuspageNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `StatuspageNetworkError = StatuspageServerError` alias added. |\n| Component `create_component` returns 422 | `status` value not in Statuspage's allowed enum | Use one of `operational`, `under_maintenance`, `degraded_performance`, `partial_outage`, `major_outage`. |\n| Subscriber `create_subscriber` returns 400 | None of `email`, `phone_number`, or `page_access_user` supplied | Pass at least one identifier; for SMS, both `phone_number` AND `phone_country` are required. |"
+    }
+  ]
+}
