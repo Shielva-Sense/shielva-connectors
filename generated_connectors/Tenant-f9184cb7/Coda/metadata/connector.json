@@ -14,10 +14,117 @@
       "help": "Your Coda API token. Generate one at https://coda.io/account under 'API Settings'."
     }
   ],
-  "capabilities": ["sync", "health_check"],
-  "resources": ["doc", "page", "table", "row"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "doc",
+    "page",
+    "table",
+    "row"
+  ],
   "api_base": "https://coda.io/apis/v1",
   "auth_header": "Authorization: Bearer {api_token}",
   "pagination": "cursor (nextPageToken / nextPageLink)",
-  "rate_limit": "10 requests/second per token"
+  "rate_limit": "10 requests/second per token",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all accessible docs, pages, tables, and rows.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_docs",
+      "name": "List Docs",
+      "description": "List all accessible Coda docs (cursor-paginated).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "List all pages within a Coda doc (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "doc_id",
+          "label": "Doc Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tables",
+      "name": "List Tables",
+      "description": "List all tables within a Coda doc (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "doc_id",
+          "label": "Doc Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_rows",
+      "name": "List Rows",
+      "description": "List all rows within a Coda table (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "doc_id",
+          "label": "Doc Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "table_id",
+          "label": "Table Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_doc",
+      "name": "Get Doc",
+      "description": "GET /docs/{docId} \u2014 retrieve a single Coda doc.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "doc_id",
+          "label": "Doc Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "CodaConnector",
+  "description": "Shielva connector for Coda."
 }
