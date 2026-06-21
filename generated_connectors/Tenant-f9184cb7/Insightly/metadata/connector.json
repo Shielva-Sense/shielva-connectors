@@ -1,0 +1,477 @@
+{
+  "connector_type": "insightly",
+  "name": "InsightlyConnector",
+  "display_name": "Insightly",
+  "version": "1.0.0",
+  "description": "Connects to the Insightly REST API (SMB CRM) — Contacts, Organisations, Opportunities, Leads, Projects, Tasks, Events, Notes, Emails, Pipelines, Users, Custom Objects, and Tags. Authenticates with a single API key over HTTP Basic — no OAuth handshake required.",
+  "provider": "insightly",
+  "service": "insightly",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Insightly API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Insightly API key",
+      "help": "From Insightly → profile avatar → User Settings → API Key. The key is sent over HTTP Basic as the username with an empty password (base64(api_key + ':'))."
+    },
+    {
+      "key": "pod",
+      "label": "Pod Region",
+      "type": "string",
+      "required": true,
+      "default": "na1",
+      "placeholder": "na1",
+      "help": "Your Insightly regional pod — visible in the Insightly web URL, e.g. 'na1' (North America), 'eu1' (Europe), 'apac1' (Asia-Pacific). Base URL = https://api.{pod}.insightly.com/v3.1."
+    },
+    {
+      "key": "base_url",
+      "label": "Insightly API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.na1.insightly.com/v3.1",
+      "placeholder": "https://api.na1.insightly.com/v3.1",
+      "help": "Optional full base URL override. Leave blank to derive from the pod field."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Insightly API requests per minute. Insightly's standard quota is roughly 10 requests/second per pod — keep below 60/min unless you have a custom plan."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and pod and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Insightly API connectivity by probing GET /Users/Me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Contacts",
+      "description": "Pages through /Contacts and ingests each as a NormalizedDocument.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "GET /Contacts — OData-style top/skip pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "brief", "type": "boolean", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /Contacts/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /Contacts — at least one of first_name/last_name/email is required.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "PUT /Contacts/{id} — fields are merged into the body verbatim (UPPER_SNAKE_CASE keys).",
+      "method": "PUT",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "DELETE /Contacts/{id}. Idempotent — returns `already_missing: true` if the contact is gone.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_organisations",
+      "name": "List Organisations",
+      "description": "GET /Organisations.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_organisation",
+      "name": "Get Organisation",
+      "description": "GET /Organisations/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "organisation_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_organisation",
+      "name": "Create Organisation",
+      "description": "POST /Organisations.",
+      "method": "POST",
+      "params": [
+        { "key": "organisation_name", "type": "string", "required": true },
+        { "key": "phone", "type": "string", "required": false },
+        { "key": "website", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_organisation",
+      "name": "Update Organisation",
+      "description": "PUT /Organisations/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "organisation_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_organisation",
+      "name": "Delete Organisation",
+      "description": "DELETE /Organisations/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "organisation_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "GET /Opportunities.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_opportunity",
+      "name": "Get Opportunity",
+      "description": "GET /Opportunities/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "opportunity_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_opportunity",
+      "name": "Create Opportunity",
+      "description": "POST /Opportunities.",
+      "method": "POST",
+      "params": [
+        { "key": "opportunity_name", "type": "string", "required": true },
+        { "key": "opportunity_value", "type": "number", "required": false },
+        { "key": "probability", "type": "number", "required": false },
+        { "key": "bid_currency", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_opportunity",
+      "name": "Update Opportunity",
+      "description": "PUT /Opportunities/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "opportunity_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_opportunity",
+      "name": "Delete Opportunity",
+      "description": "DELETE /Opportunities/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "opportunity_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "GET /Leads.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_lead",
+      "name": "Get Lead",
+      "description": "GET /Leads/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "POST /Leads.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "lead_source_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_lead",
+      "name": "Update Lead",
+      "description": "PUT /Leads/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_lead",
+      "name": "Delete Lead",
+      "description": "DELETE /Leads/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /Projects.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /Projects/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_project",
+      "name": "Create Project",
+      "description": "POST /Projects.",
+      "method": "POST",
+      "params": [
+        { "key": "project_name", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_project",
+      "name": "Update Project",
+      "description": "PUT /Projects/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_project",
+      "name": "Delete Project",
+      "description": "DELETE /Projects/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /Tasks.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "GET /Tasks/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_task",
+      "name": "Create Task",
+      "description": "POST /Tasks.",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "priority", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_task",
+      "name": "Update Task",
+      "description": "PUT /Tasks/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_task",
+      "name": "Delete Task",
+      "description": "DELETE /Tasks/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "GET /Events.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "GET /Notes.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_emails",
+      "name": "List Emails",
+      "description": "GET /Emails.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "GET /Pipelines.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /Users.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_custom_objects",
+      "name": "List Custom Objects",
+      "description": "GET /CustomObjects.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /Tags/{record_type} — record_type defaults to 'contacts'.",
+      "method": "GET",
+      "params": [
+        { "key": "record_type", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.0.0",
+    "pydantic>=2.6.0"
+  ]
+}
