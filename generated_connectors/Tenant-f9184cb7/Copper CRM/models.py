@@ -261,3 +261,41 @@ class CopperTask:
             custom_fields=raw.get("custom_fields") or [],
             raw=raw,
         )
+
+
+# The gateway consumes these results expecting the canonical ConnectorStatus
+# shape from shared.base_connector (`.health: ConnectorHealth`,
+# `.auth_status: AuthStatus`). Expose those as derived properties so the
+# connector's existing return statements need no changes.
+try:
+    from shared.base_connector import AuthStatus as _AuthStatus, ConnectorHealth as _ConnectorHealth
+except ImportError:
+    _AuthStatus = None
+    _ConnectorHealth = None
+
+
+def _install_auth_status(self):
+    if _AuthStatus is None:
+        return None
+    return _AuthStatus.CONNECTED if self.success else _AuthStatus.MISSING_CREDENTIALS
+
+
+def _install_error(self):
+    return getattr(self, "_error_field", None) if self.success else (self.message if hasattr(self, "message") else None)
+
+
+def _health_health(self):
+    if _ConnectorHealth is None:
+        return None
+    return _ConnectorHealth.HEALTHY if self.healthy else _ConnectorHealth.UNHEALTHY
+
+
+def _health_auth_status(self):
+    if _AuthStatus is None:
+        return None
+    return _AuthStatus.CONNECTED if self.healthy else _AuthStatus.FAILED
+
+
+InstallResult.auth_status = property(_install_auth_status)
+HealthCheckResult.health = property(_health_health)
+HealthCheckResult.auth_status = property(_health_auth_status)
