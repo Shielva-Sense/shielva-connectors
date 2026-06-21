@@ -1,0 +1,267 @@
+{
+  "connector_type": "onesignal",
+  "name": "OneSignalConnector",
+  "display_name": "OneSignal",
+  "version": "1.0.0",
+  "description": "Connects to the OneSignal REST API v1 to send push notifications, email, and SMS; manage apps, devices (players), segments, and inspect notification delivery history. Auth: 'Authorization: Basic <REST_API_KEY>' with the raw key (NOT base64-encoded) — a OneSignal-specific quirk.",
+  "provider": "onesignal",
+  "service": "onesignal",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "app_id",
+      "label": "OneSignal App ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Your OneSignal Application ID — Dashboard → Settings → Keys & IDs → OneSignal App ID."
+    },
+    {
+      "key": "rest_api_key",
+      "label": "REST API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your OneSignal App REST API Key",
+      "help": "App-level REST API key — Dashboard → Settings → Keys & IDs → REST API Key. Sent as 'Authorization: Basic <key>' with the raw key (OneSignal does NOT base64-encode it)."
+    },
+    {
+      "key": "user_auth_key",
+      "label": "User Auth Key (optional)",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Paste your OneSignal User Auth Key",
+      "help": "Account-wide key — Account → Keys & IDs → User Auth Key. Required only for /apps mutations (list_apps, create_app, update_app)."
+    },
+    {
+      "key": "base_url",
+      "label": "OneSignal API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://onesignal.com/api/v1",
+      "placeholder": "https://onesignal.com/api/v1",
+      "help": "Base URL for the OneSignal REST API. Leave blank to use the default."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout in seconds. Default 30."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates app_id and rest_api_key and marks the connector installed. Does NOT call the API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies OneSignal API connectivity via GET /apps/{app_id} using the REST API key.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_notifications",
+      "name": "List Notifications",
+      "description": "GET /notifications?app_id=... — list notifications with pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "kind", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_notification",
+      "name": "Get Notification",
+      "description": "GET /notifications/{id}?app_id=... — fetch a single notification record.",
+      "method": "GET",
+      "params": [
+        { "key": "notification_id", "type": "string", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_notification",
+      "name": "Send Notification",
+      "description": "POST /notifications — push to segments, player IDs, or external user IDs. Supports email and SMS via channel-specific fields in contents.",
+      "method": "POST",
+      "params": [
+        { "key": "contents", "type": "object", "required": true },
+        { "key": "app_id", "type": "string", "required": false },
+        { "key": "headings", "type": "object", "required": false },
+        { "key": "included_segments", "type": "array", "required": false },
+        { "key": "excluded_segments", "type": "array", "required": false },
+        { "key": "include_player_ids", "type": "array", "required": false },
+        { "key": "include_external_user_ids", "type": "array", "required": false },
+        { "key": "data", "type": "object", "required": false },
+        { "key": "url", "type": "string", "required": false },
+        { "key": "big_picture", "type": "string", "required": false },
+        { "key": "send_after", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "cancel_notification",
+      "name": "Cancel Notification",
+      "description": "DELETE /notifications/{id}?app_id=... — cancel a scheduled notification.",
+      "method": "DELETE",
+      "params": [
+        { "key": "notification_id", "type": "string", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "notification_history",
+      "name": "Notification History",
+      "description": "POST /notifications/{id}/history — request CSV export of sent/clicked events for a notification.",
+      "method": "POST",
+      "params": [
+        { "key": "notification_id", "type": "string", "required": true },
+        { "key": "events", "type": "string", "required": false },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_apps",
+      "name": "List Apps",
+      "description": "GET /apps — list every app in the OneSignal account. Requires user_auth_key.",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_app",
+      "name": "Get App",
+      "description": "GET /apps/{id} — fetch an app record.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_app",
+      "name": "Create App",
+      "description": "POST /apps — provision a new OneSignal app. Requires user_auth_key.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "gcm_key", "type": "string", "required": false },
+        { "key": "apns_env", "type": "string", "required": false },
+        { "key": "apns_p12", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_app",
+      "name": "Update App",
+      "description": "PUT /apps/{id} — update app settings. Requires user_auth_key.",
+      "method": "PUT",
+      "params": [
+        { "key": "app_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_devices",
+      "name": "List Devices",
+      "description": "GET /players?app_id=... — list registered devices.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_device",
+      "name": "Get Device",
+      "description": "GET /players/{id}?app_id=... — fetch a single device.",
+      "method": "GET",
+      "params": [
+        { "key": "player_id", "type": "string", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_device",
+      "name": "Create Device",
+      "description": "POST /players — register a device.",
+      "method": "POST",
+      "params": [
+        { "key": "device_type", "type": "number", "required": true },
+        { "key": "app_id", "type": "string", "required": false },
+        { "key": "identifier", "type": "string", "required": false },
+        { "key": "language", "type": "string", "required": false },
+        { "key": "tags", "type": "object", "required": false },
+        { "key": "external_user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_device",
+      "name": "Update Device",
+      "description": "PUT /players/{id} — update device attributes or tags. app_id is injected into the body automatically.",
+      "method": "PUT",
+      "params": [
+        { "key": "player_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "GET /apps/{id}/segments — list segments for the app.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_segment",
+      "name": "Create Segment",
+      "description": "POST /apps/{id}/segments — define a reusable audience filter.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "filters", "type": "array", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_segment",
+      "name": "Delete Segment",
+      "description": "DELETE /apps/{id}/segments/{segment_id} — remove a segment.",
+      "method": "DELETE",
+      "params": [
+        { "key": "segment_id", "type": "string", "required": true },
+        { "key": "app_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}
