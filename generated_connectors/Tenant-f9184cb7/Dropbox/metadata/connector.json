@@ -1,220 +1,284 @@
 {
   "connector_type": "dropbox",
-  "connector_id": "dropbox",
+  "name": "DropboxConnector",
   "display_name": "Dropbox",
-  "name": "Dropbox",
-  "provider": "Dropbox",
-  "service": "Dropbox",
   "version": "1.0.0",
-  "description": "Sync Dropbox files and folders into the Shielva knowledge base via the Dropbox API v2.",
-  "auth_type": "oauth2",
+  "description": "Connects to the Dropbox REST API v2 (Files, Sharing, Users) via OAuth 2.0. Supports recursive folder listing, file metadata, upload/download, copy/move/delete, search, revisions, shared links, account/space queries, and KB sync of all Dropbox files/folders.",
+  "provider": "dropbox",
+  "service": "dropbox",
+  "auth_type": "oauth2_code",
   "install_fields": [
     {
       "key": "client_id",
-      "label": "App Key",
+      "label": "Dropbox App Key",
       "type": "string",
       "required": true,
-      "placeholder": "your_dropbox_app_key",
-      "help": "Dropbox App Key from the Dropbox App Console (https://www.dropbox.com/developers/apps)."
+      "placeholder": "Paste your Dropbox App Key (client_id)",
+      "help": "From https://www.dropbox.com/developers/apps → your app → Settings → App key. Used as the OAuth2 client_id."
     },
     {
       "key": "client_secret",
-      "label": "App Secret",
-      "type": "password",
+      "label": "Dropbox App Secret",
+      "type": "secret",
       "required": true,
-      "placeholder": "your_dropbox_app_secret",
-      "help": "Dropbox App Secret from the Dropbox App Console."
+      "placeholder": "Paste your Dropbox App Secret",
+      "help": "From your Dropbox App's Settings page. Sent only in token exchange — never to a browser."
     },
     {
-      "key": "redirect_uri",
-      "label": "Redirect URI (optional)",
+      "key": "token_url",
+      "label": "Token URL",
       "type": "string",
       "required": false,
-      "placeholder": "https://yourapp.com/oauth/callback",
-      "help": "OAuth2 redirect URI. Must match a URI registered in the Dropbox App Console."
+      "default": "https://api.dropboxapi.com/oauth2/token",
+      "placeholder": "https://api.dropboxapi.com/oauth2/token",
+      "help": "OAuth2 token endpoint. Leave blank to use the Dropbox default."
     }
   ],
   "oauth_scopes": [
     "files.metadata.read",
+    "files.content.read",
+    "files.content.write",
     "sharing.read",
+    "sharing.write",
     "account_info.read"
   ],
   "oauth_auth_url": "https://www.dropbox.com/oauth2/authorize",
   "oauth_token_url": "https://api.dropboxapi.com/oauth2/token",
-  "features": [
-    "oauth2",
-    "retry",
-    "cursor_pagination",
-    "circuit_breaker",
-    "normalizer",
-    "rate_limiting",
-    "error_handling",
-    "recursive_listing",
-    "shared_links",
-    "space_usage",
-    "team_members"
-  ],
-  "methods": [
+  "apis": [
     {
       "id": "install",
-      "name": "Install / Authenticate",
-      "description": "Validate app_key/app_secret and optionally verify access_token via POST /users/get_current_account.",
-      "category": "auth"
+      "name": "Install Connector",
+      "description": "Validates client_id + client_secret and persists install-time config. No API call.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
     },
     {
       "id": "authorize",
       "name": "Authorize",
-      "description": "Return the Dropbox OAuth2 authorization URL for the user to grant access.",
-      "category": "auth"
+      "description": "Exchange the OAuth2 authorization code for access + refresh tokens.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
     },
     {
       "id": "health_check",
       "name": "Health Check",
-      "description": "POST /users/get_current_account and return HEALTHY, DEGRADED, or OFFLINE with display name and email.",
-      "category": "health"
+      "description": "POST /users/get_current_account — verifies Dropbox API connectivity and token validity.",
+      "method": "POST",
+      "params": [],
+      "returns": "ConnectorStatus"
     },
     {
       "id": "sync",
       "name": "Sync Files",
-      "description": "Recursively list all Dropbox files and folders and sync into the knowledge base.",
-      "category": "sync"
+      "description": "Recursively list every file and folder via /files/list_folder (cursor pagination) and ingest into the KB.",
+      "method": "POST",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
     },
     {
       "id": "list_folder",
       "name": "List Folder",
-      "description": "List contents of a Dropbox folder.",
-      "category": "files",
-      "endpoint": "POST /files/list_folder"
+      "description": "POST /files/list_folder — list entries in a Dropbox folder.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": false },
+        { "key": "recursive", "type": "boolean", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
     },
     {
       "id": "list_folder_continue",
       "name": "List Folder (Continue)",
-      "description": "Continue a folder listing using a cursor.",
-      "category": "files",
-      "endpoint": "POST /files/list_folder/continue"
+      "description": "POST /files/list_folder/continue — cursor pagination.",
+      "method": "POST",
+      "params": [
+        { "key": "cursor", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
     },
     {
       "id": "get_metadata",
       "name": "Get Metadata",
-      "description": "Retrieve metadata for a file or folder by path.",
-      "category": "files",
-      "endpoint": "POST /files/get_metadata"
+      "description": "POST /files/get_metadata — fetch metadata for a file or folder by path.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
     },
     {
-      "id": "search_files",
+      "id": "download_file",
+      "name": "Download File",
+      "description": "POST https://content.dropboxapi.com/2/files/download — returns base64-encoded content + metadata.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "upload_file",
+      "name": "Upload File",
+      "description": "POST https://content.dropboxapi.com/2/files/upload — write binary content to a Dropbox path.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true },
+        { "key": "mode", "type": "string", "required": false },
+        { "key": "autorename", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "copy_file",
+      "name": "Copy File",
+      "description": "POST /files/copy_v2.",
+      "method": "POST",
+      "params": [
+        { "key": "from_path", "type": "string", "required": true },
+        { "key": "to_path", "type": "string", "required": true },
+        { "key": "autorename", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "move_file",
+      "name": "Move File",
+      "description": "POST /files/move_v2.",
+      "method": "POST",
+      "params": [
+        { "key": "from_path", "type": "string", "required": true },
+        { "key": "to_path", "type": "string", "required": true },
+        { "key": "autorename", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_file",
+      "name": "Delete File",
+      "description": "POST /files/delete_v2.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_folder",
+      "name": "Create Folder",
+      "description": "POST /files/create_folder_v2.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "autorename", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search",
       "name": "Search Files",
-      "description": "Full-text search over Dropbox files.",
-      "category": "files",
-      "endpoint": "POST /files/search_v2"
+      "description": "POST /files/search_v2 — full-text search across the user's Dropbox.",
+      "method": "POST",
+      "params": [
+        { "key": "query", "type": "string", "required": true },
+        { "key": "max_results", "type": "number", "required": false },
+        { "key": "path", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_revisions",
+      "name": "List Revisions",
+      "description": "POST /files/list_revisions.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "restore_revision",
+      "name": "Restore Revision",
+      "description": "POST /files/restore — restore a file to a previous revision.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "rev", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_shared_link",
+      "name": "Create Shared Link",
+      "description": "POST /sharing/create_shared_link_with_settings.",
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": true },
+        { "key": "settings", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
     },
     {
       "id": "list_shared_links",
       "name": "List Shared Links",
-      "description": "List shared links for a given path or the entire account.",
-      "category": "sharing",
-      "endpoint": "POST /sharing/list_shared_links"
-    },
-    {
-      "id": "get_space_usage",
-      "name": "Get Space Usage",
-      "description": "Return allocation and used bytes for the account.",
-      "category": "account",
-      "endpoint": "POST /users/get_space_usage"
-    },
-    {
-      "id": "list_team_members",
-      "name": "List Team Members",
-      "description": "List members of the team (team apps only).",
-      "category": "team",
-      "endpoint": "POST /team/members/list_v2"
-    }
-  ],
-  "categories": [
-    "auth",
-    "health",
-    "sync",
-    "files",
-    "sharing",
-    "account",
-    "team"
-  ],
-  "apis": [
-    {
-      "name": "Install / Authenticate",
-      "id": "install",
-      "category": "auth",
-      "description": "Validate app_key/app_secret (and access_token if provided).",
-      "method": "GET"
-    },
-    {
-      "name": "Authorize",
-      "id": "authorize",
-      "category": "auth",
-      "description": "Return the Dropbox OAuth2 authorization URL.",
-      "method": "GET"
-    },
-    {
-      "name": "Health Check",
-      "id": "health_check",
-      "category": "health",
-      "description": "POST /users/get_current_account + /users/get_space_usage to verify token.",
-      "method": "GET"
-    },
-    {
-      "name": "Sync Files",
-      "id": "sync",
-      "category": "sync",
-      "description": "Sync all Dropbox files recursively into the knowledge base.",
-      "method": "GET"
-    },
-    {
-      "name": "List Folder",
-      "id": "list_folder",
-      "category": "files",
-      "description": "POST /files/list_folder.",
-      "method": "GET"
-    },
-    {
-      "name": "List Folder Continue",
-      "id": "list_folder_continue",
-      "category": "files",
-      "description": "POST /files/list_folder/continue.",
-      "method": "GET"
-    },
-    {
-      "name": "Get Metadata",
-      "id": "get_metadata",
-      "category": "files",
-      "description": "POST /files/get_metadata.",
-      "method": "GET"
-    },
-    {
-      "name": "Search Files",
-      "id": "search_files",
-      "category": "files",
-      "description": "POST /files/search_v2.",
-      "method": "GET"
-    },
-    {
-      "name": "List Shared Links",
-      "id": "list_shared_links",
-      "category": "sharing",
       "description": "POST /sharing/list_shared_links.",
-      "method": "GET"
+      "method": "POST",
+      "params": [
+        { "key": "path", "type": "string", "required": false },
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "direct_only", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
     },
     {
-      "name": "Get Space Usage",
+      "id": "get_current_account",
+      "name": "Get Current Account",
+      "description": "POST /users/get_current_account.",
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "POST /users/get_account — fetch another user's public profile.",
+      "method": "POST",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
       "id": "get_space_usage",
-      "category": "account",
+      "name": "Get Space Usage",
       "description": "POST /users/get_space_usage.",
-      "method": "GET"
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
     },
     {
-      "name": "List Team Members",
-      "id": "list_team_members",
-      "category": "team",
-      "description": "Calls list_team_members() on the connector.",
-      "method": "GET"
+      "id": "disconnect",
+      "name": "Disconnect",
+      "description": "POST /2/auth/token/revoke and clear local token storage.",
+      "method": "POST",
+      "params": [],
+      "returns": "ConnectorStatus"
     }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.0.0"
   ]
 }

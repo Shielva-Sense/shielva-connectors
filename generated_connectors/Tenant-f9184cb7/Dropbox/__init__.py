@@ -1,4 +1,4 @@
-from .connector import DropboxConnector
-from .models import AuthStatus, ConnectorHealth, SyncStatus
+"""Shielva Dropbox connector package."""
+from connector import DropboxConnector
 
-__all__ = ["AuthStatus", "ConnectorHealth", "DropboxConnector", "SyncStatus"]
+__all__ = ["DropboxConnector"]
