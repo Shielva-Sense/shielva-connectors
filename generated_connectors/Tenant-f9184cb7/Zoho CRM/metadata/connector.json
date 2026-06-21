@@ -15,14 +15,16 @@
       "type": "string",
       "required": true,
       "placeholder": "acme",
-      "description": "Your Freshworks CRM subdomain (e.g. 'acme' from acme.myfreshworks.com)."
+      "description": "Your Freshworks CRM subdomain (e.g. 'acme' from acme.myfreshworks.com).",
+      "help": "Domain."
     },
     {
       "key": "api_key",
       "label": "API Key",
       "type": "password",
       "required": true,
-      "description": "Your Freshworks CRM API key from Profile Settings → API Settings."
+      "description": "Your Freshworks CRM API key from Profile Settings \u2192 API Settings.",
+      "help": "API Key."
     }
   ],
   "capabilities": [
@@ -37,5 +39,129 @@
     "get_account"
   ],
   "api_base_url": "https://{domain}.myfreshworks.com/crm/sales/api/v2",
-  "auth_header": "Authorization: Token token={api_key}"
+  "auth_header": "Authorization: Token token={api_key}",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync contacts, deals, and accounts from Freshworks CRM.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return one page of contacts from POST /contacts/filters.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Return a single contact by ID via GET /contacts/{id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Return one page of deals from POST /deals/filters.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Return a single deal by ID via GET /deals/{id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "deal_id",
+          "label": "Deal Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return one page of accounts from POST /sales_accounts/filters.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "Return a single account by ID via GET /sales_accounts/{id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "account_id",
+          "label": "Account Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ]
 }
