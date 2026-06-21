@@ -1,0 +1,69 @@
+{
+  "title": "Anthropic Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Anthropic** is the maker of the Claude family of large language models, exposing a JSON REST API under `https://api.anthropic.com/v1`. This connector — `AnthropicConnector` (`CONNECTOR_TYPE = \"anthropic\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from Anthropic:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Messages | `/messages` | Create Claude chat completions |\n| Token counting | `/messages/count_tokens` | Estimate input-token cost before sending |\n| Models | `/models` | List + read available models for the API key |\n| Message Batches | `/messages/batches` | Submit / cancel / poll async batch inference jobs |\n| Files (beta) | `/files` | Upload / list / get / delete user files (anthropic-beta gated) |\n\nThe connector treats Anthropic as an inference surface, not a document source — `sync()` returns a zero-document `SyncResult`. All public methods are standalone `async def` (OCP), every HTTP call goes through `client/http_client.py::AnthropicHTTPClient` (SOC), and retries are handled with exponential backoff + `Retry-After` honouring (3 attempts on 429 / 5xx)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create an Anthropic API key\n\n1. Sign in to https://console.anthropic.com.\n2. Open **Settings → API Keys**.\n3. Click **Create Key**, name it (e.g. `shielva-prod`).\n4. Copy the `sk-ant-...` value — Anthropic shows the secret only once.\n5. (Optional) Note the date-pinned API version you want to target (default `2023-06-01`).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Anthropic**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | The `sk-ant-...` value from step 4 |\n| `base_url` (text, optional) | Override `https://api.anthropic.com/v1` for a proxy |\n| `anthropic_version` (text, optional) | Pin a specific date version (default `2023-06-01`) |\n| `timeout_s` (number, optional) | Per-request httpx timeout (default 60) |\n| `rate_limit_per_min` (number, optional) | Client-side soft cap (default 50) |\n\nClick **Install**. `install()` validates `api_key` is present (it does NOT call the API), initialises the `AnthropicHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 model (`GET /models?limit=1`) as a token-free probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 5xx → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Anthropic REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `x-api-key` header (NOT `Authorization`, NOT `Bearer`).\n- `anthropic-version: 2023-06-01` is mandatory on every request and is sent automatically by `AnthropicHTTPClient`.\n- File API endpoints (`/files/*`) additionally require `anthropic-beta: files-api-2025-04-14`; the client adds this only on those calls.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Initialises `AnthropicHTTPClient`. Does **not** call any Anthropic endpoint. |\n| `authorize(...)` | Returns `TokenInfo(access_token=api_key, token_type=\"api_key\")` — there is no token exchange. |\n| `health_check()` | `GET /models?limit=1` — minimal, token-free probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nx-api-key:         <api_key>           ← raw key, no Bearer prefix\nanthropic-version: 2023-06-01           ← mandatory\ncontent-type:      application/json\nanthropic-beta:    files-api-2025-04-14 ← only on /files calls\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `x-api-key` header value |\n| `base_url` | text | no | `self.base_url` (default `https://api.anthropic.com/v1`) | Override for proxy / staging |\n| `anthropic_version` | text | no | `self.anthropic_version` (default `2023-06-01`) | Pins API surface contract |\n| `timeout_s` | number | no | `self.timeout_s` (default 60) | Per-request httpx timeout |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 50) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_ANTHROPIC_BASE = \"https://api.anthropic.com/v1\"\n_DEFAULT_ANTHROPIC_VERSION = \"2023-06-01\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `AnthropicConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::AnthropicHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; initialise `AnthropicHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns `TokenInfo(access_token=api_key, token_type=\"api_key\")`.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 model via `GET /models?limit=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nDocumented no-op. Anthropic is an inference API, not a document source. Returns `SyncResult(COMPLETED, 0/0/0)`.\n\n### Webhook overrides\n- `handle_webhook(...)`, `process_callback(...)`, `handle_event(...)`, `batch_processor(...)` — all documented no-ops. Anthropic has no provider-pushed webhooks today; these are kept so the BaseConnector ABI is honoured."
+        },
+        {
+          "id": "api-messages",
+          "title": "Messages",
+          "content": "### `async create_message(model, messages, max_tokens=1024, system=None, temperature=1.0, stream=False) -> Dict`\n`POST /messages` — body: `{model, messages, max_tokens, system?, temperature, stream}`. Returns the raw Anthropic response dict.\n\n### `async count_tokens(model, messages, system=None) -> Dict`\n`POST /messages/count_tokens` — body: `{model, messages, system?}`. Returns `{input_tokens: int}`."
+        },
+        {
+          "id": "api-models",
+          "title": "Models",
+          "content": "### `async list_models(limit=20, before_id=None, after_id=None) -> Dict`\n`GET /models?limit={N}&before_id=...&after_id=...` — cursor pagination.\n\n### `async get_model(model_id) -> Dict`\n`GET /models/{model_id}` — fetch a single model."
+        },
+        {
+          "id": "api-batches",
+          "title": "Message Batches",
+          "content": "### `async create_batch(requests) -> Dict`\n`POST /messages/batches` — body: `{requests: [{custom_id, params}, ...]}`. Submit an async batch job.\n\n### `async get_batch(batch_id) -> Dict`\n`GET /messages/batches/{batch_id}` — batch status.\n\n### `async list_batches(limit=20, before_id=None, after_id=None) -> Dict`\n`GET /messages/batches` — list all batches.\n\n### `async cancel_batch(batch_id) -> Dict`\n`POST /messages/batches/{batch_id}/cancel` — cancel an in-flight batch.\n\n### `async get_batch_results(batch_id) -> Dict`\n`GET /messages/batches/{batch_id}/results` — JSONL results; the connector returns the parsed dict or `{raw: text}` when the response is line-delimited JSON."
+        },
+        {
+          "id": "api-files",
+          "title": "Files (beta)",
+          "content": "### `async list_files(limit=20, before_id=None, after_id=None) -> Dict`\n`GET /files` — list uploaded files. Sends `anthropic-beta: files-api-2025-04-14`.\n\n### `async get_file(file_id) -> Dict`\n`GET /files/{file_id}` — file metadata.\n\n### `async delete_file(file_id) -> Dict`\n`DELETE /files/{file_id}` — delete a file."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nAnthropicError                              # base; carries status_code + response_body\n├── AnthropicAuthError                      # 401 / 403\n├── AnthropicBadRequestError                # 400 / 413\n├── AnthropicNotFoundError                  # 404\n├── AnthropicRateLimitError                 # 429 — retry_after_s\n├── AnthropicServerError                    # 5xx / 529 overloaded_error\n└── AnthropicNetworkError                   # transport-layer (DNS / TCP / TLS / timeout)\n```\n\nBack-compat alias preserved:\n```\nAnthropicNotFound = AnthropicNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After` header when present, else exponential backoff `_BACKOFF_BASE * 2 ** attempt + jitter`, capped at 30s, up to `_MAX_RETRIES=3` |\n| 5xx / 529 | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `AnthropicNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps them:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n5xx → ConnectorStatus(DEGRADED,  CONNECTED)     — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Paste the `sk-ant-...` value into the install field. Anthropic shows the key only once — rotate if lost. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — key revoked or wrong account | Generate a fresh key in Console → API Keys. Update the install field. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — organisation disabled / billing suspended / scope blocked | Check Console → Settings → Billing. Verify the key's organisation has the Messages API enabled. |\n| `anthropic.http.retry` warnings spike | Hitting 429 (per-minute / per-day rate cap) | Honoured `Retry-After` automatically. Lower `rate_limit_per_min` or upgrade the Anthropic tier. |\n| `AnthropicNotFoundError` on `get_model(...)` | Model id is deprecated or not exposed to this tier | List available ids first with `list_models(limit=50)`. |\n| `AnthropicBadRequestError` on `create_message` | `max_tokens` too large or messages role alternation invalid | Halve `max_tokens`. Ensure every `user` message is followed by an `assistant` reply (or the next `user`). |\n| `anthropic-version` header missing | Hand-rolled client bypass | Always use `connector.create_message(...)`; the header is owned by `AnthropicHTTPClient._headers()`. |\n| File API returns 404 | Beta header missing | `list_files / get_file / delete_file` already send `anthropic-beta: files-api-2025-04-14`. Confirm the file id is correct. |"
+    }
+  ]
+}
