@@ -13,18 +13,21 @@
       "type": "password",
       "required": true,
       "placeholder": "rk_live_...",
-      "help": "Your Recurly Private API Key. Find it in the Recurly dashboard under Integrations → API Credentials."
+      "help": "Your Recurly Private API Key. Find it in the Recurly dashboard under Integrations \u2192 API Credentials."
     },
     {
       "key": "subdomain",
       "label": "Subdomain (optional)",
       "type": "string",
-      "required": false,
+      "required": true,
       "placeholder": "mycompany",
-      "help": "Your Recurly subdomain (e.g. 'mycompany' from mycompany.recurly.com). Optional — used for generating direct dashboard links."
+      "help": "Your Recurly subdomain (e.g. 'mycompany' from mycompany.recurly.com). Optional \u2014 used for generating direct dashboard links."
     }
   ],
-  "capabilities": ["sync", "health_check"],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
   "resources": [
     {
       "id": "accounts",
@@ -73,5 +76,63 @@
     "base_url": "https://v3.recurly.com",
     "version_header": "Accept: application/vnd.recurly.v2021-02-25",
     "docs": "https://developers.recurly.com/api/v2021-02-25/"
-  }
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync accounts, subscriptions, invoices, plans, and transactions from Recurly.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return all accounts, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_subscriptions",
+      "name": "List Subscriptions",
+      "description": "Return all subscriptions, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Return all invoices, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_plans",
+      "name": "List Plans",
+      "description": "Return all plans.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Transactions",
+      "description": "Return all transactions, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "RecurlyConnector"
 }
