@@ -1,0 +1,355 @@
+{
+  "connector_type": "bitbucket",
+  "name": "BitbucketConnector",
+  "display_name": "Bitbucket",
+  "version": "1.0.0",
+  "description": "Connects to the Bitbucket Cloud REST API (Workspaces, Repositories, Branches, Pull Requests, Issues, Commits, Webhooks, raw file content) using OAuth 2.0 Authorization Code Grant. Supports list / get / create / merge across PRs and issues, repository CRUD, and KB sync of open pull requests.",
+  "provider": "bitbucket",
+  "service": "bitbucket",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID (Key)",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Bitbucket OAuth consumer Key",
+      "help": "From Bitbucket -> Workspace settings -> OAuth consumers. The 'Key' value identifies the OAuth consumer."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Bitbucket OAuth consumer Secret",
+      "help": "Shown next to the Key in Bitbucket -> Workspace settings -> OAuth consumers. Treat as a password."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "account repository repository:write pullrequest pullrequest:write issue issue:write",
+      "placeholder": "account repository repository:write pullrequest pullrequest:write issue issue:write",
+      "help": "Space-separated Bitbucket Cloud OAuth scopes. Removing write scopes disables create/merge operations."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://bitbucket.org/site/oauth2/authorize",
+      "placeholder": "https://bitbucket.org/site/oauth2/authorize",
+      "help": "Bitbucket OAuth2 authorization endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://bitbucket.org/site/oauth2/access_token",
+      "placeholder": "https://bitbucket.org/site/oauth2/access_token",
+      "help": "Bitbucket OAuth2 token endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "base_url",
+      "label": "Bitbucket API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.bitbucket.org/2.0",
+      "placeholder": "https://api.bitbucket.org/2.0",
+      "help": "Base URL for the Bitbucket Cloud REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Bitbucket Cloud API requests per minute. Defaults to 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector installed. Does NOT call the Bitbucket API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens via the Bitbucket token endpoint with HTTP Basic auth.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Bitbucket API connectivity by calling GET /user.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "GET /user — returns the raw response for the authenticated principal.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "GET /workspaces — lists workspaces the authenticated user belongs to.",
+      "method": "GET",
+      "params": [
+        { "key": "role", "type": "string", "required": false },
+        { "key": "pagelen", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_workspace",
+      "name": "Get Workspace",
+      "description": "GET /workspaces/{workspace} — fetch a single workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_repositories",
+      "name": "List Repositories",
+      "description": "GET /repositories/{workspace} — lists repositories inside a workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "role", "type": "string", "required": false },
+        { "key": "pagelen", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_repository",
+      "name": "Get Repository",
+      "description": "GET /repositories/{workspace}/{repo_slug}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_repository",
+      "name": "Create Repository",
+      "description": "POST /repositories/{workspace}/{repo_slug} — create a new repository.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "scm", "type": "string", "required": false },
+        { "key": "is_private", "type": "boolean", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "project_key", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_repository",
+      "name": "Delete Repository",
+      "description": "DELETE /repositories/{workspace}/{repo_slug} — irreversible. Returns {} on 204.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_branches",
+      "name": "List Branches",
+      "description": "GET /repositories/{ws}/{slug}/refs/branches.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "pagelen", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pull_requests",
+      "name": "List Pull Requests",
+      "description": "GET /repositories/{ws}/{slug}/pullrequests — defaults to state=OPEN.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "pagelen", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_pull_request",
+      "name": "Get Pull Request",
+      "description": "GET /repositories/{ws}/{slug}/pullrequests/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "pull_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_pull_request",
+      "name": "Create Pull Request",
+      "description": "POST /repositories/{ws}/{slug}/pullrequests — creates a PR from source_branch into destination_branch.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "source_branch", "type": "string", "required": true },
+        { "key": "destination_branch", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "reviewers", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "merge_pull_request",
+      "name": "Merge Pull Request",
+      "description": "POST /repositories/{ws}/{slug}/pullrequests/{id}/merge — strategy is merge_commit | squash | fast_forward.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "pull_id", "type": "number", "required": true },
+        { "key": "merge_strategy", "type": "string", "required": false },
+        { "key": "message", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "GET /repositories/{ws}/{slug}/issues — state filter via ?q=state=...",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "pagelen", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "GET /repositories/{ws}/{slug}/issues/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "issue_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_issue",
+      "name": "Create Issue",
+      "description": "POST /repositories/{ws}/{slug}/issues — body content envelope is {raw: ...}.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "title", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": false },
+        { "key": "priority", "type": "string", "required": false },
+        { "key": "kind", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_commits",
+      "name": "List Commits",
+      "description": "GET /repositories/{ws}/{slug}/commits[/{branch}] — optionally filtered to a single branch.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "branch", "type": "string", "required": false },
+        { "key": "pagelen", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_commit",
+      "name": "Get Commit",
+      "description": "GET /repositories/{ws}/{slug}/commit/{node}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "commit", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_webhooks",
+      "name": "List Webhooks",
+      "description": "GET /repositories/{ws}/{slug}/hooks.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "POST /repositories/{ws}/{slug}/hooks — events default to ['repo:push'].",
+      "method": "POST",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "events", "type": "object", "required": false },
+        { "key": "active", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file_content",
+      "name": "Get File Content",
+      "description": "GET /repositories/{ws}/{slug}/src/{commit}/{path} — returns raw file text at the given commit.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace", "type": "string", "required": true },
+        { "key": "repo_slug", "type": "string", "required": true },
+        { "key": "commit", "type": "string", "required": true },
+        { "key": "path", "type": "string", "required": true }
+      ],
+      "returns": "String"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
