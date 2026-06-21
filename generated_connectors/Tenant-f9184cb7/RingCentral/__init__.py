@@ -17,15 +17,15 @@ Usage::
     )
 """
 
-from .connector import AUTH_TYPE, CONNECTOR_TYPE, RingCentralConnector
-from .exceptions import (
+from connector import AUTH_TYPE, CONNECTOR_TYPE, RingCentralConnector
+from exceptions import (
     RingCentralAuthError,
     RingCentralError,
     RingCentralNetworkError,
     RingCentralNotFoundError,
     RingCentralRateLimitError,
 )
-from .models import (
+from models import (
     ConnectorDocument,
     HealthCheckResult,
     HealthStatus,
