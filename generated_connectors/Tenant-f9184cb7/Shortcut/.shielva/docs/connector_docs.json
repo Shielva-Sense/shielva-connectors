@@ -1,0 +1,74 @@
+{
+  "title": "Shortcut Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Shortcut** (formerly Clubhouse) is a project-management SaaS for software teams. Its REST API v3 lives at `https://api.app.shortcut.com/api/v3`. This connector — `ShortcutConnector` (`CONNECTOR_TYPE = \"shortcut\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Shortcut workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Members | `/member`, `/members`, `/members/{id}` | Auth probe, list workspace members |\n| Groups (Teams) | `/groups` | List teams |\n| Workflows | `/workflows` | Discover `workflow_state_id` values |\n| Projects | `/projects` | Legacy project registry |\n| Iterations | `/iterations` | Sprint-like iterations |\n| Milestones | `/milestones` | Roadmap milestones |\n| Epics | `/epics`, `/epics/{id}` | List, get, create epics |\n| Stories | `/search/stories`, `/stories`, `/stories/{id}` | List/search, get, create, update, delete |\n| Labels | `/labels` | List + create workspace labels |\n| Files | `/files` | Uploaded-file metadata |\n\nThe connector normalises **stories** and **epics** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff that honours `Retry-After`, and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::ShortcutHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Shortcut API token\n\n1. Sign in to https://app.shortcut.com.\n2. Click your avatar (bottom-left) → **Settings**.\n3. **API Tokens** in the left navigation.\n4. **Generate Token**, label it `shielva-connector`, copy the token — Shortcut shows it only once.\n5. The token inherits the issuing user's workspace permissions; mint it from an account whose access matches the connector's intended scope (read-only vs. read-write).\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Shortcut**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | The token from step 4 |\n| `base_url` (text, optional) | Override `https://api.app.shortcut.com/api/v3` (rarely needed) |\n| `default_workflow_state_id` (number, optional) | Fallback `workflow_state_id` for `create_story()` when the caller omits it |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 200 |\n\nClick **Install**. `install()` validates `api_token` is present and calls `save_config(...)` — it does NOT call the Shortcut API. The gateway runs `health_check()` separately.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /member` (current member) as a lightweight check. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning. On `httpx.TimeoutException` / `httpx.NetworkError` → `OFFLINE + CONNECTED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Shortcut REST API uses **server-to-server API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_token` is sent in the `Shortcut-Token` header. **Not** `Authorization`, **not** query-string. This is the entire auth model — any deployment that puts the token elsewhere is misconfigured.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token` is non-empty. Persists config via `save_config`. Does **not** call any Shortcut endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` wrapping `api_token` for ABI compatibility — there is no token exchange. |\n| `health_check()` | `GET /member` — minimal authenticated probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — token is read from `self.config` each call. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nShortcut-Token: <api_token>\nContent-Type:   application/json\nAccept:         application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | `Shortcut-Token` header value |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.app.shortcut.com/api/v3`) | Override for sandbox / proxy |\n| `default_workflow_state_id` | number | no | `self.default_workflow_state_id` | Fallback workflow state for `create_story` |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 200) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\nSHORTCUT_BASE_URL = \"https://api.app.shortcut.com/api/v3\"\n```\n\n### Discover IDs\n\nMost Shortcut write endpoints take numeric IDs. Use:\n\n- `list_workflows()` to find `workflow_state_id` values.\n- `list_projects()` to find `project_id`.\n- `list_epics()` to find `epic_id`.\n- `list_iterations()` to find `iteration_id`.\n- `list_members()` / `get_member()` to find member UUIDs for `owner_ids` / `requested_by_id`."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `ShortcutConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::ShortcutHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; persist via `save_config`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo` wrapping `api_token`.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /member`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Shortcut stories (cursor-paginated `/search/stories`) + epics (`/epics`) → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_found / _synced / _failed`. Honours `since` by appending `updated:>YYYY-MM-DD` to the search DSL."
+        },
+        {
+          "id": "api-members",
+          "title": "Members + Groups",
+          "content": "### `async list_members() -> List[Dict]`\n`GET /members` — every workspace member.\n\n### `async get_member(member_id=None) -> Dict`\n`GET /members/{id}` when `member_id` is provided, else `GET /member` (authenticated member).\n\n### `async list_groups() -> List[Dict]`\n`GET /groups` — teams (groups)."
+        },
+        {
+          "id": "api-discovery",
+          "title": "Workflows · Projects · Iterations · Milestones",
+          "content": "### `async list_workflows() -> List[Dict]`\n`GET /workflows` — workflows with embedded `states[]`. Use to discover `workflow_state_id`.\n\n### `async list_projects() -> List[Dict]`\n`GET /projects` — legacy project registry.\n\n### `async list_iterations() -> List[Dict]`\n`GET /iterations` — sprint-like iterations.\n\n### `async list_milestones() -> List[Dict]`\n`GET /milestones` — roadmap milestones."
+        },
+        {
+          "id": "api-epics",
+          "title": "Epics",
+          "content": "### `async list_epics(includes_description=False) -> List[Dict]`\n`GET /epics` — list all epics. Pass `includes_description=True` to include markdown body in each row.\n\n### `async get_epic(epic_id) -> Dict`\n`GET /epics/{epic_id}`.\n\n### `async create_epic(name, description=None, state=\"to do\") -> Dict`\n`POST /epics` — body `{name, state, description?}`."
+        },
+        {
+          "id": "api-stories",
+          "title": "Stories",
+          "content": "### `async list_stories(query=None, page_size=25, next_token=None) -> Dict`\n`POST /search/stories` — body `{page_size, query?, next?}`. Returns `{data: [...], next: cursor|null, total: int}`. Pass `next_token` to advance.\n\n### `async get_story(story_id) -> Dict`\n`GET /stories/{story_id}`.\n\n### `async create_story(name, story_type=\"feature\", project_id=None, workflow_state_id=None, owner_ids=None, description=None, epic_id=None, iteration_id=None, estimate=None) -> Dict`\n`POST /stories`. Raises `ValueError` if `name` is empty. Falls back to `default_workflow_state_id` when `workflow_state_id` is omitted.\n\n### `async update_story(story_id, fields) -> Dict`\n`PUT /stories/{story_id}`. Raises `ValueError` if `fields` is empty.\n\n### `async delete_story(story_id) -> Dict`\n`DELETE /stories/{story_id}` — Shortcut returns 204; the connector surfaces `{}`."
+        },
+        {
+          "id": "api-labels-files",
+          "title": "Labels · Files",
+          "content": "### `async list_labels() -> List[Dict]`\n`GET /labels`.\n\n### `async create_label(name, color=None) -> Dict`\n`POST /labels` — body `{name, color?}`. Raises `ValueError` if `name` is empty.\n\n### `async list_files() -> List[Dict]`\n`GET /files` — uploaded-file metadata."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nShortcutError                         # base; carries status_code + response_body\n├── ShortcutAuthError                 # 401 / 403\n├── ShortcutBadRequestError           # 400 / 422\n├── ShortcutNotFoundError             # 404\n├── ShortcutConflictError             # 409\n├── ShortcutRateLimitError            # 429 — exposes retry_after_s\n├── ShortcutServerError               # 5xx\n└── ShortcutNetworkError              # transport (DNS, TCP, TLS, timeout)\n```\n\nBack-compat aliases preserved:\n```\nShortcutNotFound = ShortcutNotFoundError\nShortcutAPIError = ShortcutError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 422 | Raise immediately |\n| 429 | Honour `Retry-After` (seconds). Else exponential backoff `min(0.5 * 2 ** attempt, 8)`. Retry up to `_MAX_RETRIES = 3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `ShortcutNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_classify_failure()`:\n\n```\n403       → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n401       → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n429 / RateLimit → ConnectorStatus(DEGRADED, CONNECTED)        — logged as warning\nNetworkError    → ConnectorStatus(OFFLINE, CONNECTED)\nNotFound / 404  → ConnectorStatus(UNHEALTHY, FAILED)\nother           → ConnectorStatus(UNHEALTHY, FAILED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Generate a fresh token (User Settings → API Tokens) and paste it in ACP. Tokens are shown only once at generation. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or rotated | Mint a new token; old tokens are invalidated when re-generated. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — issuing user lacks the workspace permission the call requires | Mint the token from a member with appropriate scope (read-only vs. read-write). |\n| `ConnectorStatus(DEGRADED, CONNECTED)` at health_check | 429 — hit Shortcut's per-minute rate cap | The client retries with `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| `shortcut.http.retry` warnings spike | Same as above, plus 5xx flapping | Inspect `attempt` + `status` in the structured log. The client backs off `min(0.5 * 2 ** attempt, 8)` seconds. |\n| `404 Not Found: get_story(99999)` | Wrong `story_id` OR caller's token does not see that project | Call `list_stories(query=\"id:99999\")` first to confirm visibility. |\n| `ValueError: create_story: 'name' is required` | Empty `name` parameter | Pass a non-empty `name`. Validation lives in the connector, not the API. |\n| `ImportError: cannot import name 'ShortcutNotFound'` | Older `exceptions.py` without back-compat alias | Already fixed — `ShortcutNotFound = ShortcutNotFoundError` alias is in `exceptions.py`. |\n| `from connector import ShortcutConnector` ImportError when run outside pytest | Connector root not on `sys.path` | The package `__init__.py` bootstraps `sys.path` automatically (drata pattern). Ensure you imported the package, not a sibling module. |"
+    }
+  ]
+}
