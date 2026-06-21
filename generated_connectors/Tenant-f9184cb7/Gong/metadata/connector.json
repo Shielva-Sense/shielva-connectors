@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "Your Gong API Access Key",
-      "help": "From Gong Settings → API → Access Keys → Access Key"
+      "help": "From Gong Settings \u2192 API \u2192 Access Keys \u2192 Access Key"
     },
     {
       "key": "access_key_secret",
@@ -22,7 +22,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Gong API Access Key Secret",
-      "help": "From Gong Settings → API → Access Keys → Access Key Secret"
+      "help": "From Gong Settings \u2192 API \u2192 Access Keys \u2192 Access Key Secret"
     }
   ],
   "features": [
@@ -97,13 +97,62 @@
     "settings"
   ],
   "apis": [
-    { "name": "Install / Authenticate", "id": "install", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Calls", "id": "list_calls", "category": "calls" },
-    { "name": "Get Call", "id": "get_call", "category": "calls" },
-    { "name": "Get Call Transcript", "id": "get_call_transcript", "category": "calls" },
-    { "name": "List Users", "id": "list_users", "category": "users" },
-    { "name": "List Scorecards", "id": "list_scorecards", "category": "settings" }
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that access_key and access_key_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Probe GET /v2/users (limit 1 cursor page) to verify connectivity.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch calls and users; normalize each into a ConnectorDocument.",
+      "method": "GET"
+    },
+    {
+      "name": "List Calls",
+      "id": "list_calls",
+      "category": "calls",
+      "description": "Return all calls, optionally filtered by date range.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Call",
+      "id": "get_call",
+      "category": "calls",
+      "description": "Return extended data for a single call.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Call Transcript",
+      "id": "get_call_transcript",
+      "category": "calls",
+      "description": "Return the transcript for a single call.",
+      "method": "GET"
+    },
+    {
+      "name": "List Users",
+      "id": "list_users",
+      "category": "users",
+      "description": "Return all Gong users.",
+      "method": "GET"
+    },
+    {
+      "name": "List Scorecards",
+      "id": "list_scorecards",
+      "category": "settings",
+      "description": "Return all scorecards from Gong settings.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Gong"
 }
