@@ -1,0 +1,233 @@
+{
+  "connector_type": "wix",
+  "name": "WixConnector",
+  "display_name": "Wix",
+  "version": "1.0.0",
+  "description": "Connects to the Wix REST API (Sites, Stores, Ecom, Contacts, Members, Blog, Bookings, Subscriptions) using an API key. Supports product CRUD, order/contact/member/blog/booking/subscription queries, and KB sync of products + orders.",
+  "provider": "wix",
+  "service": "wix",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Wix API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Wix API key",
+      "help": "From Wix Headless → API Keys → Account-level or site-level key. The key is sent RAW in the Authorization header (no Bearer prefix)."
+    },
+    {
+      "key": "account_id",
+      "label": "Wix Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Wix account ID",
+      "help": "Your Wix account ID — from settings. Sent as the wix-account-id header on every request."
+    },
+    {
+      "key": "default_site_id",
+      "label": "Default Site ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional default site ID",
+      "help": "Default site ID for shorthand calls. When set, methods that omit site_id will fall back to this value."
+    },
+    {
+      "key": "base_url",
+      "label": "Wix API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://www.wixapis.com",
+      "placeholder": "https://www.wixapis.com",
+      "help": "Base URL for the Wix REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Wix API requests per minute. Default is 100."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and account_id and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Wix API connectivity by listing one site.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_sites",
+      "name": "List Sites",
+      "description": "GET /site-list/v2/sites — list sites in the account.",
+      "method": "GET",
+      "params": [
+        { "key": "paging_limit", "type": "number", "required": false },
+        { "key": "paging_offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_site",
+      "name": "Get Site",
+      "description": "GET /site-list/v2/sites/{id} — fetch a single site.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_products",
+      "name": "List / Query Products",
+      "description": "POST /stores-reader/v1/products/query — search Wix Stores products.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false },
+        { "key": "query", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_product",
+      "name": "Get Product",
+      "description": "GET /stores-reader/v1/products/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "product_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_product",
+      "name": "Create Product",
+      "description": "POST /stores/v1/products.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "product", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_product",
+      "name": "Update Product",
+      "description": "PATCH /stores/v1/products/{id}.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "product_id", "type": "string", "required": true },
+        { "key": "product", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_orders",
+      "name": "List / Search Orders",
+      "description": "POST /ecom/v1/orders/search.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "sort", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "GET /ecom/v1/orders/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "order_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List / Query Contacts",
+      "description": "POST /contacts/v4/contacts/query.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST /contacts/v4/contacts.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "info", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "POST /members/v1/members/query.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_blog_posts",
+      "name": "List Blog Posts",
+      "description": "POST /blog/v3/posts/query.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_bookings",
+      "name": "List Bookings",
+      "description": "POST /bookings/v2/bookings/query.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_subscriptions",
+      "name": "List Subscriptions",
+      "description": "POST /subscriptions/v1/subscriptions/query.",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "paging", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
