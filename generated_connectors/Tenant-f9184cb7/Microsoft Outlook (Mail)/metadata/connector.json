@@ -1,0 +1,258 @@
+{
+  "connector_type": "outlook_mail",
+  "name": "OutlookMailConnector",
+  "display_name": "Microsoft Outlook (Mail)",
+  "version": "1.0.0",
+  "description": "Connects to Microsoft Outlook mail via the Microsoft Graph v1.0 API. Read, search, send, reply, forward, move, and organise mail in folders for the signed-in user.",
+  "provider": "microsoft",
+  "service": "outlook_mail",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Application (Client) ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Found in Azure Portal → App registrations → your app → Overview → Application (client) ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter the client secret value",
+      "help": "Generate under Azure Portal → App registrations → your app → Certificates & secrets → New client secret."
+    },
+    {
+      "key": "tenant_id",
+      "label": "Azure Tenant ID",
+      "type": "string",
+      "required": false,
+      "default": "common",
+      "placeholder": "common",
+      "help": "Use 'common' for multi-tenant, your Azure tenant ID for single-tenant"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth2 Redirect URI",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://gateway.shielva.local/oauth/callback",
+      "help": "The redirect URI registered in your Azure app. Must match exactly what is configured in Azure Portal → App registrations → your app → Authentication."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "Mail.Read Mail.Send Mail.ReadWrite offline_access",
+      "placeholder": "Mail.Read Mail.Send Mail.ReadWrite offline_access",
+      "help": "Space-separated Graph delegated permissions. 'offline_access' is required to receive a refresh token."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "help": "Microsoft Identity authorization endpoint. Swap 'common' with your tenant ID for single-tenant."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "help": "Microsoft Identity token endpoint. Swap 'common' with your tenant ID for single-tenant."
+    },
+    {
+      "key": "base_url",
+      "label": "Microsoft Graph Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/v1.0",
+      "placeholder": "https://graph.microsoft.com/v1.0",
+      "help": "Base URL for the Microsoft Graph mail API. Leave blank to use v1.0."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "120",
+      "placeholder": "120",
+      "help": "Soft cap on outbound Graph requests per minute. Graph applies its own throttling; this guards against bursts."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id/client_secret and persists install-time config. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access + refresh tokens via the Microsoft Identity token endpoint.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Microsoft Graph reachability by fetching /me for the signed-in user.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Lists messages in a mail folder via /me/mailFolders/{folder}/messages with optional $filter and $search.",
+      "method": "GET",
+      "params": [
+        { "key": "folder", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_message",
+      "name": "Get Message",
+      "description": "Fetches a single message via /me/messages/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_mail",
+      "name": "Send Mail",
+      "description": "Sends mail via /me/sendMail. Returns {} on 202 Accepted. Requires Mail.Send.",
+      "method": "POST",
+      "params": [
+        { "key": "to", "type": "array", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "body_type", "type": "string", "required": false },
+        { "key": "cc", "type": "array", "required": false },
+        { "key": "bcc", "type": "array", "required": false },
+        { "key": "attachments", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_draft",
+      "name": "Create Draft",
+      "description": "Creates a draft message via POST /me/messages without sending.",
+      "method": "POST",
+      "params": [
+        { "key": "to", "type": "array", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "reply_message",
+      "name": "Reply to Message",
+      "description": "Replies to a message via POST /me/messages/{id}/reply with a comment block.",
+      "method": "POST",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "comment", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "forward_message",
+      "name": "Forward Message",
+      "description": "Forwards a message via POST /me/messages/{id}/forward to a list of recipients.",
+      "method": "POST",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "to", "type": "array", "required": true },
+        { "key": "comment", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "move_message",
+      "name": "Move Message",
+      "description": "Moves a message to another folder via POST /me/messages/{id}/move.",
+      "method": "POST",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "destination_folder_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_message",
+      "name": "Delete Message",
+      "description": "Deletes a message via DELETE /me/messages/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_mail_folders",
+      "name": "List Mail Folders",
+      "description": "Lists the signed-in user's mail folders via /me/mailFolders.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_mail_folder",
+      "name": "Create Mail Folder",
+      "description": "Creates a new mail folder via POST /me/mailFolders.",
+      "method": "POST",
+      "params": [
+        { "key": "display_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "mark_as_read",
+      "name": "Mark As Read / Unread",
+      "description": "Patches a message's isRead flag via PATCH /me/messages/{id}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "is_read", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_messages",
+      "name": "Search Messages",
+      "description": "Runs a $search query across the user's mail via /me/messages?$search=\"…\".",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

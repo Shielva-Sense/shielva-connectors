@@ -1,0 +1,41 @@
+{
+  "title": "Microsoft Outlook (Mail) Documentation",
+  "generated_by": "bulk_rebuild.py",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Microsoft Outlook (Mail)** connector \u2014 `CONNECTOR_TYPE = \"outlook_mail\"`, `AUTH_TYPE = \"oauth2_code\"`. Exposes 15 public async methods. Connects to Microsoft Outlook mail via the Microsoft Graph v1.0 API. Read, search, send, reply, forward, move, and organise mail in folders for the signed-in user."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "1. Provision credentials in the Microsoft Outlook (Mail) dashboard.\n2. In ACP \u2192 Manage Connectors \u2192 Microsoft Outlook (Mail), fill in the install fields below.\n3. Click Install \u2014 the connector validates required config keys via `install()`.\n4. The gateway calls `health_check()` to confirm credentials are valid."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Auth type: **oauth2_code** (Microsoft Identity Authorization Code grant + refresh_token).\n\n1. Caller redirects the end-user to `auth_url` with `client_id`, `redirect_uri`, requested `scope` (`Mail.Read Mail.Send Mail.ReadWrite offline_access`), and a `state` value.\n2. Microsoft redirects back to `redirect_uri` with `?code=...&state=...`.\n3. Connector calls `authorize(code)` which POSTs `grant_type=authorization_code` to `token_url` and stores the returned `TokenInfo` (access_token, refresh_token, expires_at).\n4. On any 401 the HTTP client transparently calls the refresher (`grant_type=refresh_token`), persists the new token via `set_token()`, and replays the original request with the new bearer token."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Install fields (per-tenant):\n\n| Key | Type | Required | Description |\n|---|---|---|---|\n| `client_id` | string | yes | Found in Azure Portal \u2192 App registrations \u2192 your app \u2192 Overview \u2192 Application (client) ID. |\n| `client_secret` | secret | yes | Generate under Azure Portal \u2192 App registrations \u2192 your app \u2192 Certificates & secrets \u2192 New client secret. |\n| `tenant_id` | string | no | Use 'common' for multi-tenant, your Azure tenant ID for single-tenant |\n| `scopes` | string | no | Space-separated Graph delegated permissions. 'offline_access' is required to receive a refresh token. |\n| `auth_url` | string | no | Microsoft Identity authorization endpoint. Swap 'common' with your tenant ID for single-tenant. |\n| `token_url` | string | no | Microsoft Identity token endpoint. Swap 'common' with your tenant ID for single-tenant. |\n| `base_url` | string | no | Base URL for the Microsoft Graph mail API. Leave blank to use v1.0. |\n| `rate_limit_per_min` | number | no | Soft cap on outbound Graph requests per minute. Graph applies its own throttling; this guards against bursts. |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "15 public async methods. See `metadata/connector.json::apis` for full param + return docs.\n\n### `async install()`\nValidates client_id/client_secret and persists install-time config. Call before OAuth authorization.\n### `async authorize(auth_code, state)`\nExchanges an OAuth2 authorization code for access + refresh tokens via the Microsoft Identity token endpoint.\n### `async health_check()`\nVerifies Microsoft Graph reachability by fetching /me for the signed-in user.\n### `async list_messages(folder, top, skip, filter, search)`\nLists messages in a mail folder via /me/mailFolders/{folder}/messages with optional $filter and $search.\n### `async get_message(message_id)`\nFetches a single message via /me/messages/{id}.\n### `async send_mail(to, subject, body, body_type, cc, bcc, attachments)`\nSends mail via /me/sendMail. Returns {} on 202 Accepted. Requires Mail.Send.\n### `async create_draft(to, subject, body)`\nCreates a draft message via POST /me/messages without sending.\n### `async reply_message(message_id, comment)`\nReplies to a message via POST /me/messages/{id}/reply with a comment block.\n### `async forward_message(message_id, to, comment)`\nForwards a message via POST /me/messages/{id}/forward to a list of recipients.\n### `async move_message(message_id, destination_folder_id)`\nMoves a message to another folder via POST /me/messages/{id}/move.\n### `async delete_message(message_id)`\nDeletes a message via DELETE /me/messages/{id}.\n### `async list_mail_folders()`\nLists the signed-in user's mail folders via /me/mailFolders.\n### `async create_mail_folder(display_name)`\nCreates a new mail folder via POST /me/mailFolders.\n### `async mark_as_read(message_id, is_read)`\nPatches a message's isRead flag via PATCH /me/messages/{id}.\n### `async search_messages(query, top)`\nRuns a $search query across the user's mail via /me/messages?$search=\"\u2026\"."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Common HTTP status mapping (via `_STATUS_MAP` or `_classify_failure`):\n\n| Status | ConnectorHealth | AuthStatus |\n|---|---|---|\n| 401 | OFFLINE | TOKEN_EXPIRED |\n| 403 | UNHEALTHY | INVALID_CREDENTIALS |\n| 429 | DEGRADED | CONNECTED (logged) |\n| 5xx | UNHEALTHY | FAILED (retried) |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Fix |\n|---|---|\n| `MISSING_CREDENTIALS` at install | Verify all required install fields populated |\n| `INVALID_CREDENTIALS` at health_check | Confirm API user has required permissions in the Microsoft Outlook (Mail) dashboard |\n| 429 rate limit warnings | The client honours `Retry-After`; reduce request frequency |"
+    }
+  ]
+}
