@@ -14,7 +14,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Apollo.io API key",
-      "help": "From Apollo.io → Settings → Integrations → API → API Key."
+      "help": "From Apollo.io \u2192 Settings \u2192 Integrations \u2192 API \u2192 API Key."
     }
   ],
   "features": [
@@ -94,5 +94,92 @@
     "contacts",
     "accounts",
     "sequences"
-  ]
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Apollo.io contacts and accounts into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "POST /v1/mixed_people/search \u2014 list people from the Apollo database.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "POST /v1/contacts/search \u2014 list CRM contacts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /v1/contacts/{contact_id} \u2014 retrieve a single contact by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "POST /v1/accounts/search \u2014 list CRM accounts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "GET /v1/accounts/{account_id} \u2014 retrieve a single account by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "account_id",
+          "label": "Account Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_sequences",
+      "name": "List Sequences",
+      "description": "GET /v1/emailer_campaigns \u2014 list email sequences.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "display_name": "Apollo"
 }
