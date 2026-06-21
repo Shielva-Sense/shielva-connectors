@@ -105,5 +105,114 @@
       "endpoint": "GET /rest/api/3/users/search"
     }
   ],
-  "categories": ["auth", "health", "sync", "projects", "issues", "boards", "sprints", "users"]
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "projects",
+    "issues",
+    "boards",
+    "sprints",
+    "users"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Jira issues and projects.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return a list of project dicts from GET /project/search.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "max_results",
+          "label": "Max Results",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "search_issues",
+      "name": "Search Issues",
+      "description": "Return a list of issue dicts from POST /search.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "jql",
+          "label": "Jql",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "max_results",
+          "label": "Max Results",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Return a single issue dict from GET /issue/{issue_key}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "issue_key",
+          "label": "Issue Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Return a list of board dicts from GET /rest/agile/1.0/board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_key",
+          "label": "Project Key",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_sprints",
+      "name": "List Sprints",
+      "description": "Return a list of sprint dicts from GET /rest/agile/1.0/board/{id}/sprint.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a list of user dicts from GET /users/search.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "JiraConnector"
 }
