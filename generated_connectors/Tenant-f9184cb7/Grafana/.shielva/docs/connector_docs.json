@@ -1,0 +1,79 @@
+{
+  "title": "Grafana Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Grafana** is an open-source observability + dashboarding platform with a REST HTTP API. This connector — `GrafanaConnector` (`CONNECTOR_TYPE = \"grafana\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Health | `/api/health` | Server reachability + database state probe |\n| Org | `/api/org` | Current organization for the auth token |\n| Dashboards | `/api/dashboards` + `/api/search` | List, get, create, delete dashboards |\n| Folders | `/api/folders` | List + create folders |\n| Datasources | `/api/datasources` + `/api/ds/query` | List, create, run queries |\n| Alert Rules | `/api/v1/provisioning/alert-rules` | List provisioned alert rules |\n| Users | `/api/users` | Paginated user list |\n| Teams | `/api/teams/search` | Search teams |\n\nThe base URL is **tenant-specific** — `https://<stack>.grafana.net` (Grafana Cloud) or `http://localhost:3000` (self-hosted). The connector requires `instance_url` as an install field; it is never hardcoded.\n\nThe connector normalises dashboards into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff that honours `Retry-After`, and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::GrafanaHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Create a Grafana Service Account token\n\n1. Sign in to your Grafana stack as an admin (e.g. `https://myorg.grafana.net`).\n2. Open **Administration → Service Accounts**.\n3. Click **Add service account**, give it a name (e.g. `shielva-connector`), pick a role (`Editor` for read+write or `Viewer` for read-only).\n4. On the service account page, click **Add service account token**.\n5. Name it, leave default no-expiration (or set one), and click **Generate token**.\n6. Copy the `glsa_...` value — Grafana shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Grafana**, fill in:\n\n| Field | Value |\n|---|---|\n| `instance_url` | e.g. `https://myorg.grafana.net` or `http://localhost:3000` |\n| `service_account_token` (secret) | Token from step 6 |\n| `org_id` (number, optional) | Grafana org id — defaults to 1 |\n| `rate_limit_per_min` (number) | Soft cap, default 300 |\n\nClick **Install**. `install()` validates that both required fields are non-empty (it does NOT call the API), initialises the `GrafanaHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /api/health`. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Grafana REST API uses **Service Account token authentication** (`AUTH_TYPE = \"api_key\"`). The token is sent as a `Bearer` value. There is no OAuth dance, no token refresh, no expiry (unless the operator sets one).\n\n### Credential model\n\n- `instance_url` — tenant-specific Grafana stack URL. Stored verbatim, only trailing slash trimmed.\n- `service_account_token` — `glsa_*` token. Sent as `Authorization: Bearer <token>`.\n- `org_id` — optional. Used only as a returned identifier; not currently injected as `X-Grafana-Org-Id`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `instance_url` + `service_account_token`. Initialises `GrafanaHTTPClient`. Does **not** call any Grafana endpoint. |\n| `authorize(...)` | Wraps the token in `TokenInfo(token_type=\"Bearer\")`, persists via `set_token`. |\n| `health_check()` | `GET /api/health` — minimal probe (no auth header strictly required, but token is sent). |\n| `ensure_token()` | Not called — Service Account tokens are non-expiring until revoked. |\n| token storage | `TokenInfo` is saved via `set_token` for parity with OAuth connectors. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <service_account_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `instance_url` | string | yes | `self.instance_url` | Grafana base URL (trailing slash trimmed) |\n| `service_account_token` | secret | yes | `self.service_account_token` | Bearer token |\n| `org_id` | number | no | `self.org_id` | Grafana org id (defaults to 1) |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 300) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"grafana\"\nCONNECTOR_NAME = \"Grafana\"\nAUTH_TYPE = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"instance_url\", \"service_account_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `GrafanaConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::GrafanaHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `instance_url` + `service_account_token`; initialise `GrafanaHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — wraps `service_account_token` in `TokenInfo(token_type=\"Bearer\")` and persists via `set_token`.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /api/health`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nLists all dashboards → fetches each full dashboard → normalizes to `NormalizedDocument` → calls `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-org",
+          "title": "Organization",
+          "content": "### `async get_org() -> Dict`\n`GET /api/org` — current organization context for the auth token."
+        },
+        {
+          "id": "api-dashboards",
+          "title": "Dashboards",
+          "content": "### `async list_dashboards(*, limit=100, page=1, query=None, tag=None, folder_uids=None) -> List[Dict]`\n`GET /api/search?type=dash-db` with optional `query`, `tag`, and `folderUIDs` filters.\n\n### `async get_dashboard(uid) -> Dict`\n`GET /api/dashboards/uid/{uid}` — full dashboard JSON including `meta`.\n\n### `async create_dashboard(dashboard, *, folder_uid=None, overwrite=False) -> Dict`\n`POST /api/dashboards/db` — body: `{dashboard, folderUid, overwrite}`. Creates or upserts.\n\n### `async delete_dashboard(uid) -> Dict`\n`DELETE /api/dashboards/uid/{uid}`.\n\n### `async get_dashboard_doc(uid) -> NormalizedDocument`\nConvenience: search by uid + fetch full dashboard, return a `NormalizedDocument` ready for KB ingest."
+        },
+        {
+          "id": "api-folders",
+          "title": "Folders",
+          "content": "### `async list_folders(*, limit=100, page=1) -> List[Dict]`\n`GET /api/folders`.\n\n### `async create_folder(title, *, uid=None) -> Dict`\n`POST /api/folders` — body: `{title, uid?}`."
+        },
+        {
+          "id": "api-datasources",
+          "title": "Datasources",
+          "content": "### `async list_datasources() -> List[Dict]`\n`GET /api/datasources`.\n\n### `async create_datasource(name, type, url, *, access=\"proxy\", is_default=False, basic_auth=False, json_data=None) -> Dict`\n`POST /api/datasources` — body: `{name, type, url, access, isDefault, basicAuth, jsonData?}`.\n\n### `async query_datasource(datasource_id, queries, *, from_time=None, to_time=None) -> Dict`\n`POST /api/ds/query` — body: `{queries: [{datasourceId, refId, ...}], from?, to?}`. Each query is automatically enriched with `datasourceId` + default `refId=A`."
+        },
+        {
+          "id": "api-alerts",
+          "title": "Alerts",
+          "content": "### `async list_alert_rules(*, limit=100) -> List[Dict]`\n`GET /api/v1/provisioning/alert-rules`."
+        },
+        {
+          "id": "api-users-teams",
+          "title": "Users · Teams",
+          "content": "### `async list_users(*, perpage=1000, page=1) -> List[Dict]`\n`GET /api/users`.\n\n### `async list_teams(*, perpage=1000, page=1, query=None) -> Dict`\n`GET /api/teams/search`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nGrafanaError                          # base; carries status_code + response_body\n├── GrafanaAuthError                  # 401 / 403\n├── GrafanaNotFound                   # 404\n├── GrafanaRateLimitError             # 429 — retry_after_s\n├── GrafanaNetworkError               # transport failure (DNS, TLS, timeout)\n└── GrafanaAPIError                   # other 4xx / unretried 5xx\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Honour `Retry-After` header; otherwise exponential backoff `min(1.0 * 2 ** attempt + jitter, 32)`, retry up to `DEFAULT_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` / `httpx.TransportError` | Backoff, retry up to 3, then raise `GrafanaNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `instance_url` or `service_account_token` blank | Re-enter both in ACP. Grafana shows the token only once at creation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — token role too low | In Grafana, edit the service account and raise role to `Editor` (read+write) or `Admin` (datasource provisioning). |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or expired | Generate a new service account token and re-install. |\n| `grafana.retry` warnings spike | Hitting 429 (Grafana per-stack rate cap) | The client retries with `Retry-After`-aware exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on dashboard ops | Dashboard UID wrong or belongs to another org | Verify the UID in the Grafana UI URL; ensure `org_id` matches the dashboard's org. |\n| `instance_url` mismatch | Pasted UI URL instead of stack URL | For Grafana Cloud use the API base — `https://<stack>.grafana.net` (no trailing path). |\n| Datasource queries return empty `results` | Wrong `datasourceId` or query payload | Inspect the request payload — `datasourceId` is automatically injected, but `refId` must be unique per query; queries also need `expr`, `query`, or `target` per datasource type. |"
+    }
+  ]
+}
