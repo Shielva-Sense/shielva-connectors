@@ -218,127 +218,178 @@
     {
       "name": "Install / Authenticate",
       "id": "install",
-      "category": "auth"
+      "category": "auth",
+      "description": "Validate the API key by calling /v1/account.",
+      "method": "GET"
     },
     {
       "name": "Health Check",
       "id": "health_check",
-      "category": "health"
+      "category": "health",
+      "description": "Ping Stripe /v1/account and return current health.",
+      "method": "GET"
     },
     {
       "name": "Sync Events",
       "id": "sync",
-      "category": "sync"
+      "category": "sync",
+      "description": "Sync Stripe events into the knowledge base.",
+      "method": "GET"
     },
     {
       "name": "Get Balance",
       "id": "get_balance",
-      "category": "balance"
+      "category": "balance",
+      "description": "Calls get_balance() on the connector.",
+      "method": "GET"
     },
     {
       "name": "List Customers",
       "id": "list_customers",
-      "category": "customers"
+      "category": "customers",
+      "description": "Calls list_customers() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Get Customer",
       "id": "get_customer",
-      "category": "customers"
+      "category": "customers",
+      "description": "Calls get_customer() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Create Customer",
       "id": "create_customer",
-      "category": "customers"
+      "category": "customers",
+      "description": "Calls create_customer() on the connector.",
+      "method": "POST"
     },
     {
       "name": "Update Customer",
       "id": "update_customer",
-      "category": "customers"
+      "category": "customers",
+      "description": "Calls update_customer() on the connector.",
+      "method": "PATCH"
     },
     {
       "name": "Delete Customer",
       "id": "delete_customer",
-      "category": "customers"
+      "category": "customers",
+      "description": "Calls delete_customer() on the connector.",
+      "method": "DELETE"
     },
     {
       "name": "List Charges",
       "id": "list_charges",
-      "category": "charges"
+      "category": "charges",
+      "description": "Calls list_charges() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Get Charge",
       "id": "get_charge",
-      "category": "charges"
+      "category": "charges",
+      "description": "Calls get_charge() on the connector.",
+      "method": "GET"
     },
     {
       "name": "List Payment Intents",
       "id": "list_payment_intents",
-      "category": "payment_intents"
+      "category": "payment_intents",
+      "description": "Calls list_payment_intents() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Get Payment Intent",
       "id": "get_payment_intent",
-      "category": "payment_intents"
+      "category": "payment_intents",
+      "description": "Calls get_payment_intent() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Create Payment Intent",
       "id": "create_payment_intent",
-      "category": "payment_intents"
+      "category": "payment_intents",
+      "description": "Calls create_payment_intent() on the connector.",
+      "method": "POST"
     },
     {
       "name": "List Subscriptions",
       "id": "list_subscriptions",
-      "category": "subscriptions"
+      "category": "subscriptions",
+      "description": "Calls list_subscriptions() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Get Subscription",
       "id": "get_subscription",
-      "category": "subscriptions"
+      "category": "subscriptions",
+      "description": "Calls get_subscription() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Cancel Subscription",
       "id": "cancel_subscription",
-      "category": "subscriptions"
+      "category": "subscriptions",
+      "description": "Calls cancel_subscription() on the connector.",
+      "method": "GET"
     },
     {
       "name": "List Products",
       "id": "list_products",
-      "category": "products"
+      "category": "products",
+      "description": "Calls list_products() on the connector.",
+      "method": "GET"
     },
     {
       "name": "List Invoices",
       "id": "list_invoices",
-      "category": "invoices"
+      "category": "invoices",
+      "description": "Calls list_invoices() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Create Refund",
       "id": "create_refund",
-      "category": "refunds"
+      "category": "refunds",
+      "description": "Calls create_refund() on the connector.",
+      "method": "POST"
     },
     {
       "name": "List Events",
       "id": "list_events",
-      "category": "events"
+      "category": "events",
+      "description": "Calls list_events() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Get Event",
       "id": "get_event",
-      "category": "events"
+      "category": "events",
+      "description": "Calls get_event() on the connector.",
+      "method": "GET"
     },
     {
       "name": "List Webhook Endpoints",
       "id": "list_webhooks",
-      "category": "webhooks"
+      "category": "webhooks",
+      "description": "Calls list_webhooks() on the connector.",
+      "method": "GET"
     },
     {
       "name": "Create Webhook Endpoint",
       "id": "create_webhook",
-      "category": "webhooks"
+      "category": "webhooks",
+      "description": "Calls create_webhook() on the connector.",
+      "method": "POST"
     },
     {
       "name": "Delete Webhook Endpoint",
       "id": "delete_webhook",
-      "category": "webhooks"
+      "category": "webhooks",
+      "description": "Calls delete_webhook() on the connector.",
+      "method": "DELETE"
     }
-  ]
+  ],
+  "display_name": "Checkout"
 }
