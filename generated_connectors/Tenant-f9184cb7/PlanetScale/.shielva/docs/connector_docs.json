@@ -1,0 +1,74 @@
+{
+  "title": "PlanetScale Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**PlanetScale** is a serverless MySQL-compatible database platform. Its REST API lives at `https://api.planetscale.com/v1` and exposes the resources you need to run schema-as-code: organisations, databases, branches (Git-like schema branches), deploy requests (proposals to merge a branch into production), backups, and database tokens (per-branch connection credentials). This connector — `PlanetScaleConnector` (`CONNECTOR_TYPE = \"planetscale\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a PlanetScale account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Organizations | `/organizations` | List + read orgs the service token can see |\n| Databases | `/organizations/{org}/databases` | List, get, create, delete |\n| Branches | `/organizations/{org}/databases/{db}/branches` | List, get, create, delete |\n| Deploy Requests | `/organizations/{org}/databases/{db}/deploy-requests` | List, get, create |\n| Backups | `/organizations/{org}/databases/{db}/branches/{br}/backups` | List branch backups |\n| Database Tokens | `/organizations/{org}/databases/{db}/branches/{br}/passwords` | List branch connection credentials |\n\nThe connector normalises **databases** and **branches** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, honouring `Retry-After`), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::PlanetScaleHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a PlanetScale service token\n\n1. Sign in to https://app.planetscale.com.\n2. Open **Settings → Service tokens**.\n3. Click **Generate service token**, give it a name (e.g. `shielva-acp`).\n4. Grant the access scopes you need: `read_database`, `read_branch`, `create_database`, `delete_database`, `create_branch`, `delete_branch`, `create_deploy_request`, `deploy_deploy_request`, `read_backups`, `read_passwords` (pick the minimal set for your use case).\n5. Copy the **Token ID** (public identifier) and the **Token secret** — PlanetScale shows the secret exactly once.\n6. Optionally note the slug of the organisation and database you most commonly target — these become `default_organization` / `default_database` install fields.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → PlanetScale**, fill in:\n\n| Field | Value |\n|---|---|\n| `service_token_id` (string) | Token ID from step 5 |\n| `service_token` (secret) | Token secret from step 5 |\n| `default_organization` (string, optional) | Org slug — fall-back for methods that omit `organization` |\n| `default_database` (string, optional) | Database name — fall-back for methods that omit `database` |\n| `base_url` (string, optional) | Override `https://api.planetscale.com/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft client-side cap, default 100 |\n\nClick **Install**. `install()` validates `service_token_id` + `service_token` are present (it does NOT call the API), initialises the `PlanetScaleHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists one page of organisations as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "PlanetScale REST API uses **server-to-server service-token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- A PlanetScale service token has two parts: a **Token ID** (publicly identifies the token; safe to log) and a **Token secret** (treat like a password).\n- The Authorization header value is the literal `<id>:<secret>` combo — **PlanetScale does NOT use a `Bearer` prefix** (this is the most common gotcha when wiring the API by hand).\n- Sending `Authorization: Bearer <secret>` returns 401.\n- Sending only the secret (no id) returns 401.\n- The id and the secret together are the credential.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `service_token_id` + `service_token`. Initialises `PlanetScaleHTTPClient`. Does **not** call any PlanetScale endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo(access_token=\"<id>:<secret>\", token_type=\"ServiceToken\")` so the platform persists the credential under the standard token surface. |\n| `health_check()` | `GET /organizations?page=1&per_page=1` — minimal probe. |\n| `ensure_token()` | Not called — there is no token to refresh. |\n| token storage | TokenInfo persisted by the platform; no rotation logic in the connector. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: <service_token_id>:<service_token>   ← literal id:token combo, NO Bearer\nAccept:        application/json\nContent-Type:  application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `service_token_id` | string | yes | `self.service_token_id` | Authorization header left half |\n| `service_token` | secret | yes | `self.service_token` | Authorization header right half |\n| `default_organization` | string | no | `self.default_organization` | Per-call default org for methods that accept it |\n| `default_database` | string | no | `self.default_database` | Per-call default db for methods that accept it |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.planetscale.com/v1`) | Override for test environments |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"service_token_id\", \"service_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_PLANETSCALE_BASE = \"https://api.planetscale.com/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `PlanetScaleConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::PlanetScaleHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `service_token_id` + `service_token`; initialise `PlanetScaleHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for service-token auth — returns `TokenInfo(access_token=\"<id>:<secret>\", token_type=\"ServiceToken\")` so the platform's token-storage path still works.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 page of organisations via `GET /organizations?page=1&per_page=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates PlanetScale organisations → databases → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-organizations",
+          "title": "Organizations",
+          "content": "### `async list_organizations(*, page=1, per_page=25) -> Dict`\n`GET /organizations?page={N}&per_page={M}`.\n\n### `async get_organization(name: str) -> Dict`\n`GET /organizations/{name}`."
+        },
+        {
+          "id": "api-databases",
+          "title": "Databases",
+          "content": "### `async list_databases(organization=\"\", *, page=1, per_page=25) -> Dict`\n`GET /organizations/{org}/databases`. `organization` falls back to `default_organization`.\n\n### `async get_database(organization=\"\", *, name) -> Dict`\n`GET /organizations/{org}/databases/{name}`.\n\n### `async create_database(organization=\"\", *, name, plan=\"hobby\", cluster_size=\"PS_10\", region=None) -> Dict`\n`POST /organizations/{org}/databases` — body: `{name, plan, cluster_size, region?}`.\n\n### `async delete_database(organization=\"\", *, name) -> Dict`\n`DELETE /organizations/{org}/databases/{name}`."
+        },
+        {
+          "id": "api-branches",
+          "title": "Branches",
+          "content": "### `async list_branches(organization=\"\", database=\"\", *, page=1, per_page=25) -> Dict`\n`GET /organizations/{org}/databases/{db}/branches`.\n\n### `async get_branch(organization=\"\", database=\"\", *, name) -> Dict`\n`GET /organizations/{org}/databases/{db}/branches/{name}`.\n\n### `async create_branch(organization=\"\", database=\"\", *, name, parent_branch=\"main\", backup_id=None) -> Dict`\n`POST /organizations/{org}/databases/{db}/branches` — body: `{name, parent_branch, backup_id?}`.\n\n### `async delete_branch(organization=\"\", database=\"\", *, name) -> Dict`\n`DELETE /organizations/{org}/databases/{db}/branches/{name}`."
+        },
+        {
+          "id": "api-deploy-requests",
+          "title": "Deploy Requests",
+          "content": "### `async list_deploy_requests(organization=\"\", database=\"\", *, state=None, page=1) -> Dict`\n`GET /organizations/{org}/databases/{db}/deploy-requests?state={open|closed|...}&page={N}`.\n\n### `async get_deploy_request(organization=\"\", database=\"\", *, number) -> Dict`\n`GET /organizations/{org}/databases/{db}/deploy-requests/{number}`.\n\n### `async create_deploy_request(organization=\"\", database=\"\", *, branch, into_branch=\"main\", notes=None) -> Dict`\n`POST /organizations/{org}/databases/{db}/deploy-requests` — body: `{branch, into_branch, notes?}`."
+        },
+        {
+          "id": "api-backups-tokens",
+          "title": "Backups + Database Tokens",
+          "content": "### `async list_backups(organization=\"\", database=\"\", *, branch, page=1, per_page=25) -> Dict`\n`GET /organizations/{org}/databases/{db}/branches/{br}/backups`.\n\n### `async list_database_tokens(organization=\"\", database=\"\", *, branch, page=1, per_page=25) -> Dict`\n`GET /organizations/{org}/databases/{db}/branches/{br}/passwords`. PlanetScale calls these *database tokens* in the dashboard; the underlying route is `/passwords`. Each item carries `id`, `name`, `role`, and (only on creation) `plain_text`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nPlanetScaleError                       # base; carries status_code + response_body\n├── PlanetScaleAuthError                # 401 / 403\n├── PlanetScaleBadRequestError          # 400 / 422\n├── PlanetScaleNotFoundError            # 404\n├── PlanetScaleConflictError            # 409\n├── PlanetScaleRateLimitError           # 429 — retry_after_s\n└── PlanetScaleServerError              # 5xx\n```\n\nBack-compat aliases preserved:\n```\nPlanetScaleNetworkError = PlanetScaleServerError   # legacy name\nPlanetScaleNotFound     = PlanetScaleNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 / 422 | Raise immediately |\n| 429 | Honour `Retry-After` header when present; else exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s); retry up to `_MAX_RETRIES=3` |\n| 5xx | Exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `PlanetScaleNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `service_token_id` or `service_token` blank | Re-enter both in ACP. The secret is shown only once at generation — rotate the token if you lost it. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 from PlanetScale — id/secret mismatch | Verify the id matches the secret (they're a pair). The most common mistake is editing one without re-pasting the other. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — service token lacks the required scope | In PlanetScale → Service tokens, edit the token's access grants. Common missing scopes: `read_database`, `read_branch`, `read_backups`, `read_passwords`. |\n| Every call returns 401 even though credentials look right | You probably prefixed the header with `Bearer ` | This is the #1 PlanetScale wiring mistake. Authorization MUST be the literal `id:token` combo with NO `Bearer ` prefix. The connector's `client/http_client.py::_headers` already does this correctly — if you're seeing this, something upstream is rewriting the header. |\n| `planetscale.http.retry` warnings spike | Hitting 429 (PlanetScale per-token rate cap) | The client retries with exponential backoff honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on a database/branch call | Wrong `organization` / `database` slug | PlanetScale slugs are lowercase + hyphenated. Pass the slug exactly as shown in `https://app.planetscale.com/<org>/<db>` or set `default_organization` / `default_database`. |\n| `ImportError: cannot import name 'PlanetScaleNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `PlanetScaleNetworkError = PlanetScaleServerError` alias added in `exceptions.py`. |\n| Sync ingests 0 documents | Service token has no access to any organisation | The token's org grants are empty. Re-grant in PlanetScale → Service tokens. |"
+    }
+  ]
+}
