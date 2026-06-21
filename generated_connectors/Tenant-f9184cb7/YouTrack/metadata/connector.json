@@ -1,0 +1,281 @@
+{
+  "connector_type": "youtrack",
+  "name": "YouTrackConnector",
+  "display_name": "YouTrack",
+  "version": "1.0.0",
+  "description": "Connects to the JetBrains YouTrack REST API (Issues, Projects, Users, Boards, Sprints, Articles, Comments, Tags, Time Tracking) using a permanent token. Supports issue CRUD, comments, agile boards, knowledge-base articles, and KB sync of issues.",
+  "provider": "youtrack",
+  "service": "youtrack",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "YouTrack Base URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://yourorg.youtrack.cloud",
+      "help": "Per-tenant YouTrack instance URL. Cloud: https://{instance}.youtrack.cloud. Self-hosted: https://youtrack.example.com. The connector appends /api automatically."
+    },
+    {
+      "key": "permanent_token",
+      "label": "Permanent Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "perm:dXNlcg==.NDU=.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "help": "Generate at YouTrack -> Profile -> Account Security -> Permanent Tokens. Sent as `Authorization: Bearer <perm:...>`. Tokens start with `perm:`."
+    },
+    {
+      "key": "default_project_id",
+      "label": "Default Project ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "0-1",
+      "help": "Optional. If set, sync() filters by this project and create_issue uses it as a fallback when no project_id is supplied."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "200",
+      "placeholder": "200",
+      "help": "Soft client-side cap on requests/minute against the YouTrack API."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates base_url + permanent_token and verifies the token by calling GET /users/me?fields=login.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probes GET /users/me?fields=login to verify the permanent token is still valid.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "GET /users/me - returns the user the token authenticates as.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users - list users with optional search query and pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{id} - return a single user by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /admin/projects - list projects visible to the token.",
+      "method": "GET",
+      "params": [
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /admin/projects/{id} - return a single project by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "GET /issues - search issues using the YouTrack query language.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "GET /issues/{id} - fetch a single issue by ID or readable ID.",
+      "method": "GET",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_issue",
+      "name": "Create Issue",
+      "description": "POST /issues - create an issue in the supplied project with summary and optional description/customFields.",
+      "method": "POST",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "summary", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "custom_fields", "type": "array", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_issue",
+      "name": "Update Issue",
+      "description": "POST /issues/{id} - update mutable issue fields. Only supplied fields are sent.",
+      "method": "POST",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true },
+        { "key": "summary", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "custom_fields", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_issue",
+      "name": "Delete Issue",
+      "description": "DELETE /issues/{id} - permanently delete an issue. Requires delete permission in the project.",
+      "method": "DELETE",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_comment",
+      "name": "Add Comment",
+      "description": "POST /issues/{id}/comments - add a comment to an issue.",
+      "method": "POST",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_comments",
+      "name": "List Comments",
+      "description": "GET /issues/{id}/comments - list comments on an issue.",
+      "method": "GET",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /issueTags - list account-wide tags.",
+      "method": "GET",
+      "params": [
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_time_tracking",
+      "name": "List Time Tracking Work Items",
+      "description": "GET /issues/{id}/timeTracking/workItems - list logged work items on an issue.",
+      "method": "GET",
+      "params": [
+        { "key": "issue_id", "type": "string", "required": true },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_boards",
+      "name": "List Agile Boards",
+      "description": "GET /agiles - list agile boards visible to the token.",
+      "method": "GET",
+      "params": [
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_sprints",
+      "name": "List Sprints",
+      "description": "GET /agiles/{agileId}/sprints - list sprints on an agile board.",
+      "method": "GET",
+      "params": [
+        { "key": "board_id", "type": "string", "required": true },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_articles",
+      "name": "List Articles",
+      "description": "GET /articles - list YouTrack knowledge-base articles.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "fields", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Issues",
+      "description": "Pages through /issues (optionally filtered by default_project_id and since) and ingests each issue as a NormalizedDocument into the Shielva knowledge base.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
