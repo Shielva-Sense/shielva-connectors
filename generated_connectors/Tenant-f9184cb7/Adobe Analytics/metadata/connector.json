@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "e.g. abcdef1234567890",
-      "help": "Your Adobe Analytics OAuth2 Client ID (API Key). Found in Adobe Developer Console → Projects → Your Project → Credentials."
+      "help": "Your Adobe Analytics OAuth2 Client ID (API Key). Found in Adobe Developer Console \u2192 Projects \u2192 Your Project \u2192 Credentials."
     },
     {
       "key": "client_secret",
@@ -22,7 +22,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your OAuth2 Client Secret",
-      "help": "Your Adobe Analytics OAuth2 Client Secret. Keep this secure — it is never logged."
+      "help": "Your Adobe Analytics OAuth2 Client Secret. Keep this secure \u2014 it is never logged."
     },
     {
       "key": "company_id",
@@ -36,7 +36,7 @@
       "key": "organization_id",
       "label": "Organization ID",
       "type": "string",
-      "required": false,
+      "required": true,
       "placeholder": "e.g. ABCDEF1234567890@AdobeOrg",
       "help": "Your Adobe IMS Organization ID (optional). Format: {hex}@AdobeOrg. Found in Adobe Admin Console."
     }
@@ -121,13 +121,62 @@
     "reports"
   ],
   "apis": [
-    {"name": "Install / Authenticate", "id": "install", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Sync", "id": "sync", "category": "sync"},
-    {"name": "List Report Suites", "id": "list_report_suites", "category": "report_suites"},
-    {"name": "List Dimensions", "id": "list_dimensions", "category": "dimensions"},
-    {"name": "List Metrics", "id": "list_metrics", "category": "metrics"},
-    {"name": "List Segments", "id": "list_segments", "category": "segments"},
-    {"name": "Run Report", "id": "run_report", "category": "reports"}
-  ]
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate client_id, client_secret, and company_id.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Acquire token and list report suites to verify connectivity.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync report suites, segments, and calculated metrics.",
+      "method": "GET"
+    },
+    {
+      "name": "List Report Suites",
+      "id": "list_report_suites",
+      "category": "report_suites",
+      "description": "Return all report suites for the company.",
+      "method": "GET"
+    },
+    {
+      "name": "List Dimensions",
+      "id": "list_dimensions",
+      "category": "dimensions",
+      "description": "Return all dimensions for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "List Metrics",
+      "id": "list_metrics",
+      "category": "metrics",
+      "description": "Return all metrics for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "List Segments",
+      "id": "list_segments",
+      "category": "segments",
+      "description": "Return all segments for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "Run Report",
+      "id": "run_report",
+      "category": "reports",
+      "description": "Run an Adobe Analytics ranked report.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Analytics"
 }
