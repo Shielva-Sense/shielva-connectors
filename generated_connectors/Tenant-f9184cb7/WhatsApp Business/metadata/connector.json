@@ -11,24 +11,104 @@
       "label": "Phone Number ID",
       "type": "string",
       "required": true,
-      "description": "WhatsApp Business phone number ID from Meta Business Suite."
+      "description": "WhatsApp Business phone number ID from Meta Business Suite.",
+      "help": "Phone Number ID."
     },
     {
       "key": "access_token",
       "label": "System User Access Token",
       "type": "password",
       "required": true,
-      "description": "Meta System User permanent access token with whatsapp_business_management permission."
+      "description": "Meta System User permanent access token with whatsapp_business_management permission.",
+      "help": "System User Access Token."
     },
     {
       "key": "waba_id",
       "label": "WhatsApp Business Account ID",
       "type": "string",
       "required": true,
-      "description": "WhatsApp Business Account (WABA) ID from Meta Business Suite."
+      "description": "WhatsApp Business Account (WABA) ID from Meta Business Suite.",
+      "help": "WhatsApp Business Account ID."
     }
   ],
-  "capabilities": ["list_templates", "get_template", "list_phone_numbers", "get_waba", "sync"],
+  "capabilities": [
+    "list_templates",
+    "get_template",
+    "list_phone_numbers",
+    "get_waba",
+    "sync"
+  ],
   "provider": "meta",
-  "category": "messaging"
+  "category": "messaging",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all WhatsApp message templates to the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "Return all templates for the WABA following cursor pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "Fetch a single message template by its Meta ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "template_id",
+          "label": "Template Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_phone_numbers",
+      "name": "List Phone Numbers",
+      "description": "Return all phone numbers registered to the WABA.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_waba",
+      "name": "Get Waba",
+      "description": "Fetch WhatsApp Business Account details.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "service": "whatsapp"
 }
