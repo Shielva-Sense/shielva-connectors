@@ -1,0 +1,269 @@
+{
+  "connector_type": "onenote",
+  "name": "OneNoteConnector",
+  "display_name": "Microsoft OneNote",
+  "version": "1.0.0",
+  "description": "Connects to the Microsoft OneNote (Graph) API to read, search, create, update, and delete notebooks, sections, and pages on behalf of an authenticated Microsoft 365 user.",
+  "provider": "microsoft",
+  "service": "onenote",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Application (client) ID from Azure AD",
+      "help": "Found in Azure Portal → App registrations → your app → Overview"
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Client secret value (not the ID)",
+      "help": "Found in Azure Portal → App registrations → your app → Certificates & secrets"
+    },
+    {
+      "key": "tenant_id",
+      "label": "Azure AD Tenant ID",
+      "type": "string",
+      "required": false,
+      "default": "common",
+      "placeholder": "common",
+      "help": "Azure AD tenant. Use 'common' for multi-tenant apps, or a specific tenant GUID/domain for single-tenant apps."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "Notes.ReadWrite Notes.Read offline_access",
+      "placeholder": "Notes.ReadWrite Notes.Read offline_access",
+      "help": "Space-separated list of Microsoft Graph scopes. offline_access is required to receive a refresh token."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "help": "Microsoft identity platform authorization endpoint."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "placeholder": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "help": "Microsoft identity platform token endpoint."
+    },
+    {
+      "key": "base_url",
+      "label": "OneNote API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/v1.0/me/onenote",
+      "placeholder": "https://graph.microsoft.com/v1.0/me/onenote",
+      "help": "Base URL for the Microsoft Graph OneNote API."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "120",
+      "placeholder": "120",
+      "help": "Maximum Graph API requests per minute. Default is 120 (Microsoft's standard quota for OneNote)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies OneNote API connectivity by listing one notebook.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_notebooks",
+      "name": "List Notebooks",
+      "description": "GET /notebooks — list OneNote notebooks for the signed-in user.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "orderby", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_notebook",
+      "name": "Get Notebook",
+      "description": "GET /notebooks/{id} — fetch a single notebook by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_notebook",
+      "name": "Create Notebook",
+      "description": "POST /notebooks — create a new notebook.",
+      "method": "POST",
+      "params": [
+        { "key": "display_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sections",
+      "name": "List Sections",
+      "description": "GET /notebooks/{id}/sections or /sections — list sections, optionally scoped to a notebook.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_section",
+      "name": "Get Section",
+      "description": "GET /sections/{id} — fetch a single section by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "section_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_section",
+      "name": "Create Section",
+      "description": "POST /notebooks/{id}/sections — create a section under a notebook.",
+      "method": "POST",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": true },
+        { "key": "display_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_section_groups",
+      "name": "List Section Groups",
+      "description": "GET /notebooks/{id}/sectionGroups or /sectionGroups — list section groups.",
+      "method": "GET",
+      "params": [
+        { "key": "notebook_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "GET /sections/{id}/pages or /pages — list pages, optionally with filter or search.",
+      "method": "GET",
+      "params": [
+        { "key": "section_id", "type": "string", "required": false },
+        { "key": "top", "type": "number", "required": false },
+        { "key": "skip", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "GET /pages/{id} — fetch page metadata.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_page_content",
+      "name": "Get Page Content",
+      "description": "GET /pages/{id}/content — returns the raw XHTML body of the page.",
+      "method": "GET",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "string"
+    },
+    {
+      "id": "create_page",
+      "name": "Create Page",
+      "description": "POST /sections/{id}/pages — create a page from raw XHTML. The Content-Type defaults to application/xhtml+xml.",
+      "method": "POST",
+      "params": [
+        { "key": "section_id", "type": "string", "required": true },
+        { "key": "html_body", "type": "string", "required": true },
+        { "key": "content_type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_page",
+      "name": "Update Page",
+      "description": "PATCH /pages/{id}/content — apply a JSON array of update commands.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true },
+        { "key": "commands", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_page",
+      "name": "Delete Page",
+      "description": "DELETE /pages/{id} — remove a page.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "copy_page_to_section",
+      "name": "Copy Page to Section",
+      "description": "POST /pages/{id}/copyToSection — copy a page to another section, optionally specifying a section group.",
+      "method": "POST",
+      "params": [
+        { "key": "page_id", "type": "string", "required": true },
+        { "key": "target_section_id", "type": "string", "required": true },
+        { "key": "group_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

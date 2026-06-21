@@ -1,0 +1,41 @@
+{
+  "title": "Microsoft OneNote Documentation",
+  "generated_by": "bulk_rebuild.py",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Microsoft OneNote** connector \u2014 `CONNECTOR_TYPE = \"onenote\"`, `AUTH_TYPE = \"oauth2\"`. Exposes 17 public async methods. Connects to the Microsoft OneNote (Graph) API to read, search, create, update, and delete notebooks, sections, and pages on behalf of an authenticated Microsoft 365 user."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "1. Provision credentials in the Microsoft OneNote dashboard.\n2. In ACP \u2192 Manage Connectors \u2192 Microsoft OneNote, fill in the install fields below.\n3. Click Install \u2014 the connector validates required config keys via `install()`.\n4. The gateway calls `health_check()` to confirm credentials are valid."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Auth type: **oauth2**. Credentials live in `self.config`, read via `self.config.get(...)`. Never hardcoded."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Install fields (per-tenant):\n\n| Key | Type | Required | Description |\n|---|---|---|---|\n| `client_id` | string | yes | Found in Azure Portal \u2192 App registrations \u2192 your app \u2192 Overview |\n| `client_secret` | secret | yes | Found in Azure Portal \u2192 App registrations \u2192 your app \u2192 Certificates & secrets |\n| `tenant_id` | string | no | Azure AD tenant. Use 'common' for multi-tenant apps, or a specific tenant GUID/domain for single-tenant apps. |\n| `scopes` | string | no | Space-separated list of Microsoft Graph scopes. offline_access is required to receive a refresh token. |\n| `auth_url` | string | no | Microsoft identity platform authorization endpoint. |\n| `token_url` | string | no | Microsoft identity platform token endpoint. |\n| `base_url` | string | no | Base URL for the Microsoft Graph OneNote API. |\n| `rate_limit_per_min` | number | no | Maximum Graph API requests per minute. Default is 120 (Microsoft's standard quota for OneNote). |"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "17 public async methods. See `metadata/connector.json::apis` for full param + return docs.\n\n### `async install()`\nValidates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.\n### `async authorize(auth_code, state)`\nExchanges an OAuth2 authorization code for access and refresh tokens.\n### `async health_check()`\nVerifies OneNote API connectivity by listing one notebook.\n### `async list_notebooks(top, skip, filter, orderby)`\nGET /notebooks \u2014 list OneNote notebooks for the signed-in user.\n### `async get_notebook(notebook_id)`\nGET /notebooks/{id} \u2014 fetch a single notebook by ID.\n### `async create_notebook(display_name)`\nPOST /notebooks \u2014 create a new notebook.\n### `async list_sections(notebook_id, top, skip)`\nGET /notebooks/{id}/sections or /sections \u2014 list sections, optionally scoped to a notebook.\n### `async get_section(section_id)`\nGET /sections/{id} \u2014 fetch a single section by ID.\n### `async create_section(notebook_id, display_name)`\nPOST /notebooks/{id}/sections \u2014 create a section under a notebook.\n### `async list_section_groups(notebook_id)`\nGET /notebooks/{id}/sectionGroups or /sectionGroups \u2014 list section groups.\n### `async list_pages(section_id, top, skip, filter, search)`\nGET /sections/{id}/pages or /pages \u2014 list pages, optionally with filter or search.\n### `async get_page(page_id)`\nGET /pages/{id} \u2014 fetch page metadata.\n### `async get_page_content(page_id)`\nGET /pages/{id}/content \u2014 returns the raw XHTML body of the page.\n### `async create_page(section_id, html_body, content_type)`\nPOST /sections/{id}/pages \u2014 create a page from raw XHTML. The Content-Type defaults to application/xhtml+xml.\n### `async update_page(page_id, commands)`\nPATCH /pages/{id}/content \u2014 apply a JSON array of update commands.\n### `async delete_page(page_id)`\nDELETE /pages/{id} \u2014 remove a page.\n### `async copy_page_to_section(page_id, target_section_id, group_id)`\nPOST /pages/{id}/copyToSection \u2014 copy a page to another section, optionally specifying a section group."
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Common HTTP status mapping (via `_STATUS_MAP` or `_classify_failure`):\n\n| Status | ConnectorHealth | AuthStatus |\n|---|---|---|\n| 401 | OFFLINE | TOKEN_EXPIRED |\n| 403 | UNHEALTHY | INVALID_CREDENTIALS |\n| 429 | DEGRADED | CONNECTED (logged) |\n| 5xx | UNHEALTHY | FAILED (retried) |"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Fix |\n|---|---|\n| `MISSING_CREDENTIALS` at install | Verify all required install fields populated |\n| `INVALID_CREDENTIALS` at health_check | Confirm API user has required permissions in the Microsoft OneNote dashboard |\n| 429 rate limit warnings | The client honours `Retry-After`; reduce request frequency |"
+    }
+  ]
+}
