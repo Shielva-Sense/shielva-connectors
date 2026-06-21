@@ -14,7 +14,7 @@
       "type": "string",
       "required": true,
       "placeholder": "Your Outreach OAuth app Client ID",
-      "help": "Find your Client ID in Outreach → Settings → API → Apps."
+      "help": "Find your Client ID in Outreach \u2192 Settings \u2192 API \u2192 Apps."
     },
     {
       "key": "client_secret",
@@ -22,7 +22,7 @@
       "type": "password",
       "required": true,
       "placeholder": "Your Outreach OAuth app Client Secret",
-      "help": "Find your Client Secret in Outreach → Settings → API → Apps."
+      "help": "Find your Client Secret in Outreach \u2192 Settings \u2192 API \u2192 Apps."
     },
     {
       "key": "redirect_uri",
@@ -37,7 +37,11 @@
     "authorization_url": "https://api.outreach.io/oauth/authorize",
     "token_url": "https://api.outreach.io/oauth/token",
     "scopes": "prospects.read sequences.read mailings.read calls.read accounts.read",
-    "token_fields": ["access_token", "refresh_token", "token_expires_at"]
+    "token_fields": [
+      "access_token",
+      "refresh_token",
+      "token_expires_at"
+    ]
   },
   "features": [
     "oauth2",
@@ -121,14 +125,69 @@
     "mailings"
   ],
   "apis": [
-    { "name": "Install / Configure", "id": "install", "category": "auth" },
-    { "name": "Authorize (OAuth2)", "id": "authorize", "category": "auth" },
-    { "name": "Health Check", "id": "health_check", "category": "health" },
-    { "name": "Sync Records", "id": "sync", "category": "sync" },
-    { "name": "List Prospects", "id": "list_prospects", "category": "prospects" },
-    { "name": "Get Prospect", "id": "get_prospect", "category": "prospects" },
-    { "name": "List Sequences", "id": "list_sequences", "category": "sequences" },
-    { "name": "List Accounts", "id": "list_accounts", "category": "accounts" },
-    { "name": "List Calls", "id": "list_calls", "category": "calls" }
-  ]
+    {
+      "name": "Install / Configure",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize (OAuth2)",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Build and return the OAuth2 authorization URL for Outreach.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /api/v2/users/current and return current health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Outreach prospects, sequences, and accounts into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Prospects",
+      "id": "list_prospects",
+      "category": "prospects",
+      "description": "Return one page of Outreach prospects.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Prospect",
+      "id": "get_prospect",
+      "category": "prospects",
+      "description": "Return a single Outreach prospect by ID.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sequences",
+      "id": "list_sequences",
+      "category": "sequences",
+      "description": "Return one page of Outreach sequences.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "Return one page of Outreach accounts.",
+      "method": "GET"
+    },
+    {
+      "name": "List Calls",
+      "id": "list_calls",
+      "category": "calls",
+      "description": "Return one page of Outreach calls.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Outreach"
 }
