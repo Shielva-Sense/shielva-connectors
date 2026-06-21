@@ -1,0 +1,358 @@
+{
+  "connector_type": "plivo",
+  "name": "PlivoConnector",
+  "display_name": "Plivo",
+  "version": "1.0.0",
+  "description": "Connects to the Plivo REST API for SMS, MMS, voice calls, phone-number management, and voice applications.",
+  "provider": "plivo",
+  "service": "plivo",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "auth_id",
+      "label": "Plivo Auth ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "MAXXXXXXXXXXXXXXXXXX",
+      "help": "From Plivo Console → Account → Account ID"
+    },
+    {
+      "key": "auth_token",
+      "label": "Plivo Auth Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Plivo Auth Token",
+      "help": "Plivo Auth Token paired with the Auth ID — treat as a password"
+    },
+    {
+      "key": "base_url",
+      "label": "Plivo API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.plivo.com/v1",
+      "placeholder": "https://api.plivo.com/v1",
+      "help": "Base URL for the Plivo REST API. Leave blank to use the default."
+    },
+    {
+      "key": "default_caller_id",
+      "label": "Default Caller ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "+14155550100",
+      "help": "Default sender number used when callers omit src/from on send_sms or make_call."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Plivo API requests per minute. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates auth_id and auth_token and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Plivo API connectivity by fetching the configured account record.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "Fetches the Plivo account record for the configured auth_id.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_sms",
+      "name": "Send SMS",
+      "description": "Sends an SMS or MMS via the Plivo Message API.",
+      "method": "POST",
+      "params": [
+        { "key": "src", "type": "string", "required": true },
+        { "key": "dst", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "url", "type": "string", "required": false },
+        { "key": "method", "type": "string", "required": false },
+        { "key": "log", "type": "boolean", "required": false },
+        { "key": "trackable", "type": "boolean", "required": false },
+        { "key": "message_uuid", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_message",
+      "name": "Get Message",
+      "description": "Fetches a single Plivo message by UUID.",
+      "method": "GET",
+      "params": [
+        { "key": "message_uuid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Lists Plivo messages with optional filters for state, direction, sender, recipient, and date range.",
+      "method": "GET",
+      "params": [
+        { "key": "message_state", "type": "string", "required": false },
+        { "key": "message_direction", "type": "string", "required": false },
+        { "key": "from_", "type": "string", "required": false },
+        { "key": "to", "type": "string", "required": false },
+        { "key": "message_time__gte", "type": "string", "required": false },
+        { "key": "message_time__lte", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "make_call",
+      "name": "Make Call",
+      "description": "Initiates an outbound Plivo call. Plivo fetches XML instructions from answer_url when the callee answers.",
+      "method": "POST",
+      "params": [
+        { "key": "from_", "type": "string", "required": true },
+        { "key": "to", "type": "string", "required": true },
+        { "key": "answer_url", "type": "string", "required": true },
+        { "key": "answer_method", "type": "string", "required": false },
+        { "key": "hangup_url", "type": "string", "required": false },
+        { "key": "time_limit", "type": "number", "required": false },
+        { "key": "machine_detection", "type": "string", "required": false },
+        { "key": "machine_detection_url", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_call",
+      "name": "Get Call",
+      "description": "Fetches a single Plivo call by UUID.",
+      "method": "GET",
+      "params": [
+        { "key": "call_uuid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Lists Plivo calls with optional filters for subaccount, direction, sender, recipient, and end-time range.",
+      "method": "GET",
+      "params": [
+        { "key": "subaccount", "type": "string", "required": false },
+        { "key": "call_direction", "type": "string", "required": false },
+        { "key": "from_", "type": "string", "required": false },
+        { "key": "to", "type": "string", "required": false },
+        { "key": "end_time__gte", "type": "string", "required": false },
+        { "key": "end_time__lte", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "hangup_call",
+      "name": "Hangup Call",
+      "description": "Hangs up an in-progress Plivo call.",
+      "method": "DELETE",
+      "params": [
+        { "key": "call_uuid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "transfer_call",
+      "name": "Transfer Call",
+      "description": "Transfers or updates one or both legs of an in-progress Plivo call.",
+      "method": "POST",
+      "params": [
+        { "key": "call_uuid", "type": "string", "required": true },
+        { "key": "legs", "type": "string", "required": false },
+        { "key": "aleg_url", "type": "string", "required": false },
+        { "key": "aleg_method", "type": "string", "required": false },
+        { "key": "bleg_url", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_numbers",
+      "name": "List Numbers",
+      "description": "Lists phone numbers attached to the configured Plivo account.",
+      "method": "GET",
+      "params": [
+        { "key": "type", "type": "string", "required": false },
+        { "key": "number_startswith", "type": "string", "required": false },
+        { "key": "subaccount", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_phone_numbers",
+      "name": "Search Phone Numbers",
+      "description": "Searches the Plivo marketplace for purchasable phone numbers.",
+      "method": "GET",
+      "params": [
+        { "key": "country_iso", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "pattern", "type": "string", "required": false },
+        { "key": "region", "type": "string", "required": false },
+        { "key": "services", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "buy_phone_number",
+      "name": "Buy Phone Number",
+      "description": "Purchases a phone number from the Plivo marketplace.",
+      "method": "POST",
+      "params": [
+        { "key": "number", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applications",
+      "name": "List Applications",
+      "description": "Lists Plivo voice applications.",
+      "method": "GET",
+      "params": [
+        { "key": "subaccount", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_application",
+      "name": "Create Application",
+      "description": "Creates a Plivo voice application that drives answer/hangup/message webhooks.",
+      "method": "POST",
+      "params": [
+        { "key": "app_name", "type": "string", "required": true },
+        { "key": "answer_url", "type": "string", "required": true },
+        { "key": "answer_method", "type": "string", "required": false },
+        { "key": "hangup_url", "type": "string", "required": false },
+        { "key": "message_url", "type": "string", "required": false },
+        { "key": "message_method", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_application",
+      "name": "Get Application",
+      "description": "Fetches a single Plivo voice application by id.",
+      "method": "GET",
+      "params": [
+        { "key": "app_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_mms",
+      "name": "Send MMS",
+      "description": "Sends an MMS via the Plivo Message API (wraps send_sms with type=mms).",
+      "method": "POST",
+      "params": [
+        { "key": "src", "type": "string", "required": true },
+        { "key": "dst", "type": "string", "required": true },
+        { "key": "text", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": false },
+        { "key": "method", "type": "string", "required": false },
+        { "key": "log", "type": "boolean", "required": false },
+        { "key": "trackable", "type": "boolean", "required": false },
+        { "key": "message_uuid", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_recordings",
+      "name": "List Recordings",
+      "description": "Lists Plivo recordings with optional filters for call, sender, recipient, and date range.",
+      "method": "GET",
+      "params": [
+        { "key": "call_uuid", "type": "string", "required": false },
+        { "key": "from_number", "type": "string", "required": false },
+        { "key": "to_number", "type": "string", "required": false },
+        { "key": "add_time__gte", "type": "string", "required": false },
+        { "key": "add_time__lte", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_recording",
+      "name": "Get Recording",
+      "description": "Fetches a single Plivo recording by id.",
+      "method": "GET",
+      "params": [
+        { "key": "recording_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_number",
+      "name": "Get Number",
+      "description": "Fetches a single phone number attached to the Plivo account.",
+      "method": "GET",
+      "params": [
+        { "key": "number", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_pricing",
+      "name": "Get Pricing",
+      "description": "Fetches Plivo voice + SMS pricing for a country.",
+      "method": "GET",
+      "params": [
+        { "key": "country_iso", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_subaccounts",
+      "name": "List Subaccounts",
+      "description": "Lists subaccounts under the master Plivo account.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_endpoints",
+      "name": "List Endpoints",
+      "description": "Lists SIP endpoints under the Plivo account.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}
