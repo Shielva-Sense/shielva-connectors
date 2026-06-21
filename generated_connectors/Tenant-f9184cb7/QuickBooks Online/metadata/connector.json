@@ -26,7 +26,7 @@
       "label": "OAuth2 Client Secret",
       "type": "password",
       "required": true,
-      "placeholder": "••••••••••••••••",
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
       "help": "Your Intuit app Client Secret. This is stored encrypted and never shown again after saving."
     },
     {
@@ -65,8 +65,16 @@
       "description": "Exchanges the OAuth2 authorization code (and realm_id) received from Intuit's callback for access and refresh tokens.",
       "category": "auth",
       "params": [
-        {"name": "code", "type": "string", "required": true},
-        {"name": "realm_id", "type": "string", "required": true}
+        {
+          "name": "code",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "realm_id",
+          "type": "string",
+          "required": true
+        }
       ]
     },
     {
@@ -102,7 +110,11 @@
       "category": "customers",
       "endpoint": "GET /v3/company/{realm_id}/customer/{id}",
       "params": [
-        {"name": "customer_id", "type": "string", "required": true}
+        {
+          "name": "customer_id",
+          "type": "string",
+          "required": true
+        }
       ]
     },
     {
@@ -119,7 +131,11 @@
       "category": "invoices",
       "endpoint": "GET /v3/company/{realm_id}/invoice/{id}",
       "params": [
-        {"name": "invoice_id", "type": "string", "required": true}
+        {
+          "name": "invoice_id",
+          "type": "string",
+          "required": true
+        }
       ]
     },
     {
@@ -139,16 +155,83 @@
     "accounts"
   ],
   "apis": [
-    {"name": "Install / Validate Credentials", "id": "install", "category": "auth"},
-    {"name": "Get Authorization URL", "id": "authorize", "category": "auth"},
-    {"name": "Exchange Authorization Code", "id": "exchange_code", "category": "auth"},
-    {"name": "Refresh Access Token", "id": "refresh_access_token", "category": "auth"},
-    {"name": "Health Check", "id": "health_check", "category": "health"},
-    {"name": "Full Sync", "id": "sync", "category": "sync"},
-    {"name": "List Customers", "id": "list_customers", "category": "customers"},
-    {"name": "Get Customer", "id": "get_customer", "category": "customers"},
-    {"name": "List Invoices", "id": "list_invoices", "category": "invoices"},
-    {"name": "Get Invoice", "id": "get_invoice", "category": "invoices"},
-    {"name": "List Accounts", "id": "list_accounts", "category": "accounts"}
-  ]
+    {
+      "name": "Install / Validate Credentials",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Authorization URL",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Build and return the Intuit OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Exchange Authorization Code",
+      "id": "exchange_code",
+      "category": "auth",
+      "description": "Exchange an authorization code for access + refresh tokens.",
+      "method": "GET"
+    },
+    {
+      "name": "Refresh Access Token",
+      "id": "refresh_access_token",
+      "category": "auth",
+      "description": "Use the stored refresh token to obtain a new access token.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Verify connectivity by calling GET /companyinfo/{realm_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "Full Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync QBO invoices, customers, and accounts into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "SELECT * FROM Customer MAXRESULTS {max_results}.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "GET /customer/{customer_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Invoices",
+      "id": "list_invoices",
+      "category": "invoices",
+      "description": "SELECT * FROM Invoice MAXRESULTS {max_results}.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Invoice",
+      "id": "get_invoice",
+      "category": "invoices",
+      "description": "GET /invoice/{invoice_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "SELECT * FROM Account MAXRESULTS {max_results}.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Quickbooks"
 }
