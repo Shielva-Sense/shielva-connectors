@@ -12,7 +12,7 @@
       "type": "password",
       "required": true,
       "placeholder": "rpl_...",
-      "help": "Generate from Rippling: Settings → API → Create API Key"
+      "help": "Generate from Rippling: Settings \u2192 API \u2192 Create API Key"
     }
   ],
   "capabilities": [
@@ -25,8 +25,56 @@
     "list_leaves"
   ],
   "description": "Sync employee, HR, and organizational data from Rippling.",
-  "long_description": "Connect Shielva to Rippling to sync your HR data — employees, departments, teams, roles, and leave requests — into your knowledge base for AI-powered search and analysis.",
+  "long_description": "Connect Shielva to Rippling to sync your HR data \u2014 employees, departments, teams, roles, and leave requests \u2014 into your knowledge base for AI-powered search and analysis.",
   "icon": "https://www.rippling.com/favicon.ico",
   "docs_url": "https://developer.rippling.com/docs",
-  "categories": ["hr", "payroll", "it-management"]
+  "categories": [
+    "hr",
+    "payroll",
+    "it-management"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync employees and departments into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "Return all Rippling employees, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "Return all Rippling departments.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "Return all Rippling teams.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_roles",
+      "name": "List Roles",
+      "description": "Return all Rippling roles.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_leaves",
+      "name": "List Leaves",
+      "description": "Return all Rippling leave requests, paginating through all cursor pages.",
+      "method": "GET",
+      "params": []
+    }
+  ]
 }
