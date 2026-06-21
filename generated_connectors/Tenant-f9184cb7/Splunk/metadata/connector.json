@@ -26,7 +26,7 @@
       "label": "API Token (Bearer token)",
       "type": "password",
       "required": true,
-      "help": "Splunk session token or HTTP Event Collector token. Create in Settings → Tokens."
+      "help": "Splunk session token or HTTP Event Collector token. Create in Settings \u2192 Tokens."
     },
     {
       "key": "index",
@@ -43,8 +43,17 @@
       "help": "Set to 'false' to disable SSL certificate verification (not recommended for production)"
     }
   ],
-  "capabilities": ["sync", "health_check", "search"],
-  "resources": ["saved_searches", "indexes", "apps", "users"],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "search"
+  ],
+  "resources": [
+    "saved_searches",
+    "indexes",
+    "apps",
+    "users"
+  ],
   "auth": {
     "header": "Authorization: Bearer {token}",
     "validation_endpoint": "GET /services/server/info"
@@ -55,13 +64,120 @@
     "version": "REST API v8+"
   },
   "methods": [
-    {"name": "install", "description": "Validate host and token via GET /services/server/info"},
-    {"name": "health_check", "description": "Check connectivity and return server version"},
-    {"name": "sync", "description": "Sync saved searches, indexes, and apps to knowledge base"},
-    {"name": "list_indexes", "description": "List all Splunk indexes"},
-    {"name": "list_saved_searches", "description": "List all Splunk saved searches"},
-    {"name": "list_apps", "description": "List all installed Splunk apps"},
-    {"name": "list_users", "description": "List all Splunk users"},
-    {"name": "run_search", "description": "Run an ad-hoc SPL search and return results"}
-  ]
+    {
+      "name": "install",
+      "description": "Validate host and token via GET /services/server/info"
+    },
+    {
+      "name": "health_check",
+      "description": "Check connectivity and return server version"
+    },
+    {
+      "name": "sync",
+      "description": "Sync saved searches, indexes, and apps to knowledge base"
+    },
+    {
+      "name": "list_indexes",
+      "description": "List all Splunk indexes"
+    },
+    {
+      "name": "list_saved_searches",
+      "description": "List all Splunk saved searches"
+    },
+    {
+      "name": "list_apps",
+      "description": "List all installed Splunk apps"
+    },
+    {
+      "name": "list_users",
+      "description": "List all Splunk users"
+    },
+    {
+      "name": "run_search",
+      "description": "Run an ad-hoc SPL search and return results"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync saved searches, indexes, and apps from Splunk.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_indexes",
+      "name": "List Indexes",
+      "description": "Fetch all Splunk indexes.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_saved_searches",
+      "name": "List Saved Searches",
+      "description": "Fetch all Splunk saved searches.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_apps",
+      "name": "List Apps",
+      "description": "Fetch all installed Splunk apps.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Fetch all Splunk users.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "run_search",
+      "name": "Run Search",
+      "description": "Run a Splunk search and return result rows.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "earliest",
+          "label": "Earliest",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "latest",
+          "label": "Latest",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "SplunkConnector"
 }
