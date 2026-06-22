@@ -20,12 +20,13 @@ Brand colors and descriptions come from connector_catalog.json when available.
 import asyncio
 import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
 import structlog
 from integration.data.catalog import get_all_providers, get_provider_services
 from integration.db.database import custom_providers_collection
 from integration.services import r2_service
+from integration.services import category_service
 
 logger = structlog.get_logger(__name__)
 
@@ -118,6 +119,19 @@ async def v3_list_providers():
     seen_keys: set = set()
     result = []
 
+    # DB-backed category override map — wins over JSON / Python catalog
+    # for any provider that has a row in `provider_category_map`. Cached
+    # in-process for ~30s so we don't refetch on every request.
+    db_cat = await category_service.get_provider_category_map()
+
+    def _resolve_category(key: str, *fallbacks: str) -> str:
+        if key in db_cat:
+            return db_cat[key]
+        for f in fallbacks:
+            if f:
+                return f
+        return "Uncategorized"
+
     # 1. Static Python catalog providers — embed services inline
     for p in get_all_providers():
         key = p.get("provider", "")
@@ -125,6 +139,24 @@ async def v3_list_providers():
         p = _merge_brand(p)
         p["logo_url"] = _logo_cdn_url(key)
         p["services"] = _build_services_for_static_provider(key)
+        # Provider-level category: DB override → JSON catalog meta →
+        # first service's category. Static providers don't ship a
+        # provider-level category, so we lift it from the first
+        # service that has one (the Python catalog stores it per-service).
+        json_meta = _CONNECTOR_CATALOG.get(key, {})
+        first_svc_cat = next(
+            (svc.get("category") for svc in p["services"] if svc.get("category")),
+            "",
+        )
+        p["category"] = _resolve_category(
+            key,
+            json_meta.get("category", ""),
+            first_svc_cat,
+        )
+        # Unified category — every service of this provider inherits the
+        # resolved provider category so the UI has a single source of truth.
+        for svc in p["services"]:
+            svc["category"] = p["category"]
         seen_keys.add(key)
         result.append(p)
 
@@ -134,6 +166,7 @@ async def v3_list_providers():
         if key in seen_keys:
             continue
         display_name = meta.get("display_name", key.replace("_", " ").title())
+        category = _resolve_category(key, meta.get("category", ""))
         # Synthesise a single service entry so the UI can navigate to it
         single_service = {
             "key": key,
@@ -141,7 +174,7 @@ async def v3_list_providers():
             "display_name": display_name,
             "description": meta.get("description", ""),
             "auth_type": "api_key",
-            "category": meta.get("category", "general"),
+            "category": category,
             "logo_url": _logo_cdn_url(key),
         }
         result.append({
@@ -150,6 +183,7 @@ async def v3_list_providers():
             "display_name": display_name,
             "description": meta.get("description", ""),
             "brand_color": meta.get("brand_color", "#14B8A6"),
+            "category": category,
             "service_count": 1,
             "logo_url": _logo_cdn_url(key),
             "is_custom": False,
@@ -163,6 +197,14 @@ async def v3_list_providers():
         for c in customs:
             key = c.get("provider_key", _provider_key(c.get("display_name", "")))
             raw_services = c.get("services", [])
+            # Custom providers don't ship a provider-level category in
+            # their document — derive it from the first service's
+            # category as the seed fallback if the DB map has no row yet.
+            first_svc_cat = next(
+                (svc.get("category") for svc in raw_services if svc.get("category")),
+                "",
+            )
+            provider_category = _resolve_category(key, first_svc_cat)
             services = [
                 {
                     "key": svc.get("service_key", ""),
@@ -170,7 +212,8 @@ async def v3_list_providers():
                     "display_name": svc.get("display_name", ""),
                     "description": svc.get("description", ""),
                     "auth_type": svc.get("auth_type", "api_key"),
-                    "category": svc.get("category", "general"),
+                    # Unified category — every service inherits the provider's category.
+                    "category": provider_category,
                     "logo_url": svc.get("logo_url", ""),
                     "is_custom": True,
                 }
@@ -186,6 +229,7 @@ async def v3_list_providers():
                 "custom_id": str(c["_id"]) if "_id" in c else "",
                 "brand_color": c.get("brand_color", "#14B8A6"),
                 "description": c.get("description", ""),
+                "category": provider_category,
                 "services": services,
             }
             entry = _merge_brand(entry)
@@ -207,7 +251,26 @@ async def v3_list_providers():
 
 @catalog_v3_router.get("/providers/{provider}/services")
 async def v3_list_services(provider: str):
-    """Return services for a provider. No tenant scope."""
+    """Return services for a provider. No tenant scope.
+
+    Category is unified — every service inherits the provider's category
+    (DB override → first service's static category → "Uncategorized") so
+    a single change at the provider level propagates to every service.
+    """
+    # Resolve the canonical provider category once and overlay it on every
+    # service returned from any of the three sources below.
+    db_cat = await category_service.get_provider_category_map()
+
+    def _apply_unified_category(svcs: list) -> str:
+        provider_category = db_cat.get(provider) or next(
+            (s.get("category") for s in svcs if s.get("category")),
+            "",
+        )
+        if provider_category:
+            for s in svcs:
+                s["category"] = provider_category
+        return provider_category
+
     # 1. Static Python catalog
     services = get_provider_services(provider)
     if services:
@@ -215,6 +278,7 @@ async def v3_list_services(provider: str):
         for s in services:
             if "key" not in s:
                 s["key"] = s.get("service", s.get("service_key", ""))
+        _apply_unified_category(services)
         logger.info("catalog_v3.list_services", provider=provider, count=len(services), source="static")
         return {"services": services, "provider": provider}
 
@@ -234,6 +298,7 @@ async def v3_list_services(provider: str):
                     "logo_url": svc.get("logo_url", ""),
                     "is_custom": True,
                 })
+            _apply_unified_category(result)
             logger.info("catalog_v3.list_services", provider=provider, count=len(result), source="custom")
             return {"services": result, "provider": provider}
     except Exception as exc:
@@ -253,6 +318,7 @@ async def v3_list_services(provider: str):
             "category": meta.get("category", "general"),
             "logo_url": _logo_cdn_url(provider),
         }
+        _apply_unified_category([service])
         logger.info("catalog_v3.list_services", provider=provider, count=1, source="catalog_json")
         return {"services": [service], "provider": provider}
 
@@ -261,27 +327,59 @@ async def v3_list_services(provider: str):
 
 # ── Logo endpoints ────────────────────────────────────────────────────────────
 
-@catalog_v3_router.get("/logos/{key}.svg")
-async def v3_get_logo(key: str):
-    """Serve a provider logo SVG from R2. Falls back to generated SVG if not in R2."""
+_EXT_MIME: dict[str, str] = {
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+
+
+@catalog_v3_router.get("/logos/{filename}")
+async def v3_get_logo(filename: str):
+    """Serve a provider logo from R2. Falls back to generated SVG if not present.
+
+    `filename` is `{key}.{ext}` (e.g. `slack.svg`, `acme.png`). Uploaded logos
+    keep their original extension; the default seed path stores `.svg`.
+    """
+    if "." not in filename:
+        raise HTTPException(404, "Logo not found")
+    key, _, ext = filename.rpartition(".")
+    ext = ext.lower()
+
     if not r2_service._use_local():
-        try:
-            client = r2_service._get_client()
-            r2_key = _r2_logo_key(key)
-            svg = r2_service._sync_read(client, _LOGO_R2_BUCKET, r2_key)
-            if svg:
-                return Response(content=svg, media_type="image/svg+xml",
-                                headers={"Cache-Control": "public, max-age=86400"})
-        except Exception as exc:
-            logger.warning("catalog_v3.logo_r2_read_failed", key=key, error=str(exc))
+        client = r2_service._get_client()
+        # Try the exact requested extension first, then any other known
+        # extension for this key (lets the gateway-injected `.svg` URL still
+        # find a `.png` upload the user did manually).
+        candidates = [ext] + [e for e in _EXT_MIME.keys() if e != ext]
+        for cand in candidates:
+            try:
+                resp = client.get_object(
+                    Bucket=_LOGO_R2_BUCKET,
+                    Key=f"{_LOGO_R2_PREFIX}/{key}.{cand}",
+                )
+                body = resp["Body"].read()
+                mime = _EXT_MIME.get(cand, "application/octet-stream")
+                return Response(
+                    content=body,
+                    media_type=mime,
+                    headers={"Cache-Control": "public, max-age=300"},
+                )
+            except Exception:
+                continue
 
     # Fallback: generate on the fly from catalog metadata
     meta = _CONNECTOR_CATALOG.get(key, {})
     display_name = meta.get("display_name", key.replace("_", " ").title())
     brand_color = meta.get("brand_color", "#14B8A6")
     svg = _generate_svg_logo(display_name, brand_color)
-    return Response(content=svg, media_type="image/svg+xml",
-                    headers={"Cache-Control": "public, max-age=3600"})
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @catalog_v3_router.post("/logos/seed")
@@ -334,3 +432,62 @@ async def v3_seed_logos():
 
     logger.info("catalog_v3.logos_seeded", uploaded=uploaded, failed=failed, total=len(keys))
     return {"uploaded": uploaded, "failed": failed, "total": len(keys)}
+
+
+_ALLOWED_LOGO_TYPES: dict[str, str] = {
+    "image/svg+xml": "svg",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+}
+_LOGO_MAX_BYTES = 512 * 1024  # 512 KB hard cap
+
+
+@catalog_v3_router.post("/logos/{key}")
+async def v3_upload_logo(key: str, file: UploadFile = File(...)):
+    """Upload a custom provider logo to R2.
+
+    Stored at  shielva-sense / shielva-platform-int/Connector/logos/{key}.{ext}
+    and served back via GET /logos/{key}.svg through the gateway CDN path.
+    """
+    if r2_service._use_local():
+        raise HTTPException(503, "R2 is not configured — cannot upload logo")
+
+    content_type = (file.content_type or "").lower()
+    ext = _ALLOWED_LOGO_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(
+            415,
+            f"Unsupported logo type '{content_type}'. Accepted: SVG, PNG, JPG, WebP.",
+        )
+
+    body = await file.read()
+    if len(body) > _LOGO_MAX_BYTES:
+        raise HTTPException(
+            413,
+            f"Logo file too large ({len(body)} bytes). Limit is {_LOGO_MAX_BYTES} bytes.",
+        )
+    if not body:
+        raise HTTPException(400, "Empty file")
+
+    client = r2_service._get_client()
+    r2_key = f"{_LOGO_R2_PREFIX}/{key}.{ext}"
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: client.put_object(
+                Bucket=_LOGO_R2_BUCKET,
+                Key=r2_key,
+                Body=body,
+                ContentType=content_type,
+                CacheControl="public, max-age=300",
+            ),
+        )
+    except Exception as exc:
+        logger.warning("catalog_v3.logo_upload_failed", key=key, error=str(exc))
+        raise HTTPException(502, f"R2 upload failed: {exc}") from exc
+
+    logo_url = f"{_LOGO_CDN_PREFIX}/{key}.{ext}"
+    logger.info("catalog_v3.logo_uploaded", key=key, ext=ext, bytes=len(body))
+    return {"logo_url": logo_url, "ext": ext, "bytes": len(body)}

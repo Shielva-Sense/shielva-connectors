@@ -53,3 +53,31 @@ def custom_providers_collection():
 def static_provider_overrides_collection():
     """Overrides for built-in static providers (super-admin edits)."""
     return get_db()["static_provider_overrides"]
+
+
+def provider_categories_collection():
+    """Provider category taxonomy.
+
+    Document shape:
+        slug:        str   — stable identifier ("crm-sales")
+        label:       str   — display label ("CRM & Sales")
+        description: str?  — optional human description
+        sort_order:  int   — ascending sort hint (0 = first)
+        source:      str   — "seed" | "user"
+        created_at:  datetime
+        updated_at:  datetime
+    """
+    return get_db()["provider_categories"]
+
+
+def provider_category_map_collection():
+    """Provider → category mapping. One row per provider_key.
+
+    Document shape:
+        provider_key:  str (unique)
+        category_slug: str (FK → provider_categories.slug)
+        source:        str — "seed" | "override"
+        updated_at:    datetime
+        updated_by:    str?
+    """
+    return get_db()["provider_category_map"]

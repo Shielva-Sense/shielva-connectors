@@ -100,6 +100,160 @@ class ConnectorStatusResponse(BaseModel):
 # populated dynamically on startup and on each install/reload.
 CONNECTOR_CLASSES = {}
 
+# ── Deploy queue (multi-install) ─────────────────────────────────────────────
+# `/connectors/deploy` returns immediately with a job_id. A small worker pool
+# drains the queue and runs the real install (load → instantiate → install →
+# initialize → health_check) per job. Clients poll `/connectors/deploy/jobs/{id}`
+# until status == completed | failed. This stops one slow install from blocking
+# the others (and from holding the request long enough for the browser to
+# time-out and report "failed" when the work actually succeeded).
+import uuid as _uuid_mod
+import time as _time_mod
+DEPLOY_WORKER_COUNT = int(os.getenv("DEPLOY_WORKER_COUNT", "4"))
+DEPLOY_JOB_TTL_S = int(os.getenv("DEPLOY_JOB_TTL_S", "1800"))  # 30 min — long enough for SAD to poll
+# Top-level timeout for ONE install pipeline. Caps the worst-case time a worker
+# can be blocked on a single connector — protects the queue from a single
+# misbehaving connector.install() that never returns. Per-step timeouts
+# (initialize=8s, health_check=10s) still apply inside the pipeline; this is
+# the absolute upper bound. The loader holds _LOAD_LOCK only inside this
+# bound, so a hung loader can never wedge every other worker forever.
+DEPLOY_PIPELINE_TIMEOUT_S = float(os.getenv("DEPLOY_PIPELINE_TIMEOUT_S", "120"))
+DEPLOY_LOAD_TIMEOUT_S = float(os.getenv("DEPLOY_LOAD_TIMEOUT_S", "60"))
+_DEPLOY_JOBS: Dict[str, Dict[str, Any]] = {}
+_DEPLOY_QUEUE: Optional[asyncio.Queue] = None
+_DEPLOY_WORKERS_STARTED = False
+# Serialise `_load_generated_connectors()` — it does heavy sync disk + sys.modules
+# mutation, and two workers running it interleaved on the event loop would step on
+# each other's sys.path/sys.modules state.
+_LOAD_LOCK: Optional[asyncio.Lock] = None
+
+
+def _job(job_id: str) -> Dict[str, Any]:
+    """Return or create the in-memory record for a deploy job.
+
+    The `_done_event` is an `asyncio.Event` set by the worker the moment the
+    job reaches a terminal state. The SSE endpoint awaits it so the client
+    learns about completion without polling — single network round-trip,
+    zero CPU spin.
+    """
+    if job_id not in _DEPLOY_JOBS:
+        _DEPLOY_JOBS[job_id] = {
+            "status": "queued",
+            "queued_at": _time_mod.time(),
+            "result": None,
+            "error": None,
+            "code": None,
+            "_done_event": asyncio.Event(),
+        }
+    return _DEPLOY_JOBS[job_id]
+
+
+def _serialise_job(job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
+    """JSON-safe projection of a deploy job — drops the internal asyncio.Event."""
+    return {k: v for k, v in job.items() if not k.startswith("_")} | {"job_id": job_id}
+
+
+def _ensure_deploy_runtime() -> None:
+    """Lazy-init the queue/lock/worker pool on first /deploy request.
+
+    Done lazily (not at import time) because asyncio primitives bind to the
+    running event loop, and uvicorn hasn't started it yet at import.
+    """
+    global _DEPLOY_QUEUE, _LOAD_LOCK, _DEPLOY_WORKERS_STARTED
+    if _DEPLOY_WORKERS_STARTED:
+        return
+    if _DEPLOY_QUEUE is None:
+        _DEPLOY_QUEUE = asyncio.Queue()
+    if _LOAD_LOCK is None:
+        _LOAD_LOCK = asyncio.Lock()
+    for i in range(DEPLOY_WORKER_COUNT):
+        asyncio.create_task(_deploy_worker(i))
+    asyncio.create_task(_deploy_jobs_gc())
+    _DEPLOY_WORKERS_STARTED = True
+    logger.info("deploy.workers_started", count=DEPLOY_WORKER_COUNT)
+
+
+async def _deploy_jobs_gc() -> None:
+    """Drop completed/failed jobs older than DEPLOY_JOB_TTL_S so the dict
+    doesn't grow unbounded. Runs once a minute."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            now = _time_mod.time()
+            stale = [
+                jid for jid, j in _DEPLOY_JOBS.items()
+                if j.get("status") in ("completed", "failed")
+                and (now - (j.get("finished_at") or j.get("queued_at") or now)) > DEPLOY_JOB_TTL_S
+            ]
+            for jid in stale:
+                _DEPLOY_JOBS.pop(jid, None)
+            if stale:
+                logger.info("deploy.jobs_gc", evicted=len(stale))
+        except Exception as e:
+            logger.warning("deploy.jobs_gc_failed", error=str(e))
+
+
+async def _deploy_worker(worker_id: int) -> None:
+    """Drain the deploy queue forever, running each job to completion."""
+    assert _DEPLOY_QUEUE is not None
+    while True:
+        try:
+            job_id, body, tenant_id = await _DEPLOY_QUEUE.get()
+        except Exception as e:
+            logger.warning("deploy.worker_queue_get_failed", worker=worker_id, error=str(e))
+            continue
+        job = _job(job_id)
+        job["status"] = "running"
+        job["started_at"] = _time_mod.time()
+        job["worker"] = worker_id
+        try:
+            # Hard cap on a single install. If it blows, this worker is freed
+            # immediately to pick up the next job rather than being held forever
+            # by a connector whose install() / health_check() got stuck (e.g.
+            # an upstream API that never returns and a missing timeout in the
+            # connector's own HTTP client). The job is marked failed below.
+            result = await asyncio.wait_for(
+                _run_deploy_pipeline(body, tenant_id),
+                timeout=DEPLOY_PIPELINE_TIMEOUT_S,
+            )
+            job["status"] = "completed"
+            job["result"] = result
+            job["finished_at"] = _time_mod.time()
+            logger.info(
+                "deploy.job_completed",
+                job_id=job_id, worker=worker_id,
+                connector_id=result.get("connector_id"),
+                duration_s=round(job["finished_at"] - job["started_at"], 2),
+            )
+        except asyncio.TimeoutError:
+            job["status"] = "failed"
+            job["error"] = (
+                f"Install timed out after {int(DEPLOY_PIPELINE_TIMEOUT_S)}s — the connector's install/health-check "
+                "did not complete in time. Other queued installs are unaffected."
+            )
+            job["code"] = 504
+            job["finished_at"] = _time_mod.time()
+            logger.warning("deploy.job_timed_out", job_id=job_id, worker=worker_id)
+        except HTTPException as he:
+            job["status"] = "failed"
+            job["error"] = he.detail
+            job["code"] = he.status_code
+            job["finished_at"] = _time_mod.time()
+            logger.warning("deploy.job_failed", job_id=job_id, worker=worker_id, code=he.status_code, error=he.detail)
+        except Exception as e:
+            job["status"] = "failed"
+            job["error"] = str(e)
+            job["code"] = 500
+            job["finished_at"] = _time_mod.time()
+            logger.exception("deploy.job_crashed", job_id=job_id, worker=worker_id)
+        finally:
+            # Wake any SSE listeners (or pollers via the wait_for path) — done
+            # even on crash so the client doesn't wait forever for a job whose
+            # pipeline raised an unhandled exception.
+            _evt = job.get("_done_event")
+            if _evt is not None:
+                _evt.set()
+
 
 def _resolve_connector_type(connector_type: str) -> str:
     """Normalize connector_type to the canonical key used in CONNECTOR_CLASSES.
@@ -1697,17 +1851,109 @@ async def deploy_connector(
     request: Request,
     tenant_id: str = Depends(get_tenant_id),
 ):
-    """Deploy an AI-generated connector: load from generated_connectors, install it,
-    and return the connector_id + oauth_url (if OAuth) or connected status (if API key).
+    """Enqueue an install job. Returns immediately with a `job_id`.
+
+    Clients poll `GET /connectors/deploy/jobs/{job_id}` until status is
+    `completed` (result carries `connector_id`/`oauth_url`/etc.) or `failed`
+    (`error` carries the reason). This is non-blocking so multiple installs
+    can be triggered back-to-back without the browser timing out; the worker
+    pool serialises the heavy connector-loading work and runs install +
+    initialize + health_check off the request thread.
+    """
+    _ensure_deploy_runtime()
+    assert _DEPLOY_QUEUE is not None
+    body = await request.json()
+    job_id = _uuid_mod.uuid4().hex
+    _job(job_id)  # initialise as queued
+    await _DEPLOY_QUEUE.put((job_id, body, tenant_id))
+    logger.info(
+        "deploy.job_queued",
+        job_id=job_id,
+        session_id=body.get("session_id"),
+        connector_type=body.get("connector_type"),
+        queue_depth=_DEPLOY_QUEUE.qsize(),
+    )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/connectors/deploy/jobs/{job_id}")
+async def deploy_job_status(job_id: str):
+    """Return the current status of a queued/running/completed deploy job.
+
+    Useful for one-shot status checks (e.g. a page reload that didn't keep the
+    SSE stream open). For live completion notification prefer the `/events`
+    SSE endpoint — it pushes the moment the worker finishes instead of waiting
+    for the next poll tick.
+    """
+    job = _DEPLOY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Deploy job not found (may have expired)")
+    return _serialise_job(job_id, job)
+
+
+@app.get("/connectors/deploy/jobs/{job_id}/events")
+async def deploy_job_events(job_id: str, request: Request):
+    """Server-Sent Events stream for a deploy job.
+
+    Emits one `data:` frame with the current state on open, then a single
+    terminal frame the moment the worker finishes (push, not poll — backed by
+    the per-job `asyncio.Event`). 15 s SSE comment keepalives keep proxies
+    from closing the connection on a long-running OAuth installer.
+    """
+    from fastapi.responses import StreamingResponse
+    import json as _json
+
+    job = _DEPLOY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Deploy job not found (may have expired)")
+
+    async def gen():
+        # Initial frame so the client sees current state even if it joined late.
+        yield f"data: {_json.dumps(_serialise_job(job_id, job))}\n\n"
+        if job.get("status") in ("completed", "failed"):
+            return
+
+        evt = job.get("_done_event")
+        # Loop with a short wait so SSE keepalives go out and disconnects are detected.
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                if evt is None:
+                    # Defensive: job created without an event (older schema).
+                    # Fall back to a 1 s sleep+recheck.
+                    await asyncio.sleep(1.0)
+                    if job.get("status") in ("completed", "failed"):
+                        break
+                    continue
+                await asyncio.wait_for(evt.wait(), timeout=15.0)
+                break  # event fired → terminal state
+            except asyncio.TimeoutError:
+                # 15 s passed without completion — send keepalive, stay connected.
+                yield ": keepalive\n\n"
+
+        # Final frame with the terminal state.
+        yield f"data: {_json.dumps(_serialise_job(job_id, job))}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering when proxied
+            "Connection": "keep-alive",
+        },
+    )
+
+
+async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
+    """Actual install pipeline. Called by the worker pool, not directly by the HTTP handler.
 
     Body:
         connector_type: str   — matches CONNECTOR_TYPE in connector.py
         session_id: str       — integration builder session ID (for metadata lookup)
         config: dict          — install-time credentials/settings
     """
-    import uuid
-
-    body = await request.json()
     connector_type = body.get("connector_type", "")
     config = body.get("config", {})
     session_id = body.get("session_id", "")
@@ -1743,8 +1989,35 @@ async def deploy_connector(
     if not connector_type:
         raise HTTPException(status_code=400, detail="connector_type is required and could not be resolved from session_id")
 
-    # Re-scan generated connectors in case a new one was just built
-    _load_generated_connectors()
+    # Re-scan generated connectors in case a new one was just built. Serialised
+    # with _LOAD_LOCK so concurrent workers don't trample sys.path / sys.modules
+    # mid-load (the loader does heavy in-place module registration and rollback —
+    # interleaving two of them produces "module not found" / "wrong class" races
+    # that look like the original symptom: 1-2 installs succeed, the rest fail
+    # with bogus errors).
+    # The lock acquisition is itself bounded with DEPLOY_LOAD_TIMEOUT_S — a
+    # single connector that hangs in `exec_module` (e.g. a slow import side-
+    # effect) can hold the lock at most that long before the lock-waiter gives
+    # up. The waiter then proceeds without the lock; if its own load is fine
+    # it succeeds, and the hung one fails on its own (per-pipeline timeout
+    # catches the original). Result: ONE bad connector cannot wedge every
+    # other install.
+    if _LOAD_LOCK is not None:
+        try:
+            await asyncio.wait_for(_LOAD_LOCK.acquire(), timeout=DEPLOY_LOAD_TIMEOUT_S)
+            try:
+                _load_generated_connectors()
+            finally:
+                _LOAD_LOCK.release()
+        except asyncio.TimeoutError:
+            logger.warning(
+                "deploy.load_lock_timeout",
+                connector_type=connector_type,
+                hint="another install is holding the loader — proceeding without lock; isolated load may race",
+            )
+            _load_generated_connectors()
+    else:
+        _load_generated_connectors()
     connector_type = _resolve_connector_type(connector_type)
 
     if connector_type not in CONNECTOR_CLASSES:

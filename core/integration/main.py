@@ -31,6 +31,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from integration.api.catalog_routes import catalog_router
 from integration.api.catalog_v3_routes import catalog_v3_router
+from integration.api.categories_routes import categories_router
 from integration.api.codegen_routes import codegen_router
 from integration.api.codeview_routes import codeview_router
 from integration.api.history_routes import history_router
@@ -284,6 +285,12 @@ async def lifespan(app: FastAPI):
     # Ensure MongoDB indexes for sync request collections
     from integration.api.sync_request_routes import ensure_sync_indexes, close_gh_client
     await ensure_sync_indexes()
+    # Provider category taxonomy + mapping: ensure indexes then seed from
+    # connector_catalog.json on first boot. Both ops are idempotent —
+    # restarts are cheap, manual edits are never overwritten.
+    from integration.services import category_service as _category_service
+    await _category_service.ensure_indexes()
+    await _category_service.seed_categories_from_json()
     # Background watchdog — heals sessions that get stuck mid-execution
     watchdog_task = asyncio.create_task(_session_watchdog())
 
@@ -352,7 +359,14 @@ app.add_middleware(TenantBucketMiddleware)
 _V3 = "/api/v3"
 
 app.include_router(catalog_router)       # legacy: /catalog/... (keep for backward compat)
-app.include_router(catalog_v3_router)    # /api/v3/catalog/...
+app.include_router(catalog_v3_router)    # /api/v3/catalog/... — registered first so its
+                                         # GET overrides (logo_url injection, etc.) win
+                                         # over the legacy router below.
+# Also expose catalog_router under /api/v3 so PATCH /api/v3/catalog/providers/{key}
+# and the other write endpoints (POST/DELETE custom-providers, /detail, etc.) are
+# reachable from the same v3 base path the frontends use.
+app.include_router(catalog_router, prefix=_V3)
+app.include_router(categories_router)    # /api/v3/catalog/categories + provider mapping
 
 # All functional routers mounted under /api/v3
 app.include_router(session_router,        prefix=_V3)   # /api/v3/sessions/...

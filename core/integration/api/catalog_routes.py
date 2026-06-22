@@ -170,6 +170,48 @@ async def list_services(provider: str):
     services = list(get_provider_services(provider))
     seen_keys = {s.get("service") for s in services}
 
+    # Unified category: the provider's category is the single source of truth
+    # for every service it owns. Resolution chain matches the provider list
+    # (DB override → first service's catalog category → "Uncategorized") so
+    # the UI never shows mismatched values between a provider and its services.
+    try:
+        from integration.services import category_service as _catsvc
+        cat_map = await _catsvc.get_provider_category_map()
+        provider_category = cat_map.get(provider)
+        if not provider_category:
+            provider_category = next(
+                (s.get("category") for s in services if s.get("category")),
+                "",
+            )
+        if provider_category:
+            for s in services:
+                s["category"] = provider_category
+    except Exception as exc:
+        logger.warning("catalog.provider_category_apply_failed", provider=provider, error=str(exc))
+
+    # Apply per-service overrides from the static-provider override doc, if any.
+    # An override matches by service_key and shallow-merges editable fields onto
+    # the static catalog entry so super-admin edits via the inline editor stick.
+    try:
+        ov_doc = await static_provider_overrides_collection().find_one({"provider_key": provider})
+        if ov_doc:
+            overrides_by_key: Dict[str, Dict[str, Any]] = {
+                ov.get("service_key", ""): ov
+                for ov in (ov_doc.get("service_overrides") or [])
+                if ov.get("service_key")
+            }
+            if overrides_by_key:
+                for s in services:
+                    key = s.get("service") or s.get("service_key")
+                    ov = overrides_by_key.get(key)
+                    if not ov:
+                        continue
+                    for f in ("display_name", "description", "auth_type", "category", "logo_url"):
+                        if ov.get(f) is not None:
+                            s[f] = ov[f]
+    except Exception as exc:
+        logger.warning("catalog.service_overrides_apply_failed", provider=provider, error=str(exc))
+
     try:
         doc = await custom_providers_collection().find_one({"provider_key": provider})
         if doc:
@@ -282,6 +324,7 @@ class UpdateAnyProviderRequest(BaseModel):
     brand_color: Optional[str] = None
     logo_url: Optional[str] = None
     extra_services: Optional[List[ServiceInput]] = None  # additional services for static providers
+    service_overrides: Optional[List[ServiceInput]] = None  # per-service field overrides for static catalog entries
     services: Optional[List[ServiceInput]] = None        # full services list for custom providers
     dependencies: Optional[List[DependencyInput]] = None
 
@@ -316,6 +359,8 @@ async def update_any_provider(
             updates["logo_url"] = body.logo_url
         if body.extra_services is not None:
             updates["extra_services"] = [s.model_dump() for s in body.extra_services]
+        if body.service_overrides is not None:
+            updates["service_overrides"] = [s.model_dump() for s in body.service_overrides]
         if body.dependencies is not None:
             updates["dependencies"] = [d.model_dump() for d in body.dependencies]
 

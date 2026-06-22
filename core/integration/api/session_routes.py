@@ -1020,7 +1020,8 @@ async def list_sessions(
         projection = {
             "_id": 1, "app_id": 1, "tenant_id": 1, "tenant_name": 1,
             "provider": 1, "service": 1, "service_slug": 1,
-            "connector_name": 1, "auth_type": 1, "status": 1,
+            "connector_name": 1, "alias_name": 1, "connector_type": 1,
+            "auth_type": 1, "status": 1,
             "version": 1, "metadata_version": 1, "run_kind": 1,
             "parent_session_id": 1, "output_dir": 1,
             "created_at": 1, "updated_at": 1,
@@ -1095,92 +1096,14 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
     doc["_id"] = str(doc["_id"])
     doc["id"] = doc["_id"]
 
-    # Lazy-hydrate the FULL plan body from R2 when Mongo holds only the slim
-    # summary (Phase 4). We merge per-step fields back over the slim Mongo
-    # steps so the Builder + codegen see the original PlanDocument shape.
-    # Mongo's `status` ALWAYS wins — R2's plan_full.json is the "spec" and
-    # may be stale relative to live execution status.
-    _plan_doc = doc.get("plan")
-    if isinstance(_plan_doc, dict) and _plan_doc.get("_r2_offloaded"):
-        try:
-            from integration.services import r2_service as _r2_plan
-            _provider = doc.get("provider", "")
-            _service_slug = doc.get("service_slug") or doc.get("service") or ""
-            if _provider and _service_slug:
-                _r2_plan_doc = await _r2_plan.get_plan_full(
-                    provider=_provider, service_slug=_service_slug, session_id=doc["_id"],
-                )
-                if isinstance(_r2_plan_doc, dict):
-                    _r2_steps_by_idx = {}
-                    for _r2_step in _r2_plan_doc.get("steps") or []:
-                        if isinstance(_r2_step, dict):
-                            _idx = _r2_step.get("index")
-                            if _idx is not None:
-                                _r2_steps_by_idx[_idx] = _r2_step
-                    _merged_steps = []
-                    for _slim in _plan_doc.get("steps") or []:
-                        if not isinstance(_slim, dict):
-                            _merged_steps.append(_slim); continue
-                        _full = _r2_steps_by_idx.get(_slim.get("index"))
-                        if _full:
-                            _merged_steps.append({**_full, **_slim})  # Mongo status wins
-                        else:
-                            _merged_steps.append(_slim)
-                    _merged_plan = {**_r2_plan_doc, **_plan_doc, "steps": _merged_steps}
-                    _merged_plan.pop("_r2_offloaded", None)
-                    doc["plan"] = _merged_plan
-        except Exception as _exc:
-            logger.warning("session.plan_hydrate_failed", session_id=doc["_id"], error=str(_exc))
-
-    # Lazy-hydrate conversation_history from R2 when Mongo holds only a
-    # pointer dict (Phase 5). The Builder needs the full turn list when it
-    # opens a session for replan; without this the panel would render an
-    # empty conversation.
-    _ch = doc.get("conversation_history")
-    if isinstance(_ch, dict) and _ch.get("_r2_offloaded"):
-        try:
-            from integration.services import r2_service as _r2_ch
-            _provider = doc.get("provider", "")
-            _service_slug = doc.get("service_slug") or doc.get("service") or ""
-            if _provider and _service_slug:
-                _arr = await _r2_ch.get_conversation_history(
-                    provider=_provider, service_slug=_service_slug, session_id=doc["_id"],
-                )
-                doc["conversation_history"] = _arr if isinstance(_arr, list) else []
-        except Exception as _exc:
-            logger.warning("session.conversation_hydrate_failed", session_id=doc["_id"], error=str(_exc))
-
-    # Lazy-hydrate execution_results from R2 for any step rows that were
-    # offloaded (Phase 3). We only fetch heavy bytes when the Builder is
-    # actively opening this session — single round of parallel R2 GETs, one
-    # per step that has `r2_offloaded: True`. Steps that still embed their
-    # `output`/`logs` in Mongo (legacy rows) are passed through untouched.
-    _exec_results = doc.get("execution_results") or []
-    if _exec_results:
-        _provider = doc.get("provider", "")
-        _service_slug = doc.get("service_slug") or doc.get("service") or ""
-        if _provider and _service_slug:
-            from integration.services import r2_service as _r2
-            import asyncio as _asyncio
-            _needs = [
-                (i, r) for i, r in enumerate(_exec_results)
-                if isinstance(r, dict) and r.get("r2_offloaded") and not r.get("output") and not r.get("logs")
-            ]
-            if _needs:
-                _payloads = await _asyncio.gather(
-                    *[_r2.get_step_output(provider=_provider, service_slug=_service_slug,
-                                          session_id=session_id, step_index=int(r.get("step_index", -1)))
-                      for _, r in _needs],
-                    return_exceptions=True,
-                )
-                for (i, row), payload in zip(_needs, _payloads):
-                    if isinstance(payload, dict):
-                        _exec_results[i] = {**row, **payload}
-
-    # Strip deprecated deploy_form steps from old sessions
-    _plan = doc.get("plan")
-    if _plan and isinstance(_plan.get("steps"), list):
-        _plan["steps"] = [s for s in _plan["steps"] if not (isinstance(s, dict) and s.get("type") == "deploy_form")]
+    # Heavy subdocuments (plan, execution_results, test_results, method_identities,
+    # connector_docs, generated_files, package_structure, default_config,
+    # default_config_fields, recommended_features, user_prompt, conversation_history,
+    # selected_features, selected_config_keys) live in R2 only. This endpoint
+    # returns ONLY the Mongo row. The Builder fetches the heavy subset in
+    # parallel from GET /sessions/{id}/heavy and merges client-side, so a slow
+    # R2 GET never blocks the fast Mongo response (or the dozens of pages that
+    # never need heavy data at all).
 
     # Always include output_dir — compute if not already persisted
     if not doc.get("output_dir"):
@@ -1194,6 +1117,58 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
 
     logger.info("session.get", session_id=session_id, status=doc.get("status"))
     return doc
+
+
+@session_router.get("/{session_id}/heavy")
+async def get_session_heavy(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+    """Return the per-session heavy subdocuments from R2.
+
+    Backfilled by `backfill_sessions_heavy_to_r2.py` into a single gzipped JSON
+    blob at the per-app bucket key recorded on the Mongo row
+    (`heavy_fields_r2_bucket` / `heavy_fields_r2_key`). The Builder calls this
+    in parallel with `GET /sessions/{id}` and merges client-side; list pages
+    never call this at all.
+
+    Returns:
+        { plan, execution_results, test_results, method_identities,
+          connector_docs, generated_files, package_structure, default_config,
+          default_config_fields, recommended_features, user_prompt,
+          conversation_history, selected_features, selected_config_keys }
+        — any subset of the keys that was persisted for this session.
+
+    404 when the session has no heavy blob (e.g. a freshly-created session that
+    hasn't run any steps yet).
+    """
+    tenant_id = _get_tenant(x_tenant_id)
+    if not ObjectId.is_valid(session_id):
+        raise HTTPException(400, "Invalid session ID")
+    oid = ObjectId(session_id)
+    doc = await sessions_collection().find_one(
+        _session_filter(oid, None, tenant_id),
+        # Only the marker fields — we never need the rest of the row to fetch R2.
+        {"heavy_fields_r2_bucket": 1, "heavy_fields_r2_key": 1, "heavy_fields_in_r2": 1},
+    )
+    if not doc:
+        raise HTTPException(404, "Session not found")
+    bucket = doc.get("heavy_fields_r2_bucket")
+    key = doc.get("heavy_fields_r2_key")
+    if not (bucket and key):
+        # No heavy data has been persisted for this session yet — empty payload
+        # rather than 404 so the Builder doesn't have to special-case "new session".
+        return {}
+
+    import gzip as _gzip
+    import json as _json
+    from integration.services import r2_service as _r2
+    try:
+        s3 = _r2._get_client()
+        body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+        if body[:2] == b"\x1f\x8b":  # gzip magic
+            body = _gzip.decompress(body)
+        return _json.loads(body)
+    except Exception as exc:
+        logger.warning("session.heavy_fetch_failed", session_id=session_id, error=str(exc))
+        raise HTTPException(502, f"Could not load heavy fields from R2: {exc}")
 
 
 class SelectVersionRequest(BaseModel):
