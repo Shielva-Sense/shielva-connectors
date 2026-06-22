@@ -1,0 +1,232 @@
+{
+  "connector_type": "aws_s3",
+  "name": "AwsS3Connector",
+  "display_name": "AWS S3",
+  "version": "1.0.0",
+  "description": "Connects to Amazon S3 (and S3-compatible providers such as Cloudflare R2, Wasabi, Backblaze B2, MinIO, DigitalOcean Spaces) to list, read, write, copy, and delete objects, generate presigned URLs, manage object ACLs and bucket versions, and create/delete buckets. Uses aiobotocore + AWS Signature V4 — never rolls its own signing.",
+  "provider": "aws",
+  "service": "s3",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_key_id",
+      "label": "AWS Access Key ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "AKIAIOSFODNN7EXAMPLE",
+      "help": "20-character access key ID issued by AWS IAM. Found in IAM Console → Users → Security credentials → Access keys."
+    },
+    {
+      "key": "secret_access_key",
+      "label": "AWS Secret Access Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      "help": "40-character secret access key paired with the access key ID. Stored encrypted; shown only once at creation time in AWS."
+    },
+    {
+      "key": "region",
+      "label": "AWS Region",
+      "type": "string",
+      "required": true,
+      "default": "us-east-1",
+      "placeholder": "us-east-1",
+      "help": "AWS region code (e.g. us-east-1, eu-west-1, ap-south-1). Defaults to us-east-1. For S3-compatible providers, use whatever region label they document or 'auto'."
+    },
+    {
+      "key": "endpoint_url",
+      "label": "Endpoint URL Override (S3-compatible)",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://<account>.r2.cloudflarestorage.com",
+      "help": "Override the S3 endpoint for non-AWS providers: Cloudflare R2, Wasabi, Backblaze B2, MinIO, DigitalOcean Spaces. Leave blank to talk to AWS S3."
+    },
+    {
+      "key": "session_token",
+      "label": "STS Session Token",
+      "type": "secret",
+      "required": false,
+      "placeholder": "FQoDYXdzE…",
+      "help": "Optional. Required when using temporary credentials from AWS STS, AssumeRole, or federated identity. Leave blank for long-lived IAM access keys."
+    },
+    {
+      "key": "default_bucket",
+      "label": "Default Bucket",
+      "type": "string",
+      "required": false,
+      "placeholder": "my-app-uploads",
+      "help": "Optional convenience: pre-populate the bucket name in the UI for object-level actions. When set, health checks call HeadBucket against this bucket — useful for IAM policies scoped to a single bucket without ListAllMyBuckets."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates access_key_id and secret_access_key are present and stores config. Does not call AWS.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies credentials by calling ListBuckets (or HeadBucket on default_bucket when configured). Returns CONNECTED on success, EXPIRED on AccessDenied/InvalidAccessKeyId.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_buckets",
+      "name": "List Buckets",
+      "description": "Returns all buckets the credentials can see, as [{name, creation_date}].",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_bucket",
+      "name": "Create Bucket",
+      "description": "Creates a new bucket. The region defaults to the connector's configured region; pass 'region' to override. Honours the us-east-1 LocationConstraint quirk.",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "region", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_bucket",
+      "name": "Delete Bucket",
+      "description": "Deletes a bucket. WARNING: the bucket must be empty — AWS rejects DeleteBucket on a non-empty bucket. Empty it first via list_objects + delete_object.",
+      "method": "DELETE",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "head_bucket",
+      "name": "Head Bucket",
+      "description": "Existence + access probe against a single bucket. Returns {bucket, exists: True} on 2xx; raises AwsS3NotFound on 404.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_objects",
+      "name": "List Objects",
+      "description": "Lists objects in a bucket under an optional key prefix. Paginated via continuation_token.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "prefix", "type": "string", "required": false },
+        { "key": "max_keys", "type": "number", "required": false },
+        { "key": "continuation_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_object_versions",
+      "name": "List Object Versions",
+      "description": "ListObjectVersions — for versioned buckets. Returns both Versions and DeleteMarkers.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "prefix", "type": "string", "required": false },
+        { "key": "max_keys", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_object_metadata",
+      "name": "Get Object Metadata",
+      "description": "HeadObject — returns size, etag, content_type, last_modified, user metadata, version_id.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_object",
+      "name": "Get Object (bytes)",
+      "description": "Fetches an object and returns its full body as bytes. For large objects, prefer generate_presigned_url.",
+      "method": "GET",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true }
+      ],
+      "returns": "bytes"
+    },
+    {
+      "id": "put_object",
+      "name": "Put Object",
+      "description": "Uploads bytes to bucket/key. Sets ContentType and optional user metadata (ASCII-coerced).",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "content_type", "type": "string", "required": false },
+        { "key": "metadata", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_object",
+      "name": "Delete Object",
+      "description": "Deletes a single object. Idempotent on AWS — succeeds even if the key does not exist.",
+      "method": "DELETE",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "copy_object",
+      "name": "Copy Object",
+      "description": "Server-side copy of source_bucket/source_key to dest_bucket/dest_key. No body transit through the connector.",
+      "method": "POST",
+      "params": [
+        { "key": "source_bucket", "type": "string", "required": true },
+        { "key": "source_key", "type": "string", "required": true },
+        { "key": "dest_bucket", "type": "string", "required": true },
+        { "key": "dest_key", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "set_object_acl",
+      "name": "Set Object ACL",
+      "description": "PutObjectAcl with a canned ACL string (private, public-read, public-read-write, authenticated-read, bucket-owner-read, bucket-owner-full-control).",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true },
+        { "key": "acl", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "generate_presigned_url",
+      "name": "Generate Presigned URL",
+      "description": "Returns a time-limited URL for direct browser access. operation defaults to 'get_object'; pass 'put_object' for upload URLs. AWS caps SigV4 GET URLs at 7 days.",
+      "method": "POST",
+      "params": [
+        { "key": "bucket", "type": "string", "required": true },
+        { "key": "key", "type": "string", "required": true },
+        { "key": "operation", "type": "string", "required": false },
+        { "key": "expires_in", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "aiobotocore>=2.0",
+    "botocore>=1.34"
+  ]
+}

@@ -1,0 +1,213 @@
+{
+  "connector_type": "hibob",
+  "name": "HiBobConnector",
+  "display_name": "HiBob",
+  "version": "1.0.0",
+  "description": "Connects to the HiBob (Bob) HR platform using Service-User credentials (HTTP Basic). Read and write employees, employments, time-off, payroll history, lifecycle changes, departments, and sites.",
+  "provider": "hibob",
+  "service": "hibob",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "service_user_id",
+      "label": "Service User ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "SERVICE-12345",
+      "help": "Service User ID from HiBob -> Settings -> Integrations -> Service Users (e.g. 'SERVICE-12345'). Sent as the HTTP Basic username."
+    },
+    {
+      "key": "service_user_token",
+      "label": "Service User Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste the Service User token",
+      "help": "Service-User token paired with the ID. Bob displays it only once at creation — rotate the credential if lost. Sent as the HTTP Basic password."
+    },
+    {
+      "key": "base_url",
+      "label": "HiBob API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.hibob.com/v1",
+      "placeholder": "https://api.hibob.com/v1",
+      "help": "Base URL for the HiBob REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum HiBob API requests per minute (client-side soft cap). Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates service_user_id + service_user_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies HiBob API connectivity by calling GET /people?limit=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "GET /people — list employees with optional projection.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "fields", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search_people",
+      "name": "Search People",
+      "description": "POST /people/search — bulk-fetch employee records with field projection and filters.",
+      "method": "POST",
+      "params": [
+        { "key": "filters", "type": "array", "required": false },
+        { "key": "fields", "type": "array", "required": false },
+        { "key": "include_humanized", "type": "boolean", "required": false },
+        { "key": "fields_humanized", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_employee",
+      "name": "Get Employee",
+      "description": "GET /people/{id} — fetch one employee.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_employee_profile",
+      "name": "Get Employee Profile",
+      "description": "GET /profiles/{id} — humanised full-profile projection.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_employee",
+      "name": "Create Employee",
+      "description": "POST /people — create a new employee record.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "surname", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": true },
+        { "key": "work_email", "type": "string", "required": false },
+        { "key": "start_date", "type": "string", "required": false },
+        { "key": "company_id", "type": "string", "required": false },
+        { "key": "site", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_employee",
+      "name": "Update Employee",
+      "description": "PUT /people/{id} — update employee fields.",
+      "method": "PUT",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_employments",
+      "name": "List Employments",
+      "description": "GET /people/{id}/employment — employment history per employee.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_off_requests",
+      "name": "List Time-Off Requests",
+      "description": "GET /timeoff/requests/changes — list time-off changes in a window.",
+      "method": "GET",
+      "params": [
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false },
+        { "key": "policy_type_display_name", "type": "string", "required": false },
+        { "key": "include_pending", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_time_off_request",
+      "name": "Create Time-Off Request",
+      "description": "POST /timeoff/employees/{id}/requests — submit a time-off request for one employee.",
+      "method": "POST",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true },
+        { "key": "policy_type_display_name", "type": "string", "required": true },
+        { "key": "request_range_type", "type": "string", "required": true },
+        { "key": "start_date", "type": "string", "required": true },
+        { "key": "end_date", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_payroll",
+      "name": "List Payroll History",
+      "description": "GET /payroll/history/{employee_id} — payroll history for one employee.",
+      "method": "GET",
+      "params": [
+        { "key": "employee_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_lifecycle_changes",
+      "name": "List Lifecycle Changes",
+      "description": "GET /people/lifecycle/changes — hire / leave / return / terminate event log.",
+      "method": "GET",
+      "params": [
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "GET /company/named-lists/department — department named-list.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sites",
+      "name": "List Sites",
+      "description": "GET /company/named-lists/site — site (office location) named-list.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

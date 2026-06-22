@@ -1,0 +1,204 @@
+{
+  "connector_type": "square",
+  "connector_id": "square",
+  "name": "Square",
+  "provider": "square",
+  "service": "square",
+  "version": "1.0.0",
+  "description": "Sync Square payments, orders, customers, and catalog items into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "application_id",
+      "label": "Square Application ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "sq0idp-...",
+      "help": "Your Square application ID. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials."
+    },
+    {
+      "key": "application_secret",
+      "label": "Square Application Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "sq0csp-...",
+      "help": "Your Square application secret. From developer.squareup.com \u2192 Applications \u2192 your app \u2192 Credentials."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth Redirect URI",
+      "type": "text",
+      "required": false,
+      "placeholder": "https://your-app.com/oauth/callback",
+      "help": "Optional OAuth redirect URI. Must match the URI registered in your Square application."
+    }
+  ],
+  "oauth_scopes": [
+    "MERCHANT_PROFILE_READ",
+    "PAYMENTS_READ",
+    "ORDERS_READ",
+    "CUSTOMERS_READ",
+    "ITEMS_READ"
+  ],
+  "oauth_auth_url": "https://connect.squareup.com/oauth2/authorize",
+  "oauth_token_url": "https://connect.squareup.com/oauth2/token",
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "oauth2"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate application_id and application_secret. If an access_token is present, probe GET /merchants/me.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return the Square OAuth2 authorization URL for the configured application.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probe GET /merchants/me and return HEALTHY, DEGRADED, or OFFLINE with merchant name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Square payments and customers into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_payments",
+      "name": "List Payments",
+      "description": "Paginated list of Square payments.",
+      "category": "payments",
+      "endpoint": "GET /payments"
+    },
+    {
+      "id": "get_payment",
+      "name": "Get Payment",
+      "description": "Retrieve a single payment by ID.",
+      "category": "payments",
+      "endpoint": "GET /payments/{payment_id}"
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "Search orders for a specific location.",
+      "category": "orders",
+      "endpoint": "POST /orders/search"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Paginated list of Square customers.",
+      "category": "customers",
+      "endpoint": "GET /customers"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Retrieve a single customer by ID.",
+      "category": "customers",
+      "endpoint": "GET /customers/{customer_id}"
+    },
+    {
+      "id": "list_catalog_items",
+      "name": "List Catalog Items",
+      "description": "Paginated list of Square catalog objects.",
+      "category": "catalog",
+      "endpoint": "GET /catalog/list"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "payments",
+    "orders",
+    "customers",
+    "catalog"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate application_id/application_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Square OAuth2 authorization URL for the configured app.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Probe GET /merchants/me and return current health with merchant name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Square payments, orders (skipped without a location_id), and customers.",
+      "method": "GET"
+    },
+    {
+      "name": "List Payments",
+      "id": "list_payments",
+      "category": "payments",
+      "description": "Calls list_payments() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Payment",
+      "id": "get_payment",
+      "category": "payments",
+      "description": "Calls get_payment() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Orders",
+      "id": "list_orders",
+      "category": "orders",
+      "description": "Calls list_orders() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "Calls list_customers() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "Calls get_customer() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Catalog Items",
+      "id": "list_catalog_items",
+      "category": "catalog",
+      "description": "Calls list_catalog_items() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Square"
+}

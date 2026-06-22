@@ -1,0 +1,323 @@
+{
+  "connector_type": "mongodb_atlas",
+  "name": "MongoDBAtlasConnector",
+  "display_name": "MongoDB Atlas",
+  "version": "1.0.0",
+  "description": "Manage MongoDB Atlas via the Admin API v2 — list/create/modify/delete clusters, projects, database users, and IP access list entries; read organizations, projects, snapshots, alerts, API keys, and invoices. Admin API only — wire-protocol data plane is out of scope.",
+  "provider": "mongodb",
+  "service": "atlas",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "public_key",
+      "label": "Atlas Public Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "abcdwxyz",
+      "help": "From Atlas → Organization → Access Manager → API Keys → Public Key"
+    },
+    {
+      "key": "private_key",
+      "label": "Atlas Private Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste private key",
+      "help": "Private key paired with the public key — shown only once at creation. Sent via HTTP Digest auth (RFC 7616)."
+    },
+    {
+      "key": "default_org_id",
+      "label": "Default Organization ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "5e9a1b2c3d4e5f6a7b8c9d0e",
+      "help": "Optional. Default Atlas Organization ID for shorthand operations."
+    },
+    {
+      "key": "default_project_id",
+      "label": "Default Project ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "6f8b2c3d4e5f6a7b8c9d0e1f",
+      "help": "Atlas Project / Group ID for shorthand operations."
+    },
+    {
+      "key": "base_url",
+      "label": "Atlas API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://cloud.mongodb.com/api/atlas/v2",
+      "placeholder": "https://cloud.mongodb.com/api/atlas/v2",
+      "help": "Base URL for the MongoDB Atlas Admin API v2. Leave blank to use the default."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "default": "2025-03-12",
+      "placeholder": "2025-03-12",
+      "help": "Atlas versioned media-type date (Accept: application/vnd.atlas.<date>+json)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Atlas API requests per minute. Default is 100 (Atlas standard quota)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates public_key and private_key and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Digest credentials by hitting GET /orgs?itemsPerPage=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "GET /orgs — list Atlas organizations accessible to this API key.",
+      "method": "GET",
+      "params": [
+        { "key": "page_num", "type": "number", "required": false },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_organization",
+      "name": "Get Organization",
+      "description": "GET /orgs/{org_id} — fetch a single Atlas organization by id.",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /groups — list Atlas projects (groups) accessible to this API key.",
+      "method": "GET",
+      "params": [
+        { "key": "page_num", "type": "number", "required": false },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /groups/{project_id} — fetch a single Atlas project by id.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_project",
+      "name": "Create Project",
+      "description": "POST /groups — create a new Atlas project under an organization.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "with_default_alerts_settings", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_project",
+      "name": "Delete Project",
+      "description": "DELETE /groups/{project_id} — delete an Atlas project. Irreversible.",
+      "method": "DELETE",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_clusters",
+      "name": "List Clusters",
+      "description": "GET /groups/{project_id}/clusters — list all clusters in a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_cluster",
+      "name": "Get Cluster",
+      "description": "GET /groups/{project_id}/clusters/{cluster_name} — fetch a single cluster by name.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "cluster_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_cluster",
+      "name": "Create Cluster",
+      "description": "POST /groups/{project_id}/clusters — provision a new Atlas cluster. Defaults to a single-shard REPLICASET on AWS US_EAST_1, M10, MongoDB 7.0 if provider_settings is omitted.",
+      "method": "POST",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "cluster_type", "type": "string", "required": false },
+        { "key": "provider_settings", "type": "object", "required": false },
+        { "key": "num_shards", "type": "number", "required": false },
+        { "key": "mongo_db_major_version", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "modify_cluster",
+      "name": "Modify Cluster",
+      "description": "PATCH /groups/{project_id}/clusters/{cluster_name} — partial update of an Atlas cluster.",
+      "method": "PATCH",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "cluster_name", "type": "string", "required": true },
+        { "key": "patch", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_cluster",
+      "name": "Delete Cluster",
+      "description": "DELETE /groups/{project_id}/clusters/{cluster_name} — tear down an Atlas cluster. Irreversible.",
+      "method": "DELETE",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "cluster_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_database_users",
+      "name": "List Database Users",
+      "description": "GET /groups/{project_id}/databaseUsers — list SCRAM database users for a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_database_user",
+      "name": "Create Database User",
+      "description": "POST /groups/{project_id}/databaseUsers — create a SCRAM database user in a project.",
+      "method": "POST",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "username", "type": "string", "required": true },
+        { "key": "password", "type": "string", "required": true },
+        { "key": "database_name", "type": "string", "required": false },
+        { "key": "roles", "type": "array", "required": false },
+        { "key": "scopes", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_database_user",
+      "name": "Delete Database User",
+      "description": "DELETE /groups/{project_id}/databaseUsers/{database_name}/{username} — delete a database user from a project.",
+      "method": "DELETE",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "username", "type": "string", "required": true },
+        { "key": "database_name", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_network_access",
+      "name": "List Network Access",
+      "description": "GET /groups/{project_id}/accessList — list the IP access list for a project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_network_access",
+      "name": "Add Network Access",
+      "description": "POST /groups/{project_id}/accessList — append IP / CIDR entries to the project access list. Each entry: {cidrBlock or ipAddress, comment}.",
+      "method": "POST",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "entries", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_snapshots",
+      "name": "List Snapshots",
+      "description": "GET /groups/{project_id}/clusters/{cluster_name}/backup/snapshots — list Cloud Backup snapshots for a cluster.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "cluster_name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_alerts",
+      "name": "List Alerts",
+      "description": "GET /groups/{project_id}/alerts — list alerts for a project, optionally filtered by status (OPEN, CLOSED, TRACKING).",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "page_num", "type": "number", "required": false },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_api_keys",
+      "name": "List API Keys",
+      "description": "GET /orgs/{org_id}/apiKeys — list org-level programmatic API keys (read-only).",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "page_num", "type": "number", "required": false },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "GET /orgs/{org_id}/invoices — list org-level invoices (billing surface).",
+      "method": "GET",
+      "params": [
+        { "key": "org_id", "type": "string", "required": true },
+        { "key": "page_num", "type": "number", "required": false },
+        { "key": "items_per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "title": "HiBob Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**HiBob** (a.k.a. **Bob**) is a modern HR / HCM platform exposing a REST API suite under `https://api.hibob.com/v1`. This connector — `HiBobConnector` (`CONNECTOR_TYPE = \"hibob\"`, `AUTH_TYPE = \"api_key\"`) — wraps the HR surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| People (employees) | `/people`, `/people/search`, `/people/{id}` | List, search, read, create, update employees |\n| Profile | `/profiles/{id}` | Humanised full-profile projection |\n| Employments | `/people/{id}/employment` | Employment history per employee |\n| Time-Off | `/timeoff/requests/changes`, `/timeoff/employees/{id}/requests` | List + create time-off requests |\n| Payroll | `/payroll/history/{id}` | Per-employee payroll history |\n| Lifecycle | `/people/lifecycle/changes` | Hire / leave / return / terminate event log |\n| Departments | `/company/named-lists/department` | Department named-list |\n| Sites | `/company/named-lists/site` | Office-location named-list |\n\nThe connector normalises People records into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, honours `Retry-After`), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HiBobHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Provision a Service User in HiBob\n\n1. Sign in to https://app.hibob.com.\n2. Open **Settings -> Integrations -> Service Users**.\n3. Click **New service user**, grant the scopes you need (People read/write, Time-off read/write, Payroll read, Lifecycle read, Reports read).\n4. Copy the **Service User ID** (looks like `SERVICE-12345`) and the **Service User Token** — Bob shows the token only once.\n\n### 2. Install in ACP\n\nIn **ACP -> Manage Connectors -> HiBob**, fill in:\n\n| Field | Value |\n|---|---|\n| `service_user_id` (string) | The Service User ID from step 4 |\n| `service_user_token` (secret) | The Service User token from step 4 |\n| `base_url` (string, optional) | Override `https://api.hibob.com/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Client-side soft cap, default 60 |\n\nClick **Install**. `install()` validates the two credentials are non-empty (it does NOT call the API), initialises the `HiBobHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 employee via `GET /people?fields=id&limit=1` as a lightweight probe. On 2xx -> `HEALTHY + CONNECTED`. On 401/403 -> `DEGRADED + INVALID_CREDENTIALS` with structured-log warning. On transport error -> `OFFLINE`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "HiBob REST API uses **HTTP Basic authentication** for Service Users (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `service_user_id` is sent as the HTTP Basic **username**.\n- `service_user_token` is sent as the HTTP Basic **password**.\n- The connector encodes them as `Authorization: Basic base64(service_user_id:service_user_token)`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `service_user_id` + `service_user_token`. Initialises `HiBobHTTPClient`. Does **not** call any HiBob endpoint. |\n| `authorize(...)` | Returns a synthetic `TokenInfo(token_type=\"Basic\")` — there is no token exchange. |\n| `health_check()` | `GET /people?fields=id&limit=1` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(SERVICE-12345:<token>)\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `service_user_id` | string | yes | `self.service_user_id` | Basic-Auth username |\n| `service_user_token` | secret | yes | `self.service_user_token` | Basic-Auth password |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.hibob.com/v1`) | Override for sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"service_user_id\", \"service_user_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HIBOB_BASE = \"https://api.hibob.com/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HiBobConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::HiBobHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `service_user_id` + `service_user_token`; initialise `HiBobHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for Service-User auth — returns a synthetic TokenInfo(token_type='Basic').\n\n### `async health_check() -> ConnectorStatus`\nLists 1 employee via `GET /people?fields=id&limit=1`. Classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates HiBob employees via `POST /people/search` -> `NormalizedDocument` -> `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-people",
+          "title": "People (employees)",
+          "content": "### `async list_people(*, limit=50, fields=None) -> Dict`\n`GET /people?limit={N}` — simple listing, optional field projection.\n\n### `async search_people(filters=None, fields=None, *, include_humanized=False, fields_humanized=None) -> Dict`\n`POST /people/search` — body: `{fields: [...], filters: [...]}`. When `include_humanized=True` each employee gets a tidy `humanized` projection.\n\n### `async get_employee(employee_id) -> Dict`\n`GET /people/{employee_id}`.\n\n### `async get_employee_profile(employee_id) -> Dict`\n`GET /profiles/{employee_id}` — humanised full-profile projection.\n\n### `async create_employee(first_name, surname, email, work_email=None, start_date=None, company_id=None, site=None) -> Dict`\n`POST /people` — body: `{firstName, surname, email, workEmail?, work: {startDate?, companyId?, site?}}`.\n\n### `async update_employee(employee_id, fields) -> Dict`\n`PUT /people/{employee_id}` — body: arbitrary fields dict."
+        },
+        {
+          "id": "api-employments-timeoff",
+          "title": "Employments + Time-Off",
+          "content": "### `async list_employments(employee_id) -> Dict`\n`GET /people/{employee_id}/employment` — employment history per employee.\n\n### `async list_time_off_requests(from_date=None, to_date=None, policy_type_display_name=None, include_pending=True) -> Dict`\n`GET /timeoff/requests/changes` — list time-off changes in a window.\n\n### `async create_time_off_request(employee_id, policy_type_display_name, request_range_type, start_date, end_date=None, description=None) -> Dict`\n`POST /timeoff/employees/{employee_id}/requests` — submit a time-off request."
+        },
+        {
+          "id": "api-payroll-lifecycle",
+          "title": "Payroll · Lifecycle · Named lists",
+          "content": "### `async list_payroll(employee_id) -> Dict`\n`GET /payroll/history/{employee_id}` — per-employee payroll history.\n\n### `async list_lifecycle_changes(from_date=None, to_date=None) -> Dict`\n`GET /people/lifecycle/changes` — hire / leave / return / terminate event log.\n\n### `async list_departments() -> Dict`\n`GET /company/named-lists/department`.\n\n### `async list_sites() -> Dict`\n`GET /company/named-lists/site`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHiBobError                            # base; carries status_code + response_body\n├── HiBobAuthError                    # 401 / 403\n├── HiBobBadRequestError              # 400\n├── HiBobNotFoundError                # 404\n├── HiBobConflictError                # 409 (duplicate email)\n├── HiBobRateLimitError               # 429 — retry_after_s\n└── HiBobServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nHiBobNetworkError = HiBobServerError  # legacy name from older code\nHiBobNotFound     = HiBobNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honours `Retry-After` header; otherwise exponential backoff (`_RETRY_BASE_DELAY_S * 2 ** attempt`) up to `_RETRY_MAX_DELAY_S=16s`. Retries up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `HiBobNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps them as follows:\n\n```\nHiBobAuthError      -> ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)\nHiBobNetworkError   -> ConnectorStatus(OFFLINE,  CONNECTED)\nHiBobError (other)  -> ConnectorStatus(DEGRADED, CONNECTED)\n```\n\nThe `_STATUS_MAP` class constant codifies the raw HTTP -> (health, auth_status) mapping for monitoring overlays:\n\n```\n401 -> (OFFLINE,   TOKEN_EXPIRED)\n403 -> (UNHEALTHY, INVALID_CREDENTIALS)\n429 -> (DEGRADED,  CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `service_user_id` or `service_user_token` blank | Re-enter both in ACP. Bob shows the token only once at generation — rotate the Service User if lost. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 401/403 from HiBob — Service User disabled or lacks scope | In Bob -> Settings -> Integrations -> Service Users, edit the Service User and grant the required scopes (People read, Time-off read, etc.). |\n| `ConnectorStatus(OFFLINE, CONNECTED)` at health_check | Network / DNS failure reaching `api.hibob.com` | Check egress allowlist (see `vault_egress_allowlist_prod_requirement.md`). HiBob isn't on the default allowlist. |\n| `hibob.http.retry` warnings spike | Hitting 429 (HiBob per-minute rate cap) | The client honours `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| `HiBobNotFound` on `get_employee` | The employee was deleted or the id was renamed during a rehire | Re-run `search_people()` to refresh the directory; ids are stable across renames but can change after deletion. |\n| `HiBobConflictError` on `create_employee` | Duplicate email in Bob | Bob enforces unique `email` across the tenant. Pick a different email or update the existing record. |\n| `ImportError: cannot import name 'HiBobNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `HiBobNetworkError = HiBobServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}

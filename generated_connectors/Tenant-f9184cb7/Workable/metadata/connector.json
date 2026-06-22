@@ -1,0 +1,148 @@
+{
+  "connector_type": "workable",
+  "name": "Workable",
+  "display_name": "Workable",
+  "description": "Connect to Workable ATS to sync jobs, candidates, and pipeline stages into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Workable API token. Found in Workable \u2192 Settings \u2192 Integrations \u2192 API Access Tokens.",
+      "help": "API Token."
+    },
+    {
+      "key": "subdomain",
+      "label": "Workable Subdomain (e.g. mycompany)",
+      "type": "string",
+      "required": true,
+      "description": "Your Workable account subdomain. If your Workable URL is mycompany.workable.com, enter 'mycompany'.",
+      "help": "Workable Subdomain (e.g. mycompany)."
+    }
+  ],
+  "capabilities": [
+    "list_jobs",
+    "get_job",
+    "list_candidates",
+    "get_candidate",
+    "list_stages",
+    "list_members",
+    "sync"
+  ],
+  "provider": "Workable",
+  "service": "Workable",
+  "category": "ats",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all jobs, candidates, and stages from Workable.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "List jobs (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "since_id",
+          "label": "Since Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_candidates",
+      "name": "List Candidates",
+      "description": "List candidates (single page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "since_id",
+          "label": "Since Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_job",
+      "name": "Get Job",
+      "description": "Return a single job by shortcode.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "shortcode",
+          "label": "Shortcode",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_candidate",
+      "name": "Get Candidate",
+      "description": "Return a single candidate by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "candidate_id",
+          "label": "Candidate Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_stages",
+      "name": "List Stages",
+      "description": "Return all pipeline stages.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "Return all team members.",
+      "method": "GET",
+      "params": []
+    }
+  ]
+}

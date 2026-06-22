@@ -1,0 +1,175 @@
+{
+  "connector_type": "convertkit",
+  "connector_id": "convertkit",
+  "name": "ConvertKit",
+  "provider": "ConvertKit",
+  "service": "ConvertKit",
+  "version": "1.0.0",
+  "description": "Connects to ConvertKit via the REST API v3 to sync subscribers, sequences, forms, tags, and broadcasts into the Shielva knowledge base.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "your-api-key",
+      "help": "Your ConvertKit API Key. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Key."
+    },
+    {
+      "key": "api_secret",
+      "label": "API Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "your-api-secret",
+      "help": "Your ConvertKit API Secret. Required to list subscribers. Found in ConvertKit \u2192 Settings \u2192 Advanced \u2192 API Secret."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "page_pagination"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the API key via GET /v3/account. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /v3/account and return HEALTHY, DEGRADED, or OFFLINE with the account name/email.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches all subscribers (page-paginated), sequences, and forms. Normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_subscribers",
+      "name": "List Subscribers",
+      "description": "Page-based paginated list of ConvertKit subscribers.",
+      "category": "subscribers",
+      "endpoint": "GET /v3/subscribers"
+    },
+    {
+      "id": "get_subscriber",
+      "name": "Get Subscriber",
+      "description": "Retrieve a single subscriber by ID.",
+      "category": "subscribers",
+      "endpoint": "GET /v3/subscribers/{subscriber_id}"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "List all ConvertKit tags.",
+      "category": "tags",
+      "endpoint": "GET /v3/tags"
+    },
+    {
+      "id": "list_sequences",
+      "name": "List Sequences",
+      "description": "List all ConvertKit email sequences.",
+      "category": "sequences",
+      "endpoint": "GET /v3/sequences"
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "List all ConvertKit forms.",
+      "category": "forms",
+      "endpoint": "GET /v3/forms"
+    },
+    {
+      "id": "list_broadcasts",
+      "name": "List Broadcasts",
+      "description": "List all ConvertKit broadcasts (one-off emails sent).",
+      "category": "broadcasts",
+      "endpoint": "GET /v3/broadcasts"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "subscribers",
+    "tags",
+    "sequences",
+    "forms",
+    "broadcasts"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the API key via GET /v3/account.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /v3/account and return current health with account name/email.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch subscribers, sequences, and forms; normalize each \u2192 SyncResult.",
+      "method": "GET"
+    },
+    {
+      "name": "List Subscribers",
+      "id": "list_subscribers",
+      "category": "subscribers",
+      "description": "Calls list_subscribers() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Subscriber",
+      "id": "get_subscriber",
+      "category": "subscribers",
+      "description": "Calls get_subscriber() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Tags",
+      "id": "list_tags",
+      "category": "tags",
+      "description": "Calls list_tags() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sequences",
+      "id": "list_sequences",
+      "category": "sequences",
+      "description": "Calls list_sequences() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Forms",
+      "id": "list_forms",
+      "category": "forms",
+      "description": "Calls list_forms() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Broadcasts",
+      "id": "list_broadcasts",
+      "category": "broadcasts",
+      "description": "Calls list_broadcasts() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Convertkit"
+}

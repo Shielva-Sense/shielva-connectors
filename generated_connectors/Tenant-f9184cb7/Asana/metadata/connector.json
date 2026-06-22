@@ -1,0 +1,132 @@
+{
+  "connector_type": "asana",
+  "display_name": "Asana",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Personal Access Token."
+    },
+    {
+      "key": "workspace_gid",
+      "label": "Workspace GID (optional)",
+      "type": "string",
+      "required": false,
+      "help": "Workspace GID (optional)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync tasks and projects from all workspaces in Asana.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Return all workspaces the user has access to.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return list of project dicts from a workspace.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "workspace_gid",
+          "label": "Workspace Gid",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "archived",
+          "label": "Archived",
+          "type": "boolean",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "Return a single project by GID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_gid",
+          "label": "Project Gid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Return list of task dicts in a project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_gid",
+          "label": "Project Gid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "Return a single task by GID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "task_gid",
+          "label": "Task Gid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_sections",
+      "name": "List Sections",
+      "description": "Return all sections in a project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_gid",
+          "label": "Project Gid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return list of user dicts in a workspace.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "workspace_gid",
+          "label": "Workspace Gid",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "AsanaConnector",
+  "provider": "asana",
+  "service": "asana",
+  "description": "Shielva connector for Asana."
+}

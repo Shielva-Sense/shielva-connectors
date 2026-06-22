@@ -1,0 +1,79 @@
+{
+  "title": "Hightouch Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Hightouch** is a Reverse-ETL / Composable Customer Data Platform that activates data from the warehouse into hundreds of SaaS destinations. It exposes a single REST surface rooted at `https://api.hightouch.com/api/v1`. This connector — `HightouchConnector` (`CONNECTOR_TYPE = \"hightouch\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Workspaces | `/workspaces` | List workspaces the API token can see |\n| Sources | `/sources` | List + read warehouse / DB sources |\n| Models | `/models` | List + read SQL / audience definitions |\n| Destinations | `/destinations` | List + read SaaS destinations |\n| Syncs | `/syncs` | List + read + create + trigger reverse-ETL pipelines |\n| Sync Runs | `/syncs/{id}/runs` | List + read individual run history |\n| Sequences | `/sequences` | List orchestrated multi-step sync sequences |\n| Events | `/events` | Forward Customer Studio events into Hightouch |\n\nThe connector normalises Sources + Models + Destinations + Syncs into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), exposes one standalone `async def` per user-requested operation (OCP), retries 429 / 5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HightouchHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Mint a Hightouch API token\n\n1. Sign in to https://app.hightouch.com.\n2. Open **Settings → API Keys** (workspace-scoped) **OR** **Settings → Personal Access Tokens** (user-scoped).\n3. Click **Create API Key**, name it `shielva-acp`, grant Read+Write scopes for the resource families you'll use (Sources, Models, Destinations, Syncs).\n4. Copy the token value — Hightouch shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Hightouch**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | Token from step 4 |\n| `base_url` (text, optional) | Override `https://api.hightouch.com/api/v1` (rare — sandbox/regional only) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_token` is non-empty (it does NOT call the API), initialises the `HightouchHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /workspaces` as a lightweight, idempotent reachability check. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx → `OFFLINE + CONNECTED` with a structured warning log."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Hightouch REST API uses **server-to-server bearer token authentication** (`AUTH_TYPE = \"api_key\"`). There is no OAuth dance, no token refresh, and no expiry — the token is valid until manually revoked in the Hightouch dashboard.\n\n### Credential model\n\n- `api_token` is sent in the `Authorization` header as `Bearer <api_token>`.\n- The legacy field name `api_key` is still accepted at install time for back-compat (see `connector.py::__init__`) but new installs must use `api_token`.\n- No `wix-account-id` / `x-workspace-id` style fan-out headers — the token itself scopes the request to a workspace.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token`. Initialises `HightouchHTTPClient`. Does **not** call any Hightouch endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured `api_token` (no token exchange). |\n| `health_check()` | `GET /workspaces` — minimal probe, retried twice on transient failure. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the api_token lives in `self.config` and is encrypted at rest by the gateway credential vault. |\n\n### Header contract\n\nEvery outbound request to `https://api.hightouch.com/api/v1/*`:\n\n```\nAuthorization: Bearer <api_token>\nContent-Type:  application/json\nAccept:        application/json\n```\n\nA call attempted with an empty `api_token` raises `HightouchAuthError` from the HTTP layer immediately — the connector never silently sends an unauthenticated request."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | `Authorization: Bearer …` value |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.hightouch.com/api/v1`) | Override for Hightouch sandbox or regional endpoint |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap; Hightouch enforces its own server-side limit |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HIGHTOUCH_BASE = \"https://api.hightouch.com/api/v1\"\n```\n\n### Retry tuning (single-owner in `client/http_client.py`)\n\n```python\nRETRY_DELAY_S       = 1.0   # first retry after 1 s\nBACKOFF_FACTOR      = 2.0   # exponential\nMAX_RETRY_DELAY_S   = 32.0  # cap so a long outage doesn't stall forever\nDEFAULT_MAX_RETRIES = 3\nDEFAULT_TIMEOUT_S   = 30.0  # httpx per-request budget\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HightouchConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::HightouchHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token` is non-empty; initialise `HightouchHTTPClient`. Does NOT call the API. Returns `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` when `api_token` is empty; `ConnectorStatus(HEALTHY, AUTHENTICATED)` on success.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a `TokenInfo(access_token=self.api_token, token_type=\"api_key\")` with empty refresh + expiry.\n\n### `async health_check() -> ConnectorStatus`\n`GET /workspaces` (retried up to 2 times) — minimal reachability probe. Classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Hightouch inventory (sources → models → destinations → syncs) → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_found / _synced / _failed` counters. Hightouch is reverse-ETL — there is no row corpus to backfill, so the sync mirrors the workspace inventory for KB introspection."
+        },
+        {
+          "id": "api-workspaces",
+          "title": "Workspaces",
+          "content": "### `async list_workspaces() -> Dict`\n`GET /workspaces` — list every workspace the api_token can see. Used as the health-check probe."
+        },
+        {
+          "id": "api-sources",
+          "title": "Sources",
+          "content": "### `async list_sources(page=1, per_page=50, slug=None) -> Dict`\n`GET /sources?page={N}&per_page={M}&slug={slug}` — list configured warehouse / DB sources. `slug` is an exact-match filter (omit for all).\n\n### `async get_source(source_id) -> Dict`\n`GET /sources/{id}` — fetch a single source by numeric id. Coerces id to `str` for path construction."
+        },
+        {
+          "id": "api-models",
+          "title": "Models",
+          "content": "### `async list_models(page=1, per_page=50, slug=None) -> Dict`\n`GET /models` — list SQL / audience model definitions.\n\n### `async get_model(model_id) -> Dict`\n`GET /models/{id}`."
+        },
+        {
+          "id": "api-destinations",
+          "title": "Destinations",
+          "content": "### `async list_destinations(page=1, per_page=50, slug=None) -> Dict`\n`GET /destinations` — list configured SaaS destinations.\n\n### `async get_destination(destination_id) -> Dict`\n`GET /destinations/{id}`."
+        },
+        {
+          "id": "api-syncs",
+          "title": "Syncs",
+          "content": "### `async list_syncs(page=1, per_page=50, slug=None, model_id=None, destination_id=None) -> Dict`\n`GET /syncs?modelId={mid}&destinationId={did}` — list sync pipelines. Filters mirror Hightouch's camelCase wire format.\n\n### `async get_sync(sync_id) -> Dict`\n`GET /syncs/{id}`.\n\n### `async create_sync(payload: Dict) -> Dict`\n`POST /syncs` — body is the raw sync definition (`slug`, `modelId`, `destinationId`, `configuration`, `schedule`). Hightouch validates server-side.\n\n### `async run_sync(sync_id, full_resync=False) -> Dict`\n`POST /syncs/{id}/trigger` — body `{\"fullResync\": bool}`. Returns `{\"syncRunId\": <int>}` on accept.\n\n### `async list_sync_runs(sync_id, page=1, per_page=50) -> Dict`\n`GET /syncs/{id}/runs` — paginated run history.\n\n### `async get_sync_run(sync_id, run_id) -> Dict`\n`GET /syncs/{sid}/runs/{rid}`."
+        },
+        {
+          "id": "api-sequences-events",
+          "title": "Sequences + Events",
+          "content": "### `async list_sequences(page=1, per_page=50) -> Dict`\n`GET /sequences` — orchestrated multi-step sync sequences.\n\n### `async send_event(event: Dict) -> Dict`\n`POST /events` — forward a Customer Studio event envelope (`userId`, `anonymousId`, `event`, `properties`, `timestamp`). Useful when Shielva acts as the event collector for downstream Hightouch activation."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHightouchError                         # base; carries status_code + response_body\n├── HightouchAuthError                 # 401 / 403\n├── HightouchBadRequestError           # 400\n├── HightouchNotFoundError             # 404 — also carries resource_id\n├── HightouchConflictError             # 409 (duplicate slug)\n├── HightouchRateLimitError            # 429 — retry_after_s\n└── HightouchServerError               # 5xx (and transport-layer errors)\n```\n\nBack-compat aliases preserved:\n```\nHightouchNetworkError = HightouchServerError\nHightouchNotFound     = HightouchNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately — no retry |\n| 429 | Exponential backoff `RETRY_DELAY_S * BACKOFF_FACTOR ** attempt + jitter` (1s, 2s, 4s …) capped at `MAX_RETRY_DELAY_S=32s`, up to `DEFAULT_MAX_RETRIES=3` attempts |\n| 5xx | Same exponential backoff + jitter, up to 3 retries |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `HightouchServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)         # via HightouchAuthError\n429 → ConnectorStatus(DEGRADED,  CONNECTED)             # after exhausting retries\n5xx → ConnectorStatus(OFFLINE,   CONNECTED)             # via HightouchServerError\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank in install fields | Re-enter the token in ACP. Hightouch shows the value only once at creation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — token revoked in Hightouch dashboard or wrong workspace | Confirm the token still exists at **Hightouch → Settings → API Keys**; rotate and re-install if missing. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` despite token existing | 403 — token lacks required scopes | Edit the API key in Hightouch and grant Read+Write for the resource families the connector uses (Sources, Models, Destinations, Syncs, Sequences, Events). |\n| `hightouch.http.retry` warnings spike, then succeeds | Hitting 429 (per-token rate cap) | The client retries with exponential backoff + jitter. Lower `rate_limit_per_min` install field or shrink sync batch size. |\n| 404 on `get_source(123)` / `get_sync(33)` | Resource id from a different workspace than the api_token's workspace | API tokens are workspace-scoped. Confirm the resource id belongs to the same workspace the token was minted in. |\n| `HightouchAuthError: api_token is required for Hightouch API calls` raised on first method call | Connector instantiated with empty `api_token` AND `api_key` config | Ensure install fields populated. The HTTP layer fails-closed — it will not send an unauthenticated request. |\n| `create_sync(payload)` returns 400 with `\"slug already exists\"` | Duplicate slug in the workspace | Choose a unique slug or fetch the existing sync via `list_syncs(slug=…)` and `update`. |\n| `run_sync(33, full_resync=True)` accepted but no rows activated | Sync is disabled (`disabled: true`) in Hightouch | Re-enable the sync in the Hightouch dashboard before triggering. |\n| `ImportError: cannot import name 'HightouchNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `HightouchNetworkError = HightouchServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}

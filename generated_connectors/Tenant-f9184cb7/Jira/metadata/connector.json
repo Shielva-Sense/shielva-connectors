@@ -1,0 +1,218 @@
+{
+  "connector_type": "jira",
+  "display_name": "Jira",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "provider": "Atlassian",
+  "service": "Jira",
+  "description": "Sync Jira issues, projects, boards, sprints, and users into the Shielva knowledge base via the Atlassian REST API v3 and Agile API v1.",
+  "install_fields": [
+    {
+      "key": "email",
+      "label": "Atlassian Account Email",
+      "type": "string",
+      "required": true,
+      "placeholder": "you@yourcompany.com",
+      "help": "The email address of your Atlassian account used to generate the API token."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "your-atlassian-api-token",
+      "help": "Generate at id.atlassian.com/manage-profile/security/api-tokens. Used as the HTTP Basic Auth password."
+    },
+    {
+      "key": "domain",
+      "label": "Jira Domain (e.g. company.atlassian.net)",
+      "type": "string",
+      "required": true,
+      "placeholder": "yourcompany.atlassian.net",
+      "help": "Your full Jira Cloud domain, e.g. yourcompany.atlassian.net."
+    }
+  ],
+  "features": [
+    "basic_auth",
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "adf_text_extraction",
+    "sprints",
+    "users"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate email/api_token/domain by calling GET /myself. Returns HEALTHY + CONNECTED on success.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /myself and return HEALTHY, DEGRADED, or OFFLINE with displayName in message.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Issues & Projects",
+      "description": "Full sync of all Jira projects and issues with startAt pagination.",
+      "category": "sync"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return a list of project dicts from GET /rest/api/3/project/search.",
+      "category": "projects",
+      "endpoint": "GET /rest/api/3/project/search"
+    },
+    {
+      "id": "search_issues",
+      "name": "Search Issues",
+      "description": "Return a list of issue dicts from POST /rest/api/3/search with custom JQL.",
+      "category": "issues",
+      "endpoint": "POST /rest/api/3/search"
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Retrieve a single issue by key from GET /rest/api/3/issue/{issue_key}.",
+      "category": "issues",
+      "endpoint": "GET /rest/api/3/issue/{issue_key}"
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Return a list of board dicts from GET /rest/agile/1.0/board.",
+      "category": "boards",
+      "endpoint": "GET /rest/agile/1.0/board"
+    },
+    {
+      "id": "list_sprints",
+      "name": "List Sprints",
+      "description": "Return a list of sprint dicts for a board from GET /rest/agile/1.0/board/{board_id}/sprint.",
+      "category": "sprints",
+      "endpoint": "GET /rest/agile/1.0/board/{board_id}/sprint"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a list of user dicts from GET /rest/api/3/users/search.",
+      "category": "users",
+      "endpoint": "GET /rest/api/3/users/search"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "projects",
+    "issues",
+    "boards",
+    "sprints",
+    "users"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Jira issues and projects.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return a list of project dicts from GET /project/search.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "max_results",
+          "label": "Max Results",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "search_issues",
+      "name": "Search Issues",
+      "description": "Return a list of issue dicts from POST /search.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "jql",
+          "label": "Jql",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "max_results",
+          "label": "Max Results",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Return a single issue dict from GET /issue/{issue_key}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "issue_key",
+          "label": "Issue Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Return a list of board dicts from GET /rest/agile/1.0/board.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_key",
+          "label": "Project Key",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_sprints",
+      "name": "List Sprints",
+      "description": "Return a list of sprint dicts from GET /rest/agile/1.0/board/{id}/sprint.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "board_id",
+          "label": "Board Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a list of user dicts from GET /users/search.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "JiraConnector"
+}

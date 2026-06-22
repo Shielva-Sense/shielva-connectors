@@ -1,0 +1,182 @@
+{
+  "title": "Notion Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Notion connector** integrates with Notion workspaces via the Notion API v1. It enables Shielva to sync pages, databases, and rich block content in real-time.\n\nThis connector uses Internal Integration Token authentication (`secret_...`), granting access only to pages explicitly shared with the integration.\n\n**Key capabilities:**\n- Search all accessible pages and databases via `POST /search` with cursor-based pagination\n- Fetch individual pages with full metadata\n- Recursively fetch block content (paragraphs, headings, lists, code, callouts, etc.)\n- Retrieve database schemas and query database rows\n- Stable document IDs via SHA-256(page_id) for deduplication across syncs\n- Incremental sync via cursor pagination",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`notion` \u2014 registered in ACP as **Notion**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Notion Labs Inc. (Notion API v1 \u2014 `https://api.notion.com/v1/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates integration_token presence; returns HEALTHY/CONNECTED or OFFLINE/MISSING_CREDENTIALS |\n| `health_check()` | Calls `GET /users/me` to verify token; returns bot name in message |\n| `sync()` | Searches all pages + databases, fetches block content, normalizes to ConnectorDocuments |\n| `search(query, filter_type)` | Paginated `POST /search` returning pages and/or databases |\n| `get_page(page_id)` | `GET /pages/{page_id}` for a single page |\n| `get_page_content(page_id)` | `GET /blocks/{page_id}/children` recursive \u2014 full block tree |\n| `get_database(database_id)` | `GET /databases/{database_id}` for a database schema |\n| `query_database(database_id, filter)` | Paginated `POST /databases/{database_id}/query` |"
+        }
+      ]
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Notion connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import NotionConnector\n\nconfig = {\n    \"api_key\": \"<password>\"\n}\n\nconnector = NotionConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"notion_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_pages`\n\n```python\nresult = await connector.list_pages()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Notion data into Shielva.",
+      "children": []
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Internal Integration Token** authentication \u2014 a single `secret_...` token granted when you create a Notion integration.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` \u2014 create an integration at [notion.so/my-integrations](https://www.notion.so/my-integrations), then copy the Internal Integration Token."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Integration Token | `integration_token` | password | Yes | Notion Internal Integration Token (secret_...) |"
+        },
+        {
+          "id": "required-capabilities",
+          "title": "Required Integration Capabilities",
+          "content": "| Capability | Purpose |\n|------------|---------|\n| Read content | Access pages and databases shared with the integration |\n| Read user information | Optional \u2014 retrieve user metadata |"
+        },
+        {
+          "id": "page-sharing",
+          "title": "Page Sharing",
+          "content": "Notion integrations only access pages explicitly shared with them. For each page or database to sync:\n1. Open the page in Notion\n2. Click **\u00b7\u00b7\u00b7** \u2192 **Add connections**\n3. Select your integration\n\nTo sync an entire workspace, share the workspace root page."
+        },
+        {
+          "id": "token-security",
+          "title": "Token Security",
+          "content": "Integration tokens do not expire unless regenerated or the integration is deleted. Shielva stores the token AES-256-GCM encrypted at rest via the vault. Tokens can be regenerated at any time from the Notion integration settings."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `api_key` | Integration Token | `password` | \u2705 | Notion Internal Integration Token (secret_...). From Notion \u2192 Settings \u2192 Integrations \u2192 New integration. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `NotionHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nChecks that `integration_token` is present in config. Does not make network calls \u2014 token validity is confirmed at `health_check()`.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED)` when integration_token is present\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` when integration_token is absent or empty"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nCalls `GET https://api.notion.com/v1/users/me` to verify the token. Returns the bot name in the message.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected \u2014 bot: My Bot')`\n- `HealthCheckResult(health=DEGRADED, auth_status=INVALID_CREDENTIALS)` on 401/403 errors\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network errors"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nSearches all accessible pages and databases via `POST /search`, then for each page fetches block children for content enrichment. Normalizes all objects to ConnectorDocuments.\n\n**Parameters:**\n- `full` \u2014 reserved for future incremental sync support\n- `since` \u2014 reserved for future timestamp-filtered sync\n- `kb_id` \u2014 knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with counts of found/synced/failed documents.\n\nStatus is `COMPLETED` when no failures occur, `PARTIAL` when some objects fail normalization, `FAILED` when the search API call fails entirely."
+        },
+        {
+          "id": "search",
+          "title": "search()",
+          "content": "**Signature:** `async def search(self, query='', filter_type=None) -> list[dict]`\n\nPaginated `POST /search`. Follows `has_more` + `next_cursor` until exhausted.\n\n**Parameters:**\n- `query` \u2014 text search string (empty = all accessible objects)\n- `filter_type` \u2014 `'page'` or `'database'` to restrict result types, or `None` for both\n\n**Returns:** List of Notion page and database objects."
+        },
+        {
+          "id": "get-page",
+          "title": "get_page()",
+          "content": "**Signature:** `async def get_page(self, page_id: str) -> dict`\n\nFetches a single page via `GET /pages/{page_id}`.\n\n**Returns:** Notion page object with properties.\n\n**Raises:** `NotionNotFoundError` if the page does not exist or is not shared with the integration."
+        },
+        {
+          "id": "get-page-content",
+          "title": "get_page_content()",
+          "content": "**Signature:** `async def get_page_content(self, page_id: str) -> list[dict]`\n\nRecursively fetches all block children via `GET /blocks/{page_id}/children`. Follows `has_more` + `next_cursor` at each nesting level.\n\n**Returns:** Flat list of all block objects from the page tree, including nested children.\n\nBlocks with `has_children=True` are automatically traversed."
+        },
+        {
+          "id": "get-database",
+          "title": "get_database()",
+          "content": "**Signature:** `async def get_database(self, database_id: str) -> dict`\n\nFetches a database schema via `GET /databases/{database_id}`.\n\n**Returns:** Notion database object with property schema.\n\n**Raises:** `NotionNotFoundError` if the database does not exist or is not shared."
+        },
+        {
+          "id": "query-database",
+          "title": "query_database()",
+          "content": "**Signature:** `async def query_database(self, database_id: str, filter=None) -> list[dict]`\n\nPaginated `POST /databases/{database_id}/query`. Returns all rows (pages) matching the filter.\n\n**Parameters:**\n- `database_id` \u2014 Notion database ID\n- `filter` \u2014 optional Notion filter object (see [Notion Filter docs](https://developers.notion.com/reference/post-database-query-filter))\n\n**Returns:** List of page objects (database rows) matching the filter."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_page()` and `normalize_database()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "page-document",
+          "title": "Page ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(page_id)[:16]>\",\n  \"type\": \"notion_page\",\n  \"title\": \"My Test Page\",\n  \"content\": \"Title: My Test Page\\nURL: https://www.notion.so/my-test-page\\nCreated: 2024-01-01T00:00:00.000Z\\nLast edited: 2024-06-01T00:00:00.000Z\\nParent type: workspace\\n--- Content ---\\nSome paragraph text\",\n  \"metadata\": {\n    \"page_id\": \"page-1234-abcd-5678-efgh\",\n    \"url\": \"https://www.notion.so/my-test-page\",\n    \"created_time\": \"2024-01-01T00:00:00.000Z\",\n    \"last_edited_time\": \"2024-06-01T00:00:00.000Z\",\n    \"archived\": false,\n    \"parent_type\": \"workspace\",\n    \"object_type\": \"page\",\n    \"connector_id\": \"notion_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"notion\"\n  }\n}\n```"
+        },
+        {
+          "id": "database-document",
+          "title": "Database ConnectorDocument",
+          "content": "```json\n{\n  \"id\": \"<sha256(database_id)[:16]>\",\n  \"type\": \"notion_database\",\n  \"title\": \"My Test Database\",\n  \"content\": \"Database: My Test Database\\nURL: https://www.notion.so/my-test-db\\nCreated: 2024-01-01T00:00:00.000Z\\nProperties: Name, Status, Due\",\n  \"metadata\": {\n    \"database_id\": \"db-1234-abcd-5678-efgh\",\n    \"url\": \"https://www.notion.so/my-test-db\",\n    \"created_time\": \"2024-01-01T00:00:00.000Z\",\n    \"last_edited_time\": \"2024-06-01T00:00:00.000Z\",\n    \"archived\": false,\n    \"property_names\": [\"Name\", \"Status\", \"Due\"],\n    \"object_type\": \"database\",\n    \"connector_id\": \"notion_connector\",\n    \"tenant_id\": \"Tenant-f9184cb7\",\n    \"source\": \"notion\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `id` field is `SHA-256(notion_object_id)` truncated to 16 hex characters. This is stable across syncs \u2014 the same Notion page or database always produces the same Shielva document ID, enabling upsert deduplication without storing seen-id lists."
+        },
+        {
+          "id": "block-rendering",
+          "title": "Block Content Rendering",
+          "content": "Block content is flattened to plain text in `_block_to_text()`:\n\n| Block Type | Rendered As |\n|------------|-------------|\n| `paragraph` | Plain text |\n| `heading_1` | `# Heading` |\n| `heading_2` | `## Heading` |\n| `heading_3` | `### Heading` |\n| `bulleted_list_item` | `- item` |\n| `numbered_list_item` | `1. item` |\n| `to_do` | `[ ] task` or `[x] done` |\n| `quote` | `> quote` |\n| `callout` | `> callout` |\n| `code` | ` ```lang\\ncode\\n``` ` |\n| `divider` | `---` |\n| `equation` | LaTeX expression |"
+        }
+      ]
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Notion, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: _no optional feature flags set_.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `NotionError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nNotionError(Exception)\n  NotionAuthError(NotionError)\n  NotionNetworkError(NotionError)\n  NotionRateLimitError(NotionError)\n  NotionNotFoundError(NotionError)\n```\n\n### When each is raised\n\n- **`NotionError`** \u2014 Base exception for all Notion connector errors.\n- **`NotionAuthError`** \u2014 Raised on authentication failures \u2014 invalid token, unauthorized.\n- **`NotionNetworkError`** \u2014 Raised on connection / timeout failures.\n- **`NotionRateLimitError`** \u2014 Raised when Notion API returns 429 Too Many Requests.\n- **`NotionNotFoundError`** \u2014 Raised when a requested resource does not exist (404).\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd notion_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **153** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `NOTION_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "The most common failure modes for the Notion connector and how to resolve them.\n\n| Symptom | Probable cause | Resolution |\n|---------|----------------|------------|\n| `401 Unauthorized` on every call | API key revoked, OAuth token expired without a valid refresh token, or wrong account | Re-run the install flow with fresh credentials; check the provider audit log for forced revocation |\n| `403 Forbidden` on specific endpoints | Authenticated identity lacks the required scope or role | Grant the missing scope (see **Authentication**), then re-authorize |\n| `404 Not Found` for resources that should exist | Tenant / workspace ID mismatch \u2014 credentials belong to a different scope | Verify the workspace ID in `install_fields` matches the credential's scope |\n| `429 Too Many Requests` storm | Sync running concurrently with another integration that shares the rate-limit bucket | Stagger sync schedules; the connector already retries with backoff but cannot exceed the provider's per-account quota |\n| Sync returns `PARTIAL` status | One or more resource types failed (see `SyncResult.errors`) | Re-run sync; if the same resource fails repeatedly, inspect the error in the audit log and open an issue |\n| `CircuitBreakerOpen` raised | 5 consecutive failures tripped the breaker | Wait 30s \u2014 the breaker self-heals \u2014 or call `health_check()` to force a probe |\n| Connector loads but `health_check()` reports `unhealthy` | Credentials present but invalid | Inspect `health.error` for the upstream message; usually a typo'd key or revoked grant |\n| `MissingConfigError` at startup | Required `install_field` not supplied | Re-install via the UI and fill the highlighted field |\n\n### Diagnostic checklist\n\n1. `await connector.health_check()` \u2014 quickest probe; returns the upstream's verbatim error if the credentials are bad.\n2. Check the connector audit entries in shielva-sop \u2014 every API call is logged with `outcome` (`Success`/`Denied`/`Failure`) and a `correlation_id`.\n3. Reproduce the failing call in isolation with `curl` against the provider API using the same credentials \u2014 if curl also fails, the credentials are the problem, not the connector.\n4. Inspect `connector.metrics` if you have observability enabled \u2014 request counts, error rates, and p99 latency per method are exported.",
+      "children": []
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Notion account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Notion against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Notion propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `NotionConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Notion connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Notion connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
+    }
+  ]
+}

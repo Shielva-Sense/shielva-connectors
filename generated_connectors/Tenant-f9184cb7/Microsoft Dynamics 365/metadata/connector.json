@@ -1,0 +1,149 @@
+{
+  "connector_type": "dynamics365",
+  "display_name": "Microsoft Dynamics 365",
+  "provider": "microsoft",
+  "service": "dynamics365",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync Microsoft Dynamics 365 CRM contacts, accounts, leads, opportunities, and activities into the Shielva knowledge base via the Dataverse Web API.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Application (client) ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "help": "From Azure Portal \u2192 App registrations \u2192 your app \u2192 Overview \u2192 Application (client) ID"
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Client secret value",
+      "help": "From Azure Portal \u2192 App registrations \u2192 your app \u2192 Certificates & secrets \u2192 Client secrets"
+    },
+    {
+      "key": "tenant_id",
+      "label": "Azure AD Tenant ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "help": "From Azure Portal \u2192 Azure Active Directory \u2192 Overview \u2192 Tenant ID"
+    },
+    {
+      "key": "instance_url",
+      "label": "Dynamics 365 Instance URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://yourorg.crm.dynamics.com",
+      "help": "Your Dynamics 365 environment URL. Found in Power Platform Admin Center \u2192 Environments \u2192 your env \u2192 Environment URL."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-app.example.com/callback",
+      "help": "OAuth callback URL. Must match the redirect URI registered in your Azure AD app."
+    }
+  ],
+  "scopes": [
+    "offline_access"
+  ],
+  "oauth_auth_url_template": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize",
+  "oauth_token_url_template": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+  "api_base_template": "{instance_url}/api/data/v9.2/",
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "entities": [
+    "contacts",
+    "accounts",
+    "leads",
+    "opportunities",
+    "activities"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Get OAuth URL",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync CRM Records",
+      "category": "sync"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "category": "contacts"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "category": "accounts"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "category": "leads"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "category": "opportunities"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all CRM entities (contacts, accounts, leads, opportunities) from",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return raw contact records from the Dataverse API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return raw account records from the Dataverse API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Return raw lead records from the Dataverse API.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "Return raw opportunity records from the Dataverse API.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "Dynamics365Connector"
+}

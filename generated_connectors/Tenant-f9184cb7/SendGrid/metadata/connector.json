@@ -1,0 +1,138 @@
+{
+  "connector_type": "sendgrid",
+  "display_name": "SendGrid",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "API Key."
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync SendGrid marketing contacts and templates into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return list of contact dicts (first page).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Return single contact dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Return list of marketing list dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "Return list of segment dicts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "Return list of template dicts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "generations",
+          "label": "Generations",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "Return single template dict by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "template_id",
+          "label": "Template Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_stats",
+      "name": "Get Stats",
+      "description": "Return stats list. Defaults to last 30 days when dates not provided.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "start_date",
+          "label": "Start Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "end_date",
+          "label": "End Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_suppressions",
+      "name": "List Suppressions",
+      "description": "Return list of suppressed emails.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "group_id",
+          "label": "Group Id",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "SendGridConnector",
+  "provider": "sendgrid",
+  "service": "sendgrid",
+  "description": "Shielva connector for Sendgrid."
+}

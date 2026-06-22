@@ -1,0 +1,254 @@
+{
+  "connector_type": "plausible",
+  "name": "PlausibleConnector",
+  "display_name": "Plausible Analytics",
+  "version": "1.0.0",
+  "description": "Connects to the Plausible Analytics REST API to read aggregate / timeseries / breakdown stats, fetch realtime visitor counts, record pageviews and custom events, and manage sites and conversion goals.",
+  "provider": "plausible",
+  "service": "plausible",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Plausible API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Plausible Stats API key",
+      "help": "From Plausible → Settings → API Keys (Stats API access)"
+    },
+    {
+      "key": "base_url",
+      "label": "Plausible API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://plausible.io",
+      "placeholder": "https://plausible.io",
+      "help": "Plausible cloud or your self-hosted instance origin. The connector appends /api/v1 if not present."
+    },
+    {
+      "key": "default_site_id",
+      "label": "Default Site ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "example.com",
+      "help": "Default site domain — e.g. example.com"
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "600",
+      "placeholder": "600",
+      "help": "Maximum Plausible API requests per minute. Default is 600 (Plausible's standard quota)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the api_key and persists the connector config. Call before any other API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Plausible API connectivity by fetching realtime visitors for default_site_id.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Snapshot",
+      "description": "Records a 30-day aggregate + realtime visitor snapshot for default_site_id.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "aggregate",
+      "name": "Aggregate Stats",
+      "description": "Returns aggregate metrics (visitors, pageviews, bounce_rate, visit_duration) for a site over a period.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "period", "type": "string", "required": false },
+        { "key": "date", "type": "string", "required": false },
+        { "key": "metrics", "type": "array", "required": false },
+        { "key": "filters", "type": "string", "required": false },
+        { "key": "compare", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "timeseries",
+      "name": "Timeseries Stats",
+      "description": "Returns a time-bucketed series for the requested metrics and interval.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "period", "type": "string", "required": false },
+        { "key": "date", "type": "string", "required": false },
+        { "key": "metrics", "type": "array", "required": false },
+        { "key": "filters", "type": "string", "required": false },
+        { "key": "interval", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "breakdown",
+      "name": "Breakdown Stats",
+      "description": "Returns a paginated breakdown of a property (e.g. event:page, visit:country) with the requested metrics.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "period", "type": "string", "required": false },
+        { "key": "date", "type": "string", "required": false },
+        { "key": "property", "type": "string", "required": false },
+        { "key": "metrics", "type": "array", "required": false },
+        { "key": "filters", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "realtime_visitors",
+      "name": "Realtime Visitors",
+      "description": "Returns the live visitor count for a site.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "record_pageview",
+      "name": "Record Pageview",
+      "description": "Records a pageview event. Uses the public events endpoint — no API key required, identity is derived from user_agent.",
+      "method": "POST",
+      "params": [
+        { "key": "domain", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "user_agent", "type": "string", "required": false },
+        { "key": "screen_width", "type": "number", "required": false },
+        { "key": "referrer", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "record_custom_event",
+      "name": "Record Custom Event",
+      "description": "Records a named custom event with optional props.",
+      "method": "POST",
+      "params": [
+        { "key": "domain", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "user_agent", "type": "string", "required": false },
+        { "key": "props", "type": "object", "required": false },
+        { "key": "referrer", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sites",
+      "name": "List Sites",
+      "description": "Lists sites visible to the API key (Sites Provisioning API).",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_site",
+      "name": "Get Site",
+      "description": "Fetches a single site by ID (domain).",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_site",
+      "name": "Create Site",
+      "description": "Provisions a new tracked site.",
+      "method": "POST",
+      "params": [
+        { "key": "domain", "type": "string", "required": true },
+        { "key": "timezone", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_site",
+      "name": "Update Site",
+      "description": "Updates a site's writable fields (currently only timezone).",
+      "method": "PUT",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "timezone", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_site",
+      "name": "Delete Site",
+      "description": "Deletes a tracked site.",
+      "method": "DELETE",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_goals",
+      "name": "List Goals",
+      "description": "Lists conversion goals configured on a site.",
+      "method": "GET",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_goal",
+      "name": "Create Goal",
+      "description": "Creates either an event goal (event_name) or a page goal (page_path).",
+      "method": "POST",
+      "params": [
+        { "key": "site_id", "type": "string", "required": true },
+        { "key": "goal_type", "type": "string", "required": true },
+        { "key": "event_name", "type": "string", "required": false },
+        { "key": "page_path", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_event",
+      "name": "Send Event",
+      "description": "Spec-aligned alias for record_custom_event. Records a named event against a domain using the anonymous /events endpoint.",
+      "method": "POST",
+      "params": [
+        { "key": "domain", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "user_agent", "type": "string", "required": false },
+        { "key": "props", "type": "object", "required": false },
+        { "key": "referrer", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}

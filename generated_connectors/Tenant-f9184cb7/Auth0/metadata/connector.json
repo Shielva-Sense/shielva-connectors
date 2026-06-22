@@ -1,0 +1,124 @@
+{
+  "connector_type": "auth0",
+  "display_name": "Auth0",
+  "provider": "auth0",
+  "service": "auth0",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "domain",
+      "label": "Auth0 Domain (e.g. myapp.auth0.com)",
+      "type": "string",
+      "required": true,
+      "help": "Auth0 Domain (e.g. myapp.auth0.com)."
+    },
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "users",
+    "roles",
+    "clients",
+    "connections",
+    "logs"
+  ],
+  "description": "Sync Auth0 tenant users, roles, applications (clients), identity connections, and audit log events via the Auth0 Management API v2 using OAuth 2.0 Machine-to-Machine client credentials.",
+  "docs_url": "https://auth0.com/docs/api/management/v2",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync of Auth0 users, roles, clients, connections, and logs.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Fetch all users via page-based pagination (GET /api/v2/users).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /api/v2/users/{id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_roles",
+      "name": "List Roles",
+      "description": "Fetch all roles via page-based pagination (GET /api/v2/roles).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_clients",
+      "name": "List Clients",
+      "description": "Fetch all clients (applications) via page-based pagination (GET /api/v2/clients).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "app_type",
+          "label": "App Type",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_connections",
+      "name": "List Connections",
+      "description": "Fetch all connections via page-based pagination (GET /api/v2/connections).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_logs",
+      "name": "List Logs",
+      "description": "Fetch log events via page-based or cursor-based pagination (GET /api/v2/logs).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "from_",
+          "label": "From ",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "Auth0Connector"
+}

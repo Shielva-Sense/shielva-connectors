@@ -1,0 +1,246 @@
+{
+  "connector_type": "hightouch",
+  "name": "HightouchConnector",
+  "display_name": "Hightouch",
+  "version": "1.0.0",
+  "description": "Connects to the Hightouch Reverse-ETL / Composable CDP REST API (Workspaces, Sources, Models, Destinations, Syncs, Sync Runs, Sequences, Events) using a workspace API token. Supports inventory sync, on-demand pipeline triggers, and Customer Studio event ingest.",
+  "provider": "hightouch",
+  "service": "hightouch",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Hightouch API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Hightouch API token",
+      "help": "From Hightouch → Settings → API Keys (workspace-scoped) or Settings → Personal Access Tokens (user-scoped). Sent as `Authorization: Bearer <api_token>` on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Hightouch API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.hightouch.com/api/v1",
+      "placeholder": "https://api.hightouch.com/api/v1",
+      "help": "Override for Hightouch sandbox or a regional endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side cap. Hightouch enforces its own per-token cap server-side; the client retries 429s with exponential backoff regardless."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token is present and persists install config. Does NOT call the API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (API Key)",
+      "description": "API-key flow — no OAuth exchange. Returns a TokenInfo whose access_token is the configured api_token for ABI symmetry.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Hightouch API connectivity by probing GET /workspaces.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Inventory into KB",
+      "description": "Pages through /sources, /models, /destinations, /syncs and ingests each as a NormalizedDocument into the Shielva knowledge base.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "GET /workspaces — list workspaces accessible to the API token.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sources",
+      "name": "List Sources",
+      "description": "GET /sources — list configured warehouse / DB sources in the workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "slug", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_source",
+      "name": "Get Source",
+      "description": "GET /sources/{id} — fetch a single source by numeric id.",
+      "method": "GET",
+      "params": [
+        { "key": "source_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "GET /models — list SQL / audience model definitions in the workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "slug", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_model",
+      "name": "Get Model",
+      "description": "GET /models/{id} — fetch a single model.",
+      "method": "GET",
+      "params": [
+        { "key": "model_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_destinations",
+      "name": "List Destinations",
+      "description": "GET /destinations — list configured SaaS destinations.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "slug", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_destination",
+      "name": "Get Destination",
+      "description": "GET /destinations/{id} — fetch a single destination.",
+      "method": "GET",
+      "params": [
+        { "key": "destination_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_syncs",
+      "name": "List Syncs",
+      "description": "GET /syncs — list sync (model → destination) pipelines, optionally filtered by model or destination.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "slug", "type": "string", "required": false },
+        { "key": "model_id", "type": "number", "required": false },
+        { "key": "destination_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_sync",
+      "name": "Get Sync",
+      "description": "GET /syncs/{id} — fetch a single sync.",
+      "method": "GET",
+      "params": [
+        { "key": "sync_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_sync",
+      "name": "Create Sync",
+      "description": "POST /syncs — create a new sync from a raw payload (slug, modelId, destinationId, configuration, schedule).",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_sync",
+      "name": "Run Sync (Trigger)",
+      "description": "POST /syncs/{id}/trigger — kick off a sync run. `full_resync=true` forces a full re-sync of all rows.",
+      "method": "POST",
+      "params": [
+        { "key": "sync_id", "type": "number", "required": true },
+        { "key": "full_resync", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sync_runs",
+      "name": "List Sync Runs",
+      "description": "GET /syncs/{id}/runs — list historical run attempts for a sync.",
+      "method": "GET",
+      "params": [
+        { "key": "sync_id", "type": "number", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_sync_run",
+      "name": "Get Sync Run",
+      "description": "GET /syncs/{sid}/runs/{rid} — fetch a single sync run by id.",
+      "method": "GET",
+      "params": [
+        { "key": "sync_id", "type": "number", "required": true },
+        { "key": "run_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_sequences",
+      "name": "List Sequences",
+      "description": "GET /sequences — list orchestrated multi-step sync sequences.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_event",
+      "name": "Send Event",
+      "description": "POST /events — forward a single Customer Studio event envelope (userId, anonymousId, event, properties, timestamp).",
+      "method": "POST",
+      "params": [
+        { "key": "event", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

@@ -1,0 +1,246 @@
+{
+  "connector_type": "sugarcrm",
+  "name": "SugarCRMConnector",
+  "display_name": "SugarCRM",
+  "version": "1.0.0",
+  "description": "Connects to SugarCRM (REST API v11) to read, search, create, update, and delete Contacts, Accounts, Opportunities, Leads, and Meetings via OAuth2. Supports both the password grant (on-prem) and the authorization-code grant (SugarCloud).",
+  "provider": "sugarcrm",
+  "service": "sugarcrm",
+  "auth_type": "oauth2_password",
+  "install_fields": [
+    {
+      "key": "site_url",
+      "label": "SugarCRM Site URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://yourcompany.sugarondemand.com",
+      "help": "e.g. https://yourcompany.sugarondemand.com — the root URL of your SugarCRM deployment. The connector appends /rest/v11 automatically."
+    },
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "default": "sugar",
+      "placeholder": "sugar",
+      "help": "OAuth2 client ID. Defaults to 'sugar' (SugarCRM's built-in trusted client for the password grant)."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "secret",
+      "required": false,
+      "default": "",
+      "placeholder": "Leave blank for the default 'sugar' client",
+      "help": "OAuth2 client secret. Leave blank when using the default 'sugar' client; required for custom OAuth applications."
+    },
+    {
+      "key": "username",
+      "label": "SugarCRM Username",
+      "type": "string",
+      "required": false,
+      "placeholder": "your.username",
+      "help": "Required when grant_type=password. Use a SugarCRM service account with the minimum scopes you intend to expose."
+    },
+    {
+      "key": "password",
+      "label": "SugarCRM Password",
+      "type": "secret",
+      "required": false,
+      "placeholder": "********",
+      "help": "Required when grant_type=password. Stored encrypted by Shielva."
+    },
+    {
+      "key": "grant_type",
+      "label": "OAuth2 Grant Type",
+      "type": "string",
+      "required": false,
+      "default": "password",
+      "placeholder": "password",
+      "help": "'password' for on-prem deployments, 'authorization_code' for SugarCloud / SugarCRM OAuth applications."
+    },
+    {
+      "key": "platform",
+      "label": "Platform Identifier",
+      "type": "string",
+      "required": false,
+      "default": "api",
+      "placeholder": "api",
+      "help": "SugarCRM 'platform' string sent with every token request. Use 'api' for service-account integrations."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "OAuth2 Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-shielva-instance.example.com/oauth/callback",
+      "help": "Required only when grant_type=authorization_code. Must match the redirect URI registered on the SugarCRM OAuth client exactly."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum SugarCRM API requests per minute. Default 60 is conservative; raise to match your SugarCRM license tier."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates configuration and runs the OAuth2 token exchange. For grant_type=password the install completes the exchange immediately; for grant_type=authorization_code it only validates fields and waits for authorize().",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "InstallResult"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens. Used only when grant_type=authorization_code.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies SugarCRM API connectivity by calling GET /me with the current access token.",
+      "method": "GET",
+      "params": [],
+      "returns": "HealthCheckResult"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List contacts with offset/max_num pagination and an optional SugarCRM filter envelope.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "max_num", "type": "number", "required": false },
+        { "key": "filter", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Fetch a single contact by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "Create a new contact. Email is rendered as the SugarCRM email array (primary_address=true).",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone_work", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "Update arbitrary fields on an existing contact via PUT /Contacts/{id}.",
+      "method": "PUT",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "Delete a contact by ID.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "List customer accounts with offset/max_num pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "max_num", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List sales opportunities with offset/max_num pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "max_num", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_opportunity",
+      "name": "Create Opportunity",
+      "description": "Create a new opportunity. When date_closed is omitted it defaults to 30 days from today to satisfy the SugarCRM required-field constraint.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "account_id", "type": "string", "required": false },
+        { "key": "amount", "type": "number", "required": false },
+        { "key": "sales_stage", "type": "string", "required": false },
+        { "key": "date_closed", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List leads with offset/max_num pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "max_num", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "convert_lead",
+      "name": "Convert Lead",
+      "description": "Convert a lead into Contact/Account/Opportunity records. 'modules' follows the SugarCRM convert payload shape (Contacts/Accounts/Opportunities keys with per-module field dicts).",
+      "method": "POST",
+      "params": [
+        { "key": "lead_id", "type": "string", "required": true },
+        { "key": "modules", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "List calendar meetings with offset/max_num pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "max_num", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

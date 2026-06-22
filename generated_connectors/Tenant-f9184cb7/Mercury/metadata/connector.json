@@ -1,0 +1,172 @@
+{
+  "connector_type": "mercury",
+  "name": "MercuryConnector",
+  "display_name": "Mercury",
+  "version": "1.0.0",
+  "description": "Connects to the Mercury Business Banking REST API (Accounts, Transactions, Recipients, Treasury Statements, ACH/wire/check payments) using a static API token.",
+  "provider": "mercury",
+  "service": "mercury",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Mercury API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "secret-token-XXXXXXXXXXXX",
+      "help": "From Mercury Dashboard → Settings → API Tokens. Use a read-write token if you need to initiate ACH/wire transfers via send_payment(); read-only tokens still support every list/get method. Sent as `Authorization: Bearer <api_token>`."
+    },
+    {
+      "key": "default_account_id",
+      "label": "Default Account ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "acc_xxxxxxxxxxxxxxxx",
+      "help": "Optional. When set, sync() and money-movement helpers default to this account when none is supplied per call."
+    },
+    {
+      "key": "base_url",
+      "label": "Mercury API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.mercury.com/api/v1",
+      "placeholder": "https://api.mercury.com/api/v1",
+      "help": "Override only if Mercury issues a sandbox or regional endpoint. Defaults to production."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft rate-limit ceiling. Mercury rate limits are not strictly published — stay conservative."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token and (best-effort) probes /accounts. Returns ConnectorStatus.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies the Mercury API is reachable with the configured token by listing accounts.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "GET /accounts — every Mercury account on the organization.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_account",
+      "name": "Get Account",
+      "description": "GET /account/{id} — one account's full record (balances, routing, status).",
+      "method": "GET",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_account_transactions",
+      "name": "List Account Transactions",
+      "description": "GET /account/{id}/transactions — paginated, filterable ledger.",
+      "method": "GET",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "end", "type": "string", "required": false },
+        { "key": "order", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_transaction",
+      "name": "Get Transaction",
+      "description": "GET /account/{aid}/transaction/{tid} — fetch one transaction.",
+      "method": "GET",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true },
+        { "key": "transaction_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_recipients",
+      "name": "List Recipients",
+      "description": "GET /recipients — list every payment recipient.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_recipient",
+      "name": "Get Recipient",
+      "description": "GET /recipient/{id} — fetch one recipient.",
+      "method": "GET",
+      "params": [
+        { "key": "recipient_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_recipient",
+      "name": "Create Recipient",
+      "description": "POST /recipient — create a new payment recipient (ACH/wire/check destination).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "emails", "type": "array", "required": false },
+        { "key": "default_payment_method", "type": "string", "required": false },
+        { "key": "payment_methods", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_payment",
+      "name": "Send Payment",
+      "description": "POST /account/{id}/transactions — initiate an ACH/wire/check send. Requires a stable Idempotency-Key per logical attempt.",
+      "method": "POST",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true },
+        { "key": "recipient_id", "type": "string", "required": true },
+        { "key": "amount", "type": "number", "required": true },
+        { "key": "payment_method", "type": "string", "required": true },
+        { "key": "idempotency_key", "type": "string", "required": true },
+        { "key": "note", "type": "string", "required": false },
+        { "key": "external_memo", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_statements",
+      "name": "List Statements",
+      "description": "GET /account/{id}/statements?start=&end= — fetch treasury statement records for a date range.",
+      "method": "GET",
+      "params": [
+        { "key": "account_id", "type": "string", "required": true },
+        { "key": "start", "type": "string", "required": true },
+        { "key": "end", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "connector_type": "grafana",
+  "name": "GrafanaConnector",
+  "display_name": "Grafana",
+  "version": "1.0.0",
+  "description": "Connects to a Grafana instance via Service Account token. Supports dashboards, folders, datasources, queries, alert rules, users, and teams.",
+  "provider": "grafana",
+  "service": "grafana",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "instance_url",
+      "label": "Grafana Instance URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://myorg.grafana.net",
+      "help": "Your Grafana URL — e.g. https://myorg.grafana.net or http://localhost:3000"
+    },
+    {
+      "key": "service_account_token",
+      "label": "Service Account Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "glsa_********************************",
+      "help": "Create at Administration → Service Accounts → Add Service Account → Token"
+    },
+    {
+      "key": "org_id",
+      "label": "Org ID",
+      "type": "number",
+      "required": false,
+      "placeholder": "1",
+      "help": "Org ID — defaults to 1 if unspecified"
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "300",
+      "placeholder": "300",
+      "help": "Maximum Grafana API requests per minute. Default is 300."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates instance_url and service_account_token and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Grafana API reachability by calling /api/health.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_org",
+      "name": "Get Organization",
+      "description": "Returns the current organization for the auth token (GET /api/org).",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "Lists dashboards via GET /api/search?type=dash-db. Supports query, tag, and folder filters.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "tag", "type": "array", "required": false },
+        { "key": "folder_uids", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_dashboard",
+      "name": "Get Dashboard",
+      "description": "Fetches a dashboard by UID (GET /api/dashboards/uid/{uid}).",
+      "method": "GET",
+      "params": [
+        { "key": "uid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_dashboard",
+      "name": "Create Dashboard",
+      "description": "Creates or updates a dashboard (POST /api/dashboards/db).",
+      "method": "POST",
+      "params": [
+        { "key": "dashboard", "type": "object", "required": true },
+        { "key": "folder_uid", "type": "string", "required": false },
+        { "key": "overwrite", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_dashboard",
+      "name": "Delete Dashboard",
+      "description": "Deletes a dashboard by UID (DELETE /api/dashboards/uid/{uid}).",
+      "method": "DELETE",
+      "params": [
+        { "key": "uid", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_folders",
+      "name": "List Folders",
+      "description": "Lists folders (GET /api/folders).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_folder",
+      "name": "Create Folder",
+      "description": "Creates a folder (POST /api/folders).",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "uid", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_datasources",
+      "name": "List Datasources",
+      "description": "Lists configured datasources (GET /api/datasources).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_datasource",
+      "name": "Create Datasource",
+      "description": "Registers a new datasource (POST /api/datasources).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": true },
+        { "key": "url", "type": "string", "required": true },
+        { "key": "access", "type": "string", "required": false },
+        { "key": "is_default", "type": "boolean", "required": false },
+        { "key": "basic_auth", "type": "boolean", "required": false },
+        { "key": "json_data", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "query_datasource",
+      "name": "Query Datasource",
+      "description": "Executes datasource queries (POST /api/ds/query).",
+      "method": "POST",
+      "params": [
+        { "key": "datasource_id", "type": "number", "required": true },
+        { "key": "queries", "type": "array", "required": true },
+        { "key": "from_time", "type": "number", "required": false },
+        { "key": "to_time", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_alert_rules",
+      "name": "List Alert Rules",
+      "description": "Lists provisioned alert rules (GET /api/v1/provisioning/alert-rules).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Lists users (GET /api/users).",
+      "method": "GET",
+      "params": [
+        { "key": "perpage", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "Searches teams (GET /api/teams/search).",
+      "method": "GET",
+      "params": [
+        { "key": "perpage", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

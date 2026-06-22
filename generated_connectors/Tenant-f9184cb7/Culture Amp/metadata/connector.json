@@ -1,0 +1,147 @@
+{
+  "connector_type": "culture_amp",
+  "name": "Culture Amp",
+  "display_name": "Culture Amp",
+  "description": "Connect to Culture Amp to sync engagement surveys, employees, and performance goals into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Culture Amp API token used as Bearer token for all API requests.",
+      "help": "API Token."
+    }
+  ],
+  "capabilities": [
+    "list_surveys",
+    "get_survey",
+    "list_employees",
+    "list_goals",
+    "list_reviews",
+    "list_groups",
+    "sync"
+  ],
+  "provider": "Culture Amp",
+  "service": "Culture Amp",
+  "category": "hr",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync surveys, employees, and goals from Culture Amp.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_surveys",
+      "name": "List Surveys",
+      "description": "Return surveys from Culture Amp.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "Return employees from Culture Amp.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_goals",
+      "name": "List Goals",
+      "description": "Return performance goals from Culture Amp.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_reviews",
+      "name": "List Reviews",
+      "description": "Return performance reviews from Culture Amp.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "Return groups (departments/teams) from Culture Amp.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_survey",
+      "name": "Get Survey",
+      "description": "Return a single survey by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "survey_id",
+          "label": "Survey Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

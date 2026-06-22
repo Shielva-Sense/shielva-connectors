@@ -1,0 +1,190 @@
+{
+  "connector_type": "webex",
+  "connector_id": "webex",
+  "name": "Webex",
+  "provider": "Cisco",
+  "service": "Webex",
+  "version": "1.0.0",
+  "description": "Sync Cisco Webex rooms, meetings, messages, and people into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Webex OAuth App Client ID",
+      "help": "From developer.webex.com \u2192 Your App \u2192 Credentials \u2192 Client ID"
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Webex OAuth App Client Secret",
+      "help": "From developer.webex.com \u2192 Your App \u2192 Credentials \u2192 Client Secret"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-domain.com/oauth/callback",
+      "help": "Optional. The OAuth redirect URI registered in your Webex App."
+    }
+  ],
+  "oauth_scopes": [
+    "spark:all",
+    "spark:messages_read",
+    "spark:rooms_read",
+    "spark:memberships_read",
+    "meeting:schedules_read"
+  ],
+  "oauth_auth_url": "https://webexapis.com/v1/authorize",
+  "oauth_token_url": "https://webexapis.com/v1/access_token",
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "oauth2"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate client_id and client_secret. If an access_token is already configured, probe GET /people/me.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return the Webex OAuth2 authorization URL with required scopes.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /people/me and return HEALTHY, DEGRADED, or OFFLINE. Updates the circuit breaker.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Webex rooms and meetings into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_rooms",
+      "name": "List Rooms",
+      "description": "Paginated list of Webex spaces/rooms.",
+      "category": "rooms",
+      "endpoint": "GET /rooms"
+    },
+    {
+      "id": "get_room",
+      "name": "Get Room",
+      "description": "Retrieve a single room by ID.",
+      "category": "rooms",
+      "endpoint": "GET /rooms/{room_id}"
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "List messages in a room.",
+      "category": "messages",
+      "endpoint": "GET /messages"
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Paginated list of Webex meetings.",
+      "category": "meetings",
+      "endpoint": "GET /meetings"
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "Paginated list of people in the organization.",
+      "category": "people",
+      "endpoint": "GET /people"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "rooms",
+    "messages",
+    "meetings",
+    "people"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Return the Webex OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /people/me and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Webex rooms and meetings into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Rooms",
+      "id": "list_rooms",
+      "category": "rooms",
+      "description": "Calls list_rooms() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Room",
+      "id": "get_room",
+      "category": "rooms",
+      "description": "Calls get_room() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Messages",
+      "id": "list_messages",
+      "category": "messages",
+      "description": "Calls list_messages() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Meetings",
+      "id": "list_meetings",
+      "category": "meetings",
+      "description": "Calls list_meetings() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List People",
+      "id": "list_people",
+      "category": "people",
+      "description": "Calls list_people() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Webex"
+}

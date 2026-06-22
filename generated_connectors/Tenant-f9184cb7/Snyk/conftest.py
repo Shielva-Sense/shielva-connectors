@@ -1,0 +1,10 @@
+"""Repo-root conftest — ensures the connector package is importable in tests."""
+import os
+import sys
+
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+_CORE = "/Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/core"
+if os.path.isdir(_CORE) and _CORE not in sys.path:
+    sys.path.insert(0, _CORE)

@@ -1,0 +1,330 @@
+{
+  "connector_type": "entra_id_connector",
+  "name": "EntraIdConnector",
+  "display_name": "Microsoft Entra ID",
+  "version": "1.0.0",
+  "description": "Connects to Microsoft Entra ID (formerly Azure AD) via the Microsoft Graph v1.0 API for identity and access management: users, groups, applications, service principals, directory roles, role assignments, sign-in logs, audit logs, devices, conditional access policies, and domains. Uses the OAuth2 client-credentials grant against the tenant-scoped Microsoft identity-platform token endpoint.",
+  "provider": "microsoft",
+  "service": "entra_id",
+  "auth_type": "oauth2_client_credentials",
+  "connector_name": "Microsoft Entra ID",
+  "install_fields": [
+    {
+      "key": "azure_tenant_id",
+      "label": "Azure Tenant ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "Your Microsoft Entra tenant ID (GUID) — Azure Portal → Microsoft Entra ID → Overview. Distinct from the Shielva tenant_id. Use 'common' or 'organizations' for multi-tenant apps."
+    },
+    {
+      "key": "client_id",
+      "label": "Application (Client) ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "help": "From Azure Portal → App registrations → your app → Application (client) ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Microsoft Entra ID client secret value",
+      "help": "From App registrations → Certificates & secrets → Client secrets. Copy the VALUE (not the ID) at creation — it cannot be retrieved later."
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scope",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/.default",
+      "placeholder": "https://graph.microsoft.com/.default",
+      "help": "Microsoft Graph scope. Use the default (.default) for client-credentials apps so consented application permissions are honored."
+    },
+    {
+      "key": "base_url",
+      "label": "Microsoft Graph Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://graph.microsoft.com/v1.0",
+      "placeholder": "https://graph.microsoft.com/v1.0",
+      "help": "Microsoft Graph API base URL. Override only when targeting sovereign clouds (US Gov, China, Germany)."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "240",
+      "placeholder": "240",
+      "help": "Maximum Microsoft Graph requests per minute. Graph throttles per-app and per-tenant; 240 is a safe default for most workloads."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates required config (azure_tenant_id, client_id, client_secret) and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (Client Credentials)",
+      "description": "Mints a Microsoft Graph access token via the OAuth2 client-credentials grant against the tenant-scoped token endpoint.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Microsoft Graph connectivity by listing 1 user.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Users",
+      "description": "Pages /users (with @odata.nextLink) and ingests each as a NormalizedDocument.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users with optional $filter, $search, $orderby, $select, $top.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "search", "type": "string", "required": false },
+        { "key": "orderby", "type": "string", "required": false },
+        { "key": "select", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{id|userPrincipalName}.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id_or_upn", "type": "string", "required": true },
+        { "key": "select", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_user",
+      "name": "Create User",
+      "description": "POST /users — create a new directory user with passwordProfile.",
+      "method": "POST",
+      "params": [
+        { "key": "account_enabled", "type": "boolean", "required": true },
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "mail_nickname", "type": "string", "required": true },
+        { "key": "password", "type": "string", "required": true },
+        { "key": "user_principal_name", "type": "string", "required": true },
+        { "key": "force_change_password_next_signin", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_user",
+      "name": "Update User",
+      "description": "PATCH /users/{id} with arbitrary fields.",
+      "method": "PATCH",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete User",
+      "description": "DELETE /users/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "GET /groups.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false },
+        { "key": "select", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_group",
+      "name": "Get Group",
+      "description": "GET /groups/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_group",
+      "name": "Create Group",
+      "description": "POST /groups.",
+      "method": "POST",
+      "params": [
+        { "key": "display_name", "type": "string", "required": true },
+        { "key": "mail_nickname", "type": "string", "required": true },
+        { "key": "mail_enabled", "type": "boolean", "required": false },
+        { "key": "security_enabled", "type": "boolean", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "group_types", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_group_members",
+      "name": "List Group Members",
+      "description": "GET /groups/{id}/members.",
+      "method": "GET",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "top", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_group_member",
+      "name": "Add Group Member",
+      "description": "POST /groups/{id}/members/$ref with @odata.id payload.",
+      "method": "POST",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "remove_group_member",
+      "name": "Remove Group Member",
+      "description": "DELETE /groups/{gid}/members/{uid}/$ref.",
+      "method": "DELETE",
+      "params": [
+        { "key": "group_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applications",
+      "name": "List Applications",
+      "description": "GET /applications — list app registrations in the tenant.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_service_principals",
+      "name": "List Service Principals",
+      "description": "GET /servicePrincipals.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_directory_roles",
+      "name": "List Directory Roles",
+      "description": "GET /directoryRoles — activated directory roles.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_role_assignments",
+      "name": "List Role Assignments",
+      "description": "GET /roleManagement/directory/roleAssignments.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_signin_logs",
+      "name": "List Sign-In Logs",
+      "description": "GET /auditLogs/signIns.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_audit_logs",
+      "name": "List Directory Audit Logs",
+      "description": "GET /auditLogs/directoryAudits.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_devices",
+      "name": "List Devices",
+      "description": "GET /devices — registered devices.",
+      "method": "GET",
+      "params": [
+        { "key": "top", "type": "number", "required": false },
+        { "key": "filter", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_conditional_access_policies",
+      "name": "List Conditional Access Policies",
+      "description": "GET /identity/conditionalAccess/policies.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_domains",
+      "name": "List Domains",
+      "description": "GET /domains — verified tenant domains.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0"
+  ]
+}

@@ -1,0 +1,237 @@
+{
+  "connector_type": "quickbooks",
+  "connector_id": "quickbooks",
+  "name": "QuickBooks Online",
+  "provider": "intuit",
+  "service": "quickbooks",
+  "version": "1.0.0",
+  "description": "Connects to QuickBooks Online (QBO) via the Intuit v3 REST API to sync invoices, customers, and accounts into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "auth_config": {
+    "auth_url": "https://appcenter.intuit.com/connect/oauth2",
+    "token_url": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+    "scopes": "com.intuit.quickbooks.accounting"
+  },
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "ABcdefGHijklMNopQRstUV1234567890wxyz",
+      "help": "Your Intuit app Client ID. Find it in the Intuit Developer Portal under your app's Keys & OAuth section."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      "help": "Your Intuit app Client Secret. This is stored encrypted and never shown again after saving."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://yourapp.example.com/oauth/callback",
+      "help": "The OAuth2 redirect URI registered in your Intuit app. Leave blank to use the Intuit OAuth2 Playground default."
+    }
+  ],
+  "features": [
+    "oauth2",
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "token_refresh"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate Credentials",
+      "description": "Validates that client_id and client_secret are present. If an access token is already available, verifies it against the QBO company info endpoint.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Get Authorization URL",
+      "description": "Returns the Intuit OAuth2 consent URL. Redirect the user to this URL to initiate the OAuth2 flow.",
+      "category": "auth"
+    },
+    {
+      "id": "exchange_code",
+      "name": "Exchange Authorization Code",
+      "description": "Exchanges the OAuth2 authorization code (and realm_id) received from Intuit's callback for access and refresh tokens.",
+      "category": "auth",
+      "params": [
+        {
+          "name": "code",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "realm_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "refresh_access_token",
+      "name": "Refresh Access Token",
+      "description": "Uses the stored refresh token to obtain a new access token from Intuit.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies connectivity by calling GET /companyinfo/{realm_id} and returns HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health",
+      "endpoint": "GET /v3/company/{realm_id}/companyinfo/{realm_id}"
+    },
+    {
+      "id": "sync",
+      "name": "Full Sync",
+      "description": "Fetches invoices, customers, and accounts from QBO and normalizes them into ConnectorDocuments.",
+      "category": "sync"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Runs SELECT * FROM Customer MAXRESULTS {max_results} against the QBO query API.",
+      "category": "customers",
+      "endpoint": "GET /v3/company/{realm_id}/query?query=SELECT * FROM Customer"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Retrieve a single QBO customer by ID.",
+      "category": "customers",
+      "endpoint": "GET /v3/company/{realm_id}/customer/{id}",
+      "params": [
+        {
+          "name": "customer_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Runs SELECT * FROM Invoice MAXRESULTS {max_results} against the QBO query API.",
+      "category": "invoices",
+      "endpoint": "GET /v3/company/{realm_id}/query?query=SELECT * FROM Invoice"
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "Retrieve a single QBO invoice by ID.",
+      "category": "invoices",
+      "endpoint": "GET /v3/company/{realm_id}/invoice/{id}",
+      "params": [
+        {
+          "name": "invoice_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Runs SELECT * FROM Account MAXRESULTS {max_results} against the QBO query API.",
+      "category": "accounts",
+      "endpoint": "GET /v3/company/{realm_id}/query?query=SELECT * FROM Account"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "customers",
+    "invoices",
+    "accounts"
+  ],
+  "apis": [
+    {
+      "name": "Install / Validate Credentials",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Authorization URL",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Build and return the Intuit OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Exchange Authorization Code",
+      "id": "exchange_code",
+      "category": "auth",
+      "description": "Exchange an authorization code for access + refresh tokens.",
+      "method": "GET"
+    },
+    {
+      "name": "Refresh Access Token",
+      "id": "refresh_access_token",
+      "category": "auth",
+      "description": "Use the stored refresh token to obtain a new access token.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Verify connectivity by calling GET /companyinfo/{realm_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "Full Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync QBO invoices, customers, and accounts into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "SELECT * FROM Customer MAXRESULTS {max_results}.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "GET /customer/{customer_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Invoices",
+      "id": "list_invoices",
+      "category": "invoices",
+      "description": "SELECT * FROM Invoice MAXRESULTS {max_results}.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Invoice",
+      "id": "get_invoice",
+      "category": "invoices",
+      "description": "GET /invoice/{invoice_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "SELECT * FROM Account MAXRESULTS {max_results}.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Quickbooks"
+}

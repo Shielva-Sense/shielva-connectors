@@ -1,0 +1,154 @@
+{
+  "connector_type": "vonage",
+  "name": "VonageConnector",
+  "display_name": "Vonage",
+  "version": "1.0.0",
+  "description": "Vonage (formerly Nexmo) CPaaS connector covering SMS, Voice (programmable calls + recordings), Verify v2 (2FA), Numbers, and Applications surfaces. Dual-mode auth: HTTP Basic (api_key + api_secret) for SMS/Verify/Numbers/Account, RS256 JWT (application_id + private_key) for Voice.",
+  "provider": "vonage",
+  "service": "vonage",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "your_vonage_api_key",
+      "help": "Vonage API key — Dashboard → Getting Started → API key."
+    },
+    {
+      "key": "api_secret",
+      "label": "API Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Vonage API secret",
+      "help": "Vonage API secret — Dashboard → Getting Started → API secret. Stored encrypted, never returned."
+    },
+    {
+      "key": "application_id",
+      "label": "Application ID (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "11111111-2222-3333-4444-555555555555",
+      "help": "Vonage Application UUID — required only for Voice / Messages / Conversations endpoints. Create one in Dashboard → Applications."
+    },
+    {
+      "key": "private_key",
+      "label": "Private Key (PEM, optional)",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "-----BEGIN PRIVATE KEY-----\\n…\\n-----END PRIVATE KEY-----\\n",
+      "help": "RSA private key (PEM) downloaded when the Vonage Application was created. Used to sign RS256 JWTs for Voice / Messages. Stored encrypted, never returned."
+    },
+    {
+      "key": "webhook_secret",
+      "label": "Webhook Signing Secret",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Optional — HS256 secret",
+      "help": "Vonage webhook signing secret — used to verify HS256 JWTs on inbound callbacks (Dashboard → Settings → Signed webhooks)."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request timeout in seconds."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Soft client-side advisory only — Vonage enforces server-side. Default 30 (Standard account)."
+    }
+  ],
+  "apis": [
+    { "id": "install",              "name": "Install",                  "description": "Validate required config keys and initialise the HTTP client. No API call.",                                       "method": "install",        "params": [], "returns": "ConnectorStatus" },
+    { "id": "health_check",         "name": "Health Check",             "description": "Probe /account/get-balance to verify api_key + api_secret.",                                                        "method": "health_check",   "params": [], "returns": "ConnectorStatus" },
+    { "id": "sync",                 "name": "Sync",                     "description": "Aggregate recent SMS + voice calls into NormalizedDocument batches.",                                              "method": "sync",           "params": [
+      { "key": "since", "type": "string", "required": false },
+      { "key": "full",  "type": "boolean", "required": false },
+      { "key": "kb_id", "type": "string", "required": false },
+      { "key": "webhook_url", "type": "string", "required": false }
+    ], "returns": "SyncResult" },
+    { "id": "get_balance",          "name": "Get Account Balance",      "description": "GET /account/get-balance — returns {value, autoReload}.",                                                            "method": "GET",            "params": [], "returns": "object" },
+    { "id": "send_sms",             "name": "Send SMS",                 "description": "POST /sms/json — send an SMS. Payload includes from, to, text, type?. Envelope-checked.",                          "method": "POST",           "params": [{ "key": "payload", "type": "object", "required": true }], "returns": "object" },
+    { "id": "get_sms_status",       "name": "Get SMS Status",           "description": "GET /search/message — look up the state of a previously-sent SMS.",                                                "method": "GET",            "params": [{ "key": "message_id", "type": "string", "required": true }], "returns": "object" },
+    { "id": "list_messages",        "name": "List Messages",            "description": "GET /search/messages — paginated list of recent SMS for this account.",                                            "method": "GET",            "params": [
+      { "key": "date", "type": "string", "required": false },
+      { "key": "to", "type": "string", "required": false },
+      { "key": "page_index", "type": "number", "required": false },
+      { "key": "page_size", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "create_call",          "name": "Create Call",              "description": "POST /v1/calls — place an outbound voice call. Payload must include to + (ncco | answer_url). JWT auth.",          "method": "POST",           "params": [{ "key": "payload", "type": "object", "required": true }], "returns": "object" },
+    { "id": "get_call",             "name": "Get Call",                 "description": "GET /v1/calls/{uuid} — fetch a single call's state. JWT auth.",                                                    "method": "GET",            "params": [{ "key": "call_uuid", "type": "string", "required": true }], "returns": "object" },
+    { "id": "update_call",          "name": "Update Call",              "description": "PUT /v1/calls/{uuid} — change call state (hangup, mute, etc.). JWT auth.",                                          "method": "PUT",            "params": [
+      { "key": "call_uuid", "type": "string", "required": true },
+      { "key": "payload", "type": "object", "required": true }
+    ], "returns": "object" },
+    { "id": "list_calls",           "name": "List Calls",               "description": "GET /v1/calls — paginated list of voice calls. JWT auth.",                                                          "method": "GET",            "params": [
+      { "key": "status", "type": "string", "required": false },
+      { "key": "date_start", "type": "string", "required": false },
+      { "key": "date_end", "type": "string", "required": false },
+      { "key": "page_size", "type": "number", "required": false },
+      { "key": "record_index", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "get_call_recording",   "name": "Download Call Recording",  "description": "GET <recording_url> — download a recording's audio bytes. JWT auth.",                                                "method": "GET",            "params": [{ "key": "recording_url", "type": "string", "required": true }], "returns": "bytes" },
+    { "id": "send_verify_request",  "name": "Send Verify Request",      "description": "POST /v2/verify — start a phone-number verification (sms/voice/email/whatsapp workflow).",                          "method": "POST",           "params": [{ "key": "payload", "type": "object", "required": true }], "returns": "object" },
+    { "id": "check_verify_code",    "name": "Check Verify Code",        "description": "POST /v2/verify/{request_id} — submit the OTP the user entered.",                                                   "method": "POST",           "params": [
+      { "key": "request_id", "type": "string", "required": true },
+      { "key": "code", "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "cancel_verify",        "name": "Cancel Verify",            "description": "DELETE /v2/verify/{request_id} — abort an in-flight verification.",                                                 "method": "DELETE",         "params": [{ "key": "request_id", "type": "string", "required": true }], "returns": "object" },
+    { "id": "list_numbers",         "name": "List Owned Numbers",       "description": "GET /account/numbers — phone numbers currently owned by this account.",                                            "method": "GET",            "params": [
+      { "key": "country", "type": "string", "required": false },
+      { "key": "pattern", "type": "string", "required": false },
+      { "key": "search_pattern", "type": "number", "required": false },
+      { "key": "features", "type": "string", "required": false },
+      { "key": "size", "type": "number", "required": false },
+      { "key": "index", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "search_numbers",       "name": "Search Available Numbers", "description": "GET /number/search — find numbers available to purchase.",                                                          "method": "GET",            "params": [
+      { "key": "country", "type": "string", "required": true },
+      { "key": "pattern", "type": "string", "required": false },
+      { "key": "type_", "type": "string", "required": false },
+      { "key": "features", "type": "string", "required": false },
+      { "key": "size", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "buy_number",           "name": "Buy Number",               "description": "POST /number/buy — provision a number into this account.",                                                          "method": "POST",           "params": [
+      { "key": "country", "type": "string", "required": true },
+      { "key": "msisdn", "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "cancel_number",        "name": "Cancel Number",            "description": "POST /number/cancel — release a number from this account.",                                                         "method": "POST",           "params": [
+      { "key": "country", "type": "string", "required": true },
+      { "key": "msisdn", "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "list_applications",    "name": "List Applications",        "description": "GET /v2/applications — list Vonage applications for this account.",                                                "method": "GET",            "params": [
+      { "key": "page_size", "type": "number", "required": false },
+      { "key": "page", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "handle_webhook",       "name": "Handle Webhook",           "description": "Verify Vonage signature (if configured) then route by event_type.",                                                 "method": "handle_webhook", "params": [
+      { "key": "payload", "type": "object", "required": true },
+      { "key": "headers", "type": "object", "required": false }
+    ], "returns": "object" },
+    { "id": "process_callback",     "name": "Process Callback",         "description": "Verify a Vonage callback's HS256 JWT Authorization header (falls back to HMAC-SHA256 of X-Vonage-Signature).",      "method": "process_callback","params": [
+      { "key": "payload", "type": "object", "required": true },
+      { "key": "headers", "type": "object", "required": false }
+    ], "returns": "object" },
+    { "id": "handle_event",         "name": "Handle Event",             "description": "Idempotency-keyed event acknowledgement.",                                                                          "method": "handle_event",   "params": [{ "key": "event", "type": "object", "required": true }], "returns": "object" },
+    { "id": "batch_processor",      "name": "Batch Processor",          "description": "Iterate events through handle_event with per-item error capture.",                                                  "method": "batch_processor","params": [{ "key": "items", "type": "array",  "required": true }], "returns": "object" }
+  ],
+  "dependencies": [
+    "httpx>=0.27",
+    "PyJWT[crypto]>=2.8",
+    "structlog>=24.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12"
+  ]
+}

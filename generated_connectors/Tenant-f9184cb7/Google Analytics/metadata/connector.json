@@ -1,0 +1,97 @@
+{
+  "connector_type": "google_analytics",
+  "display_name": "Google Analytics",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {"key": "client_id", "label": "OAuth Client ID", "type": "string", "required": true},
+    {"key": "client_secret", "label": "OAuth Client Secret", "type": "password", "required": true},
+    {"key": "redirect_uri", "label": "Redirect URI (optional)", "type": "string", "required": false}
+  ],
+  "config_keys": [
+    "access_token",
+    "refresh_token",
+    "token_expires_at",
+    "property_id"
+  ],
+  "scopes": [
+    "https://www.googleapis.com/auth/analytics.readonly"
+  ],
+  "features": [
+    "oauth2",
+    "bearer_token",
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "pagination",
+    "accounts",
+    "properties",
+    "reports",
+    "realtime_reports",
+    "metadata"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate Credentials",
+      "description": "Validate that client_id and client_secret are present. Returns HEALTHY/CONNECTED or OFFLINE with reason.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Generate Authorization URL",
+      "description": "Return the Google OAuth2 authorization URL for the analytics.readonly scope. User visits this URL to grant consent.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Call list_accounts() to verify Bearer token is valid. Returns account count in message.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Run sessions + users report for last 30 days on the configured property_id. Paginates all rows (offset/limit). Normalizes each row to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Return all GA accounts accessible by the authenticated user.",
+      "category": "accounts",
+      "endpoint": "GET https://analyticsadmin.googleapis.com/v1alpha/accounts"
+    },
+    {
+      "id": "list_properties",
+      "name": "List Properties",
+      "description": "Return all GA4 properties under a given account.",
+      "category": "properties",
+      "endpoint": "GET https://analyticsadmin.googleapis.com/v1alpha/properties?filter=parent:accounts/{account_id}"
+    },
+    {
+      "id": "run_report",
+      "name": "Run Report",
+      "description": "Run a GA4 Data API report for a property with given dimensions, metrics, and date range.",
+      "category": "reports",
+      "endpoint": "POST https://analyticsdata.googleapis.com/v1beta/properties/{property_id}:runReport"
+    },
+    {
+      "id": "get_metadata",
+      "name": "Get Property Metadata",
+      "description": "Return GA4 property metadata including all available dimensions and metrics.",
+      "category": "metadata",
+      "endpoint": "GET https://analyticsdata.googleapis.com/v1beta/properties/{property_id}/metadata"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "accounts",
+    "properties",
+    "reports",
+    "metadata"
+  ]
+}

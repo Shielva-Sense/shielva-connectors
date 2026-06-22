@@ -1,0 +1,111 @@
+{
+  "connector_type": "front",
+  "display_name": "Front",
+  "provider": "front",
+  "service": "front",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Front to sync conversations, contacts, teammates, inboxes, and tags.",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Front API token from Settings \u2192 Developers \u2192 API Tokens.",
+      "help": "API Token."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_conversations",
+    "get_conversation",
+    "list_messages",
+    "list_contacts",
+    "list_teammates",
+    "list_inboxes",
+    "list_tags"
+  ],
+  "category": "customer_support",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync conversations and contacts from Front.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "Return all conversations (auto-paginated).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "Return a single conversation by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Return all messages in a conversation.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return all contacts (auto-paginated).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_teammates",
+      "name": "List Teammates",
+      "description": "Return all teammates.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_inboxes",
+      "name": "List Inboxes",
+      "description": "Return all inboxes.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Return all tags.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "FrontConnector"
+}

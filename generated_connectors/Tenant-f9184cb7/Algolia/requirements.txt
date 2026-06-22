@@ -1,0 +1,10 @@
+# Algolia connector — runtime dependencies
+#
+# The shared connector venv pre-installs:
+#   httpx>=0.27,<1.0
+#   pydantic>=2.0
+#   structlog>=24.1
+#   pytest, pytest-asyncio, pytest-mock, respx
+#
+# Algolia is a plain REST API with no signature scheme, no OAuth, and no SDK
+# requirement. Nothing connector-specific to add.

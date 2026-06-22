@@ -1,0 +1,143 @@
+{
+  "connector_type": "google_drive",
+  "name": "GoogleDriveConnector",
+  "display_name": "Google Drive",
+  "version": "1.0.0",
+  "description": "Connects to the Google Drive API v3 to list, fetch, and sync files and shared drives, with OAuth2 authorization and SHA-256 stable document IDs.",
+  "provider": "google",
+  "service": "google_drive",
+  "auth_type": "oauth2",
+  "oauth_auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+  "oauth_token_url": "https://oauth2.googleapis.com/token",
+  "oauth_scopes": [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/userinfo.email"
+  ],
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+      "help": "Found in Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs"
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "GOCSPX-...",
+      "help": "Found alongside the Client ID in Google Cloud Console. Stored encrypted."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.ai/connectors/callback",
+      "help": "The OAuth2 redirect URI registered in Google Cloud Console. Leave blank to use the platform default."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "InstallResult"
+    },
+    {
+      "id": "authorize",
+      "name": "Get Authorization URL",
+      "description": "Returns the Google OAuth2 authorization URL with drive.readonly and userinfo.email scopes. Redirect the user to this URL to start the OAuth flow.",
+      "method": "GET",
+      "params": [],
+      "returns": "string (URL)"
+    },
+    {
+      "id": "exchange_code",
+      "name": "Exchange Authorization Code",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens. Called by the platform after the user completes the Google consent screen.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true }
+      ],
+      "returns": "Dict (token response)"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Checks Google Drive API connectivity by calling GET /about?fields=user. Returns the authenticated user email on success.",
+      "method": "GET",
+      "params": [],
+      "returns": "HealthCheckResult"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Files",
+      "description": "Pages through all Drive files via nextPageToken, normalizes each to a ConnectorDocument, and ingests into the Shielva knowledge base.",
+      "method": "GET",
+      "params": [
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_files",
+      "name": "List Files",
+      "description": "Lists Drive files with optional query filter and pagination via nextPageToken. Returns raw API response.",
+      "method": "GET",
+      "params": [
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "query", "type": "string", "required": false },
+        { "key": "page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file",
+      "name": "Get File",
+      "description": "Fetches full metadata for a single Drive file by ID using fields=*.",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_shared_drives",
+      "name": "List Shared Drives",
+      "description": "Lists all shared drives accessible to the authenticated user.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "export_file",
+      "name": "Export File",
+      "description": "Exports a Google Docs/Sheets/Slides file to a specified MIME type (e.g. text/plain, application/pdf) and returns raw bytes.",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true },
+        { "key": "mime_type", "type": "string", "required": true }
+      ],
+      "returns": "bytes"
+    }
+  ],
+  "features": [
+    "oauth2",
+    "pagination",
+    "retry",
+    "normalizer",
+    "multi_tenant",
+    "stable_document_ids",
+    "google_doc_export"
+  ],
+  "dependencies": [
+    "aiohttp>=3.9"
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "connector_type": "productboard",
+  "display_name": "Productboard",
+  "provider": "productboard",
+  "service": "productboard",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Productboard to sync features, components, products, notes, and users.",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Productboard API token. Generate it from Productboard \u2192 Account settings \u2192 Integrations \u2192 API Access.",
+      "help": "API Token."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "category": "product_management",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync features, components, products, notes, and users from Productboard.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_features",
+      "name": "List Features",
+      "description": "Return all features, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_cursor",
+          "label": "Page Cursor",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_feature",
+      "name": "Get Feature",
+      "description": "Return a single feature by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "feature_id",
+          "label": "Feature Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_components",
+      "name": "List Components",
+      "description": "Return all components, following cursor pagination automatically.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Return all products.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "Return all notes, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_cursor",
+          "label": "Page Cursor",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "ProductboardConnector"
+}

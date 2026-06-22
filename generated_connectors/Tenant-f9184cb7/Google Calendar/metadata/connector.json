@@ -1,0 +1,168 @@
+{
+  "connector_type": "google_calendar",
+  "connector_id": "google_calendar",
+  "name": "Google Calendar",
+  "provider": "google",
+  "service": "google_calendar",
+  "version": "1.0.0",
+  "description": "Sync Google Calendar events and meeting metadata into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "your-client-id.apps.googleusercontent.com",
+      "help": "From Google Cloud Console \u2192 APIs & Services \u2192 Credentials \u2192 OAuth 2.0 Client IDs"
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "GOCSPX-...",
+      "help": "The client secret from your OAuth 2.0 Client ID"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "text",
+      "required": false,
+      "placeholder": "https://localhost:8000/connectors/oauth/callback",
+      "help": "Must match exactly what is registered in Google Cloud Console"
+    }
+  ],
+  "oauth_scopes": [
+    "https://www.googleapis.com/auth/calendar.readonly"
+  ],
+  "oauth_auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+  "oauth_token_url": "https://oauth2.googleapis.com/token",
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "InstallResult"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens.",
+      "method": "POST",
+      "params": [
+        {
+          "key": "auth_code",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "state",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Google Calendar API connectivity by fetching the primary calendar.",
+      "method": "GET",
+      "params": [],
+      "returns": "HealthCheckResult"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Events",
+      "description": "Syncs upcoming calendar events (next 30 days) from the primary calendar into the Shielva knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "webhook_url",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_calendars",
+      "name": "List Calendars",
+      "description": "Returns all calendars accessible to the authenticated user.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "Lists events in a calendar within an optional time range.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "calendar_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "time_min",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "time_max",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "max_results",
+          "type": "number",
+          "required": false
+        }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_event",
+      "name": "Get Event",
+      "description": "Fetches a single calendar event by calendar_id and event_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "calendar_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "event_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.0.0"
+  ],
+  "display_name": "Calendar"
+}

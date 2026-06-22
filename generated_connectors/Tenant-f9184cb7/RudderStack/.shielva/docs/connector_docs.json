@@ -1,0 +1,79 @@
+{
+  "title": "RudderStack Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**RudderStack** is an open-source, warehouse-first Customer Data Platform. It exposes two distinct API surfaces, and this connector — `RudderstackConnector` (`CONNECTOR_TYPE = \"rudderstack\"`, `AUTH_TYPE = \"api_key\"`) — wraps both:\n\n| Surface | Base URL | Auth | What it does |\n|---|---|---|---|\n| **Data Plane** (HTTP API) | `https://hosted.rudderlabs.com` | HTTP **Basic** — `write_key` as username, empty password | Ingests user events: `track`, `identify`, `page`, `screen`, `group`, `alias`, `batch` |\n| **Control Plane** (Management API v2) | `https://api.rudderstack.com/v2` | **Bearer** `<personal_access_token>` | Manages Sources, Destinations, Connections, Workspaces, Profiles, Identities |\n\nMethods exposed by the connector:\n\n| Group | Methods |\n|---|---|\n| Lifecycle | `install`, `authorize`, `health_check`, `sync` |\n| Sources | `list_sources`, `get_source`, `create_source` |\n| Destinations | `list_destinations`, `get_destination` |\n| Connections | `list_connections` |\n| Workspaces | `list_workspaces` |\n| Profiles / Identities | `list_profiles`, `get_profile`, `list_identities` |\n| Events (data plane) | `track_event`, `identify_user`, `page_event`, `screen_event`, `group_event`, `alias_user`, `batch_events` |\n\nThe connector normalises control-plane Sources + Destinations into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), exposes one standalone `async def` per user-requested operation (OCP), retries 429 / 5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::RudderstackHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Get a Write Key (data plane)\n\n1. Sign in to https://app.rudderstack.com (or your self-hosted control plane).\n2. **Sources → Add Source** (e.g. JavaScript / HTTP / Python) — RudderStack provisions a source.\n3. Open the source — the **Write Key** is shown at the top. Copy it.\n\n### 2. (Optional) Generate a Personal Access Token (control plane)\n\nThe PAT is required only for control-plane methods (`list_sources`, `create_source`, `list_destinations`, `list_workspaces`, etc.). For pure event ingestion, skip this step.\n\n1. **Settings → Personal Access Tokens → Generate Token**.\n2. Give it `read` / `write` scopes for the resources you want to manage.\n3. Copy the token — RudderStack shows it only once.\n\n### 3. Install in ACP\n\nIn **ACP → Manage Connectors → RudderStack**, fill in:\n\n| Field | Value |\n|---|---|\n| `write_key` (secret, **required**) | Source Write Key from step 1 |\n| `access_token` (secret, optional) | PAT from step 2 — enables control-plane methods |\n| `data_plane_url` (text, optional) | Default `https://hosted.rudderlabs.com`. Override only for self-hosted / private regions. |\n| `control_plane_url` (text, optional) | Default `https://api.rudderstack.com/v2`. Override only if you self-host the control plane. |\n| `rate_limit_per_min` (number) | Soft cap, default 100. |\n\nClick **Install**. `install()` validates `write_key` is present (it does NOT call the API), initialises the `RudderstackHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 4. First health check\n\nThe gateway calls `health_check()`. With a PAT it performs `GET /sources?limit=1` as a lightweight probe. Without a PAT it returns HEALTHY when `write_key` is present (the data plane has no idempotent GET to probe).\n\n| Probe result | Connector status |\n|---|---|\n| 2xx | `HEALTHY` + `CONNECTED` |\n| 401 | `OFFLINE` + `TOKEN_EXPIRED` |\n| 403 | `UNHEALTHY` + `INVALID_CREDENTIALS` |\n| 429 | `DEGRADED` + `CONNECTED` (logged) |"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "RudderStack uses **two different auth schemes** depending on the surface — both are configured at install time and never refreshed.\n\n### Credential model\n\n| Field | Used by | Header |\n|---|---|---|\n| `write_key` | Data plane | `Authorization: Basic <base64(write_key + \":\")>` |\n| `access_token` | Control plane | `Authorization: Bearer <access_token>` |\n\nThe write_key is sent as the HTTP Basic **username** with an **empty password** — the Segment-compatible auth scheme RudderStack adopted. This is a gotcha: a typical Basic-auth library expects user+pass; here you must explicitly base64 the literal `write_key:` (note the trailing colon).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `write_key`. Initialises `RudderstackHTTPClient`. Does **not** call any RudderStack endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured `write_key` — there is no token exchange. |\n| `health_check()` | Control-plane probe `GET /sources?limit=1` when PAT is set; otherwise HEALTHY-when-write_key-present. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — secrets live in the connector config (encrypted at rest via the platform's credential layer). |\n\n### Header contract per surface\n\n```\n# Control plane (Bearer)\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n\n# Data plane (Basic)\nAuthorization: Basic <base64(write_key + \":\")>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `write_key` | secret | **yes** | `self.write_key` | HTTP Basic username for data plane |\n| `access_token` | secret | no | `self.access_token` | Bearer PAT for control plane |\n| `data_plane_url` | text | no | `self.data_plane_url` (default `https://hosted.rudderlabs.com`) | Data plane base URL |\n| `control_plane_url` | text | no | `self.control_plane_url` (default `https://api.rudderstack.com/v2`) | Control plane base URL |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"rudderstack\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"write_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DATA_PLANE_BASE    = \"https://hosted.rudderlabs.com\"\n_CONTROL_PLANE_BASE = \"https://api.rudderstack.com/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `RudderstackConnector`. SOC: `connector.py` orchestrates only; HTTP lives in `client/http_client.py::RudderstackHTTPClient`; payload shaping in `helpers/utils.py::normalize_event_payload`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidates `write_key`. Persists config via `save_config()`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose `access_token = write_key` for interface symmetry.\n\n### `async health_check() -> ConnectorStatus`\nIf PAT present → `GET /sources?limit=1`. Otherwise HEALTHY when `write_key` is set. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates control-plane Sources + Destinations → `NormalizedDocument` → `ingest_document`. When PAT is absent, returns `SyncResult(COMPLETED, message=\"…\")` — RudderStack is event-streaming, there is no event corpus to backfill."
+        },
+        {
+          "id": "api-sources",
+          "title": "Sources",
+          "content": "### `async list_sources(limit=50, after=None) -> Dict`\n`GET /sources?limit={N}&after={cursor}`.\n\n### `async get_source(source_id) -> Dict`\n`GET /sources/{source_id}`.\n\n### `async create_source(name, type, config=None) -> Dict`\n`POST /sources` — body: `{name, type, config}`. `type` is the RudderStack source type (e.g. `Javascript`, `Python`, `HTTP`)."
+        },
+        {
+          "id": "api-destinations",
+          "title": "Destinations",
+          "content": "### `async list_destinations(limit=50, after=None) -> Dict`\n`GET /destinations?limit={N}&after={cursor}`.\n\n### `async get_destination(destination_id) -> Dict`\n`GET /destinations/{destination_id}`."
+        },
+        {
+          "id": "api-connections",
+          "title": "Connections",
+          "content": "### `async list_connections() -> Dict`\n`GET /connections` — list source↔destination wirings."
+        },
+        {
+          "id": "api-workspaces",
+          "title": "Workspaces",
+          "content": "### `async list_workspaces() -> Dict`\n`GET /workspaces` — list workspaces accessible to the PAT. Used to scope subsequent calls when an account has multiple workspaces."
+        },
+        {
+          "id": "api-profiles-identities",
+          "title": "Profiles + Identities",
+          "content": "### `async list_profiles(limit=50, after=None) -> Dict`\n`GET /profiles` — list unified user profiles built by the RudderStack Profiles API.\n\n### `async get_profile(profile_id) -> Dict`\n`GET /profiles/{profile_id}`.\n\n### `async list_identities(limit=50, after=None) -> Dict`\n`GET /identities` — list raw identity records (one profile can have many identities — email, anonId, …)."
+        },
+        {
+          "id": "api-events",
+          "title": "Data-Plane Events",
+          "content": "Every method below sends HTTP Basic with `write_key` and accepts an optional per-call `write_key` override (multi-source tenants).\n\n### `async track_event(user_id, event, properties=None, write_key=None, timestamp=None) -> Dict`\n`POST /v1/track` — body: `{userId, event, properties, timestamp, sentAt}`.\n\n### `async identify_user(user_id, traits=None, write_key=None, timestamp=None) -> Dict`\n`POST /v1/identify` — body: `{userId, traits, timestamp, sentAt}`.\n\n### `async page_event(user_id, name=None, properties=None, write_key=None, timestamp=None) -> Dict`\n`POST /v1/page` — body: `{userId, name?, properties, timestamp, sentAt}`.\n\n### `async screen_event(user_id, name=None, properties=None, write_key=None, timestamp=None) -> Dict`\n`POST /v1/screen` — mobile equivalent of page.\n\n### `async group_event(user_id, group_id, traits=None, write_key=None, timestamp=None) -> Dict`\n`POST /v1/group` — body: `{userId, groupId, traits, timestamp, sentAt}`.\n\n### `async alias_user(user_id, previous_id, write_key=None, timestamp=None) -> Dict`\n`POST /v1/alias` — body: `{userId, previousId, timestamp, sentAt}`.\n\n### `async batch_events(events, write_key=None) -> Dict`\n`POST /v1/batch` — body: `{batch: [...events], sentAt}`. Each entry must be a fully-formed event with a `type` field (`track` / `identify` / `page` / `screen` / `group` / `alias`)."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nRudderstackError                       # base; carries status_code + response_body\n├── RudderstackAuthError               # 401 / 403\n├── RudderstackBadRequestError         # 400\n├── RudderstackNotFoundError           # 404 — carries resource_id\n├── RudderstackConflictError           # 409\n├── RudderstackRateLimitError          # 429 — retry_after_s\n└── RudderstackServerError             # 5xx\n```\n\nBack-compat aliases preserved:\n\n```\nRudderstackNetworkError = RudderstackServerError    # legacy name\nRudderstackNotFound     = RudderstackNotFoundError\nRudderStack* = Rudderstack*                          # old capitalisation\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff (`RETRY_DELAY_S * BACKOFF_FACTOR ** attempt + jitter`, capped at `MAX_RETRY_DELAY_S`), retry up to `DEFAULT_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `RudderstackServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(DEGRADED, CONNECTED) with the exception message\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `write_key` blank | Paste the Source Write Key from RudderStack → Sources → your source. |\n| `RudderstackAuthError(\"access_token is required for control-plane calls\")` when calling `list_sources` etc. | No PAT configured | Generate a Personal Access Token in RudderStack → Settings → Personal Access Tokens, paste into the `access_token` install field. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from RudderStack — PAT lacks scope | In RudderStack Dashboard → Settings → PAT, edit and grant `read:sources` (and `write:*` for create/update). |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — PAT revoked or write_key wrong | Rotate the PAT, and verify the write_key matches the source you're sending events to. |\n| Events return 200 but never appear in destination | Wrong `write_key` for the source bound to that destination | Each source has its own write_key. Use the per-call `write_key=` override when sending to multiple sources from one tenant. |\n| `rudderstack.http.retry` warnings spike | Hitting 429 (RudderStack per-minute rate cap) | The client retries with exponential backoff + jitter. Lower `rate_limit_per_min` or batch events via `batch_events`. |\n| 404 on `get_source(\"…\")` | Wrong `source_id` or source deleted | Call `list_sources()` to confirm IDs. RudderStack source IDs look like `2Lb…` (Base62). |\n| `RudderstackAuthError` on `track_event` with status 401 | Bad write_key (or no source matches it) | Verify the write_key. Note RudderStack sends `write_key` as Basic-auth **username** with empty password — a typical `Authorization: Bearer <write_key>` is wrong. |\n| `ImportError: cannot import name 'RudderStackHTTPClient'` | Older `client/__init__.py` without back-compat alias | Already fixed — `RudderStackHTTPClient = RudderstackHTTPClient` alias added in `client/__init__.py`. |\n| Self-hosted control plane returns 404 on `/v2/sources` | `control_plane_url` doesn't include the `/v2` suffix | Set `control_plane_url` to `https://your-host/v2`, not just `https://your-host`. |"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "title": "Wix Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Wix** is a website-builder + headless CaaS platform exposing a REST API suite under `https://www.wixapis.com`. This connector — `WixConnector` (`CONNECTOR_TYPE = \"wix\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Wix site:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Sites | `/site-list/v2/sites` | List + read sites under the account |\n| Stores Products | `/stores-reader/v1/products` + `/stores/v1/products` | List, get, create, update products |\n| Ecom Orders | `/ecom/v1/orders` | List + read orders |\n| Contacts | `/contacts/v4/contacts` | List + create contacts |\n| Members | `/members/v1/members` | Site member registry |\n| Blog | `/blog/v3/posts` | Blog posts |\n| Bookings | `/bookings/v2/bookings` | Booking instances |\n| Subscriptions | `/subscriptions/v1/subscriptions` | Recurring subscriptions |\n\nThe connector normalises products + orders + contacts into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::WixHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Wix API key\n\n1. Sign in to https://www.wix.com.\n2. Open **Settings → API Keys** (top-right account menu).\n3. Click **Generate API Key**, grant the scopes you need (Stores Read+Write, Ecom Read+Write, Members Read, Contacts Read+Write, etc.).\n4. Copy the API key value — Wix shows it only once.\n5. Copy your **Account ID** from the same page (UUID format).\n6. From **My Sites → Settings → Site Settings**, copy the **Site ID** of the Wix site you want to connect.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Wix**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `account_id` (text) | Account UUID |\n| `default_site_id` (text, optional) | Default Site ID — methods accept site_id override per call |\n| `base_url` (text, optional) | Override `https://www.wixapis.com` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n\nClick **Install**. `install()` validates `api_key` + `account_id` are present (it does NOT call the API), initialises the `WixHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 site as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Wix REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as the **raw key** — **no `Bearer` prefix** (Wix-specific gotcha).\n- `account_id` is sent in the `wix-account-id` header.\n- `site_id` is sent in the `wix-site-id` header for site-scoped endpoints (Stores, Orders, Members, Bookings, Forms, Blog). Omit for account-only endpoints (Sites list).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` + `account_id`. Initialises `WixHTTPClient`. Does **not** call any Wix endpoint. |\n| `authorize(...)` | Returns an empty `TokenInfo` — there is no token exchange. |\n| `health_check()` | `GET /site-list/v2/sites?paging.limit=1` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: <api_key>           ← raw, no Bearer prefix\nwix-account-id: <account_id>\nwix-site-id:    <site_id>          ← when site-scoped\nContent-Type:   application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Authorization header value |\n| `account_id` | text | yes | `self.account_id` | `wix-account-id` header |\n| `default_site_id` | text | no | `self.default_site_id` | Per-call default site for site-scoped endpoints |\n| `base_url` | text | no | `self.base_url` (defaults to `https://www.wixapis.com`) | Override for Wix sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\", \"account_id\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_WIX_BASE = \"https://www.wixapis.com\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `WixConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::WixHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key` + `account_id`; initialise `WixHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns an empty TokenInfo with metadata.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 site via `GET /site-list/v2/sites?paging.limit=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Wix products, orders, contacts → `NormalizedDocument` → `ingest_batch`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-sites",
+          "title": "Sites",
+          "content": "### `async list_sites(*, paging_limit=10, paging_offset=0) -> Dict`\n`GET /site-list/v2/sites?paging.limit={N}&paging.offset={O}`.\n\n### `async get_site(site_id: str) -> Dict`\n`GET /site-list/v2/sites/{site_id}`."
+        },
+        {
+          "id": "api-stores",
+          "title": "Stores (Products)",
+          "content": "### `async list_products(site_id, *, paging=None, query=None) -> Dict`\n`POST /stores-reader/v1/products/query` — body: `{query: {paging: {...}, filter: {...}}}`.\n\n### `async get_product(site_id, product_id) -> Dict`\n`GET /stores-reader/v1/products/{product_id}`.\n\n### `async create_product(site_id, product) -> Dict`\n`POST /stores/v1/products` — body: `{product: {...}}`.\n\n### `async update_product(site_id, product_id, product) -> Dict`\n`PATCH /stores/v1/products/{product_id}` — body: `{product: {...}}`."
+        },
+        {
+          "id": "api-ecom",
+          "title": "Ecom (Orders)",
+          "content": "### `async list_orders(site_id, *, paging=None, filter=None, sort=None) -> Dict`\n`POST /ecom/v1/orders/search` — body: `{search: {filter, sort, cursorPaging}}`.\n\n### `async get_order(site_id, order_id) -> Dict`\n`GET /ecom/v1/orders/{order_id}`."
+        },
+        {
+          "id": "api-contacts-members",
+          "title": "Contacts + Members",
+          "content": "### `async list_contacts(site_id, *, paging=None, filter=None) -> Dict`\n`POST /contacts/v4/contacts/query` — body: `{query: {paging, filter}}`.\n\n### `async create_contact(site_id, info) -> Dict`\n`POST /contacts/v4/contacts` — body: `{info: {...}}`.\n\n### `async list_members(site_id, *, paging=None) -> Dict`\n`POST /members/v1/members/query` — body: `{query: {paging}}`."
+        },
+        {
+          "id": "api-other",
+          "title": "Blog · Bookings · Subscriptions",
+          "content": "### `async list_blog_posts(site_id, *, paging=None) -> Dict`\n`POST /blog/v3/posts/query`.\n\n### `async list_bookings(site_id, *, paging=None) -> Dict`\n`POST /bookings/v2/bookings/query`.\n\n### `async list_subscriptions(site_id, *, paging=None) -> Dict`\n`POST /subscriptions/v1/subscriptions/query`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nWixError                              # base; carries status_code + response_body\n├── WixAuthError                      # 401 / 403\n├── WixBadRequestError                # 400\n├── WixNotFoundError                  # 404\n├── WixConflictError                  # 409\n├── WixPreconditionError              # 428 (revision mismatch)\n├── WixRateLimitError                 # 429 — retry_after_s\n└── WixServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nWixNetworkError = WixServerError      # legacy name from older code\nWixNotFound     = WixNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `WixNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(UNHEALTHY, FAILED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` or `account_id` blank | Re-enter both in ACP. Wix shows the key only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Wix — API key lacks scope | In Wix Dashboard → API Keys, edit the key and grant Stores/Ecom/Members read scopes (whichever surfaces you use). |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — API key revoked or wrong account_id | Verify `account_id` matches the account that owns the key. Rotate the key if needed. |\n| `wix.http.retry` warnings spike | Hitting 429 (Wix per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on a site-scoped call | `site_id` not provided OR wrong site | Pass `site_id` arg explicitly OR set `default_site_id` install_field. Verify the site belongs to the account. |\n| `ImportError: cannot import name 'WixNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `WixNetworkError = WixServerError` alias added in `exceptions.py`. |\n| Webhook payloads land but signature mismatch | `webhook_secret` not the same as Wix's webhook HMAC | Re-enter the exact secret in both Wix Dashboard and ACP install field. |"
+    }
+  ]
+}

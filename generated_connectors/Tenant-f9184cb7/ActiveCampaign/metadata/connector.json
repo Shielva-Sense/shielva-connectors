@@ -1,0 +1,308 @@
+{
+  "connector_type": "activecampaign",
+  "name": "ActiveCampaign",
+  "provider": "ActiveCampaign",
+  "service": "Email Marketing & CRM",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "ActiveCampaign connector for contacts, campaigns, automations, and deals",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your ActiveCampaign API key",
+      "help": "Found in Settings \u2192 Developer \u2192 API Key."
+    },
+    {
+      "key": "account_name",
+      "label": "Account Name (subdomain)",
+      "type": "string",
+      "required": true,
+      "placeholder": "mycompany",
+      "help": "The subdomain of your ActiveCampaign URL. E.g. if your URL is https://mycompany.api-activecampaign.com, enter mycompany."
+    }
+  ],
+  "capabilities": [
+    "contacts",
+    "campaigns",
+    "automations",
+    "deals",
+    "tags",
+    "sync"
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_id"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate api_key and account_name by calling GET /users/me.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /users/me and return HEALTHY, DEGRADED, or OFFLINE with authenticated user name and email.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of ActiveCampaign contacts, deals, and campaigns into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of ActiveCampaign contacts (offset-based).",
+      "category": "contacts",
+      "endpoint": "GET /api/3/contacts"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Retrieve a single contact by ID.",
+      "category": "contacts",
+      "endpoint": "GET /api/3/contacts/:id"
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Paginated list of ActiveCampaign subscriber lists (offset-based).",
+      "category": "lists",
+      "endpoint": "GET /api/3/lists"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Paginated list of ActiveCampaign campaigns (offset-based).",
+      "category": "campaigns",
+      "endpoint": "GET /api/3/campaigns"
+    },
+    {
+      "id": "list_automations",
+      "name": "List Automations",
+      "description": "Paginated list of ActiveCampaign automations (offset-based).",
+      "category": "automations",
+      "endpoint": "GET /api/3/automations"
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Paginated list of ActiveCampaign deals (offset-based).",
+      "category": "deals",
+      "endpoint": "GET /api/3/deals"
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Retrieve a single deal by ID.",
+      "category": "deals",
+      "endpoint": "GET /api/3/deals/:id"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Paginated list of ActiveCampaign tags (offset-based).",
+      "category": "tags",
+      "endpoint": "GET /api/3/tags"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "contacts",
+    "lists",
+    "campaigns",
+    "automations",
+    "deals",
+    "tags"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync ActiveCampaign contacts, deals, and campaigns into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Calls list_contacts().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Calls get_contact().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_lists",
+      "name": "List Lists",
+      "description": "Calls list_lists().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "Calls list_campaigns().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_automations",
+      "name": "List Automations",
+      "description": "Calls list_automations().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Calls list_deals().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Calls get_deal().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "deal_id",
+          "label": "Deal Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Calls list_tags().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Activecampaign"
+}

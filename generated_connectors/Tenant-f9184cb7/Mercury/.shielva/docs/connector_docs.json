@@ -1,0 +1,74 @@
+{
+  "title": "Mercury Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Mercury** is a US business-banking platform exposing a REST API under `https://api.mercury.com/api/v1`. This connector — `MercuryConnector` (`CONNECTOR_TYPE = \"mercury\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Mercury organization:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Accounts | `/accounts` + `/account/{id}` | List + read accounts under the organization |\n| Transactions | `/account/{id}/transactions` | Paginated, date / status / search-filterable ledger |\n| Recipients | `/recipients` + `/recipient/{id}` | List + read + create payment recipients |\n| Money Movement | `POST /account/{id}/transactions` | ACH / wire / check sends (Idempotency-Key mandatory) |\n| Treasury Statements | `/account/{id}/statements` | Monthly statement records for a date range |\n\nThe connector normalises accounts + transactions + recipients + statements into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::MercuryHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Mint a Mercury API token\n\n1. Sign in to https://app.mercury.com.\n2. Open **Settings → API Tokens** (top-right account menu).\n3. Click **Generate API Token**. Choose **Read** or **Read & Write** scope — use Read & Write if you need to initiate ACH/wire transfers via `send_payment()`.\n4. Copy the token value — Mercury shows it only once.\n5. (Optional) From **Dashboard → Accounts**, copy the **Account ID** of the account you want as the per-tenant default.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Mercury**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret) | Token from step 4 |\n| `default_account_id` (text, optional) | Default account UUID — methods accept account_id override per call |\n| `base_url` (text, optional) | Override `https://api.mercury.com/api/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_token` is non-empty, persists config, then probes `GET /accounts` so a bad token fails install loud (returns `AuthStatus.TOKEN_EXPIRED` on 401/403).\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists accounts as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Mercury REST API uses **server-to-server API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry (tokens are valid until rotated).\n\n### Credential model\n\n- `api_token` is sent in the `Authorization` header as `Bearer <api_token>`.\n- Mercury requires an **`Idempotency-Key`** header on every money-movement POST. The connector enforces a non-empty key in `send_payment()`; use `MercuryConnector.new_idempotency_key()` to mint one per logical attempt.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token`. Initialises `MercuryHTTPClient`. Probes `GET /accounts` so a bad token fails install loud. |\n| `authorize(...)` | Returns a TokenInfo wrapping the static token — no exchange. |\n| `health_check()` | `GET /accounts` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — `api_token` lives in `self.config`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_token>\nAccept:        application/json\nContent-Type:  application/json\nIdempotency-Key: <uuid>          ← only on send_payment()\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | Bearer token value |\n| `default_account_id` | text | no | `self.default_account_id` | Per-call default account_id for sync() + money-movement |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.mercury.com/api/v1`) | Override for Mercury sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_MERCURY_BASE = \"https://api.mercury.com/api/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `MercuryConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::MercuryHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; initialise `MercuryHTTPClient`; probe `GET /accounts`. Maps 401/403/429 via `_STATUS_MAP`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping the static token.\n\n### `async health_check() -> ConnectorStatus`\nLists accounts via `GET /accounts` as a lightweight probe. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Mercury accounts + transactions → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-accounts",
+          "title": "Accounts",
+          "content": "### `async list_accounts() -> Dict`\n`GET /accounts` — every account on the organization.\n\n### `async get_account(account_id: str) -> Dict`\n`GET /account/{account_id}` — full record (balances, routing, status, type)."
+        },
+        {
+          "id": "api-transactions",
+          "title": "Transactions",
+          "content": "### `async list_account_transactions(account_id, *, limit=50, offset=0, status=None, start=None, end=None, order='desc', search=None) -> Dict`\n`GET /account/{account_id}/transactions` — paginated, filterable ledger. `status` ∈ pending / sent / failed / cancelled; `start`/`end` are ISO 8601 date strings; `order` ∈ asc / desc; `search` is a free-text match against counterparty / memo.\n\n### `async get_transaction(account_id, transaction_id) -> Dict`\n`GET /account/{account_id}/transaction/{transaction_id}` — fetch one transaction."
+        },
+        {
+          "id": "api-recipients",
+          "title": "Recipients",
+          "content": "### `async list_recipients() -> Dict`\n`GET /recipients` — list every payment recipient on the org.\n\n### `async get_recipient(recipient_id) -> Dict`\n`GET /recipient/{recipient_id}`.\n\n### `async create_recipient(name, emails=None, default_payment_method=None, payment_methods=None) -> Dict`\n`POST /recipient` — create a new payment recipient. `payment_methods` is a list of Mercury PaymentMethod objects (ACH, wire, check) — see Mercury docs for the per-method shape."
+        },
+        {
+          "id": "api-money-movement",
+          "title": "Money Movement",
+          "content": "### `async send_payment(account_id, recipient_id, amount, payment_method, idempotency_key, note=None, external_memo=None) -> Dict`\n`POST /account/{account_id}/transactions` — initiate an ACH / wire / check send.\n\nMercury requires an **`Idempotency-Key`** header on every money-movement POST. The connector raises `MercuryError` if `idempotency_key` is empty. Use the static helper `MercuryConnector.new_idempotency_key(prefix='shielva-mercury')` to mint a UUID-backed key per logical attempt — retries reuse the same key so Mercury de-dupes."
+        },
+        {
+          "id": "api-statements",
+          "title": "Treasury Statements",
+          "content": "### `async list_statements(account_id, start, end) -> Dict`\n`GET /account/{account_id}/statements?start={ISO}&end={ISO}` — fetch treasury statement records for a date range. `start` and `end` are ISO 8601 date strings (`YYYY-MM-DD`)."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nMercuryError                          # base; carries status_code + response_body\n├── MercuryAuthError                  # 401 / 403\n├── MercuryBadRequestError            # 400\n├── MercuryNotFoundError              # 404\n├── MercuryConflictError              # 409\n├── MercuryRateLimitError             # 429 — retry_after_s\n└── MercuryServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nMercuryNetworkError = MercuryServerError    # legacy name from older code\nMercuryNotFound     = MercuryNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `0.5 * 2 ** attempt` ± 25% jitter, retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `MercuryNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED, CONNECTED)   — logged as warning\nnet → ConnectorStatus(OFFLINE,  CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Re-enter the token in ACP. Mercury shows the token only once at generation — rotate from the dashboard if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at install / health_check | 401 — token revoked, invalid, or copy-paste truncated | Rotate the token in Mercury Dashboard → Settings → API Tokens and re-install. |\n| `MercuryAuthError(403)` on `send_payment()` only | Token is read-only; reads succeed but writes are forbidden | Mint a Read & Write token in the Mercury dashboard and re-install. |\n| `MercuryError: idempotency_key is required` | Caller invoked `send_payment()` with empty `idempotency_key` | Pass `MercuryConnector.new_idempotency_key()` — keep the same key across retries of the same logical send. |\n| `mercury.http.retry` warnings spike | Hitting 429 (Mercury per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_account()` | Wrong `account_id` or account belongs to a different Mercury org | Verify via `list_accounts()` that the ID exists on this token's org. |\n| `ImportError: cannot import name 'MercuryNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `MercuryNetworkError = MercuryServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}

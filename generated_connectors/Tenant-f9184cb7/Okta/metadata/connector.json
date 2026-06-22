@@ -1,0 +1,163 @@
+{
+  "connector_type": "okta",
+  "display_name": "Okta",
+  "provider": "okta",
+  "service": "okta",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync Okta users, groups, applications, and system log events into the Shielva knowledge base via the Okta REST API v1.",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "00abc_DEF-...",
+      "help": "Okta API token. From Okta Admin Console: Security \u2192 API \u2192 Tokens \u2192 Create Token."
+    },
+    {
+      "key": "domain",
+      "label": "Okta Domain (e.g. dev-123456.okta.com)",
+      "type": "string",
+      "required": true,
+      "placeholder": "dev-123456.okta.com",
+      "help": "Your Okta organization domain. Find it in the Okta Admin Console URL bar or under Settings \u2192 Account."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "features": [
+    "retry",
+    "cursor_pagination",
+    "link_header_pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "ssws_auth"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate api_token and domain by calling GET /users/me. Returns HEALTHY + CONNECTED on success.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /users/me and return HEALTHY, DEGRADED, or OFFLINE. Includes authenticated login.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Okta users, groups, applications, and system log events into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "List all users via cursor pagination.",
+      "category": "users",
+      "endpoint": "GET /api/v1/users"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Retrieve a single user by Okta user ID.",
+      "category": "users",
+      "endpoint": "GET /api/v1/users/{userId}"
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "List all groups via cursor pagination.",
+      "category": "groups",
+      "endpoint": "GET /api/v1/groups"
+    },
+    {
+      "id": "list_apps",
+      "name": "List Applications",
+      "description": "List all applications via cursor pagination.",
+      "category": "apps",
+      "endpoint": "GET /api/v1/apps"
+    },
+    {
+      "id": "list_logs",
+      "name": "List System Logs",
+      "description": "List system log events via cursor pagination. Supports since= for incremental fetches.",
+      "category": "logs",
+      "endpoint": "GET /api/v1/logs"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "users",
+    "groups",
+    "apps",
+    "logs"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate credentials \u2014 api_token and domain must both be present.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /users/me and return current health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Full sync of Okta users, groups, applications, and system logs.",
+      "method": "GET"
+    },
+    {
+      "name": "List Users",
+      "id": "list_users",
+      "category": "users",
+      "description": "Fetch all users via cursor pagination (GET /users).",
+      "method": "GET"
+    },
+    {
+      "name": "Get User",
+      "id": "get_user",
+      "category": "users",
+      "description": "GET /users/{user_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Groups",
+      "id": "list_groups",
+      "category": "groups",
+      "description": "Fetch all groups via cursor pagination (GET /groups).",
+      "method": "GET"
+    },
+    {
+      "name": "List Applications",
+      "id": "list_apps",
+      "category": "apps",
+      "description": "Fetch all applications via cursor pagination (GET /apps).",
+      "method": "GET"
+    },
+    {
+      "name": "List System Logs",
+      "id": "list_logs",
+      "category": "logs",
+      "description": "Fetch system log events via cursor pagination (GET /logs).",
+      "method": "GET"
+    }
+  ],
+  "name": "OktaConnector"
+}

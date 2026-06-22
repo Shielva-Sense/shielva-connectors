@@ -1,0 +1,222 @@
+{
+  "connector_type": "woocommerce",
+  "name": "WooCommerce",
+  "provider": "WooCommerce",
+  "service": "E-Commerce",
+  "service_slug": "woocommerce",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "WooCommerce e-commerce connector for products, orders, and customers",
+  "install_fields": [
+    {
+      "key": "consumer_key",
+      "label": "Consumer Key",
+      "type": "string",
+      "required": true,
+      "help": "Consumer Key."
+    },
+    {
+      "key": "consumer_secret",
+      "label": "Consumer Secret",
+      "type": "password",
+      "required": true,
+      "help": "Consumer Secret."
+    },
+    {
+      "key": "site_url",
+      "label": "Site URL (e.g. mystore.com)",
+      "type": "string",
+      "required": true,
+      "help": "Site URL (e.g. mystore.com)."
+    }
+  ],
+  "capabilities": [
+    "products",
+    "orders",
+    "customers",
+    "categories",
+    "sync"
+  ],
+  "category": "ecommerce",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync orders, products, and customers into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "Calls list_orders().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "Calls get_order().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "order_id",
+          "label": "Order Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Calls list_products().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_product",
+      "name": "Get Product",
+      "description": "Calls get_product().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Calls list_customers().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Calls get_customer().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "Return product categories for a single page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Woocommerce"
+}

@@ -1,0 +1,121 @@
+{
+  "connector_type": "bugsnag",
+  "display_name": "Bugsnag",
+  "provider": "Bugsnag",
+  "service": "Bugsnag",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "auth_token",
+      "label": "Personal Auth Token",
+      "type": "password",
+      "required": true,
+      "help": "Your Bugsnag Personal Auth Token. Find it at Settings \u2192 My account \u2192 Personal auth token."
+    },
+    {
+      "key": "organization_slug",
+      "label": "Organization Slug",
+      "type": "string",
+      "required": true,
+      "help": "The slug of your Bugsnag organization. Find it in the URL after /organizations/ or in Settings \u2192 Organization."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "projects",
+    "errors",
+    "releases",
+    "collaborators"
+  ],
+  "pagination": "x_next_page_link_header",
+  "description": "Syncs Bugsnag projects, errors (crash reports), and releases into the Shielva knowledge base for AI-powered error analysis and incident response.",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync projects and top errors (per project) from Bugsnag.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Fetch all projects for the organization via offset pagination.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_errors",
+      "name": "List Errors",
+      "description": "Fetch errors for a project via X-Next-Page-Link pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "severity",
+          "label": "Severity",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_error",
+      "name": "Get Error",
+      "description": "Return a single raw Bugsnag error by project_id and error_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "error_id",
+          "label": "Error Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_releases",
+      "name": "List Releases",
+      "description": "Fetch releases for a specific project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_collaborators",
+      "name": "List Collaborators",
+      "description": "Fetch all collaborators for the organization.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "BugsnagConnector"
+}

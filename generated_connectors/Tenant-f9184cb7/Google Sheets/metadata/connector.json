@@ -1,0 +1,133 @@
+{
+  "connector_type": "google_sheets",
+  "name": "Google Sheets",
+  "display_name": "Google Sheets",
+  "description": "Connect to Google Sheets to sync spreadsheet data into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth Client ID",
+      "type": "string",
+      "required": true,
+      "description": "Google OAuth 2.0 client ID from Google Cloud Console.",
+      "help": "OAuth Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "Google OAuth 2.0 client secret.",
+      "help": "OAuth Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "description": "OAuth redirect URI. Must match Google Cloud Console configuration.",
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
+  ],
+  "capabilities": [
+    "list_spreadsheets",
+    "get_spreadsheet",
+    "get_sheet_values",
+    "sync"
+  ],
+  "provider": "google",
+  "category": "productivity",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all accessible spreadsheets \u2014 all sheets, all rows.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_spreadsheets",
+      "name": "List Spreadsheets",
+      "description": "List all Google Sheets files accessible via the OAuth token (paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_spreadsheet",
+      "name": "Get Spreadsheet",
+      "description": "Return spreadsheet metadata + sheet names.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "spreadsheet_id",
+          "label": "Spreadsheet Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_sheet_values",
+      "name": "Get Sheet Values",
+      "description": "Return all cell values for a named sheet (columns A through Z).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "spreadsheet_id",
+          "label": "Spreadsheet Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "sheet_title",
+          "label": "Sheet Title",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_spreadsheet_data",
+      "name": "Get Spreadsheet Data",
+      "description": "Return full data for all sheets in a spreadsheet.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "spreadsheet_id",
+          "label": "Spreadsheet Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "service": "sheets"
+}

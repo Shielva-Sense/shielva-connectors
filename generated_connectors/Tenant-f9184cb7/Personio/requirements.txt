@@ -1,0 +1,5 @@
+# Personio connector — connector-specific deps only.
+# httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx are
+# pre-installed in the shared connector venv and must NOT be re-listed here.
+#
+# Personio v1 requires no extra packages.

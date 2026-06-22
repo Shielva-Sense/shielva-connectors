@@ -1,0 +1,176 @@
+{
+  "connector_type": "databricks",
+  "display_name": "Databricks",
+  "provider": "Databricks",
+  "service": "Databricks",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect Databricks to sync clusters, jobs, notebooks, MLflow experiments, registered models, and SQL warehouses for unified analytics intelligence.",
+  "install_fields": [
+    {
+      "key": "workspace_url",
+      "label": "Workspace URL (e.g. https://adb-123456.azuredatabricks.net)",
+      "type": "string",
+      "required": true,
+      "help": "The full URL of your Databricks workspace. Found in the browser address bar when logged in."
+    },
+    {
+      "key": "token",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Generate a PAT in Databricks: User Settings \u2192 Developer \u2192 Access tokens \u2192 Generate new token"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "clusters",
+    "jobs",
+    "notebooks",
+    "experiments",
+    "models",
+    "sql_warehouses"
+  ],
+  "auth": {
+    "headers": [
+      {
+        "name": "Authorization",
+        "value_template": "Bearer {token}"
+      }
+    ],
+    "validation_endpoint": "GET /api/2.0/preview/scim/v2/Me"
+  },
+  "api": {
+    "base_url_template": "{workspace_url}",
+    "versions": [
+      "2.0",
+      "2.1"
+    ]
+  },
+  "methods": [
+    {
+      "name": "install",
+      "description": "Validate workspace_url + token via SCIM Me endpoint and record connector as installed"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify credentials are still valid via GET /api/2.0/preview/scim/v2/Me; returns email"
+    },
+    {
+      "name": "sync",
+      "description": "Sync clusters, jobs, and notebooks to the Shielva knowledge base"
+    },
+    {
+      "name": "list_clusters",
+      "description": "List all clusters in the Databricks workspace"
+    },
+    {
+      "name": "list_jobs",
+      "description": "List all jobs in the workspace with automatic pagination"
+    },
+    {
+      "name": "list_notebooks",
+      "description": "List workspace notebook objects at the given path (default root /)"
+    },
+    {
+      "name": "list_experiments",
+      "description": "List all MLflow experiments in the workspace"
+    },
+    {
+      "name": "list_models",
+      "description": "List all MLflow registered models in the workspace"
+    },
+    {
+      "name": "list_sql_warehouses",
+      "description": "List all SQL warehouses (Databricks SQL endpoints) in the workspace"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync clusters, jobs, and notebooks from Databricks.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_clusters",
+      "name": "List Clusters",
+      "description": "Fetch all clusters in the workspace.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "Fetch all jobs from the workspace, paginating automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_notebooks",
+      "name": "List Notebooks",
+      "description": "Fetch workspace objects (notebooks/directories) at the given path.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "path",
+          "label": "Path",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_experiments",
+      "name": "List Experiments",
+      "description": "Fetch all MLflow experiments in the workspace.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "Fetch all MLflow registered models in the workspace.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_sql_warehouses",
+      "name": "List Sql Warehouses",
+      "description": "Fetch all SQL warehouses in the workspace.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "DatabricksConnector"
+}

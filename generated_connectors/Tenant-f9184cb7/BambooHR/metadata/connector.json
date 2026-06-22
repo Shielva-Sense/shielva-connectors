@@ -1,0 +1,133 @@
+{
+  "connector_type": "bamboohr",
+  "name": "BambooHR",
+  "display_name": "BambooHR",
+  "description": "Connect to BambooHR to sync employee records and time-off requests into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "company_domain",
+      "label": "Company Domain",
+      "type": "string",
+      "required": true,
+      "description": "Your BambooHR subdomain (e.g. 'acme' from acme.bamboohr.com).",
+      "help": "Company Domain."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "BambooHR API key generated from your account profile.",
+      "help": "API Key."
+    }
+  ],
+  "capabilities": [
+    "get_employee_directory",
+    "get_employee",
+    "list_time_off_requests",
+    "list_custom_reports",
+    "get_company_info",
+    "sync"
+  ],
+  "provider": "bamboohr",
+  "category": "hr",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all BambooHR employees and time-off requests into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_employee_directory",
+      "name": "Get Employee Directory",
+      "description": "Return the full BambooHR employee directory.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_employee",
+      "name": "Get Employee",
+      "description": "Return a single employee's record with optional field selection.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "employee_id",
+          "label": "Employee Id",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "fields",
+          "label": "Fields",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_time_off_requests",
+      "name": "List Time Off Requests",
+      "description": "Return time-off requests within a date range (YYYY-MM-DD).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "start_date",
+          "label": "Start Date",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "end_date",
+          "label": "End Date",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_custom_reports",
+      "name": "List Custom Reports",
+      "description": "Run a saved custom report and return the results.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "report_id",
+          "label": "Report Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_company_info",
+      "name": "Get Company Info",
+      "description": "Return company metadata from GET /company/info.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "service": "bamboohr"
+}

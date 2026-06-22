@@ -1,0 +1,117 @@
+{
+  "connector_type": "loom",
+  "display_name": "Loom",
+  "provider": "loom",
+  "service": "loom",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Your Loom API key. Found in Loom \u2192 Account Settings \u2192 Integrations \u2192 API."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "videos",
+    "folders",
+    "workspaces"
+  ],
+  "api_base": "https://www.loom.com/v1/",
+  "auth_header": "Authorization: Bearer {api_key}",
+  "pagination": "cursor",
+  "pagination_param": "next_page",
+  "description": "Sync Loom videos (with transcripts), folders, and workspaces into Shielva Knowledge Base.",
+  "docs_url": "https://support.loom.com/hc/en-us/articles/360002197917-Loom-API",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Loom videos, folders, and workspaces.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_videos",
+      "name": "List Videos",
+      "description": "Return all videos accessible to the API key (paginated).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_folders",
+      "name": "List Folders",
+      "description": "Return folders accessible to the API key.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "folder_id",
+          "label": "Folder Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Return all workspaces accessible to the API key.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_video",
+      "name": "Get Video",
+      "description": "Retrieve a single Loom video by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "video_id",
+          "label": "Video Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_video_transcript",
+      "name": "Get Video Transcript",
+      "description": "Retrieve the transcript for a Loom video.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "video_id",
+          "label": "Video Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "LoomConnector"
+}

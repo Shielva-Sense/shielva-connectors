@@ -1,0 +1,155 @@
+{
+  "connector_type": "mixpanel",
+  "display_name": "Mixpanel",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "username",
+      "label": "Service Account Username",
+      "type": "string",
+      "required": true,
+      "description": "Mixpanel Service Account Username. Created in Project Settings \u2192 Service Accounts.",
+      "help": "Service Account Username."
+    },
+    {
+      "key": "secret",
+      "label": "Service Account Secret",
+      "type": "password",
+      "required": true,
+      "description": "Mixpanel Service Account Secret. Generated at service account creation \u2014 shown only once.",
+      "help": "Service Account Secret."
+    },
+    {
+      "key": "project_id",
+      "label": "Project ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Mixpanel Project ID. Found in Project Settings \u2192 Project ID.",
+      "help": "Project ID."
+    },
+    {
+      "key": "region",
+      "label": "Region (US or EU)",
+      "type": "string",
+      "required": false,
+      "description": "Data residency region. Use 'EU' for EU data residency projects. Defaults to 'US'.",
+      "help": "API region/datacenter (e.g. us, eu, ap)."
+    }
+  ],
+  "provider": "Mixpanel",
+  "service": "Mixpanel",
+  "connector_name": "Mixpanel",
+  "service_slug": "mixpanel",
+  "category": "analytics",
+  "capabilities": [
+    "query_events",
+    "list_funnels",
+    "query_funnel",
+    "query_segmentation",
+    "health_check",
+    "sync"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Query events for last 30 days, normalize, return SyncResult.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "query_events",
+      "name": "Query Events",
+      "description": "Export raw events via NDJSON endpoint, return as a list of event dicts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event_names",
+          "label": "Event Names",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "from_date",
+          "label": "From Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "to_date",
+          "label": "To Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_funnels",
+      "name": "List Funnels",
+      "description": "Return list of funnel dicts from the Mixpanel project.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "query_funnel",
+      "name": "Query Funnel",
+      "description": "Return funnel data dict for the given funnel_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "funnel_id",
+          "label": "Funnel Id",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "from_date",
+          "label": "From Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "to_date",
+          "label": "To Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "query_segmentation",
+      "name": "Query Segmentation",
+      "description": "Return segmentation data dict for the given event.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event",
+          "label": "Event",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "from_date",
+          "label": "From Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "to_date",
+          "label": "To Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "MixpanelConnector",
+  "description": "Shielva connector for Mixpanel."
+}

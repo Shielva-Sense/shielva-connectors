@@ -1,0 +1,104 @@
+{
+  "connector_type": "smartsheet",
+  "name": "Smartsheet",
+  "provider": "Smartsheet",
+  "service": "Project Management",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Smartsheet connector for sheets, folders, workspaces, and reports",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Smartsheet API access token. Go to Account \u2192 Apps & Integrations \u2192 API Access \u2192 Generate new access token.",
+      "help": "API Token."
+    }
+  ],
+  "capabilities": [
+    "sheets",
+    "folders",
+    "workspaces",
+    "reports",
+    "sync"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all sheets and their rows from Smartsheet.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_sheets",
+      "name": "List Sheets",
+      "description": "List all sheets via page-based pagination.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_rows",
+      "name": "List Rows",
+      "description": "List all rows for a given sheet via page-based pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sheet_id",
+          "label": "Sheet Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "List all workspaces (includeAll=true).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_reports",
+      "name": "List Reports",
+      "description": "List all reports via page-based pagination.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_sheet",
+      "name": "Get Sheet",
+      "description": "Fetch a single sheet by ID with columns and rows.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sheet_id",
+          "label": "Sheet Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "display_name": "Smartsheet"
+}

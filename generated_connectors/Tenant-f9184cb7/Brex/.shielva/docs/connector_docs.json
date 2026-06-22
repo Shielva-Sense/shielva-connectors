@@ -1,0 +1,79 @@
+{
+  "title": "Brex Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Brex** is a corporate-card + spend-management platform exposing a REST API at `https://platform.brexapis.com`. This connector — `BrexConnector` (`CONNECTOR_TYPE = \"brex\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from Brex:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/v2/users` | List + read users, current user lookup |\n| Cards | `/v2/cards` | List + read corporate cards |\n| Card transactions | `/v2/transactions/card/primary` | List + read card transactions |\n| Expenses | `/v1/expenses/card` | List + read expense records |\n| Departments | `/v2/departments` | Org-tree departments |\n| Locations | `/v2/locations` | Office locations |\n| Vendors | `/v1/vendors` | AP vendors |\n| Receipts | `/v1/expenses/card/receipt_match` | Receipts attached to expenses |\n| Budgets | `/v2/budgets` | Budgets |\n| Spend Limits | `/v2/spend_limits` | Spend limits per program |\n\nThe connector normalises transactions + expenses + users into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::BrexHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Brex access token\n\n1. Sign in to https://dashboard.brex.com.\n2. Open **Developer → Tokens**.\n3. Either:\n   - Click **Create new token** and grant the scopes you need (Cards Read, Transactions Read, Expenses Read+Write, Users Read, etc.). Brex shows the token only once — copy it immediately.\n   - Or set up an OAuth2 client-credentials app and mint a token via `POST /oauth2/default/v1/token`.\n4. The token value is what you paste into the `access_token` install field.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Brex**, fill in:\n\n| Field | Value |\n|---|---|\n| `access_token` (secret) | Token from step 3 |\n| `base_url` (text, optional) | Override `https://platform.brexapis.com` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `access_token` is present (it does NOT call the API), initialises the `BrexHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /v2/users/me` as a lightweight check. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx / network → `OFFLINE + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Brex REST API uses **Bearer-token authentication** (`AUTH_TYPE = \"api_key\"`). Tokens can be created two ways:\n\n1. **Personal access tokens** — generated in the Brex Dashboard → Developer → Tokens. Long-lived; revoked manually.\n2. **OAuth2 client credentials** — mint short-lived tokens via `POST /oauth2/default/v1/token`. The connector treats the resulting access_token the same as a personal token.\n\n### Credential model\n\n- `access_token` is sent in the `Authorization` header as `Bearer <token>`.\n- No `X-Brex-*` headers are required.\n- No tenant-of-tenant scoping (Brex tokens are account-scoped).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `access_token`. Initialises `BrexHTTPClient`. Does **not** call any Brex endpoint. |\n| `authorize(...)` | Returns a surface-compat `TokenInfo` carrying the configured access_token — no exchange happens. |\n| `health_check()` | `GET /v2/users/me` — minimal probe. |\n| `ensure_token()` | Not called — there is no refresh path for personal tokens; OAuth2 short-lived tokens are refreshed externally. |\n| token storage | None (the connector uses the stored config value). |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `access_token` | secret | yes | `self.access_token` | Authorization header value (Bearer) |\n| `base_url` | text | no | `self.base_url` (defaults to `https://platform.brexapis.com`) | Override for Brex sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"access_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_BREX_BASE = \"https://platform.brexapis.com\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `BrexConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::BrexHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `access_token`; initialise `BrexHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo carrying the configured access_token.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /v2/users/me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Brex card transactions + expenses + users → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-users",
+          "title": "Users",
+          "content": "### `async get_current_user() -> Dict`\n`GET /v2/users/me`.\n\n### `async list_users(*, cursor=None, limit=50, status=None) -> Dict`\n`GET /v2/users?limit={N}&cursor={C}[&status={S}]`.\n\n### `async get_user(user_id: str) -> Dict`\n`GET /v2/users/{user_id}`."
+        },
+        {
+          "id": "api-cards",
+          "title": "Cards",
+          "content": "### `async list_cards(*, cursor=None, limit=50, user_id=None) -> Dict`\n`GET /v2/cards?limit={N}&cursor={C}[&user_id={U}]`.\n\n### `async get_card(card_id: str) -> Dict`\n`GET /v2/cards/{card_id}`."
+        },
+        {
+          "id": "api-transactions",
+          "title": "Transactions",
+          "content": "### `async list_transactions(*, cursor=None, limit=100, posted_at_start=None, expand=None) -> Dict`\n`GET /v2/transactions/card/primary` — list card transactions, cursor-paginated.\n\n### `async get_transaction(transaction_id: str) -> Dict`\n`GET /v2/transactions/card/primary/{transaction_id}`."
+        },
+        {
+          "id": "api-expenses",
+          "title": "Expenses + Receipts",
+          "content": "### `async list_expenses(*, cursor=None, limit=50, expense_type=None, status=None, payment_status=None, user_id=None) -> Dict`\n`GET /v1/expenses/card` — filter by `expense_type[]`, `status[]`, `payment_status[]`, `user_id[]`.\n\n### `async get_expense(expense_id: str) -> Dict`\n`GET /v1/expenses/card/{expense_id}`.\n\n### `async list_receipts(*, cursor=None, limit=50) -> Dict`\n`GET /v1/expenses/card/receipt_match`."
+        },
+        {
+          "id": "api-org",
+          "title": "Departments · Locations · Vendors",
+          "content": "### `async list_departments(*, cursor=None, limit=50) -> Dict`\n`GET /v2/departments`.\n\n### `async list_locations(*, cursor=None, limit=50) -> Dict`\n`GET /v2/locations`.\n\n### `async list_vendors(*, cursor=None, limit=50) -> Dict`\n`GET /v1/vendors`."
+        },
+        {
+          "id": "api-budgets",
+          "title": "Budgets + Spend Limits",
+          "content": "### `async list_budgets(*, cursor=None, limit=50) -> Dict`\n`GET /v2/budgets`.\n\n### `async list_spend_limits(*, cursor=None, limit=50) -> Dict`\n`GET /v2/spend_limits`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nBrexError                              # base; carries status_code + response_body\n├── BrexAuthError                      # 401 / 403\n├── BrexBadRequestError                # 400\n├── BrexNotFoundError                  # 404\n├── BrexConflictError                  # 409\n├── BrexRateLimitError                 # 429 — retry_after_s\n└── BrexServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nBrexNetworkError = BrexServerError      # legacy name\nBrexNotFound     = BrexNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `BrexNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED, CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `access_token` blank | Re-enter the token in ACP. Brex shows it only once at creation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Brex — token lacks scope | In Brex Dashboard → Developer → Tokens, edit the token scopes (Users, Cards, Transactions, Expenses Read at minimum). |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — token revoked or expired (OAuth2 short-lived) | Rotate the personal token, or mint a new OAuth2 access_token via `POST /oauth2/default/v1/token` and update the install field. |\n| `brex.http.retry` warnings spike | Hitting 429 (Brex per-token rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_user(user_id)` | User does not belong to this Brex account | Verify the `user_id` and the token's account scope. |\n| 404 on `get_card(card_id)` | Wrong card_id or card terminated | List cards first via `list_cards()` to discover valid IDs. |\n| `ImportError: cannot import name 'BrexNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `BrexNetworkError = BrexServerError` alias added in `exceptions.py`. |\n| Cursor pagination loops forever | Brex returned a malformed `next_cursor` | The sync loop exits when `next_cursor` is falsy — verify the API response shape; open a Brex support ticket if needed. |"
+    }
+  ]
+}

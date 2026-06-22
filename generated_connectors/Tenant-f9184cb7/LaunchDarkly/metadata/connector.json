@@ -1,0 +1,216 @@
+{
+  "connector_type": "launchdarkly",
+  "display_name": "LaunchDarkly",
+  "provider": "launchdarkly",
+  "service": "launchdarkly",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect LaunchDarkly to sync feature flags, projects, environments, members, and audit log entries for feature flag intelligence.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in LaunchDarkly \u2192 Account Settings \u2192 Authorization \u2192 Personal access tokens"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "projects",
+    "feature_flags",
+    "environments",
+    "members",
+    "audit_log"
+  ],
+  "auth": {
+    "type": "api_key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "from": "api_key",
+        "note": "Raw key \u2014 no Bearer prefix"
+      },
+      {
+        "name": "LD-API-Version",
+        "value": "20220603"
+      }
+    ],
+    "validation_endpoint": "GET /api/v2/projects"
+  },
+  "api": {
+    "base_url": "https://app.launchdarkly.com/api/v2/",
+    "version": "20220603"
+  },
+  "methods": [
+    {
+      "name": "install",
+      "description": "Validate API key via GET /projects and record connector as installed"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify API key is still valid via GET /projects"
+    },
+    {
+      "name": "sync",
+      "description": "Sync projects, feature flags, environments, members, and audit log to knowledge base"
+    },
+    {
+      "name": "list_projects",
+      "description": "List all LaunchDarkly projects"
+    },
+    {
+      "name": "list_flags",
+      "description": "List all feature flags in a project with pagination"
+    },
+    {
+      "name": "get_flag",
+      "description": "Get a single feature flag by project key and flag key"
+    },
+    {
+      "name": "list_environments",
+      "description": "List all environments in a project"
+    },
+    {
+      "name": "list_members",
+      "description": "List all account members with pagination"
+    },
+    {
+      "name": "list_audit_log",
+      "description": "List audit log entries with cursor-based pagination"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync projects, feature flags, environments, members, and audit log.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Fetch all LaunchDarkly projects.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_flags",
+      "name": "List Flags",
+      "description": "Fetch all feature flags in a project, paginating automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_key",
+          "label": "Project Key",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_flag",
+      "name": "Get Flag",
+      "description": "Retrieve a single feature flag by project key and flag key.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_key",
+          "label": "Project Key",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "flag_key",
+          "label": "Flag Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_environments",
+      "name": "List Environments",
+      "description": "Fetch all environments in a project.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_key",
+          "label": "Project Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "Fetch all account members, paginating automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_audit_log",
+      "name": "List Audit Log",
+      "description": "Fetch audit log entries, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "before",
+          "label": "Before",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "LaunchDarklyConnector"
+}

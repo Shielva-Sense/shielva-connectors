@@ -1,0 +1,123 @@
+{
+  "connector_type": "clearbit",
+  "connector_id": "clearbit",
+  "name": "Clearbit",
+  "provider": "Clearbit",
+  "service": "Clearbit",
+  "version": "1.0.0",
+  "description": "Connects to the Clearbit B2B data enrichment API to look up company and person data by domain or email. Clearbit is a lookup-based API \u2014 use enrich_company(), enrich_person(), and combined_lookup() to retrieve enrichment data on demand.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "placeholder": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "help": "Your Clearbit API key. Found in your Clearbit dashboard under Settings \u2192 API Keys."
+    }
+  ],
+  "features": [
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "company_enrichment",
+    "person_enrichment",
+    "combined_lookup",
+    "company_search",
+    "ip_reveal"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the api_key by calling enrich_company('clearbit.com'). Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping the Clearbit company API and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Clearbit is a lookup-based API with no bulk list endpoint. sync() returns COMPLETED with 0 documents. Use enrich_company(), enrich_person(), or combined_lookup() for on-demand enrichment.",
+      "category": "sync"
+    },
+    {
+      "id": "enrich_company",
+      "name": "Enrich Company",
+      "description": "Look up a company by domain and return a normalized ConnectorDocument.",
+      "category": "enrichment",
+      "endpoint": "GET https://company.clearbit.com/v2/companies/find"
+    },
+    {
+      "id": "enrich_person",
+      "name": "Enrich Person",
+      "description": "Look up a person by email and return a normalized ConnectorDocument.",
+      "category": "enrichment",
+      "endpoint": "GET https://person.clearbit.com/v2/people/find"
+    },
+    {
+      "id": "combined_lookup",
+      "name": "Combined Lookup",
+      "description": "Look up a person and their company simultaneously by email and return a single normalized ConnectorDocument.",
+      "category": "enrichment",
+      "endpoint": "GET https://person.clearbit.com/v2/combined/find"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "enrichment"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that api_key is present and accepted by Clearbit.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping Clearbit by enriching clearbit.com and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Clearbit is a lookup-based enrichment API, not a list-based data store.",
+      "method": "GET"
+    },
+    {
+      "name": "Enrich Company",
+      "id": "enrich_company",
+      "category": "enrichment",
+      "description": "Enrich a company by domain via GET /v2/companies/find?domain={domain}.",
+      "method": "GET"
+    },
+    {
+      "name": "Enrich Person",
+      "id": "enrich_person",
+      "category": "enrichment",
+      "description": "Enrich a person by email via GET /v2/people/find?email={email}.",
+      "method": "GET"
+    },
+    {
+      "name": "Combined Lookup",
+      "id": "combined_lookup",
+      "category": "enrichment",
+      "description": "Perform a combined person + company lookup by email.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Clearbit"
+}

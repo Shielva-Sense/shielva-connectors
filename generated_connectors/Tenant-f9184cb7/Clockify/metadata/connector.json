@@ -1,0 +1,308 @@
+{
+  "connector_type": "clockify",
+  "name": "ClockifyConnector",
+  "display_name": "Clockify",
+  "version": "1.0.0",
+  "description": "Connects to the Clockify time-tracking API. Manage workspaces, projects, clients, tags, tasks, and time entries; run summary reports against the Reports API.",
+  "provider": "clockify",
+  "service": "clockify",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Clockify API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Clockify API key",
+      "help": "Generate at Clockify → Profile Settings → API"
+    },
+    {
+      "key": "default_workspace_id",
+      "label": "Default Workspace ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional default workspace ID",
+      "help": "Used by sync() when no workspace_id is supplied. Leave blank to use the first workspace returned by /workspaces."
+    },
+    {
+      "key": "base_url",
+      "label": "Clockify API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.clockify.me/api/v1",
+      "placeholder": "https://api.clockify.me/api/v1",
+      "help": "Base URL for the Clockify REST API. Leave blank to use the default."
+    },
+    {
+      "key": "reports_base_url",
+      "label": "Clockify Reports API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://reports.api.clockify.me/v1",
+      "placeholder": "https://reports.api.clockify.me/v1",
+      "help": "Base URL for the Clockify Reports (analytics) API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum requests per minute to Clockify. Default is 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and stores connector configuration.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies API connectivity by calling GET /user.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "Returns the authenticated user's profile via GET /user.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Lists every workspace the authenticated user belongs to.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Lists projects within a workspace, optionally filtered by name or archived state.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "archived", "type": "boolean", "required": false },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "Fetches a single project by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_project",
+      "name": "Create Project",
+      "description": "Creates a project in the given workspace. Supports billable + hourlyRate.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "client_id", "type": "string", "required": false },
+        { "key": "color", "type": "string", "required": false },
+        { "key": "is_public", "type": "boolean", "required": false },
+        { "key": "billable", "type": "boolean", "required": false },
+        { "key": "hourly_rate", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_clients",
+      "name": "List Clients",
+      "description": "Lists clients within a workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "archived", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_client",
+      "name": "Create Client",
+      "description": "Creates a client in the given workspace.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "address", "type": "string", "required": false },
+        { "key": "email", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Lists tags within a workspace.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "archived", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Lists tasks for a project (default status ACTIVE).",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "project_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_time_entries",
+      "name": "List Time Entries",
+      "description": "Lists time entries for a user within a workspace, optionally filtered by date range or project.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "end", "type": "string", "required": false },
+        { "key": "project", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_time_entry",
+      "name": "Get Time Entry",
+      "description": "Fetches a single time entry by ID via GET /workspaces/{wid}/time-entries/{eid}.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_time_entry",
+      "name": "Create Time Entry",
+      "description": "Creates a time entry. start is required; end is optional (omit for a running timer).",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "start", "type": "string", "required": true },
+        { "key": "end", "type": "string", "required": false },
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "task_id", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "tag_ids", "type": "array", "required": false },
+        { "key": "billable", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "start_time_entry",
+      "name": "Start Time Entry (running timer)",
+      "description": "Starts a running timer by POSTing a time-entry with no end field. Stop with stop_time_entry.",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "start", "type": "string", "required": false },
+        { "key": "project_id", "type": "string", "required": false },
+        { "key": "task_id", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "tag_ids", "type": "array", "required": false },
+        { "key": "billable", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "stop_time_entry",
+      "name": "Stop Running Timer",
+      "description": "Stops the running timer for a user via PATCH /workspaces/{wid}/user/{uid}/time-entries with body {end}.",
+      "method": "PATCH",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "end", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Workspace Users",
+      "description": "Lists members of a workspace via GET /workspaces/{wid}/users.",
+      "method": "GET",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "update_time_entry",
+      "name": "Update Time Entry",
+      "description": "Patches a time entry with arbitrary fields (PUT body).",
+      "method": "PUT",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "string", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_time_entry",
+      "name": "Delete Time Entry",
+      "description": "Deletes a time entry.",
+      "method": "DELETE",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "entry_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "summary_report",
+      "name": "Summary Report",
+      "description": "Runs a Clockify summary report (uses the Reports API base URL).",
+      "method": "POST",
+      "params": [
+        { "key": "workspace_id", "type": "string", "required": true },
+        { "key": "date_range_start", "type": "string", "required": true },
+        { "key": "date_range_end", "type": "string", "required": true },
+        { "key": "summary_filter", "type": "object", "required": false },
+        { "key": "users", "type": "object", "required": false },
+        { "key": "projects", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

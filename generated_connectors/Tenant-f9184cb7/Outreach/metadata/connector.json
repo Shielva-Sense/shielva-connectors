@@ -1,0 +1,193 @@
+{
+  "connector_type": "outreach",
+  "connector_id": "outreach",
+  "name": "Outreach",
+  "provider": "Outreach",
+  "service": "Outreach",
+  "version": "1.0.0",
+  "description": "Sync Outreach prospects, sequences, accounts, calls, and mailings into the Shielva knowledge base via OAuth2.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Outreach OAuth app Client ID",
+      "help": "Find your Client ID in Outreach \u2192 Settings \u2192 API \u2192 Apps."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Outreach OAuth app Client Secret",
+      "help": "Find your Client Secret in Outreach \u2192 Settings \u2192 API \u2192 Apps."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.com/oauth/outreach/callback",
+      "help": "Must match the Redirect URI registered in your Outreach OAuth app. Leave blank to use the default."
+    }
+  ],
+  "oauth2": {
+    "authorization_url": "https://api.outreach.io/oauth/authorize",
+    "token_url": "https://api.outreach.io/oauth/token",
+    "scopes": "prospects.read sequences.read mailings.read calls.read accounts.read",
+    "token_fields": [
+      "access_token",
+      "refresh_token",
+      "token_expires_at"
+    ]
+  },
+  "features": [
+    "oauth2",
+    "retry",
+    "cursor_pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_ids",
+    "json_api"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Configure",
+      "description": "Validate that client_id and client_secret are present.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth2)",
+      "description": "Build and return the OAuth2 authorization URL for the Outreach consent screen.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /api/v2/users/current and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Outreach prospects, sequences, and accounts into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_prospects",
+      "name": "List Prospects",
+      "description": "Paginated list of Outreach prospects using JSON:API cursor pagination.",
+      "category": "prospects",
+      "endpoint": "GET /api/v2/prospects"
+    },
+    {
+      "id": "get_prospect",
+      "name": "Get Prospect",
+      "description": "Retrieve a single prospect by ID.",
+      "category": "prospects",
+      "endpoint": "GET /api/v2/prospects/{prospect_id}"
+    },
+    {
+      "id": "list_sequences",
+      "name": "List Sequences",
+      "description": "Paginated list of Outreach sequences.",
+      "category": "sequences",
+      "endpoint": "GET /api/v2/sequences"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Paginated list of Outreach accounts.",
+      "category": "accounts",
+      "endpoint": "GET /api/v2/accounts"
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Paginated list of Outreach calls.",
+      "category": "calls",
+      "endpoint": "GET /api/v2/calls"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "prospects",
+    "sequences",
+    "accounts",
+    "calls",
+    "mailings"
+  ],
+  "apis": [
+    {
+      "name": "Install / Configure",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize (OAuth2)",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Build and return the OAuth2 authorization URL for Outreach.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /api/v2/users/current and return current health status.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Outreach prospects, sequences, and accounts into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Prospects",
+      "id": "list_prospects",
+      "category": "prospects",
+      "description": "Return one page of Outreach prospects.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Prospect",
+      "id": "get_prospect",
+      "category": "prospects",
+      "description": "Return a single Outreach prospect by ID.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sequences",
+      "id": "list_sequences",
+      "category": "sequences",
+      "description": "Return one page of Outreach sequences.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "Return one page of Outreach accounts.",
+      "method": "GET"
+    },
+    {
+      "name": "List Calls",
+      "id": "list_calls",
+      "category": "calls",
+      "description": "Return one page of Outreach calls.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Outreach"
+}

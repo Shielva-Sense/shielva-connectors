@@ -1,0 +1,207 @@
+{
+  "connector_type": "zendesk",
+  "display_name": "Zendesk",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "email",
+      "label": "Agent Email",
+      "type": "string",
+      "required": true,
+      "help": "Agent Email."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "help": "API Token."
+    },
+    {
+      "key": "subdomain",
+      "label": "Zendesk Subdomain",
+      "type": "string",
+      "required": true,
+      "help": "Zendesk Subdomain."
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Zendesk tickets (with comments) into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "Return a list of Zendesk ticket dicts, following next_page pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "sort_by",
+          "label": "Sort By",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "sort_order",
+          "label": "Sort Order",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_ticket",
+      "name": "Get Ticket",
+      "description": "Return a single ticket dict (Zendesk envelope: {ticket: {...}}).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "ticket_id",
+          "label": "Ticket Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_ticket_comments",
+      "name": "List Ticket Comments",
+      "description": "Return a list of comment dicts for the given ticket.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "ticket_id",
+          "label": "Ticket Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return a list of Zendesk user dicts, following next_page pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "role",
+          "label": "Role",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Return a single user dict (Zendesk envelope: {user: {...}}).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "Return a list of Zendesk organization dicts, following next_page pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_macros",
+      "name": "List Macros",
+      "description": "Return a list of Zendesk macro dicts, following next_page pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "ZendeskConnector",
+  "provider": "zendesk",
+  "service": "zendesk",
+  "description": "Shielva connector for Zendesk."
+}

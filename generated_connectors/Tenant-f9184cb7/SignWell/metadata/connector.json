@@ -1,0 +1,257 @@
+{
+  "connector_type": "signwell",
+  "name": "SignWellConnector",
+  "display_name": "SignWell",
+  "version": "1.0.0",
+  "description": "Connects to the SignWell e-signature REST API (Documents, Templates, Document Templates, Recipients, Webhooks, Account) using an API key. Supports document CRUD, send/cancel/archive, signed-PDF download, template instantiation, recipient reminders, webhook subscriptions, and KB sync of documents.",
+  "provider": "signwell",
+  "service": "signwell",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "SignWell API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your SignWell API key",
+      "help": "From SignWell → Settings → API → API Keys. The key is sent in the X-Api-Key header (NOT Authorization: Bearer)."
+    },
+    {
+      "key": "test_mode_default",
+      "label": "Default test_mode",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "placeholder": "true",
+      "help": "Default test_mode for all created documents. Production deployments should set this to false."
+    },
+    {
+      "key": "base_url",
+      "label": "SignWell API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://www.signwell.com/api/v1",
+      "placeholder": "https://www.signwell.com/api/v1",
+      "help": "Base URL for the SignWell REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum SignWell API requests per minute. SignWell's standard quota is 100/min."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and persists install-time config. Does not call the SignWell API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Calls GET /me to verify the API key and account connectivity.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_me",
+      "name": "Get Account",
+      "description": "GET /me — return the authenticated SignWell account payload.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_documents",
+      "name": "List Documents",
+      "description": "GET /documents — paginated list of documents with optional status / archived / search filters.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "archived", "type": "boolean", "required": false },
+        { "key": "q", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_document",
+      "name": "Get Document",
+      "description": "GET /documents/{id} — full document record.",
+      "method": "GET",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_document",
+      "name": "Create Document",
+      "description": "POST /documents — create a new SignWell document/envelope. Provide files or file_urls plus recipients.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "recipients", "type": "array", "required": true },
+        { "key": "files", "type": "array", "required": false },
+        { "key": "file_urls", "type": "array", "required": false },
+        { "key": "message", "type": "string", "required": false },
+        { "key": "subject", "type": "string", "required": false },
+        { "key": "test_mode", "type": "boolean", "required": false },
+        { "key": "draft", "type": "boolean", "required": false },
+        { "key": "embedded_signing", "type": "boolean", "required": false },
+        { "key": "expires_in", "type": "number", "required": false },
+        { "key": "reminders", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_document",
+      "name": "Send Document",
+      "description": "POST /documents/{id}/send — release a draft document to recipients.",
+      "method": "POST",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "cancel_document",
+      "name": "Cancel Document",
+      "description": "POST /documents/{id}/cancel — cancel an in-flight document.",
+      "method": "POST",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "archive_document",
+      "name": "Archive Document",
+      "description": "POST /documents/{id}/archive — archive a finished document.",
+      "method": "POST",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_document",
+      "name": "Delete Document",
+      "description": "DELETE /documents/{id} — permanently remove the document.",
+      "method": "DELETE",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "download_completed_document",
+      "name": "Download Completed Document",
+      "description": "GET /documents/{id}/completed_pdf — raw PDF bytes for a finished document.",
+      "method": "GET",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false }
+      ],
+      "returns": "Bytes"
+    },
+    {
+      "id": "list_templates",
+      "name": "List Templates",
+      "description": "GET /templates — paginated list of templates with optional search.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "q", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_template",
+      "name": "Get Template",
+      "description": "GET /templates/{id} — fetch a template by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "template_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_document_from_template",
+      "name": "Create Document From Template",
+      "description": "POST /document_templates/documents — instantiate a new document from a reusable template, pre-filling template fields.",
+      "method": "POST",
+      "params": [
+        { "key": "template_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "recipients", "type": "array", "required": true },
+        { "key": "template_fields", "type": "array", "required": false },
+        { "key": "test_mode", "type": "boolean", "required": false },
+        { "key": "draft", "type": "boolean", "required": false },
+        { "key": "embedded_signing", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_recipients",
+      "name": "List Recipients",
+      "description": "GET /documents/{id}/recipients — list recipients on a document.",
+      "method": "GET",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_reminder",
+      "name": "Send Recipient Reminder",
+      "description": "POST /documents/{did}/recipients/{rid}/reminder — send a reminder email to a specific recipient.",
+      "method": "POST",
+      "params": [
+        { "key": "document_id", "type": "string", "required": true },
+        { "key": "recipient_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_webhooks",
+      "name": "List Webhooks",
+      "description": "GET /api_application/webhooks — list webhook subscriptions.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "POST /api_application/webhooks — register a webhook subscription.",
+      "method": "POST",
+      "params": [
+        { "key": "url", "type": "string", "required": true },
+        { "key": "events", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_webhook",
+      "name": "Delete Webhook",
+      "description": "DELETE /api_application/webhooks/{id} — remove a webhook subscription.",
+      "method": "DELETE",
+      "params": [
+        { "key": "webhook_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

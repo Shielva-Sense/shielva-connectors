@@ -1,0 +1,337 @@
+{
+  "connector_type": "billcom",
+  "name": "BillcomConnector",
+  "display_name": "Bill.com",
+  "version": "1.0.0",
+  "description": "Connects to the Bill.com REST API (v2) to manage vendors, customers, bills, invoices, payments, the chart of accounts, classifications, and locations. Uses session-based authentication seeded by a 4-piece credential bundle (userName + password + orgId + devKey) and transparently re-logs-in when Bill.com rejects a stale sessionId.",
+  "provider": "billcom",
+  "service": "billcom",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "user_name",
+      "label": "Bill.com Username (Email)",
+      "type": "string",
+      "required": true,
+      "placeholder": "you@example.com",
+      "help": "Bill.com login email. Sent as the userName form field on POST /Login.json."
+    },
+    {
+      "key": "password",
+      "label": "Bill.com Password",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Bill.com account password",
+      "help": "Stored encrypted. Used only by the connector to obtain a sessionId via POST /Login.json."
+    },
+    {
+      "key": "org_id",
+      "label": "Bill.com Organization ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "00800000000000000",
+      "help": "Found in Bill.com → Settings → Profile → Organization ID. Sent as the orgId form field on POST /Login.json."
+    },
+    {
+      "key": "dev_key",
+      "label": "Bill.com Developer Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Your Bill.com devKey",
+      "help": "Apply at developer.bill.com. Sent as the devKey form field on every API call."
+    },
+    {
+      "key": "base_url",
+      "label": "Bill.com API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.bill.com/api/v2",
+      "placeholder": "https://api.bill.com/api/v2",
+      "help": "Base URL for the Bill.com REST API. Leave blank to use the default. Override for sandbox or proxy."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Client-side soft cap on requests per minute. Default 60 — Bill.com's standard quota."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the 4-piece credential bundle and performs an initial /Login.json call. Saves config + cached sessionId.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "No-op for Bill.com (session-based auth). Returns a TokenInfo wrapping the cached sessionId.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Bill.com connectivity by forcing a fresh /Login.json round-trip.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Lists + normalizes vendors, bills, customers, and invoices into the Shielva KB.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "login",
+      "name": "Login",
+      "description": "Force-refresh the Bill.com session and return the new sessionId.",
+      "method": "POST",
+      "params": [],
+      "returns": "string"
+    },
+    {
+      "id": "logout",
+      "name": "Logout",
+      "description": "Invalidate the current sessionId on the Bill.com side.",
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "POST /List/Vendor.json — paginate vendors. Optional filters list of Bill.com filter dicts.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false },
+        { "key": "filters", "type": "array", "required": false }
+      ],
+      "returns": "Array<Vendor>"
+    },
+    {
+      "id": "get_vendor",
+      "name": "Get Vendor",
+      "description": "POST /Crud/Read/Vendor.json — read a single vendor by its Bill.com ID.",
+      "method": "POST",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true }
+      ],
+      "returns": "Vendor"
+    },
+    {
+      "id": "create_vendor",
+      "name": "Create Vendor",
+      "description": "POST /Crud/Create/Vendor.json — create a vendor record.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "address1", "type": "string", "required": false },
+        { "key": "city", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "zip", "type": "string", "required": false },
+        { "key": "country", "type": "string", "required": false }
+      ],
+      "returns": "Vendor"
+    },
+    {
+      "id": "list_bills",
+      "name": "List Bills",
+      "description": "POST /List/Bill.json — paginate bills (accounts payable).",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false },
+        { "key": "filters", "type": "array", "required": false }
+      ],
+      "returns": "Array<Bill>"
+    },
+    {
+      "id": "get_bill",
+      "name": "Get Bill",
+      "description": "POST /Crud/Read/Bill.json — read a single bill by ID.",
+      "method": "POST",
+      "params": [
+        { "key": "bill_id", "type": "string", "required": true }
+      ],
+      "returns": "Bill"
+    },
+    {
+      "id": "create_bill",
+      "name": "Create Bill",
+      "description": "POST /Crud/Create/Bill.json — create a bill (payable) with one or more line items.",
+      "method": "POST",
+      "params": [
+        { "key": "vendor_id", "type": "string", "required": true },
+        { "key": "invoice_number", "type": "string", "required": true },
+        { "key": "invoice_date", "type": "string", "required": true },
+        { "key": "due_date", "type": "string", "required": true },
+        { "key": "amount", "type": "number", "required": true },
+        { "key": "line_items", "type": "array", "required": true }
+      ],
+      "returns": "Bill"
+    },
+    {
+      "id": "pay_bill",
+      "name": "Pay Bill",
+      "description": "POST /SendPayment.json — schedule a payment for a specific bill.",
+      "method": "POST",
+      "params": [
+        { "key": "bill_id", "type": "string", "required": true },
+        { "key": "payment_date", "type": "string", "required": true },
+        { "key": "amount", "type": "number", "required": false }
+      ],
+      "returns": "Payment"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "POST /List/Customer.json — paginate customers.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false },
+        { "key": "filters", "type": "array", "required": false }
+      ],
+      "returns": "Array<Customer>"
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "POST /Crud/Read/Customer.json — read a single customer by ID.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true }
+      ],
+      "returns": "Customer"
+    },
+    {
+      "id": "create_customer",
+      "name": "Create Customer",
+      "description": "POST /Crud/Create/Customer.json — create a customer record.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "bill_address1", "type": "string", "required": false }
+      ],
+      "returns": "Customer"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "POST /List/Invoice.json — paginate invoices (accounts receivable).",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false },
+        { "key": "filters", "type": "array", "required": false }
+      ],
+      "returns": "Array<Invoice>"
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "POST /Crud/Read/Invoice.json — read a single invoice by ID.",
+      "method": "POST",
+      "params": [
+        { "key": "invoice_id", "type": "string", "required": true }
+      ],
+      "returns": "Invoice"
+    },
+    {
+      "id": "create_invoice",
+      "name": "Create Invoice",
+      "description": "POST /Crud/Create/Invoice.json — create an invoice (receivable) with one or more line items.",
+      "method": "POST",
+      "params": [
+        { "key": "customer_id", "type": "string", "required": true },
+        { "key": "invoice_number", "type": "string", "required": true },
+        { "key": "invoice_date", "type": "string", "required": true },
+        { "key": "due_date", "type": "string", "required": false },
+        { "key": "amount", "type": "number", "required": true },
+        { "key": "line_items", "type": "array", "required": true }
+      ],
+      "returns": "Invoice"
+    },
+    {
+      "id": "list_payments",
+      "name": "List Payments",
+      "description": "POST /List/SentPay.json — paginate sent payments.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false },
+        { "key": "filters", "type": "array", "required": false }
+      ],
+      "returns": "Array<Payment>"
+    },
+    {
+      "id": "get_payment",
+      "name": "Get Payment",
+      "description": "POST /Crud/Read/SentPay.json — read a single sent payment by ID.",
+      "method": "POST",
+      "params": [
+        { "key": "payment_id", "type": "string", "required": true }
+      ],
+      "returns": "Payment"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Chart of Accounts",
+      "description": "POST /List/ChartOfAccount.json — list the organization's ledger accounts.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false }
+      ],
+      "returns": "Array<ChartOfAccount>"
+    },
+    {
+      "id": "list_classifications",
+      "name": "List Classifications",
+      "description": "POST /List/ActgClass.json — list accounting classifications.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false }
+      ],
+      "returns": "Array<Classification>"
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "POST /List/Location.json — list entity locations.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "max", "type": "number", "required": false }
+      ],
+      "returns": "Array<Location>"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27,<1.0",
+    "structlog>=24.1"
+  ]
+}

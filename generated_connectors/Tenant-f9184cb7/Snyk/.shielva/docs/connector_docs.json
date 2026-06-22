@@ -1,0 +1,74 @@
+{
+  "title": "Snyk Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Snyk** is a developer-first security platform that scans source, dependencies, container images, and IaC for vulnerabilities and license risk. It exposes two HTTP surfaces:\n\n- **REST v3** at `https://api.snyk.io/rest` — JSON:API, requires `?version=YYYY-MM-DD~beta` (or a GA date) on every request, content type `application/vnd.api+json`.\n- **Legacy v1** at `https://api.snyk.io/v1` — plain JSON. Used for surfaces not yet ported to v3 (`/user/me`, dependencies, org members, per-user notification settings).\n\nThis connector — `SnykConnector` (`CONNECTOR_TYPE = \"snyk\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from Snyk:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| User (self) | `/v1/user/me` | Identify the token holder; used as the health probe |\n| Organizations | `/rest/orgs` | List + read orgs visible to the token |\n| Projects | `/rest/orgs/{id}/projects` | List + read + delete scanned projects |\n| Issues | `/rest/orgs/{id}/issues` | List + read open vulnerability / license issues |\n| Targets | `/rest/orgs/{id}/targets` | List + read scan targets (repo / image / SBOM source) |\n| Dependencies | `/v1/org/{id}/dependencies` | Legacy dependency graph search |\n| Users | `/v1/org/{id}/members` | List org members |\n| User settings | `/v1/user/me/notification-settings/org/{id}` | Per-org notification preferences for the token holder |\n\nThe connector normalises projects + issues into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces every user-requested operation as a standalone `async def` (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::SnykHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Snyk API token\n\n1. Sign in to https://app.snyk.io.\n2. Click your avatar → **Account Settings → General → Auth Token**.\n3. Click **Click to show** to reveal the token, then **Copy**.\n4. (Optional) Note your default organization's UUID from **Settings → General → Organization ID**.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Snyk**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_token` (secret, required) | The token from step 3 |\n| `default_org_id` (text, optional) | Org UUID used by `sync()` and shorthand calls |\n| `api_version` (text, optional) | REST v3 version date, default `2024-10-15` |\n| `base_url` (text, optional) | Override `https://api.snyk.io/rest` |\n| `v1_base_url` (text, optional) | Override `https://api.snyk.io/v1` |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 200 |\n\nClick **Install**. `install()` validates `api_token` is present (it does NOT call the API), initialises the `SnykHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` next. That probes `GET https://api.snyk.io/v1/user/me` with `Authorization: token <api_token>`. A 2xx → `HEALTHY + CONNECTED`. 401 / 403 → `DEGRADED + TOKEN_EXPIRED`. 429 → `DEGRADED + CONNECTED` with structured-log warning.\n\n### 4. First call\n\nList your organizations:\n\n```python\nresult = await connector.list_organizations(limit=10)\nfor org in result[\"data\"]:\n    print(org[\"id\"], org[\"attributes\"][\"name\"])\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Snyk uses **API token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Snyk-specific gotcha — \"token\" prefix, NOT \"Bearer\"\n\nThe Authorization header uses the literal `token` prefix on **every** request (both REST v3 and legacy v1):\n\n```\nAuthorization: token <api_token>\n```\n\nThis is the single most common Snyk integration error. If you send `Bearer <api_token>` the API responds 401 even with a valid token.\n\n### Credential model\n\n- `api_token` (required) — Snyk personal or service-account token. Held in `self.config` and applied by `SnykHTTPClient._rest_headers()` / `_v1_headers()` on every outbound call.\n- `default_org_id` (optional) — the org slug or UUID `sync()` and `health_check()` fall back to.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_token` is non-empty. Persists install config. Does **not** call any Snyk endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured `api_token` (compatibility shim — no token exchange happens). |\n| `health_check()` | `GET /v1/user/me`. Maps 401/403/429 via `_STATUS_MAP`. |\n| `ensure_token()` / refresh | N/A — Snyk tokens never expire automatically; rotate by re-running install with a new value. |\n\n### Header contract\n\n```\n# REST v3 (/rest/*)\nAuthorization: token <api_token>\nContent-Type:  application/vnd.api+json\nAccept:        application/vnd.api+json\n\n# Legacy v1 (/v1/*)\nAuthorization: token <api_token>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_token` | secret | yes | `self.api_token` | Bearer-replacement: `Authorization: token <…>` |\n| `default_org_id` | text | no | `self.default_org_id` | Default org for `sync()` and shorthand calls |\n| `api_version` | text | no | `self.api_version` (default `2024-10-15`) | REST v3 `?version=` param |\n| `base_url` | text | no | `self.base_url` (default `https://api.snyk.io/rest`) | REST v3 base override |\n| `v1_base_url` | text | no | `self.v1_base_url` (default `https://api.snyk.io/v1`) | Legacy v1 base override |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 200) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"snyk\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_REST_BASE       = \"https://api.snyk.io/rest\"\n_V1_BASE         = \"https://api.snyk.io/v1\"\n_DEFAULT_VERSION = \"2024-10-15\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `SnykConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::SnykHTTPClient`. OCP: every user-named operation is a standalone `async def`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_token`; initialise `SnykHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping the configured API token.\n\n### `async health_check() -> ConnectorStatus`\nFetches the token holder via `GET /v1/user/me`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates projects + issues for `default_org_id` → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-organizations",
+          "title": "Organizations",
+          "content": "### `async list_organizations(version=None, limit=100, starting_after=None) -> Dict`\n`GET /rest/orgs?version=…&limit=…[&starting_after=…]`.\n\n### `async get_organization(org_id) -> Dict`\n`GET /rest/orgs/{org_id}`."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects",
+          "content": "### `async list_projects(org_id, *, target_id=None, types=None, limit=100, starting_after=None) -> Dict`\n`GET /rest/orgs/{org_id}/projects`. `types` is a list; the client joins it as a CSV.\n\n### `async get_project(org_id, project_id) -> Dict`\n`GET /rest/orgs/{org_id}/projects/{project_id}`.\n\n### `async delete_project(org_id, project_id) -> Dict`\n`DELETE /rest/orgs/{org_id}/projects/{project_id}`. Returns `{}` on 204."
+        },
+        {
+          "id": "api-issues",
+          "title": "Issues",
+          "content": "### `async list_issues(org_id, *, project_id=None, severity=None, type=None, limit=50, starting_after=None) -> Dict`\n`GET /rest/orgs/{org_id}/issues`. `severity` is a list; the client joins it as a CSV.\n\n### `async get_issue(org_id, issue_id) -> Dict`\n`GET /rest/orgs/{org_id}/issues/{issue_id}`."
+        },
+        {
+          "id": "api-targets",
+          "title": "Targets",
+          "content": "### `async list_targets(org_id, *, source=None, limit=100, starting_after=None) -> Dict`\n`GET /rest/orgs/{org_id}/targets`.\n\n### `async get_target(org_id, target_id) -> Dict`\n`GET /rest/orgs/{org_id}/targets/{target_id}`."
+        },
+        {
+          "id": "api-other",
+          "title": "Dependencies · Users · Settings (legacy v1)",
+          "content": "### `async list_dependencies(org_id, *, project_id=None, limit=50) -> Dict`\n`POST /v1/org/{org_id}/dependencies` — body: `{\"filters\": {\"projects\": [...]}}`.\n\n### `async list_users(org_id) -> List`\n`GET /v1/org/{org_id}/members` — returns a JSON array.\n\n### `async list_org_members(org_id) -> List`\nAlias for `list_users` — same endpoint.\n\n### `async get_user_settings(org_id) -> Dict`\n`GET /v1/user/me/notification-settings/org/{org_id}` — per-org notification preferences for the token holder."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nSnykError                              # base; carries status_code + response_body\n├── SnykAuthError                      # 401 / 403\n├── SnykBadRequestError                # 400\n├── SnykNotFoundError                  # 404\n├── SnykConflictError                  # 409\n├── SnykRateLimitError                 # 429 — retry_after_s\n└── SnykServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nSnykNetworkError = SnykServerError      # legacy name from older callers\nSnykNotFound     = SnykNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Honour `Retry-After` header; otherwise exponential backoff `_BACKOFF_BASE * 2 ** attempt`. Retry up to `_MAX_RETRIES=3`. |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `SnykServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n429 → ConnectorStatus(DEGRADED, CONNECTED)\nnet → ConnectorStatus(OFFLINE,  CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```\n\n`sync()` returns `SyncResult(status=FAILED, message=…)` on any uncaught exception; per-document failures bump `documents_failed` and the final status becomes `PARTIAL` if any are non-zero."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_token` blank | Re-paste the token in ACP. The token is sealed at rest. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 from Snyk | Token was revoked or copied incorrectly. Generate a new one at Account Settings → General → Auth Token. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` for a freshly issued token | Sending `Authorization: Bearer <…>` instead of `token <…>` | Already fixed in `client/http_client.py::_rest_headers/_v1_headers`. If you patched these, restore the literal `token` prefix. |\n| `snyk.http.retry` warnings spike | Hitting 429 (Snyk per-token rate cap) | The client retries with exponential backoff honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `list_organizations` | Wrong `base_url` (typo in install field) | Reset `base_url` to `https://api.snyk.io/rest`. |\n| 404 on `list_dependencies` | Wrong `v1_base_url` | Reset `v1_base_url` to `https://api.snyk.io/v1`. |\n| `sync()` returns FAILED with \"default_org_id is required\" | Connector installed without an org context | Fill in `default_org_id` in ACP and re-install. |\n| `ImportError: cannot import name 'SnykNetworkError'` | Older callers expect the legacy alias | Already fixed — `SnykNetworkError = SnykServerError` alias added in `exceptions.py`. |\n| REST request missing `?version=` | Direct `httpx` call bypassing `SnykHTTPClient._rest_params()` | Always go through the client; `connector.py` never calls httpx directly. |"
+    }
+  ]
+}

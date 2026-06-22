@@ -1,0 +1,69 @@
+{
+  "title": "Attio Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Attio** is a modern, customisable CRM (people, companies, deals, custom objects) exposing a REST API under `https://api.attio.com/v2`. This connector — `AttioConnector` (`CONNECTOR_TYPE = \"attio\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from an Attio workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Workspaces | `/self` | Identify the workspace the token belongs to |\n| Objects | `/objects` | List object schemas (people, companies, deals, custom) |\n| Records | `/objects/{slug}/records` | List / get / create / update / assert / delete records |\n| Attributes | `/objects/{slug}/attributes` | List / read attribute schemas |\n| Lists | `/lists` | List Attio lists + their entries |\n| Notes | `/notes` | List + create notes attached to records |\n| Tasks | `/tasks` | List + create tasks |\n\nThe connector normalises records + notes + tasks into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::AttioHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate an Attio access token\n\n1. Sign in to https://app.attio.com.\n2. Open **Workspace settings → Developers → Access tokens**.\n3. Click **Create token**, give it a name + scopes (record:read, record:write, list:read, note:read, note:write, task:read, task:write as needed).\n4. Copy the token value — Attio shows it only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Attio**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | Access token from step 4 |\n| `workspace_slug` (text, optional) | Display label (e.g. `acme`) |\n| `base_url` (text, optional) | Override `https://api.attio.com/v2` (rarely needed) |\n| `sync_objects` (text, optional) | Comma-separated object slugs to ingest, default `people,companies` |\n| `rate_limit_per_min` (number) | Soft cap, default 100 |\n\nClick **Install**. `install()` validates `api_key` is present (it does NOT call the API), initialises the `AttioHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which calls `GET /self` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Attio REST API uses **server-to-server access token authentication** (`AUTH_TYPE = \"api_key\"`). The token is long-lived (until revoked), scoped to a single workspace, and sent in the `Authorization` header with the `Bearer` prefix.\n\n### Credential model\n\n- `api_key` is sent as `Authorization: Bearer <api_key>`.\n- `workspace_slug` is display-only — Attio derives the workspace from the token automatically.\n- No token exchange, no refresh, no expiry (until revoked in the Attio UI).\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Initialises `AttioHTTPClient`. Does **not** call any Attio endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` whose `access_token` is the configured api_key (no exchange). |\n| `health_check()` | `GET /self` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_key>\nContent-Type:  application/json\nAccept:        application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `Authorization: Bearer <…>` value |\n| `workspace_slug` | text | no | `self.workspace_slug` | Display-only label |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.attio.com/v2`) | Override for Attio sandbox or proxy |\n| `sync_objects` | text | no | `self.sync_objects` (default `[\"people\", \"companies\"]`) | Object slugs iterated by `sync()` |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\nATTIO_BASE_URL = \"https://api.attio.com/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `AttioConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::AttioHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; initialise `AttioHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nReturns a passthrough TokenInfo with `access_token = self.api_key`.\n\n### `async health_check() -> ConnectorStatus`\n`GET /self`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates configured `sync_objects` (default `people,companies`). Calls `POST /objects/{slug}/records/query`, normalises each record → `NormalizedDocument` → `ingest_batch`. Returns `SyncResult` with `documents_found / synced / failed`."
+        },
+        {
+          "id": "api-objects",
+          "title": "Objects + Attributes",
+          "content": "### `async list_workspaces() -> Dict`\n`GET /self` wrapped in `{workspaces: [...]}`.\n\n### `async list_objects() -> Dict`\n`GET /objects` — all object schemas.\n\n### `async list_attributes(object_slug) -> Dict`\n`GET /objects/{slug}/attributes`.\n\n### `async get_attribute(object_slug, attribute_id) -> Dict`\n`GET /objects/{slug}/attributes/{id}`."
+        },
+        {
+          "id": "api-records",
+          "title": "Records (CRUD + Assert)",
+          "content": "### `async list_records(object_slug, limit=50, offset=0, filter=None, sorts=None) -> Dict`\n`POST /objects/{slug}/records/query` — body: `{limit, offset, filter?, sorts?}`.\n\n### `async get_record(object_slug, record_id) -> Dict`\n`GET /objects/{slug}/records/{record_id}`.\n\n### `async create_record(object_slug, values) -> Dict`\n`POST /objects/{slug}/records` — body: `{data:{values:{…}}}`.\n\n### `async update_record(object_slug, record_id, values) -> Dict`\n`PATCH /objects/{slug}/records/{record_id}` — body: `{data:{values:{…}}}`.\n\n### `async assert_record(object_slug, matching_attribute, values) -> Dict`\n`PUT /objects/{slug}/records?matching_attribute={attr}` — upsert by matching attribute.\n\n### `async delete_record(object_slug, record_id) -> Dict`\n`DELETE /objects/{slug}/records/{record_id}`."
+        },
+        {
+          "id": "api-lists",
+          "title": "Lists",
+          "content": "### `async list_lists() -> Dict`\n`GET /lists`.\n\n### `async get_list(list_id) -> Dict`\n`GET /lists/{id}`.\n\n### `async list_list_entries(list_id, limit=50, offset=0) -> Dict`\n`POST /lists/{id}/entries/query`."
+        },
+        {
+          "id": "api-notes-tasks",
+          "title": "Notes + Tasks",
+          "content": "### `async list_notes(parent_object=None, parent_record_id=None, limit=50, offset=0) -> Dict`\n`GET /notes` — optionally scoped to a parent record.\n\n### `async create_note(parent_object, parent_record_id, title, content, format=\"plaintext\") -> Dict`\n`POST /notes` — body: `{data:{parent_object, parent_record_id, title, format, content}}`.\n\n### `async list_tasks(limit=50, offset=0) -> Dict`\n`GET /tasks`.\n\n### `async create_task(content, format=\"plaintext\", deadline_at=None, assignees=None, linked_records=None) -> Dict`\n`POST /tasks`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nAttioError                            # base; carries status_code + response_body\n├── AttioAuthError                    # 401 / 403\n├── AttioBadRequestError              # 400\n├── AttioNotFoundError                # 404\n├── AttioConflictError                # 409\n├── AttioRateLimitError               # 429 — retry_after_s\n└── AttioServerError                  # 5xx\n```\n\nBack-compat aliases preserved:\n```\nAttioConnectorError = AttioError\nAttioAPIError       = AttioError\nAttioNetworkError   = AttioServerError\nAttioNotFound       = AttioNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `AttioServerError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(UNHEALTHY, FAILED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the access token in ACP. Attio shows the token only once at creation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Attio — token lacks scope | In Attio → Workspace settings → Developers → Access tokens, edit the token and grant the missing scopes (record:read, record:write, etc.). |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or never valid | Generate a new access token in Attio and re-install. |\n| `attio.http.retry` warnings spike | Hitting 429 (Attio per-token rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or reduce sync frequency. |\n| 404 on `get_record` | Wrong `object_slug` OR record deleted | Check the slug is one of the workspace's object slugs (`list_objects()`) and the record still exists. |\n| `TypeError: Can't instantiate abstract class AttioConnector` | Older builds shipped without `sync()` — abstract method missing | Fixed in v1.0.0 — `sync()` iterates configured `sync_objects`. Re-pull the connector. |\n| Sync returns 0 documents | `sync_objects` list empty | Set `sync_objects=people,companies` (or whatever slugs you want) in the install fields. |"
+    }
+  ]
+}

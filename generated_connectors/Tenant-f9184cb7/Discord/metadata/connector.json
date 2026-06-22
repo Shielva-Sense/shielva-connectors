@@ -1,0 +1,241 @@
+{
+  "connector_type": "discord",
+  "name": "DiscordConnector",
+  "display_name": "Discord",
+  "version": "1.0.0",
+  "description": "Connects to the Discord REST API (v10) using a bot token. Supports guild/channel/message read and write, member + role management, and webhooks. An optional OAuth2 user-token override flips the Authorization header from 'Bot' to 'Bearer'.",
+  "provider": "discord",
+  "service": "discord",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "bot_token",
+      "label": "Discord Bot Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Discord bot token",
+      "help": "From Discord Developer Portal → Applications → your app → Bot → Reset Token. Sent as 'Authorization: Bot <token>'."
+    },
+    {
+      "key": "oauth_token",
+      "label": "OAuth2 User Token (optional override)",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Optional Bearer token",
+      "help": "When set, the connector switches the Authorization header to 'Bearer <oauth_token>' to act as a Discord user instead of a bot."
+    },
+    {
+      "key": "base_url",
+      "label": "Discord API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://discord.com/api/v10",
+      "placeholder": "https://discord.com/api/v10",
+      "help": "Base URL for the Discord REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "50",
+      "placeholder": "50",
+      "help": "Client-side soft cap. Discord enforces its own per-route rate limits via the 429 response and 'retry_after' body field."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates bot_token (or oauth_token) is present and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Discord API connectivity via GET /users/@me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_guilds",
+      "name": "List Guilds",
+      "description": "GET /users/@me/guilds — list servers the bot/user belongs to.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "before", "type": "string", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_guild",
+      "name": "Get Guild",
+      "description": "GET /guilds/{guild_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "guild_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_channels",
+      "name": "List Channels",
+      "description": "GET /guilds/{guild_id}/channels.",
+      "method": "GET",
+      "params": [
+        { "key": "guild_id", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_channel",
+      "name": "Get Channel",
+      "description": "GET /channels/{channel_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_message",
+      "name": "Send Message",
+      "description": "POST /channels/{channel_id}/messages.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true },
+        { "key": "embeds", "type": "array", "required": false },
+        { "key": "components", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_message",
+      "name": "Get Message",
+      "description": "GET /channels/{channel_id}/messages/{message_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "GET /channels/{channel_id}/messages.",
+      "method": "GET",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "before", "type": "string", "required": false },
+        { "key": "after", "type": "string", "required": false },
+        { "key": "around", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "edit_message",
+      "name": "Edit Message",
+      "description": "PATCH /channels/{channel_id}/messages/{message_id}.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_message",
+      "name": "Delete Message",
+      "description": "DELETE /channels/{channel_id}/messages/{message_id}.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_guild_members",
+      "name": "List Guild Members",
+      "description": "GET /guilds/{guild_id}/members.",
+      "method": "GET",
+      "params": [
+        { "key": "guild_id", "type": "string", "required": true },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "after", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /users/{user_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_role",
+      "name": "Add Role",
+      "description": "PUT /guilds/{guild_id}/members/{user_id}/roles/{role_id}.",
+      "method": "POST",
+      "params": [
+        { "key": "guild_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "role_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "remove_role",
+      "name": "Remove Role",
+      "description": "DELETE /guilds/{guild_id}/members/{user_id}/roles/{role_id}.",
+      "method": "POST",
+      "params": [
+        { "key": "guild_id", "type": "string", "required": true },
+        { "key": "user_id", "type": "string", "required": true },
+        { "key": "role_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "POST /channels/{channel_id}/webhooks.",
+      "method": "POST",
+      "params": [
+        { "key": "channel_id", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "execute_webhook",
+      "name": "Execute Webhook",
+      "description": "POST /webhooks/{webhook_id}/{webhook_token}.",
+      "method": "POST",
+      "params": [
+        { "key": "webhook_id", "type": "string", "required": true },
+        { "key": "webhook_token", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true },
+        { "key": "embeds", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "connector_type": "google_gmail_connector",
+  "name": "GmailConnector",
+  "display_name": "Google Gmail",
+  "version": "1.1.0",
+  "description": "Connects to the Google Gmail API to read, search, modify, and send email messages, with incremental sync via the Gmail history API.",
+  "provider": "google",
+  "service": "gmail",
+  "auth_type": "oauth2_code",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "OAuth2 Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Google OAuth2 Client ID",
+      "help": "Found in Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs"
+    },
+    {
+      "key": "client_secret",
+      "label": "OAuth2 Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Google OAuth2 Client Secret",
+      "help": "Found alongside the Client ID in Google Cloud Console"
+    },
+    {
+      "key": "scopes",
+      "label": "OAuth2 Scopes",
+      "type": "string",
+      "required": false,
+      "default": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+      "placeholder": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+      "help": "Space-separated list of Gmail API scopes. The gmail.send scope is required to send email."
+    },
+    {
+      "key": "auth_url",
+      "label": "OAuth2 Authorization URL",
+      "type": "string",
+      "required": false,
+      "default": "https://accounts.google.com/o/oauth2/auth",
+      "placeholder": "https://accounts.google.com/o/oauth2/auth",
+      "help": "Google OAuth2 authorization endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "token_url",
+      "label": "OAuth2 Token URL",
+      "type": "string",
+      "required": false,
+      "default": "https://oauth2.googleapis.com/token",
+      "placeholder": "https://oauth2.googleapis.com/token",
+      "help": "Google OAuth2 token endpoint. Leave blank to use the default."
+    },
+    {
+      "key": "base_url",
+      "label": "Gmail API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://gmail.googleapis.com/gmail/v1",
+      "placeholder": "https://gmail.googleapis.com/gmail/v1",
+      "help": "Base URL for the Gmail REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "250",
+      "placeholder": "250",
+      "help": "Maximum Gmail API requests per minute. Default is 250 (Google's standard quota)."
+    },
+    {
+      "key": "pagination_type",
+      "label": "Pagination Type",
+      "type": "string",
+      "required": false,
+      "default": "page_token",
+      "placeholder": "page_token",
+      "help": "Pagination strategy. Only 'page_token' is supported by the Gmail API."
+    },
+    {
+      "key": "api_version",
+      "label": "API Version",
+      "type": "string",
+      "required": false,
+      "default": "v1",
+      "placeholder": "v1",
+      "help": "Gmail REST API version. Leave blank to use 'v1'."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Exchanges an OAuth2 authorization code for access and refresh tokens. Called by the platform after the user completes the OAuth consent screen.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": true },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Gmail API connectivity by fetching the authenticated user's profile.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Messages",
+      "description": "Syncs Gmail messages into the Shielva knowledge base. Uses incremental history sync when a checkpoint exists; falls back to full page scan.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_emails",
+      "name": "List Emails",
+      "description": "Lists Gmail message stubs matching a search query. Returns raw API response with message IDs and pagination token.",
+      "method": "GET",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "max_results", "type": "number", "required": false },
+        { "key": "page_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_email",
+      "name": "Get Email",
+      "description": "Fetches a full Gmail message by ID and returns it as a NormalizedDocument.",
+      "method": "GET",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "NormalizedDocument"
+    },
+    {
+      "id": "modify_message",
+      "name": "Modify Message",
+      "description": "Adds or removes label IDs on a Gmail message (e.g. mark as read, star, archive).",
+      "method": "POST",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true },
+        { "key": "add_labels", "type": "string", "required": false },
+        { "key": "remove_labels", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "read_email",
+      "name": "Read Email (Raw)",
+      "description": "Returns the raw Gmail API message object for a given message ID. Use get_email() for a NormalizedDocument.",
+      "method": "GET",
+      "params": [
+        { "key": "message_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_email",
+      "name": "Send Email",
+      "description": "Sends an email via the Gmail API. Builds a base64url-encoded RFC 2822 MIME message and POSTs to /users/me/messages/send. Requires gmail.send scope.",
+      "method": "POST",
+      "params": [
+        { "key": "to", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "cc", "type": "string", "required": false },
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "add_email",
+      "name": "Add Email (Create Draft)",
+      "description": "Creates a Gmail draft without sending. Uses the same MIME encoding path as send_email().",
+      "method": "POST",
+      "params": [
+        { "key": "to", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "cc", "type": "string", "required": false },
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "post_email",
+      "name": "Post Email (Send Alias)",
+      "description": "Public alias for send_email(). Provided for API surface completeness — delegates directly to send_email().",
+      "method": "POST",
+      "params": [
+        { "key": "to", "type": "string", "required": true },
+        { "key": "subject", "type": "string", "required": true },
+        { "key": "body", "type": "string", "required": true },
+        { "key": "cc", "type": "string", "required": false },
+        { "key": "bcc", "type": "string", "required": false },
+        { "key": "html_body", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "aiohttp>=3.9",
+    "python-dateutil>=2.8"
+  ]
+}

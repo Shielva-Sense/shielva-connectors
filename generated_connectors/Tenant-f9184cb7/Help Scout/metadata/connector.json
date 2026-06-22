@@ -1,0 +1,112 @@
+{
+  "connector_type": "helpscout",
+  "display_name": "Help Scout",
+  "provider": "helpscout",
+  "service": "helpscout",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Connect to Help Scout to sync conversations, customers, mailboxes, users, and tags.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "App ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Help Scout OAuth app's App ID (client_id). Found under Your Profile \u2192 My Apps.",
+      "help": "App ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "App Secret",
+      "type": "password",
+      "required": true,
+      "description": "Your Help Scout OAuth app's App Secret (client_secret). Found under Your Profile \u2192 My Apps.",
+      "help": "App Secret."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_conversations",
+    "get_conversation",
+    "list_customers",
+    "list_mailboxes",
+    "list_users"
+  ],
+  "resources": [
+    "conversations",
+    "customers",
+    "mailboxes",
+    "users",
+    "tags"
+  ],
+  "category": "customer_support",
+  "api_base": "https://api.helpscout.net/v2/",
+  "token_url": "https://api.helpscout.net/v2/oauth2/token",
+  "pagination": "hal+json",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync conversations, customers, mailboxes, and users from Help Scout.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "Return all conversations across pages (HAL pagination).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "Return a single conversation by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "conversation_id",
+          "label": "Conversation Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return all customers across pages (HAL pagination).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_mailboxes",
+      "name": "List Mailboxes",
+      "description": "Return all mailboxes.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return all users across pages (HAL pagination).",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "HelpScoutConnector"
+}

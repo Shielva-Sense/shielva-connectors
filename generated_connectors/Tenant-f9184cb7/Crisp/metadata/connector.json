@@ -1,0 +1,221 @@
+{
+  "connector_type": "crisp",
+  "name": "CrispConnector",
+  "display_name": "Crisp",
+  "version": "1.0.0",
+  "description": "Connects to the Crisp customer messaging + helpdesk REST API (account, websites, conversations, people, helpdesk, campaigns) using HTTP Basic plugin credentials. Supports send-message, contact CRUD, conversation list/read, and KB sync of helpdesk articles + conversations + people.",
+  "provider": "crisp",
+  "service": "crisp",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "identifier",
+      "label": "Plugin Identifier",
+      "type": "string",
+      "required": true,
+      "placeholder": "Paste your Crisp plugin identifier",
+      "help": "From Crisp Marketplace → your plugin → Tokens → Identifier. This is the Basic-auth username half."
+    },
+    {
+      "key": "api_key",
+      "label": "Plugin Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Crisp plugin key",
+      "help": "From Crisp Marketplace → your plugin → Tokens → Key. This is the Basic-auth password half — shown only once."
+    },
+    {
+      "key": "website_id",
+      "label": "Website ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "11111111-2222-3333-4444-555555555555",
+      "help": "Crisp website UUID — from Crisp app → Settings → Website Settings → Website ID. All site-scoped methods use this when no override is passed."
+    },
+    {
+      "key": "tier",
+      "label": "API Tier",
+      "type": "string",
+      "required": false,
+      "default": "plugin",
+      "placeholder": "plugin",
+      "help": "X-Crisp-Tier header. 'plugin' for Marketplace-plugin tokens (most common); 'user' for personal user tokens."
+    },
+    {
+      "key": "base_url",
+      "label": "Crisp API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.crisp.chat/v1",
+      "placeholder": "https://api.crisp.chat/v1",
+      "help": "Base URL for the Crisp REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Crisp API requests per minute. Default is 60 (Crisp's documented plugin limit)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates identifier, api_key and website_id and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Crisp API connectivity by fetching the authenticated account profile.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_account_profile",
+      "name": "Get Account Profile",
+      "description": "GET /user/account — fetch the authenticated Crisp account profile.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_websites",
+      "name": "List Websites",
+      "description": "GET /user/websites — list Crisp websites the credential can access.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_website",
+      "name": "Get Website",
+      "description": "GET /website/{id} — fetch one Crisp website.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "GET /website/{id}/conversations/{page} — paginated, optionally filtered conversation list.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "search_query", "type": "string", "required": false },
+        { "key": "search_filter_type", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "GET /website/{wid}/conversation/{sid} — fetch one conversation.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "session_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_message",
+      "name": "Send Message",
+      "description": "POST /website/{wid}/conversation/{sid}/message — send a message into a Crisp conversation. The Python parameter from_ is renamed to 'from' on the wire.",
+      "method": "POST",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "session_id", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": true },
+        { "key": "from_", "type": "string", "required": true },
+        { "key": "origin", "type": "string", "required": true },
+        { "key": "content", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "GET /website/{id}/people/profiles/{page} — list contacts on a Crisp website.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "search_text", "type": "string", "required": false },
+        { "key": "search_filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_person",
+      "name": "Get Person",
+      "description": "GET /website/{wid}/people/profile/{pid} — fetch one contact profile.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "people_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_person",
+      "name": "Create Person",
+      "description": "POST /website/{id}/people/profile — create a new Crisp contact.",
+      "method": "POST",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "person", "type": "object", "required": false },
+        { "key": "segments", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_person",
+      "name": "Update Person",
+      "description": "PATCH /website/{wid}/people/profile/{pid} — update a contact profile.",
+      "method": "PATCH",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "people_id", "type": "string", "required": true },
+        { "key": "person", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_helpdesks",
+      "name": "List Helpdesk Articles",
+      "description": "GET /website/{id}/helpdesk/locale/{locale}/articles/{page} — list helpdesk articles for a locale.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "locale", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_campaigns",
+      "name": "List Campaigns",
+      "description": "GET /website/{id}/campaigns/list/{page} — list Crisp campaigns.",
+      "method": "GET",
+      "params": [
+        { "key": "website_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": []
+}

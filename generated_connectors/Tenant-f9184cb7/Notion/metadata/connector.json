@@ -1,0 +1,184 @@
+{
+  "connector_type": "notion",
+  "display_name": "Notion",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Integration Token",
+      "type": "password",
+      "required": true,
+      "description": "Notion Internal Integration Token (secret_...). From Notion \u2192 Settings \u2192 Integrations \u2192 New integration.",
+      "help": "Integration Token."
+    }
+  ],
+  "capabilities": [
+    "list_pages",
+    "list_databases",
+    "get_page",
+    "get_database",
+    "query_database",
+    "get_page_blocks",
+    "sync"
+  ],
+  "provider": "Notion",
+  "service": "Notion",
+  "connector_name": "Notion",
+  "category": "productivity",
+  "api_version": "2022-06-28",
+  "base_url": "https://api.notion.com/v1",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Search all accessible pages and databases, normalize, and return SyncResult.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_pages",
+      "name": "List Pages",
+      "description": "Search for all accessible pages, returning a list of page dicts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_databases",
+      "name": "List Databases",
+      "description": "List all accessible databases, returning a list of database dicts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_page",
+      "name": "Get Page",
+      "description": "GET /pages/{page_id} \u2014 retrieve a single Notion page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_database",
+      "name": "Get Database",
+      "description": "GET /databases/{database_id} \u2014 retrieve a single database schema.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database_id",
+          "label": "Database Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "query_database",
+      "name": "Query Database",
+      "description": "POST /databases/{database_id}/query \u2014 query database rows (pages).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database_id",
+          "label": "Database Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "sorts",
+          "label": "Sorts",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_page_blocks",
+      "name": "Get Page Blocks",
+      "description": "GET /blocks/{page_id}/children \u2014 fetch all block content for a page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_page_content",
+      "name": "Get Page Content",
+      "description": "Alias for get_page_blocks \u2014 kept for backward compatibility.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_id",
+          "label": "Page Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "name": "Search",
+      "description": "POST /search \u2014 return all pages and/or databases matching the query.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "filter_type",
+          "label": "Filter Type",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "NotionConnector",
+  "description": "Shielva connector for Notion."
+}

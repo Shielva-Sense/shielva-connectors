@@ -1,0 +1,187 @@
+{
+  "title": "Klaviyo Connector",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Klaviyo connector** integrates with Klaviyo via the REST API v2024-02-15. It enables Shielva to sync profiles, campaigns, lists, and segments from your Klaviyo account into the knowledge base.\n\nThis connector uses **Private API Key** authentication \u2014 a single `pk_...` key sent as the `Klaviyo-API-Key` Authorization header on every request.\n\n**Key capabilities:**\n- Validate the API key via `GET /accounts` on install and health check\n- Sync all profiles with cursor-based pagination (handles audiences of any size)\n- Sync email campaigns, subscriber lists, and segments\n- Stable document IDs via SHA-256(resource_id)[:16] for deduplication across syncs\n- Automatic retry with exponential back-off for transient errors and rate limits\n- Circuit breaker (threshold: 5 failures, 60s recovery) for health degradation detection",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`klaviyo` \u2014 registered in ACP as **Klaviyo**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Klaviyo, Inc. (Klaviyo REST API v2024-02-15 \u2014 `https://a.klaviyo.com/api/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key format (must start with 'pk_') and calls GET /accounts; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Calls GET /accounts to verify key; returns account organization name in message |\n| `sync()` | Fetches all profiles (cursor-paginated) + campaigns + lists; normalizes to ConnectorDocuments |\n| `list_profiles(page_size, cursor)` | Cursor-paginated GET /profiles |\n| `get_profile(profile_id)` | GET /profiles/{profile_id} for a single profile |\n| `list_lists(page_size)` | GET /lists \u2014 all subscriber lists |\n| `get_list(list_id)` | GET /lists/{list_id} for a single list |\n| `list_campaigns(page_size)` | GET /campaigns \u2014 email campaigns |\n| `list_segments(page_size)` | GET /segments \u2014 audience segments |"
+        }
+      ]
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Klaviyo connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import KlaviyoConnector\n\nconfig = {\n    \"api_key\": \"<password>\"\n}\n\nconnector = KlaviyoConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"klaviyo_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_profiles`\n\n```python\nresult = await connector.list_profiles()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Klaviyo data into Shielva.",
+      "children": []
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **Private API Key** authentication. The key is sent as `Authorization: Klaviyo-API-Key {api_key}` on every request.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` \u2014 create a Private API key in Klaviyo at Account \u2192 Settings \u2192 API Keys. The key starts with `pk_`."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Private API Key | `api_key` | password | Yes | Klaviyo Private API key starting with 'pk_' |"
+        },
+        {
+          "id": "key-scopes",
+          "title": "Required Key Scopes",
+          "content": "| Scope | Permission | Purpose |\n|-------|------------|--------|\n| Profiles | Read | Sync subscriber profiles |\n| Campaigns | Read | Sync email campaigns |\n| Lists | Read | Sync subscriber lists |\n| Segments | Read | Sync audience segments |\n| Accounts | Read | Validate key on install and health check |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Key Validation",
+          "content": "The connector validates the key in two steps:\n1. **Format check** \u2014 the key must start with `pk_`. Public keys (`pk_` prefix with different structure) or test tokens are rejected with INVALID_CREDENTIALS before any network call.\n2. **API validation** \u2014 `GET /accounts` is called. A 401/403 response returns INVALID_CREDENTIALS. Any 5xx or network error returns FAILED."
+        },
+        {
+          "id": "token-security",
+          "title": "Key Security",
+          "content": "Private API keys do not expire unless manually revoked. Shielva stores the key AES-256-GCM encrypted at rest via the vault. Keys can be regenerated at any time from Klaviyo \u2192 Account \u2192 Settings \u2192 API Keys."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `api_key` | Private API Key | `password` | \u2705 | Your Klaviyo Private API key starting with 'pk_'. Found in Klaviyo \u2192 Account \u2192 Settings \u2192 API Keys. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `KlaviyoHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the API key and establishes the connector.\n\n**Steps:**\n1. Check `api_key` is non-empty \u2192 MISSING_CREDENTIALS if not.\n2. Check `api_key` starts with `pk_` \u2192 INVALID_CREDENTIALS if not.\n3. Call `GET /accounts` via `with_retry`.\n4. Extract `organization_name` from first account in response.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Klaviyo \u2014 Acme Corp')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` \u2014 no key\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` \u2014 wrong prefix or 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` \u2014 network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nPings `GET /accounts` and returns health with account name.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Klaviyo \u2014 Acme Corp')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error (circuit breaker not open)\n- `HealthCheckResult(health=OFFLINE, auth_status=FAILED)` on network error (circuit breaker open)"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across three resource types:\n1. **Profiles** \u2014 cursor-paginated via `links.next`, normalized via `normalize_profile()`\n2. **Campaigns** \u2014 single page (no cursor required for typical account sizes), normalized via `normalize_campaign()`\n3. **Lists** \u2014 single page, normalized to simple ConnectorDocuments\n\nCampaign and list failures are non-fatal \u2014 profile sync is the primary resource.\n\n**Parameters:**\n- `full` \u2014 reserved (all syncs are full by default)\n- `since` \u2014 reserved for future incremental support\n- `kb_id` \u2014 knowledge base ID for ingestion (SDK mode only)\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some normalizations fail; `FAILED` when profile API call fails."
+        },
+        {
+          "id": "list-profiles",
+          "title": "list_profiles()",
+          "content": "**Signature:** `async def list_profiles(self, page_size=100, cursor=None) -> dict`\n\nSingle-page call to `GET /profiles`. For multi-page iteration, call repeatedly with the cursor extracted from `links.next`.\n\n**Parameters:**\n- `page_size` \u2014 records per page (max 100)\n- `cursor` \u2014 opaque cursor string from previous page's `links.next`\n\n**Returns:** JSON:API response with `data` list and `links` object."
+        },
+        {
+          "id": "get-profile",
+          "title": "get_profile()",
+          "content": "**Signature:** `async def get_profile(self, profile_id: str) -> dict`\n\nFetches a single profile via `GET /profiles/{profile_id}`.\n\n**Returns:** JSON:API response with `data` containing the profile resource.\n\n**Raises:** `KlaviyoNotFoundError` if the profile does not exist."
+        },
+        {
+          "id": "list-lists",
+          "title": "list_lists()",
+          "content": "**Signature:** `async def list_lists(self, page_size=100) -> dict`\n\nFetches subscriber lists via `GET /lists`.\n\n**Returns:** JSON:API response with `data` list of list resources."
+        },
+        {
+          "id": "get-list",
+          "title": "get_list()",
+          "content": "**Signature:** `async def get_list(self, list_id: str) -> dict`\n\nFetches a single list via `GET /lists/{list_id}`.\n\n**Returns:** JSON:API response with `data` containing the list resource."
+        },
+        {
+          "id": "list-campaigns",
+          "title": "list_campaigns()",
+          "content": "**Signature:** `async def list_campaigns(self, page_size=100) -> dict`\n\nFetches email campaigns via `GET /campaigns` (filtered to channel=email).\n\n**Returns:** JSON:API response with `data` list of campaign resources."
+        },
+        {
+          "id": "list-segments",
+          "title": "list_segments()",
+          "content": "**Signature:** `async def list_segments(self, page_size=100) -> dict`\n\nFetches audience segments via `GET /segments`.\n\n**Returns:** JSON:API response with `data` list of segment resources."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_profile()` and `normalize_campaign()` in `helpers/utils.py`, and `_normalize_list()` in `connector.py`.",
+      "children": [
+        {
+          "id": "profile-document",
+          "title": "Profile ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(profile_id)[:16]>\",\n  \"title\": \"Klaviyo profile: Jane Doe <jane@example.com>\",\n  \"content\": \"Profile ID: profile_abc123\\nName: Jane Doe\\nEmail: jane@example.com\\nPhone: +15551234567\\nCreated: 2024-01-15T10:00:00+00:00\\nLocation: San Francisco, CA, US\",\n  \"source_url\": \"https://www.klaviyo.com/profile/profile_abc123\",\n  \"metadata\": {\n    \"profile_id\": \"profile_abc123\",\n    \"email\": \"jane@example.com\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Doe\",\n    \"phone_number\": \"+15551234567\",\n    \"created\": \"2024-01-15T10:00:00+00:00\",\n    \"updated\": \"2024-06-01T09:00:00+00:00\",\n    \"location\": {\"city\": \"San Francisco\", \"region\": \"CA\", \"country\": \"US\"}\n  }\n}\n```"
+        },
+        {
+          "id": "campaign-document",
+          "title": "Campaign ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(campaign_id)[:16]>\",\n  \"title\": \"Klaviyo campaign: Summer Sale 2024\",\n  \"content\": \"Campaign ID: campaign_xyz789\\nName: Summer Sale 2024\\nStatus: sent\\nScheduled at: 2024-07-01T12:00:00+00:00\",\n  \"source_url\": \"https://www.klaviyo.com/campaign/campaign_xyz789\",\n  \"metadata\": {\n    \"campaign_id\": \"campaign_xyz789\",\n    \"name\": \"Summer Sale 2024\",\n    \"status\": \"sent\",\n    \"scheduled_at\": \"2024-07-01T12:00:00+00:00\",\n    \"created_at\": \"2024-06-25T08:00:00+00:00\",\n    \"updated_at\": \"2024-07-01T12:00:00+00:00\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "The `source_id` field is `SHA-256(klaviyo_resource_id)` truncated to 16 hex characters. This is stable across syncs \u2014 the same Klaviyo profile or campaign always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists."
+        },
+        {
+          "id": "json-api-unwrapping",
+          "title": "JSON:API Unwrapping",
+          "content": "Normalizers handle both wrapped responses (top-level API response with `{\"data\": {...}}`) and unwrapped resources (items from a `data` list during pagination). The normalizer inspects the structure and extracts attributes accordingly."
+        }
+      ]
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Klaviyo, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: circuit_breaker, cursor_pagination, error_handling, normalizer, pagination, rate_limiting, retry.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `KlaviyoError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nKlaviyoError(Exception)\n  KlaviyoAuthError(KlaviyoError)\n  KlaviyoInvalidKeyError(KlaviyoAuthError)\n  KlaviyoRateLimitError(KlaviyoError)\n  KlaviyoNotFoundError(KlaviyoError)\n  KlaviyoNetworkError(KlaviyoError)\n  KlaviyoServerError(KlaviyoError)\n```\n\n### When each is raised\n\n- **`KlaviyoError`** \u2014 Base exception for all Klaviyo connector errors.\n- **`KlaviyoAuthError`** \u2014 Raised when Klaviyo rejects the API key (401/403).\n- **`KlaviyoInvalidKeyError`** \u2014 Raised when the API key format is invalid or does not start with 'pk_'.\n- **`KlaviyoRateLimitError`** \u2014 Raised on 429 Too Many Requests from Klaviyo.\n- **`KlaviyoNotFoundError`** \u2014 Raised when a requested Klaviyo resource does not exist (404).\n- **`KlaviyoNetworkError`** \u2014 Raised on transient network failures (timeouts, connection errors).\n- **`KlaviyoServerError`** \u2014 Raised on 5xx responses from Klaviyo.\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd klaviyo_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **95** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `KLAVIYO_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "The most common failure modes for the Klaviyo connector and how to resolve them.\n\n| Symptom | Probable cause | Resolution |\n|---------|----------------|------------|\n| `401 Unauthorized` on every call | API key revoked, OAuth token expired without a valid refresh token, or wrong account | Re-run the install flow with fresh credentials; check the provider audit log for forced revocation |\n| `403 Forbidden` on specific endpoints | Authenticated identity lacks the required scope or role | Grant the missing scope (see **Authentication**), then re-authorize |\n| `404 Not Found` for resources that should exist | Tenant / workspace ID mismatch \u2014 credentials belong to a different scope | Verify the workspace ID in `install_fields` matches the credential's scope |\n| `429 Too Many Requests` storm | Sync running concurrently with another integration that shares the rate-limit bucket | Stagger sync schedules; the connector already retries with backoff but cannot exceed the provider's per-account quota |\n| Sync returns `PARTIAL` status | One or more resource types failed (see `SyncResult.errors`) | Re-run sync; if the same resource fails repeatedly, inspect the error in the audit log and open an issue |\n| `CircuitBreakerOpen` raised | 5 consecutive failures tripped the breaker | Wait 30s \u2014 the breaker self-heals \u2014 or call `health_check()` to force a probe |\n| Connector loads but `health_check()` reports `unhealthy` | Credentials present but invalid | Inspect `health.error` for the upstream message; usually a typo'd key or revoked grant |\n| `MissingConfigError` at startup | Required `install_field` not supplied | Re-install via the UI and fill the highlighted field |\n\n### Diagnostic checklist\n\n1. `await connector.health_check()` \u2014 quickest probe; returns the upstream's verbatim error if the credentials are bad.\n2. Check the connector audit entries in shielva-sop \u2014 every API call is logged with `outcome` (`Success`/`Denied`/`Failure`) and a `correlation_id`.\n3. Reproduce the failing call in isolation with `curl` against the provider API using the same credentials \u2014 if curl also fails, the credentials are the problem, not the connector.\n4. Inspect `connector.metrics` if you have observability enabled \u2014 request counts, error rates, and p99 latency per method are exported.",
+      "children": []
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Klaviyo account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Klaviyo against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Klaviyo propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `KlaviyoConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Klaviyo connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Klaviyo connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
+    }
+  ]
+}

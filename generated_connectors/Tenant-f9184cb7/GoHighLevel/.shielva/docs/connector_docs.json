@@ -1,0 +1,74 @@
+{
+  "title": "GoHighLevel Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**GoHighLevel (HighLevel / LeadConnector)** is an all-in-one CRM, marketing-automation, sales pipeline + multi-channel messaging platform exposing a REST API under `https://services.leadconnectorhq.com`. This connector — `GoHighLevelConnector` (`CONNECTOR_TYPE = \"gohighlevel\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a HighLevel sub-account (location):\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Locations | `/locations` | List + read sub-accounts |\n| Contacts | `/contacts` | List, get, create, update, delete |\n| Opportunities | `/opportunities` | List, get, create, update CRM opportunities |\n| Conversations | `/conversations` | List, get + send messages (SMS/Email/IG/FB) |\n| Calendars | `/calendars` | List calendars |\n| Pipelines | `/opportunities/pipelines` | List sales pipelines + stages |\n| Users | `/users` | List users in a location |\n| Campaigns | `/campaigns` | List marketing campaigns |\n| Custom Fields | `/locations/{id}/customFields` | List location custom fields |\n| Tags | `/locations/{id}/tags` | List location tags |\n\nThe connector normalises contacts + opportunities + conversations into `NormalizedDocument` (id = `f\"{connector_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::GoHighLevelHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a HighLevel API key\n\n1. Sign in to https://app.gohighlevel.com.\n2. For a **location** key: open the location → **Settings → Business Profile → API Key → Generate**.\n3. For an **agency** key: **Agency Settings → API Key → Generate**.\n4. Copy the API key — HighLevel shows the full token once.\n5. (Optional) Copy the **Location ID** from the URL of the location, or from **Settings → Company Info**.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → GoHighLevel**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `location_id` (text, optional) | Default location — methods accept override per call |\n| `base_url` (text, optional) | Override `https://services.leadconnectorhq.com` |\n| `api_version` (text, optional) | Defaults to `2021-07-28` (current GA contract) |\n\nClick **Install**. `install()` validates `api_key` is non-empty (it does NOT call the API), initialises the `GoHighLevelHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()`. With `location_id` set, it probes `GET /locations/{id}`; otherwise it lists 1 location. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429/5xx → retried with exponential backoff."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "GoHighLevel REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance for this code path, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent in the `Authorization` header as `Bearer <api_key>`.\n- `Version` is a **mandatory** header on every request (defaults to `2021-07-28`).\n- `locationId` is a query/body field on most resource endpoints — sent automatically from the install field when calls omit it.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Initialises `GoHighLevelHTTPClient`. Does **not** call any HighLevel endpoint. |\n| `authorize(...)` | Returns a `TokenInfo` wrapping the api_key — no token exchange. |\n| `health_check()` | `GET /locations/{location_id}` if set, else `GET /locations/search?limit=1`. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_key>\nVersion:        <api_version>      ← defaults to 2021-07-28\nContent-Type:   application/json\nAccept:         application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Authorization Bearer token |\n| `location_id` | text | no | `self.location_id` | Default location for site-scoped calls |\n| `api_version` | text | no | `self.api_version` (default `2021-07-28`) | `Version` header value |\n| `base_url` | text | no | `self.base_url` (default `https://services.leadconnectorhq.com`) | Override host for proxies / staging |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 100) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_GHL_BASE = \"https://services.leadconnectorhq.com\"\n_DEFAULT_API_VERSION = \"2021-07-28\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `GoHighLevelConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::GoHighLevelHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; initialise `GoHighLevelHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo wrapping the api_key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /locations/{location_id}` if set, otherwise `GET /locations/search?limit=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates HighLevel contacts + opportunities + conversations → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-locations",
+          "title": "Locations",
+          "content": "### `async list_locations(*, limit=20, skip=0) -> Dict`\n`GET /locations/search?limit={N}&skip={S}`.\n\n### `async get_location(location_id) -> Dict`\n`GET /locations/{locationId}`."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(*, location_id=None, limit=20, page=1, query=None) -> Dict`\n`GET /contacts/?locationId=&limit=&page=&query=`.\n\n### `async get_contact(contact_id) -> Dict`\n`GET /contacts/{contactId}`.\n\n### `async create_contact(payload) -> Dict`\n`POST /contacts/` — install-field `location_id` injected when payload omits `locationId`.\n\n### `async update_contact(contact_id, payload) -> Dict`\n`PUT /contacts/{contactId}`.\n\n### `async delete_contact(contact_id) -> Dict`\n`DELETE /contacts/{contactId}`."
+        },
+        {
+          "id": "api-opportunities",
+          "title": "Opportunities",
+          "content": "### `async list_opportunities(*, location_id=None, pipeline_id=None, limit=20, page=1) -> Dict`\n`GET /opportunities/search?location_id=&pipeline_id=&limit=&page=`.\n\n### `async get_opportunity(opportunity_id) -> Dict`\n`GET /opportunities/{opportunityId}`.\n\n### `async create_opportunity(payload) -> Dict`\n`POST /opportunities/` — install-field `location_id` injected when omitted.\n\n### `async update_opportunity(opportunity_id, payload) -> Dict`\n`PUT /opportunities/{opportunityId}`."
+        },
+        {
+          "id": "api-conversations",
+          "title": "Conversations",
+          "content": "### `async list_conversations(*, location_id=None, contact_id=None, limit=20) -> Dict`\n`GET /conversations/search?locationId=&contactId=&limit=`.\n\n### `async get_conversation(conversation_id) -> Dict`\n`GET /conversations/{conversationId}`.\n\n### `async send_message(conversation_id, payload) -> Dict`\n`POST /conversations/messages` — `conversationId` is injected from the path arg. Payload carries `type` (SMS/Email/FB/IG), `message`, and `contactId`."
+        },
+        {
+          "id": "api-other",
+          "title": "Calendars · Pipelines · Users · Campaigns · Custom Fields · Tags",
+          "content": "### `async list_calendars(*, location_id=None) -> Dict`\n`GET /calendars/?locationId=`.\n\n### `async list_pipelines(*, location_id=None) -> Dict`\n`GET /opportunities/pipelines?locationId=`.\n\n### `async list_users(*, location_id=None) -> Dict`\n`GET /users/?locationId=`.\n\n### `async list_campaigns(*, location_id=None) -> Dict`\n`GET /campaigns/?locationId=`.\n\n### `async list_custom_fields(location_id) -> Dict`\n`GET /locations/{locationId}/customFields`.\n\n### `async list_tags(location_id) -> Dict`\n`GET /locations/{locationId}/tags`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nGoHighLevelError                         # base; carries status_code + response_body\n├── GoHighLevelAuthError                  # 401 / 403\n├── GoHighLevelBadRequestError            # 400 / 422\n├── GoHighLevelNotFoundError              # 404\n├── GoHighLevelConflictError              # 409\n├── GoHighLevelRateLimitError             # 429 — retry_after_s\n└── GoHighLevelServerError                # 5xx\n```\n\nBack-compat aliases preserved:\n```\nGoHighLevelNetworkError = GoHighLevelServerError\nGoHighLevelNotFound     = GoHighLevelNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `GoHighLevelNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nother → ConnectorStatus(UNHEALTHY, FAILED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-paste the key. HighLevel only shows the full secret once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from HighLevel — key lacks scope or is for the wrong sub-account | Regenerate at the **location** where you need access; or use an agency key if you need cross-location reach. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — API key revoked / wrong header | Verify `Authorization: Bearer ...` is sent (the client does this automatically; check `api_key` install field for stray whitespace). |\n| `gohighlevel.http.retry` warnings spike | Hitting 429 (HighLevel per-minute rate cap) | The client retries with exponential backoff. Reduce concurrency or lower `rate_limit_per_min`. |\n| 404 on a location-scoped call | Wrong `location_id` or contact deleted | Verify the location_id against `list_locations()`; confirm contact exists. |\n| `Version header missing` error from HighLevel | `api_version` install field was cleared | Reset to `2021-07-28` — HighLevel rejects requests without a Version header. |\n| `ImportError: cannot import name 'GoHighLevelNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `GoHighLevelNetworkError = GoHighLevelServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}

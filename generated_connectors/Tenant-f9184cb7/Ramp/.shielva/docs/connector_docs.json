@@ -1,0 +1,74 @@
+{
+  "title": "Ramp Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Ramp** is a corporate-card and spend-management platform exposing a REST API under `https://api.ramp.com/developer/v1`. This connector — `RampConnector` (`CONNECTOR_TYPE = \"ramp\"`, `AUTH_TYPE = \"oauth2_client_credentials\"`) — wraps the operational surfaces a Shielva tenant typically needs from Ramp:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Users | `/users`, `/users/deferred` | List, get, invite |\n| Cards | `/cards` | List, get |\n| Transactions | `/transactions` | List, get |\n| Departments | `/departments` | List |\n| Locations | `/locations` | List |\n| Reimbursements | `/reimbursements` | List |\n| Bills | `/bills` | List |\n| Vendors | `/vendors` | List |\n| Limits | `/limits` | List |\n| Memos | `/memos` | List, get |\n\nThe connector normalises users + transactions into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), refreshes the OAuth2 access_token on 401 (exactly once per request), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::RampHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate Ramp API credentials\n\n1. Sign in to https://app.ramp.com.\n2. Open **Settings → Developer → API → Create new app**.\n3. Grant the scopes you need (`users:read`, `users:write`, `cards:read`, `transactions:read`, `reimbursements:read`, `bills:read`, `vendors:read`, `departments:read`, `locations:read`, `limits:read`, `memos:read`).\n4. Copy the **Client ID** and **Client Secret** — Ramp shows the secret only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Ramp**, fill in:\n\n| Field | Value |\n|---|---|\n| `client_id` | OAuth2 client_id from step 4 |\n| `client_secret` (secret) | OAuth2 client_secret from step 4 |\n| `scopes` (optional) | Override default scope list |\n| `base_url` (optional) | Override `https://api.ramp.com/developer/v1` |\n| `token_url` (optional) | Override `https://api.ramp.com/developer/v1/token` |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `client_id` + `client_secret` are present and mints a probe access_token. On 401 → `UNHEALTHY + INVALID_CREDENTIALS`. On success → `HEALTHY + AUTHENTICATED`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which lists 1 user as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx/network → `OFFLINE + CONNECTED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Ramp Developer API uses **OAuth2 client_credentials** (`AUTH_TYPE = \"oauth2_client_credentials\"`). No user-facing auth-code dance, no refresh token — the client_id+client_secret are exchanged directly for an access_token.\n\n### Credential model\n\n- `client_id` and `client_secret` form the HTTP Basic credential on the `/token` request.\n- Token grant body: `grant_type=client_credentials` (+ optional `scope=<space-separated>`).\n- The access_token is cached in memory inside `RampHTTPClient` with a 60 s safety margin before expiry; re-minted on first call / expiry.\n- A 401 from the API invalidates the cached token and triggers exactly one fresh mint + retry. A second 401 surfaces as `RampAuthError`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `client_id` + `client_secret`. Probes the token endpoint. Returns `AUTHENTICATED+HEALTHY` on success. |\n| `authorize(...)` | Runs the client_credentials grant and returns a `TokenInfo` (carries the access_token, expires_at, scopes). |\n| `health_check()` | `GET /users?page_size=1` — minimal probe. |\n| `ensure_token()` | Handled inside `RampHTTPClient._get_token()`. |\n\n### Header contract\n\nEvery outbound API request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:   application/json\nAccept:         application/json\nIdempotency-Key: <uuid>   ← POST mutations only\n```\n\nToken-mint request:\n```\nPOST https://api.ramp.com/developer/v1/token\nAuthorization: Basic base64(client_id:client_secret)\nContent-Type: application/x-www-form-urlencoded\n\ngrant_type=client_credentials&scope=...\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `client_id` | string | yes | `self.client_id` | OAuth2 client_id |\n| `client_secret` | secret | yes | `self.client_secret` | OAuth2 client_secret |\n| `scopes` | string | no | `self.scopes` | Space-separated scope list |\n| `base_url` | string | no | `self.base_url` (default `https://api.ramp.com/developer/v1`) | Sandbox / regional override |\n| `token_url` | string | no | `self.token_url` (default `https://api.ramp.com/developer/v1/token`) | Sandbox / regional override |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"client_id\", \"client_secret\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_RAMP_BASE = \"https://api.ramp.com/developer/v1\"\n_RAMP_TOKEN_URL = \"https://api.ramp.com/developer/v1/token\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `RampConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::RampHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `client_id` + `client_secret`, mint a probe access_token via the OAuth2 client_credentials grant. Returns `HEALTHY + AUTHENTICATED` on success.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nRuns the client_credentials grant and returns a TokenInfo. No auth-code is used.\n\n### `async health_check() -> ConnectorStatus`\nLists 1 user via `GET /users?page_size=1`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Ramp users + transactions → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-users",
+          "title": "Users",
+          "content": "### `async list_users(*, department_id=None, location_id=None, role=None, start=None, page_size=50) -> Dict`\n`GET /users?department_id=&location_id=&role=&start=&page_size=`. Cursor pagination via `start`.\n\n### `async get_user(user_id) -> Dict`\n`GET /users/{user_id}`.\n\n### `async invite_user(first_name, last_name, email, role=\"BUSINESS_USER\", department_id=None, location_id=None, idempotency_key=None) -> Dict`\n`POST /users/deferred` with the user payload. Pass `idempotency_key` to safely retry the invite."
+        },
+        {
+          "id": "api-cards",
+          "title": "Cards",
+          "content": "### `async list_cards(*, user_id=None, start=None, page_size=50, is_physical=None) -> Dict`\n`GET /cards`. `is_physical` is encoded as `\"true\"` / `\"false\"`.\n\n### `async get_card(card_id) -> Dict`\n`GET /cards/{card_id}`."
+        },
+        {
+          "id": "api-transactions",
+          "title": "Transactions",
+          "content": "### `async list_transactions(*, start=None, end=None, sk_category_id=None, merchant_id=None, page_size=50) -> Dict`\n`GET /transactions`. `start`/`end` are ISO-8601 timestamps and map to `from_date` / `to_date` query params.\n\n### `async get_transaction(transaction_id) -> Dict`\n`GET /transactions/{transaction_id}`."
+        },
+        {
+          "id": "api-org",
+          "title": "Departments · Locations · Vendors · Bills · Reimbursements · Limits",
+          "content": "### `async list_departments(*, start=None, page_size=50) -> Dict`\n`GET /departments`.\n\n### `async list_locations(*, start=None, page_size=50) -> Dict`\n`GET /locations`.\n\n### `async list_reimbursements(*, start=None, page_size=50, user_id=None) -> Dict`\n`GET /reimbursements`.\n\n### `async list_bills(*, page_size=50, start=None) -> Dict`\n`GET /bills`.\n\n### `async list_vendors(*, page_size=50, start=None) -> Dict`\n`GET /vendors`.\n\n### `async list_limits(*, page_size=50, start=None, user_id=None) -> Dict`\n`GET /limits`."
+        },
+        {
+          "id": "api-memos",
+          "title": "Memos",
+          "content": "### `async list_memos(*, page_size=50, start=None) -> Dict`\n`GET /memos`.\n\n### `async get_memo(memo_id) -> Dict`\n`GET /memos/{memo_id}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nRampError                              # base; carries status_code + response_body\n├── RampAuthError                      # 401 / 403\n├── RampBadRequestError                # 400\n├── RampNotFoundError                  # 404\n├── RampConflictError                  # 409\n├── RampRateLimitError                 # 429 — retry_after_s\n└── RampServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nRampNetworkError = RampServerError     # legacy name from older code\nRampNotFound     = RampNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 403 / 404 | Raise immediately |\n| 401 | Invalidate cached token, mint fresh, retry once. A second 401 raises `RampAuthError`. |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s); honours `Retry-After` header; retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `RampNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)  ← via install probe\n429 → ConnectorStatus(DEGRADED,  CONNECTED)            ← logged as warning\n5xx → ConnectorStatus(OFFLINE,   CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `client_id` or `client_secret` blank | Re-enter both in ACP. Ramp shows the secret only once at creation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at install | 401 from Ramp `/token` — credentials wrong | Verify the client_id matches the secret. Rotate the secret in Ramp Dashboard → Developer → API. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | Two consecutive 401s from `/users` even after token refresh | The token grant succeeded but the API still rejects — usually missing scopes. Edit the Ramp app and grant `users:read`. |\n| `ramp.http.retry` warnings spike | Hitting 429 (Ramp per-minute rate cap) | The client retries with exponential backoff and honours `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_user(uid)` / `get_card(cid)` / `get_transaction(tid)` | Stale id, or resource lives in a different Ramp account | Verify the id in the Ramp dashboard. The connector only sees the account that owns the OAuth2 app. |\n| `ImportError: cannot import name 'RampNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `RampNetworkError = RampServerError` alias added in `exceptions.py`. |\n| Token mints repeatedly inside a single batch | `expires_in` in the token response is very small (sandbox sometimes returns 60) | Inspect the token response; consider extending `_token_expires_at` margin if your account has unusually short TTLs. |"
+    }
+  ]
+}

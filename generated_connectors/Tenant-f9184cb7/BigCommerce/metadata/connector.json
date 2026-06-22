@@ -1,0 +1,169 @@
+{
+  "connector_type": "bigcommerce",
+  "name": "BigCommerce",
+  "display_name": "BigCommerce",
+  "description": "Connect to your BigCommerce store to sync products, orders, and customers into Shielva.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "store_hash",
+      "label": "Store Hash",
+      "type": "string",
+      "required": true,
+      "description": "Your BigCommerce store hash from the store URL (e.g. 'abc123' from abc123.mybigcommerce.com or store-abc123.mybigcommerce.com).",
+      "help": "Store Hash."
+    },
+    {
+      "key": "access_token",
+      "label": "API Access Token",
+      "type": "password",
+      "required": true,
+      "description": "BigCommerce API access token. Generate from BigCommerce Control Panel \u2192 Advanced Settings \u2192 API Accounts.",
+      "help": "API Access Token."
+    }
+  ],
+  "capabilities": [
+    "list_products",
+    "get_product",
+    "list_orders",
+    "get_order",
+    "list_customers",
+    "get_customer",
+    "sync"
+  ],
+  "provider": "bigcommerce",
+  "service": "bigcommerce",
+  "service_slug": "bigcommerce",
+  "category": "ecommerce",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync products, orders, and customers from BigCommerce.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Return products for a single page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_product",
+      "name": "Get Product",
+      "description": "Calls get_product().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "Return orders for a single page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "Calls get_order().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "order_id",
+          "label": "Order Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return customers for a single page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Calls get_customer().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

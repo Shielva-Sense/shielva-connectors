@@ -1,0 +1,172 @@
+{
+  "connector_type": "shopify",
+  "name": "Shopify",
+  "provider": "Shopify",
+  "service": "shopify",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "shop_domain",
+      "label": "Shop Domain",
+      "type": "string",
+      "required": true,
+      "placeholder": "mystore.myshopify.com",
+      "help": "Shop Domain."
+    },
+    {
+      "key": "access_token",
+      "label": "Admin API Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Admin API Access Token."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_products",
+    "list_orders",
+    "list_customers",
+    "list_collections",
+    "get_product"
+  ],
+  "description": "Sync products, orders, and customers from your Shopify store.",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync orders, products, and customers from Shopify.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_orders",
+      "name": "List Orders",
+      "description": "Return all orders, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "created_at_min",
+          "label": "Created At Min",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_order",
+      "name": "Get Order",
+      "description": "Calls get_order().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "order_id",
+          "label": "Order Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Return all products, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "published_status",
+          "label": "Published Status",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_product",
+      "name": "Get Product",
+      "description": "Calls get_product().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "product_id",
+          "label": "Product Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Return all customers, following cursor pagination automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "created_at_min",
+          "label": "Created At Min",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Calls get_customer().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "customer_id",
+          "label": "Customer Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "display_name": "Shopify"
+}

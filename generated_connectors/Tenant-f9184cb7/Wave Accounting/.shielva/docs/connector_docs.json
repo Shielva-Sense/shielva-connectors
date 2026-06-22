@@ -1,0 +1,79 @@
+{
+  "title": "Wave Accounting Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Wave** is an accounting + invoicing SaaS exposing a single **GraphQL endpoint** rather than a REST surface. This connector — `WaveConnector` (`CONNECTOR_TYPE = \"wave\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Wave business:\n\n| Surface | GraphQL ops | Capability |\n|---|---|---|\n| Identity | `user` | Authenticated user node |\n| Businesses | `businesses`, `business(id)` | List + read businesses |\n| Customers | `business.customers`, `customerCreate` | List + create customers |\n| Invoices | `business.invoices`, `invoiceCreate` | List + create invoices |\n| Products | `business.products`, `productCreate` | List + create products |\n| Accounts | `business.accounts` | Read chart of accounts |\n| Transactions | `business.transactions` | List ledger transactions |\n| Sales Taxes | `business.salesTaxes` | List sales-tax rates |\n\n### Why GraphQL not REST\n\nWave's only public surface is `POST https://gql.waveapps.com/graphql/public` with a body of `{\"query\": \"...\", \"variables\": {...}}`. Unlike REST, the *operation name* lives in the request body, not the URL. The connector keeps every query string in `helpers/queries.py` (SOC — `connector.py` never embeds GraphQL literals) and routes each through `client/http_client.py::WaveHTTPClient.execute(query, variables, context)`.\n\nThe connector normalises **customers + invoices** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), inspects GraphQL `errors[]` even on HTTP 200, and never embeds raw HTTP or query strings in `connector.py`."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Wave personal access token\n\n1. Sign in to https://my.waveapps.com.\n2. Open **Settings → API Access → Manage Applications**.\n3. Click **Create token** (or open an existing app and generate a full-access token).\n4. Copy the token value — Wave shows it only once.\n5. Optional: from **Settings → Business Profile**, copy the **Business ID** if you want to scope this connector to a single business by default.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Wave Accounting**, fill in:\n\n| Field | Value |\n|---|---|\n| `access_token` (secret) | Personal access token from step 4 |\n| `business_id` (string, optional) | Default Business ID — methods accept a per-call override |\n| `base_url` (string, optional) | Override `https://gql.waveapps.com/graphql/public` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `access_token` is present (it does NOT call the API), initialises the `WaveHTTPClient` with a `Bearer` header, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()`, which posts a minimal `{ user { id } }` GraphQL query. On 2xx → `HEALTHY + CONNECTED`. On 401 → `OFFLINE + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + FAILED`. On 429 → `DEGRADED + CONNECTED` with a structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Wave's public API uses **personal-access-token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `access_token` is sent in the `Authorization` header as `Bearer <token>` — this is the standard form, *not* the raw-header form used by some providers (Wix sends the key raw with no `Bearer ` prefix; Wave does the opposite).\n- `business_id` is sent as a GraphQL **variable** in the query body, not a header. It's optional at install time; methods that need it accept a per-call override.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `access_token`. Initialises `WaveHTTPClient`. Does **not** call any Wave endpoint. |\n| `authorize(...)` | Returns a `TokenInfo(access_token=<the same token>, token_type=\"api_key\")` — there is no token exchange. |\n| `health_check()` | `POST { \"query\": \"{ user { id } }\", \"variables\": {} }` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None on the platform side; the token lives only in `self.config[\"access_token\"]`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <access_token>\nContent-Type:  application/json\nAccept:        application/json\n```\n\n### GraphQL request envelope\n\nEvery operation — query or mutation — POSTs:\n\n```json\n{\n  \"query\":     \"<one of the strings in helpers/queries.py>\",\n  \"variables\": { ... }\n}\n```\n\nSuccessful response:\n\n```json\n{ \"data\": { \"<op>\": { ... } } }\n```\n\nPartial / total failure on HTTP 200 (GraphQL spec):\n\n```json\n{ \"data\": null, \"errors\": [ { \"message\": \"...\", \"extensions\": { \"code\": \"...\" } } ] }\n```\n\nThe client inspects `errors[]` on every payload — even HTTP 200 — and raises `WaveError` so the orchestrator can rely on `data` being well-formed."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `access_token` | secret | yes | `self.access_token` | Bearer token sent in Authorization header |\n| `business_id` | string | no | `self.default_business_id` | Default Business ID; per-call arg can override |\n| `base_url` | string | no | `self.base_url` (defaults to `https://gql.waveapps.com/graphql/public`) | Override for Wave sandbox or proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"access_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_WAVE_BASE = \"https://gql.waveapps.com/graphql/public\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `WaveConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::WaveHTTPClient`; query strings live in `helpers/queries.py`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `access_token`; initialise `WaveHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose access_token is the configured personal access token.\n\n### `async health_check() -> ConnectorStatus`\nProbes `{ user { id } }`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nIterates Wave customers + invoices across every accessible business → `NormalizedDocument` → `ingest_document`. Returns `SyncResult` with `documents_synced / _failed / _found`."
+        },
+        {
+          "id": "api-identity",
+          "title": "Identity",
+          "content": "### `async get_user() -> Dict`\nGraphQL `{ user { id defaultEmail firstName lastName } }` — returns the `user` sub-object.\n\n### `async list_users() -> Dict`\nWave's public schema exposes only the authenticated user — this method wraps `get_user` in a connection-style envelope (`{ users: { pageInfo, edges: [{ node: user }] } }`) so list-page callers can treat it uniformly with the other `list_*` methods."
+        },
+        {
+          "id": "api-businesses",
+          "title": "Businesses",
+          "content": "### `async list_businesses(*, page=1, page_size=50) -> Dict`\nGraphQL `businesses(page: $page, pageSize: $pageSize)`.\n\n### `async get_business(business_id=None) -> Dict`\nGraphQL `business(id: $id)`. Uses the configured `default_business_id` when no arg is passed."
+        },
+        {
+          "id": "api-customers",
+          "title": "Customers",
+          "content": "### `async list_customers(business_id=None, *, page=1, page_size=50) -> Dict`\nGraphQL `business(id).customers(page, pageSize)`.\n\n### `async get_customer(customer_id, business_id=None) -> Dict`\nGraphQL `business(id).customer(id)`.\n\n### `async create_customer(name, email=None, business_id=None) -> Dict`\nGraphQL `customerCreate(input: CustomerCreateInput!)` mutation. The connector wraps the simple `name` + `email` args into Wave's `CustomerCreateInput` shape: `{ businessId, name, email? }`."
+        },
+        {
+          "id": "api-invoices",
+          "title": "Invoices",
+          "content": "### `async list_invoices(business_id=None, *, page=1, page_size=50, status=None) -> Dict`\nGraphQL `business(id).invoices(page, pageSize, status)`. `status` is uppercased before sending (e.g. `\"paid\"` → `\"PAID\"`).\n\n### `async get_invoice(invoice_id, business_id=None) -> Dict`\nGraphQL `business(id).invoice(id)` — also fetches `items[]` for the requested invoice.\n\n### `async create_invoice(customer_id, items, business_id=None, due_date=None) -> Dict`\nGraphQL `invoiceCreate(input: InvoiceCreateInput!)` mutation. `items` is a list of `{product_id, quantity?, unit_price?, description?}` dicts; the connector translates snake_case → camelCase (Wave's `InvoiceCreateItemInput` uses `productId`, `unitPrice`)."
+        },
+        {
+          "id": "api-products",
+          "title": "Products",
+          "content": "### `async list_products(business_id=None, *, page=1, page_size=50) -> Dict`\nGraphQL `business(id).products(page, pageSize)`.\n\n### `async create_product(name, unit_price, business_id=None, *, description=None, income_account_id=None) -> Dict`\nGraphQL `productCreate(input: ProductCreateInput!)` mutation."
+        },
+        {
+          "id": "api-ledger",
+          "title": "Accounts · Transactions · Sales taxes",
+          "content": "### `async list_accounts(business_id=None) -> Dict`\nGraphQL `business(id).accounts` — full chart of accounts.\n\n### `async list_transactions(business_id=None, *, from_date=None, to_date=None, page=1, page_size=50) -> Dict`\nGraphQL `business(id).transactions(page, pageSize, from, to)`. Date args are ISO `YYYY-MM-DD`.\n\n### `async list_sales_taxes(business_id=None) -> Dict`\nGraphQL `business(id).salesTaxes` — sales-tax rate registry."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nWaveError                              # base; carries status_code + response_body\n├── WaveAuthError                      # 401 / 403\n├── WaveBadRequestError                # 400\n├── WaveValidationError                # client-side input validation\n├── WaveNotFoundError                  # 404\n├── WaveRateLimitError                 # 429 — retry_after_s\n└── WaveServerError                    # 5xx\n```\n\nBack-compat aliases preserved:\n```\nWaveNetworkError = WaveServerError     # legacy name from older code\nWaveNotFound     = WaveNotFoundError\n```\n\n### GraphQL-level errors (HTTP 200 + errors[])\n\nThe GraphQL spec allows a 200 OK response to still carry partial validation / authorization errors in `errors[]`. `WaveHTTPClient._post` inspects this on every payload and raises `WaveError` carrying the joined `errors[*].message` strings so `connector.py` never has to look at `errors[]` itself.\n\n### Retry behaviour (`client/http_client.py::_post`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` | Backoff, retry up to 3, then raise `WaveNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, FAILED)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\n5xx → ConnectorStatus(OFFLINE,   CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `access_token` blank | Re-enter the token in ACP. Wave shows the value only once at generation — rotate if lost. |\n| `ConnectorStatus(UNHEALTHY, FAILED)` at health_check | 403 from Wave — token lacks scope or was revoked | In Wave Dashboard → API Access, generate a new full-access token with the required scopes. |\n| `ConnectorStatus(OFFLINE, TOKEN_EXPIRED)` at health_check | 401 — token revoked or wrong | Regenerate the token in Wave Dashboard and re-enter it in ACP. |\n| `wave.http.retry` warnings spike | Hitting 429 (Wave's per-minute rate cap) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| `WaveError: GraphQL errors: business not found` on every call | Wrong `business_id` | Call `list_businesses()` to confirm the available IDs, then update the install field. |\n| `WaveValidationError: business_id is required` | No `business_id` arg and no `default_business_id` configured | Pass `business_id=` on every call OR set the default in ACP. |\n| `WaveError: GraphQL errors: Cannot query field ...` after Wave schema change | Schema drift between this connector and live Wave API | Update `helpers/queries.py` — every operation string lives there. |\n| `ImportError: cannot import name 'WaveNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `WaveNetworkError = WaveServerError` alias added in `exceptions.py`. |"
+    }
+  ]
+}

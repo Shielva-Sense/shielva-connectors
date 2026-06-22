@@ -1,0 +1,193 @@
+{
+  "connector_type": "salesloft",
+  "connector_id": "salesloft",
+  "name": "Salesloft",
+  "provider": "Salesloft",
+  "service": "Salesloft",
+  "version": "1.0.0",
+  "description": "Sync Salesloft people, cadences, calls, emails, and accounts into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Your Salesloft OAuth app Client ID",
+      "help": "Create an OAuth app at https://developers.salesloft.com and copy the Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Salesloft OAuth app Client Secret",
+      "help": "The Client Secret generated when you registered your OAuth application."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://your-app.com/oauth/callback",
+      "help": "Optional. The redirect URI registered with your Salesloft OAuth application."
+    }
+  ],
+  "oauth2": {
+    "authorization_url": "https://accounts.salesloft.com/oauth/authorize",
+    "token_url": "https://accounts.salesloft.com/oauth/token",
+    "scopes": "read",
+    "token_fields": [
+      "access_token",
+      "refresh_token",
+      "token_expires_at"
+    ]
+  },
+  "features": [
+    "oauth2",
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_ids"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate",
+      "description": "Validate that client_id and client_secret are present.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "Return the Salesloft OAuth2 authorization URL.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /v2/me.json and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Salesloft people, cadences, and calls into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_people",
+      "name": "List People",
+      "description": "Paginated list of Salesloft people (contacts/leads).",
+      "category": "people",
+      "endpoint": "GET /v2/people.json"
+    },
+    {
+      "id": "list_cadences",
+      "name": "List Cadences",
+      "description": "Paginated list of Salesloft cadences (sequences/workflows).",
+      "category": "cadences",
+      "endpoint": "GET /v2/cadences.json"
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Paginated list of Salesloft call activities.",
+      "category": "calls",
+      "endpoint": "GET /v2/activities/calls.json"
+    },
+    {
+      "id": "list_emails",
+      "name": "List Emails",
+      "description": "Paginated list of Salesloft email activities.",
+      "category": "emails",
+      "endpoint": "GET /v2/activities/emails.json"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Paginated list of Salesloft accounts (companies).",
+      "category": "accounts",
+      "endpoint": "GET /v2/accounts.json"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "people",
+    "cadences",
+    "calls",
+    "emails",
+    "accounts"
+  ],
+  "apis": [
+    {
+      "name": "Install / Validate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate that client_id and client_secret are present.",
+      "method": "GET"
+    },
+    {
+      "name": "Authorize",
+      "id": "authorize",
+      "category": "auth",
+      "description": "Build and return the Salesloft OAuth2 authorization URL.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /v2/me.json and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Salesloft people, cadences, and calls into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List People",
+      "id": "list_people",
+      "category": "people",
+      "description": "Calls list_people() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Cadences",
+      "id": "list_cadences",
+      "category": "cadences",
+      "description": "Calls list_cadences() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Calls",
+      "id": "list_calls",
+      "category": "calls",
+      "description": "Calls list_calls() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Emails",
+      "id": "list_emails",
+      "category": "emails",
+      "description": "Calls list_emails() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Accounts",
+      "id": "list_accounts",
+      "category": "accounts",
+      "description": "Calls list_accounts() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Salesloft"
+}

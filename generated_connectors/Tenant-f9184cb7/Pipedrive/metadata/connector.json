@@ -1,0 +1,213 @@
+{
+  "connector_type": "pipedrive",
+  "connector_id": "pipedrive",
+  "name": "Pipedrive",
+  "provider": "Pipedrive",
+  "service": "pipedrive",
+  "version": "1.0.0",
+  "description": "Sync deals, contacts, organizations, and sales pipeline data from Pipedrive CRM.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your Pipedrive API token",
+      "help": "Find your API token in Pipedrive \u2192 Settings \u2192 Personal preferences \u2192 API."
+    },
+    {
+      "key": "company_domain",
+      "label": "Company Domain (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "mycompany (optional)",
+      "help": "Your Pipedrive company domain (e.g. 'mycompany' for mycompany.pipedrive.com). Leave blank for standard cloud deployments."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_deals",
+    "list_persons",
+    "list_organizations",
+    "list_pipelines"
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "stable_ids",
+    "bearer_auth"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate API token by calling GET /users/me.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /users/me and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of Pipedrive deals, persons, and organizations into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "Paginated list of Pipedrive deals filtered by status.",
+      "category": "deals",
+      "endpoint": "GET /deals"
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "Retrieve a single deal by ID.",
+      "category": "deals",
+      "endpoint": "GET /deals/{deal_id}"
+    },
+    {
+      "id": "list_persons",
+      "name": "List Persons",
+      "description": "Paginated list of Pipedrive persons.",
+      "category": "persons",
+      "endpoint": "GET /persons"
+    },
+    {
+      "id": "get_person",
+      "name": "Get Person",
+      "description": "Retrieve a single person by ID.",
+      "category": "persons",
+      "endpoint": "GET /persons/{person_id}"
+    },
+    {
+      "id": "list_organizations",
+      "name": "List Organizations",
+      "description": "Paginated list of Pipedrive organizations.",
+      "category": "organizations",
+      "endpoint": "GET /organizations"
+    },
+    {
+      "id": "list_activities",
+      "name": "List Activities",
+      "description": "Paginated list of Pipedrive activities.",
+      "category": "activities",
+      "endpoint": "GET /activities"
+    },
+    {
+      "id": "list_pipelines",
+      "name": "List Pipelines",
+      "description": "List all sales pipelines.",
+      "category": "pipelines",
+      "endpoint": "GET /pipelines"
+    },
+    {
+      "id": "list_stages",
+      "name": "List Stages",
+      "description": "List all stages across all pipelines.",
+      "category": "stages",
+      "endpoint": "GET /stages"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "deals",
+    "persons",
+    "organizations",
+    "activities",
+    "pipelines",
+    "stages"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate API key by calling GET /users/me.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /users/me and return current health.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync Records",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync Pipedrive deals, persons, and organizations into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Deals",
+      "id": "list_deals",
+      "category": "deals",
+      "description": "Calls list_deals() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Deal",
+      "id": "get_deal",
+      "category": "deals",
+      "description": "Calls get_deal() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Persons",
+      "id": "list_persons",
+      "category": "persons",
+      "description": "Calls list_persons() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Person",
+      "id": "get_person",
+      "category": "persons",
+      "description": "Calls get_person() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Organizations",
+      "id": "list_organizations",
+      "category": "organizations",
+      "description": "Calls list_organizations() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Activities",
+      "id": "list_activities",
+      "category": "activities",
+      "description": "Calls list_activities() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Pipelines",
+      "id": "list_pipelines",
+      "category": "pipelines",
+      "description": "Calls list_pipelines() on the connector.",
+      "method": "GET"
+    },
+    {
+      "name": "List Stages",
+      "id": "list_stages",
+      "category": "stages",
+      "description": "Calls list_stages() on the connector.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Pipedrive"
+}

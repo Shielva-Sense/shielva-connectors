@@ -1,0 +1,4 @@
+# n8n connector — connector-specific deps only.
+# httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx are
+# pre-installed in the shared venv — do NOT re-add them here.
+tenacity>=8.2

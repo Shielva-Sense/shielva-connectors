@@ -1,0 +1,100 @@
+{
+  "connector_type": "ringcentral",
+  "display_name": "RingCentral",
+  "provider": "ringcentral",
+  "service": "ringcentral",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync call logs, messages, extensions, contacts, and meetings from RingCentral cloud communications platform via the RingCentral REST API v1.",
+  "authorization_url": "https://platform.ringcentral.com/restapi/oauth/authorize",
+  "token_url": "https://platform.ringcentral.com/restapi/oauth/token",
+  "api_base": "{server_url}/restapi/v1.0/",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "The Client ID from your RingCentral Developer Portal app."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "The Client Secret from your RingCentral Developer Portal app."
+    },
+    {
+      "key": "server_url",
+      "label": "Server URL (default: https://platform.ringcentral.com)",
+      "type": "string",
+      "required": false,
+      "help": "Use https://platform.ringcentral.com for production or https://platform.devtest.ringcentral.com for sandbox.",
+      "default": "https://platform.ringcentral.com",
+      "placeholder": "https://platform.ringcentral.com"
+    }
+  ],
+  "scopes": [
+    "ReadCallLog",
+    "ReadMessages",
+    "ReadContacts",
+    "Meetings"
+  ],
+  "resources": [
+    "call_logs",
+    "messages",
+    "extensions",
+    "contacts",
+    "meetings"
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all supported resources and return a SyncResult.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_call_logs",
+      "name": "List Call Logs",
+      "description": "Fetch and normalize all call log records (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Fetch and normalize all messages (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_extensions",
+      "name": "List Extensions",
+      "description": "Fetch and normalize all extensions (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Fetch and normalize all contacts (all pages).",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Fetch and normalize all meetings (all pages).",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "RingCentralConnector"
+}

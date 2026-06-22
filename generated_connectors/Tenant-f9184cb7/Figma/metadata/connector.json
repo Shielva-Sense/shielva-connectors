@@ -1,0 +1,199 @@
+{
+  "connector_type": "figma",
+  "display_name": "Figma",
+  "provider": "Figma",
+  "service": "Figma",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Figma to sync design files, projects, components, styles, and comments via the Figma REST API using a Personal Access Token.",
+  "homepage_url": "https://www.figma.com",
+  "docs_url": "https://www.figma.com/developers/api",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "help": "Generate from Figma \u2192 Account Settings \u2192 Security \u2192 Personal access tokens"
+    },
+    {
+      "key": "team_id",
+      "label": "Team ID (optional)",
+      "type": "string",
+      "required": false,
+      "help": "Found in your Figma team URL: figma.com/files/team/{team_id}/..."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "files",
+    "projects",
+    "components",
+    "styles",
+    "comments",
+    "versions"
+  ],
+  "rate_limits": {
+    "requests_per_minute": 100,
+    "notes": "Figma enforces ~100 req/min per token. The connector will receive 429 on breach and retries with exponential backoff."
+  },
+  "auth_notes": "Uses Personal Access Token (PAT) via the X-Figma-Token header. The PAT grants access to all files and teams the Figma account can see.",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Figma resources: projects \u2192 files \u2192 comments, plus components and styles.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return the list of projects for the given team_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_files",
+      "name": "List Files",
+      "description": "Return the list of files for the given project_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "project_id",
+          "label": "Project Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_file",
+      "name": "Get File",
+      "description": "Retrieve the full document tree for a Figma file.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "file_key",
+          "label": "File Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_file_comments",
+      "name": "Get File Comments",
+      "description": "Return all comments for the given file_key.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "file_key",
+          "label": "File Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_comments",
+      "name": "List Comments",
+      "description": "Alias for get_file_comments.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "file_key",
+          "label": "File Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_file_versions",
+      "name": "Get File Versions",
+      "description": "Return version history for the given file_key.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "file_key",
+          "label": "File Key",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_components",
+      "name": "List Components",
+      "description": "Return all published components for the given team (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_team_components",
+      "name": "List Team Components",
+      "description": "Alias for list_components \u2014 kept for backward compatibility.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_styles",
+      "name": "List Styles",
+      "description": "Return all published styles for the given team (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "FigmaConnector"
+}

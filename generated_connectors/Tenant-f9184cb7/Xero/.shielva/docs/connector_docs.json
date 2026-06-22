@@ -1,0 +1,129 @@
+{
+  "title": "Xero Accounting Connector Documentation",
+  "generated_at": "2026-06-19T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Xero Accounting** connector integrates Shielva with the [Xero Accounting API v2](https://developer.xero.com/documentation/api/accounting/overview) to sync invoices, contacts, and chart-of-accounts entries into the Shielva knowledge base.\n\nXero is a leading cloud accounting platform used by millions of small-to-medium businesses worldwide. This connector exposes **9 API methods** across 3 resource domains \u2014 Invoices, Contacts, and Accounts \u2014 and implements a full paginated sync engine that ingests all accounting data as normalized `ConnectorDocument` objects.\n\n**Key capabilities:**\n- OAuth2 PKCE flow \u2014 secure, user-delegated authorization with no password sharing\n- Organisation health check via `GET /Organisation`\n- Full and incremental sync (Invoices + Contacts support `If-Modified-Since` headers)\n- Paginated listing of invoices, contacts, and accounts\n- Direct `get_invoice` and `get_contact` by ID\n- Typed exception hierarchy (auth / rate-limit / not-found / network)\n- Exponential backoff retry (auth errors never retried)\n- All records normalized to `ConnectorDocument` with stable 16-char SHA-256 source IDs"
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Xero connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import XeroConnector\n\nconfig = {\n    \"client_id\": \"<string>\"\n    \"client_secret\": \"<password>\"\n    \"redirect_uri\": \"<string>\"\n    \"xero_tenant_id\": \"<string>\"\n}\n\nconnector = XeroConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"xero_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `list_invoices`\n\n```python\nresult = await connector.list_invoices()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Xero data into Shielva.",
+      "children": []
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The Xero connector uses **OAuth2 PKCE** (Proof Key for Code Exchange) \u2014 Xero's recommended method for web applications.\n\n### Credential Fields\n\n| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| Client ID | `client_id` | string | Yes | OAuth2 Client ID from the Xero Developer Portal |\n| Client Secret | `client_secret` | password | Yes | OAuth2 Client Secret \u2014 shown once at generation |\n| Redirect URI | `redirect_uri` | string | No | Must match a URI registered in your Xero app |\n\n### OAuth2 Flow\n\n1. **install()** \u2014 validates credentials are present, returns `HEALTHY/PENDING`\n2. **authorize()** \u2014 builds a PKCE auth URL with `code_challenge` (S256). Direct the user here.\n3. Xero redirects back with `?code=...` to your redirect URI\n4. **exchange_code(code)** \u2014 exchanges the code for `access_token` + `refresh_token`, then calls `GET /connections` to store `xero_tenant_id`\n5. **refresh_token()** \u2014 renews the access token automatically using the stored refresh token\n\n### Required Scopes\n\n| Scope | Purpose |\n|-------|---------|\n| `accounting.transactions` | Read invoices and financial transactions |\n| `accounting.contacts` | Read contacts (customers, suppliers) |\n| `offline_access` | Obtain a refresh token for unattended renewal |\n\n### Token Storage\n\nAfter `exchange_code()`, the connector stores:\n- `access_token` \u2014 short-lived (30 min), refreshed automatically\n- `refresh_token` \u2014 long-lived (60-day inactivity expiry), used for renewal\n- `xero_tenant_id` \u2014 the selected organisation's tenant ID, required on every API call\n\n### Security\n\n- Credentials are stored AES-256-GCM encrypted in the Shielva vault\n- PKCE prevents authorization code interception attacks\n- Access tokens are never logged or written to disk\n- All communication uses TLS 1.2+"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `client_id` | Client ID | `string` | \u2705 | Found in the Xero Developer Portal under your app's OAuth 2.0 credentials. |\n| `client_secret` | Client Secret | `password` | \u2705 | Found alongside the Client ID in the Xero Developer Portal. Stored encrypted. |\n| `redirect_uri` | Redirect URI | `string` | \u2014 | The OAuth2 callback URI. Must match exactly one of the redirect URIs registered in your Xero app. Leave blank to use the Shielva platform default. |\n| `xero_tenant_id` | Xero Tenant ID | `string` | \u2014 | The Xero organisation (tenant) ID. Set automatically after OAuth2 authorization from GET /connections. Only fill in manually if you need to target a specific organisation. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "The connector exposes 10 public async methods.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "Validates that `client_id` and `client_secret` are present.\n\n```python\nresult = await connector.install()\n# InstallResult(health=HEALTHY, auth_status=PENDING, message='Connector installed \u2014 complete OAuth2 authorization to connect')\n```\n\n**Returns:** `InstallResult` with `health`, `auth_status`, `connector_id`, `message`\n\n**Error cases:**\n- Missing fields \u2192 `OFFLINE / MISSING_CREDENTIALS`"
+        },
+        {
+          "id": "authorize",
+          "title": "authorize()",
+          "content": "Builds and returns the Xero OAuth2 PKCE authorization URL.\n\n```python\nurl = connector.authorize()\n# 'https://login.xero.com/identity/connect/authorize?response_type=code&client_id=...&code_challenge=...'\n```\n\n**Returns:** `str` \u2014 redirect this URL to the user's browser\n\n**Side effect:** stores `_pkce_code_verifier` in `connector.config` for use in `exchange_code()`"
+        },
+        {
+          "id": "exchange-code",
+          "title": "exchange_code(code)",
+          "content": "Exchanges the authorization code for tokens and fetches `xero_tenant_id`.\n\n```python\ntokens = await connector.exchange_code(\"auth_code_from_callback\")\n# {\"access_token\": \"...\", \"refresh_token\": \"...\", \"xero_tenant_id\": \"...\"}\n```\n\n**Returns:** `dict` \u2014 full token response including `xero_tenant_id`\n\n**Side effects:** sets `connector._access_token`, `connector._xero_tenant_id`, updates `connector.config`, creates `connector.http_client`"
+        },
+        {
+          "id": "refresh-token",
+          "title": "refresh_token()",
+          "content": "Renews the access token using the stored refresh token.\n\n```python\ntokens = await connector.refresh_token()\n```\n\n**Returns:** `dict` \u2014 new token response\n\n**Raises:** `XeroAuthError` if no refresh token is stored"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "Pings `GET /Organisation` to verify the connector is still reachable.\n\n```python\nresult = await connector.health_check()\n# HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Xero organisation: Acme Ltd', organisation_name='Acme Ltd')\n```\n\n**Returns:** `HealthCheckResult` with `health`, `auth_status`, `message`, `organisation_name`"
+        },
+        {
+          "id": "sync",
+          "title": "sync(full, since, kb_id)",
+          "content": "Syncs all Xero invoices, contacts, and accounts into the knowledge base.\n\n```python\n# Full sync \u2014 all records\nresult = await connector.sync(full=True, kb_id=\"kb_accounting\")\n\n# Incremental sync \u2014 records modified after a date\nfrom datetime import datetime, timezone\nresult = await connector.sync(\n    full=False,\n    since=datetime(2026, 6, 1, tzinfo=timezone.utc),\n    kb_id=\"kb_accounting\"\n)\n\nprint(result.documents_found)   # total records found\nprint(result.documents_synced)  # successfully normalized + ingested\nprint(result.documents_failed)  # failed normalizations\nprint(result.status)            # COMPLETED / PARTIAL / FAILED\n```\n\n**How it works:**\n1. Paginates through `GET /Invoices` (100 per page, `If-Modified-Since` if incremental)\n2. Paginates through `GET /Contacts` (100 per page, `If-Modified-Since` if incremental)\n3. Fetches `GET /Accounts` (full sync only)\n4. Normalizes each record to `ConnectorDocument` and ingests via `_ingest_document()`"
+        },
+        {
+          "id": "list-invoices",
+          "title": "list_invoices(modified_after)",
+          "content": "Returns a paginated list of invoices.\n\n```python\npage = await connector.list_invoices()\n# {\"Invoices\": [{\"InvoiceID\": \"...\", \"InvoiceNumber\": \"INV-001\", ...}]}\n\n# Incremental \u2014 only invoices modified since Jan 1 2024\npage = await connector.list_invoices(modified_after=\"Mon, 01 Jan 2024 00:00:00 GMT\")\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Invoices`\n**Header:** `If-Modified-Since: {modified_after}` (when provided)"
+        },
+        {
+          "id": "get-invoice",
+          "title": "get_invoice(invoice_id)",
+          "content": "Returns a single invoice by InvoiceID.\n\n```python\nresult = await connector.get_invoice(\"b2c3d4e5-f6a7-48b9-c0d1-e2f3a4b5c6d7\")\n# {\"Invoices\": [{...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Invoices/{invoice_id}`\n\n**Raises:** `XeroNotFoundError` if the invoice does not exist"
+        },
+        {
+          "id": "list-contacts",
+          "title": "list_contacts(modified_after)",
+          "content": "Returns a paginated list of contacts.\n\n```python\npage = await connector.list_contacts()\n# {\"Contacts\": [{\"ContactID\": \"...\", \"Name\": \"Acme Corp\", ...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Contacts`"
+        },
+        {
+          "id": "get-contact",
+          "title": "get_contact(contact_id)",
+          "content": "Returns a single contact by ContactID.\n\n```python\nresult = await connector.get_contact(\"a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890\")\n# {\"Contacts\": [{...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Contacts/{contact_id}`\n\n**Raises:** `XeroNotFoundError` if the contact does not exist"
+        },
+        {
+          "id": "list-accounts",
+          "title": "list_accounts()",
+          "content": "Returns all chart-of-accounts entries.\n\n```python\nresult = await connector.list_accounts()\n# {\"Accounts\": [{\"AccountID\": \"...\", \"Code\": \"200\", \"Name\": \"Sales\", \"Type\": \"REVENUE\", ...}]}\n```\n\n**Xero endpoint:** `GET /api.xro/2.0/Accounts`"
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Every record this connector emits into the Shielva knowledge base is a `ConnectorDocument` \u2014 a normalized envelope with a stable `source_id`, a resource type discriminator, and a payload of provider-specific fields. The shape per resource is documented below; the contract is enforced by the `normalize_*` helpers in `helpers/utils.py` (or `helpers/normalizer.py`).\n\n### Envelope fields (shared)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `source_id` | `str` | SHA-256-derived 16-char ID, stable across resyncs |\n| `resource_type` | `str` | Discriminator: `message`, `contact`, `event`, etc. |\n| `payload` | `dict` | Provider-native fields, untouched JSON-safe values |\n| `created_at` | `str` | RFC 3339 timestamp from the provider |\n| `updated_at` | `str` | RFC 3339 timestamp from the provider |\n| `tenant_id` | `str` | Multi-tenant scope \u2014 never `None` for stored records |\n\n### Resource models\n\n#### `InstallResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `connector_id` | `str` |\n| `message` | `str` |\n\n#### `HealthCheckResult`\n\n| Field | Type |\n|-------|------|\n| `health` | `ConnectorHealth` |\n| `auth_status` | `AuthStatus` |\n| `message` | `str` |\n| `organisation_name` | `str` |\n\n#### `SyncResult`\n\n| Field | Type |\n|-------|------|\n| `status` | `SyncStatus` |\n| `documents_found` | `int` |\n| `documents_synced` | `int` |\n| `documents_failed` | `int` |\n| `message` | `str` |\n\n#### `ConnectorDocument`\n\nNormalized document emitted by the connector into the knowledge base.\n\n| Field | Type |\n|-------|------|\n| `source_id` | `str` |\n| `title` | `str` |\n| `content` | `str` |\n| `connector_id` | `str` |\n| `tenant_id` | `str` |\n| `source_url` | `str` |\n| `metadata` | `dict[str, Any]` |\n\n\n### `source_id` determinism\n\nAll resource IDs are computed by SHA-256-hashing the provider's stable identifier (e.g. message ID, contact ID, event UUID) plus the resource type, then truncating to 16 characters. This guarantees that re-syncing the same resource produces the same Shielva document ID \u2014 enabling idempotent ingestion and incremental updates without duplicates.",
+      "children": []
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "### Document Schema\n\nEach Xero record is normalized to a `ConnectorDocument`:\n\n**Invoice:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('invoice:InvoiceID')[:16]` \u2014 stable 16-char hex |\n| `title` | `Invoice INV-0001 \u2014 Acme Corp` |\n| `content` | Status, contact, total, currency, dates, line items |\n| `source_url` | `https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={id}` |\n| `metadata.entity_type` | `invoice` |\n| `metadata.status` | AUTHORISED / PAID / DRAFT / VOIDED |\n| `metadata.total` | Invoice total amount |\n\n**Contact:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('contact:ContactID')[:16]` |\n| `title` | `Contact: Acme Corp` |\n| `content` | Name, email, status, phone, address |\n| `source_url` | `https://go.xero.com/Contacts/View/{id}` |\n\n**Account:**\n\n| Field | Value |\n|-------|-------|\n| `source_id` | `sha256('account:AccountID')[:16]` |\n| `title` | `Account: 200 \u2014 Sales` |\n| `content` | Code, name, type, status, currency, description |\n\n### Incremental sync\n\nInvoices and Contacts support `If-Modified-Since` header for incremental fetches:\n\n```python\nresult = await connector.sync(full=False, since=last_sync_dt)\n```\n\nAccounts do **not** support incremental sync \u2014 they are only fetched during full sync runs.\n\n### Pagination\n\nAll list endpoints use page-number pagination with page size 100. The connector stops when a response returns fewer than 100 records.\n\n### Recommended schedule\n\n- Full sync on first install\n- Incremental sync every 15\u201330 minutes for near-real-time accounting data\n- Weekly full sync to catch any records missed by incremental"
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `XeroError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nXeroError(Exception)\n  XeroAuthError(XeroError)\n  XeroRateLimitError(XeroError)\n  XeroNotFoundError(XeroError)\n  XeroNetworkError(XeroError)\n```\n\n### When each is raised\n\n- **`XeroError`** \u2014 Base exception for all Xero connector errors.\n- **`XeroAuthError`** \u2014 Raised when Xero rejects the OAuth2 token (401/403).\n- **`XeroRateLimitError`** \u2014 Raised on 429 Too Many Requests from Xero.\n- **`XeroNotFoundError`** \u2014 Raised when a requested Xero resource does not exist (404).\n- **`XeroNetworkError`** \u2014 Raised on transient network failures (timeouts, connection errors).\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "The connector ships with **67 unit tests** \u2014 zero real HTTP calls.\n\n### Run tests\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/xero_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n# Expected: 67 passed\n```\n\n### Coverage\n\n- `install()` \u2014 success, missing client_id, missing client_secret, missing both\n- `authorize()` \u2014 returns URL, stores PKCE verifier, raises on missing client_id, includes scopes\n- `health_check()` \u2014 healthy with org name, no token, auth error, network error, empty org\n- `list_invoices()` \u2014 returns list, with modified_after\n- `get_invoice()` \u2014 returns invoice, raises XeroNotFoundError on 404\n- `list_contacts()` \u2014 returns list, with modified_after\n- `get_contact()` \u2014 returns contact, raises XeroNotFoundError on 404\n- `list_accounts()` \u2014 returns accounts\n- `sync()` \u2014 full sync 3 resources, incremental (accounts skipped), empty results, invoice failure \u2192 FAILED, contact failure \u2192 PARTIAL, pagination (2 pages), KB ingestion callback\n- `normalize_invoice()` \u2014 all fields, optional fields, metadata\n- `normalize_contact()` \u2014 all fields, no phones, metadata\n- `normalize_account()` \u2014 all fields, metadata\n- `_stable_id()` \u2014 16-char length, deterministic, entity-type differentiation\n- Exception classes \u2014 all 5 types, status codes, retry_after default\n- Connector lifecycle \u2014 defaults, config extraction, aclose noop, aclose closes client, async context manager, `_ensure_client` creates + reuses"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "### \"client_id and client_secret are required\"\n\n**Cause:** Connector form submitted with empty credential fields.\n**Fix:** Return to connector settings and fill in both **Client ID** and **Client Secret**.\n\n---\n\n### 401 Unauthorized\n\n**Cause:** Access token is expired or invalid.\n**Fix:** Call `refresh_token()` to renew automatically, or click **Re-authorize** in the Shielva UI to restart the OAuth2 flow.\n\n---\n\n### \"Token expired \u2014 re-authorize the connector\"\n\n**Cause:** Xero refresh tokens expire after 60 days of inactivity.\n**Fix:** Click **Re-authorize** in the connector settings. Your synced data is preserved.\n\n---\n\n### 403 Forbidden\n\n**Cause:** The Xero user who authorized the app does not have permission to the requested resource.\n**Fix:** Ensure the authorizing user has the required Xero role (e.g. Adviser for full accounting access).\n\n---\n\n### 429 Too Many Requests\n\n**Cause:** Xero enforces 60 API calls per minute per app.\n**Fix:** The connector retries automatically with a 60-second backoff. If persistent, reduce sync frequency in Shielva schedule settings.\n\n---\n\n### Sync returns 0 documents\n\n**Cause 1:** Incremental sync with `since` timestamp in the future.\n**Fix:** Run `sync(full=True)` to bypass `If-Modified-Since` filtering.\n\n**Cause 2:** `xero_tenant_id` not stored in config (OAuth not fully completed).\n**Fix:** Re-run `exchange_code()` \u2014 check that `connector.config['xero_tenant_id']` is populated.\n\n---\n\n### Connection errors to api.xero.com\n\n**Cause:** Firewall or egress rules blocking `api.xero.com:443` or `identity.xero.com:443`.\n**Fix:** Add both domains to your egress allowlist. See the Shielva vault egress allowlist documentation.\n\n---\n\n### Tests fail with import errors\n\n**Fix:**\n```bash\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npip install httpx pytest pytest-asyncio pytest-mock\npython -m pytest tests/ -v\n```"
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Xero account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Xero against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Xero propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `XeroConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Xero connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Xero connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
+    }
+  ]
+}

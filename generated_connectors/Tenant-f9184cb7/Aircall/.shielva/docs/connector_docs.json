@@ -1,0 +1,69 @@
+{
+  "title": "Aircall Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Aircall** is a cloud-based business telephony platform exposing a Public REST API at `https://api.aircall.io/v1`. This connector — `AircallConnector` (`CONNECTOR_TYPE = \"aircall\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from an Aircall account:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Lifecycle | `/ping` | Credential health probe |\n| Calls | `/calls` | List + read call events; transfer / assign / start outbound |\n| Users | `/users` | List + read agents |\n| Numbers | `/numbers` | List + read DIDs |\n| Contacts | `/contacts` | CRUD on CRM contacts |\n| Tags | `/tags` | List call tags |\n| Teams | `/teams` | List teams of agents |\n| Webhooks | `/webhooks` | List + create webhook subscriptions |\n\nThe connector normalises calls into `NormalizedDocument` (id = `f\"{connector_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::AircallHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate Aircall API credentials\n\n1. Sign in to https://dashboard.aircall.io.\n2. Open **Integrations & API → Aircall API** (admin only).\n3. Click **Generate an API Key**, give it a descriptive name (e.g. *Shielva ACP*), and select the scopes you need (Calls, Users, Numbers, Contacts, Tags, Teams, Webhooks).\n4. Copy the **API ID** and **API Token** — Aircall shows the token only once.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Aircall**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_id` (text) | API ID from step 4 |\n| `api_token` (secret) | API Token from step 4 |\n| `base_url` (text, optional) | Override `https://api.aircall.io/v1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_id` + `api_token` are present, probes `GET /ping`, and on success persists the credentials and returns `ConnectorStatus(HEALTHY, CONNECTED)`. On 401 it returns `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /ping` as a lightweight probe. The result is mapped via `_STATUS_MAP`:\n\n```\n200 → ConnectorStatus(HEALTHY,   CONNECTED)\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\n```"
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Aircall Public API uses **HTTP Basic authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_id` is the Basic-auth **username**.\n- `api_token` is the Basic-auth **password**.\n- Wire format: `Authorization: Basic base64(api_id:api_token)`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_id` + `api_token`. Probes `GET /ping`. On success, persists config. |\n| `authorize(...)` | Returns a stable `TokenInfo` (access_token = api_token, token_type = `\"Basic\"`) — there is no token exchange. |\n| `health_check()` | `GET /ping` — minimal probe; maps status via `_STATUS_MAP`. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None at the SDK layer; credentials live in `self.config`. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(api_id:api_token)\nContent-Type:  application/json\nAccept:        application/json\n```\n\nThe Basic header is computed lazily in `AircallHTTPClient._basic_auth_header()` so rotating `api_id`/`api_token` via `set_credentials()` takes effect on the next request without re-creating the client."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_id` | string | yes | `self.api_id` | Basic-auth username |\n| `api_token` | secret | yes | `self.api_token` | Basic-auth password |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.aircall.io/v1`) | Sandbox / proxy override |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_id\", \"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_AIRCALL_BASE = \"https://api.aircall.io/v1\"\n```\n\n### Retry tuning (`client/http_client.py` module constants)\n\n```python\n_RETRY_BASE_DELAY_S = 1.0\n_RETRY_BACKOFF      = 2.0\n_RETRY_MAX_DELAY_S  = 32.0\n_RETRY_MAX_ATTEMPTS = 3\n```\n\nChange these in one place; nothing else in the codebase should hardcode retry counts."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `AircallConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::AircallHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_id` + `api_token`; probe `GET /ping`; persist config.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a stable TokenInfo with `token_type=\"Basic\"`.\n\n### `async health_check() -> ConnectorStatus`\n`GET /ping`. Maps failures by `_STATUS_MAP`: 401 → OFFLINE/TOKEN_EXPIRED, 403 → DEGRADED/INVALID_CREDENTIALS, 429 → DEGRADED/CONNECTED, network → OFFLINE/CONNECTED.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages `GET /calls`, normalises each call → `NormalizedDocument` → `ingest_document`. Returns `SyncResult(documents_found/synced/failed, status)`. In incremental mode (`full=False`) it caps at 5 pages."
+        },
+        {
+          "id": "api-calls",
+          "title": "Calls",
+          "content": "### `async list_calls(per_page=50, page=1, from_date=None, to_date=None, direction=None, user_id=None) -> Dict`\n`GET /calls`. `from_date` / `to_date` are Unix epoch seconds (string). `direction` must be `\"inbound\"` or `\"outbound\"` (ValueError otherwise).\n\n### `async get_call(call_id) -> Dict`\n`GET /calls/{call_id}`.\n\n### `async start_outbound_call(user_id, number_id, to) -> Dict`\n`POST /users/{user_id}/calls` with body `{number_id, to}`. `to` is validated by `helpers.utils.is_valid_phone` (loose E.164).\n\n### `async transfer_call(call_id, user_id) -> Dict`\n`POST /calls/{call_id}/transfers` with body `{user_id}`.\n\n### `async assign_call(call_id, user_id) -> Dict`\n`PUT /calls/{call_id}/assignment` with body `{user_id}`."
+        },
+        {
+          "id": "api-users-numbers",
+          "title": "Users + Numbers",
+          "content": "### `async list_users(per_page=50, page=1) -> Dict`\n`GET /users?per_page={N}&page={P}`.\n\n### `async get_user(user_id) -> Dict`\n`GET /users/{user_id}`.\n\n### `async list_numbers(per_page=50, page=1) -> Dict`\n`GET /numbers?per_page={N}&page={P}`.\n\n### `async get_number(number_id) -> Dict`\n`GET /numbers/{number_id}`."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(per_page=50, page=1, search=None) -> Dict`\n`GET /contacts`. `search` filter is forwarded as a query param.\n\n### `async get_contact(contact_id) -> Dict`\n`GET /contacts/{contact_id}`.\n\n### `async create_contact(first_name, last_name, company_name=None, phone_numbers=None, emails=None) -> Dict`\n`POST /contacts`. At least one of `first_name` / `last_name` is required (ValueError otherwise).\n\n### `async update_contact(contact_id, first_name=None, last_name=None, company_name=None, phone_numbers=None, emails=None) -> Dict`\n`POST /contacts/{contact_id}` with a partial payload. At least one field is required.\n\n### `async delete_contact(contact_id) -> Dict`\n`DELETE /contacts/{contact_id}`. Returns `{}` on 204."
+        },
+        {
+          "id": "api-other",
+          "title": "Tags · Teams · Webhooks",
+          "content": "### `async list_tags() -> Dict`\n`GET /tags`.\n\n### `async list_teams(per_page=50) -> Dict`\n`GET /teams?per_page={N}`.\n\n### `async list_webhooks(per_page=50, page=1) -> Dict`\n`GET /webhooks?per_page={N}&page={P}`.\n\n### `async create_webhook(url, events=None) -> Dict`\n`POST /webhooks` with body `{url, events?}`. `url` must be non-empty (ValueError otherwise). `events` is the list of Aircall event types (e.g. `call.created`, `call.ended`, `contact.created`)."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nAircallError                          # base; carries status_code + response_body\n├── AircallAuthError                  # 401 / 403\n├── AircallBadRequestError            # 400\n├── AircallNotFoundError              # 404\n├── AircallConflictError              # 409\n├── AircallRateLimitError             # 429 — retry_after_s\n├── AircallServerError                # 5xx\n└── AircallNetworkError               # transport (timeout / DNS / reset)\n```\n\nBack-compat alias preserved:\n```\nAircallNotFound = AircallNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately (no retry) |\n| 429 | Exponential backoff `_RETRY_BASE_DELAY_S * 2 ** attempt + jitter`, retry up to `_RETRY_MAX_ATTEMPTS=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.NetworkError` / `httpx.ConnectError` | Backoff, retry up to 3, then raise `AircallNetworkError` |\n\nThe orchestration layer (`connector.py`) additionally wraps each public read in `helpers.utils.with_retry(max_retries=3)` so that unexpected transient errors that escape the HTTP client (e.g. JSON-decode flakes on a flaky proxy) get one more chance to converge.\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(OFFLINE,   TOKEN_EXPIRED)\n403 → ConnectorStatus(DEGRADED,  INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\nnetwork → ConnectorStatus(OFFLINE, CONNECTED)\nother → ConnectorStatus(DEGRADED, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_id` or `api_token` blank | Re-enter both in ACP. Aircall shows the token only once at generation — rotate if lost. |\n| `ConnectorStatus(OFFLINE, INVALID_CREDENTIALS)` at install | 401 from `/ping` — wrong api_id / api_token pair | Verify the pair in Aircall Dashboard → Integrations & API. Regenerate the key pair and re-install. |\n| `ConnectorStatus(DEGRADED, INVALID_CREDENTIALS)` at health_check | 403 — API token lacks the scope for a method | In Aircall Dashboard → Integrations & API, edit the key and grant the relevant scopes (Calls / Users / Numbers / Contacts / Tags / Teams / Webhooks). |\n| `aircall.retry` warnings spike | Hitting 429 (Aircall per-token rate cap of ~60/min) | The client retries with exponential backoff. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `get_call` / `get_contact` / `get_number` | Wrong ID, or the resource lives in a different Aircall account | Cross-check the ID in the Aircall Dashboard. IDs are integers, not UUIDs. |\n| `ValueError: 'to' is not a valid phone number` | `start_outbound_call(..., to=...)` received a malformed number | Use E.164 (`+1XXXXXXXXXX`) or a recognised local format. Aircall rejects bare digits without country code. |\n| `ValueError: direction must be 'inbound' or 'outbound'` | `list_calls(direction=...)` received an unsupported value | Only `\"inbound\"` and `\"outbound\"` are valid. |\n| `AircallConflictError` on `create_contact` | Email or phone collides with an existing contact | Use `list_contacts(search=...)` to find the duplicate, then `update_contact` instead. |\n| Webhook deliveries 401 at your endpoint | Aircall signs payloads with a per-account signing secret | Verify the signature using the secret from Aircall Dashboard → Integrations & API → Webhooks (handled outside this connector). |"
+    }
+  ]
+}

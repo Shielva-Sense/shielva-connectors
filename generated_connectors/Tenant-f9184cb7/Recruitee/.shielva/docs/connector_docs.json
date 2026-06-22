@@ -1,0 +1,69 @@
+{
+  "title": "Recruitee Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Recruitee** is a collaborative Applicant Tracking System (ATS) exposing a REST API under `https://api.recruitee.com/c/{company_id}`. This connector — `RecruiteeConnector` (`CONNECTOR_TYPE = \"recruitee\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Recruitee workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Current User | `/current_user` | Token-owner probe used for `install()` + `health_check()` |\n| Candidates | `/candidates` | List, get, create, update, delete candidates |\n| Offers (Jobs) | `/offers` | List, get, create job requisitions |\n| Departments | `/departments` | List company departments used to scope offers |\n| Pipelines | `/pipeline_templates` | List per-company pipeline templates |\n| Stages | `/offers/{offer_id}/stages` | List the stages of a specific offer's pipeline |\n| Tags | `/tags` | List candidate tags |\n| Notes | `/candidates/{id}/notes` | List + create candidate notes |\n| Tasks | `/tasks` | List company tasks (assignable to candidates / offers) |\n| Hiring Managers | `/admins` | List hiring managers / admins |\n\nThe connector normalises Candidates + Offers into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts, `Retry-After` honoured), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::RecruiteeHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Recruitee Personal API Token\n\n1. Sign in to https://app.recruitee.com.\n2. Open **Settings → Apps & Plugins → Personal API Tokens**.\n3. Click **Add new token**, give it a descriptive name (e.g. `Shielva`), and copy the token value. Recruitee shows it only once.\n4. From the URL after login (`https://app.recruitee.com/#/companies/{COMPANY_ID}/...`) copy the numeric **Company ID** — it is also visible under **Settings → Company Profile**.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Recruitee**, fill in:\n\n| Field | Value |\n|---|---|\n| `company_id` (string, required) | Recruitee Company ID from step 4 |\n| `api_token` (secret, required) | Personal API Token from step 3 |\n| `base_url` (string, optional) | Override `https://api.recruitee.com/c` (rarely needed; proxy or sandbox) |\n| `rate_limit_per_min` (number, optional) | Soft cap, default 60 to match Recruitee's standard quota |\n\nClick **Install**. `install()` validates `company_id` + `api_token` are present, then probes `GET /current_user` to confirm the token resolves and binds to the company. On 2xx → `ConnectorStatus(HEALTHY, CONNECTED)`. On 401/403 → `ConnectorStatus(OFFLINE, FAILED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which hits `GET /current_user` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 5xx → `OFFLINE + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Recruitee REST API uses **Personal API Token authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no refresh, no expiry.\n\n### Credential model\n\n- `api_token` is sent in the `Authorization` header as `Bearer <token>` (standard Bearer prefix — different from Wix).\n- `company_id` is **NOT** sent as a header. It is embedded in the URL path: every request goes to `https://api.recruitee.com/c/{company_id}/...`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `company_id` + `api_token` are non-empty. Probes `GET /current_user` to verify the token resolves to the company. Initialises `RecruiteeHTTPClient`. |\n| `authorize(...)` | Returns a `TokenInfo(access_token=api_token, token_type=\"api_key\")` for surface parity — there is no token exchange. |\n| `health_check()` | `GET /current_user` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None. The token lives in `self.config` and is persisted via `save_config()` after install validation. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Bearer <api_token>\nContent-Type:  application/json\nAccept:        application/json\n```\n\nNo `wix-account-id` / `wix-site-id` analogues — Recruitee is single-tenant per company, scoped via the URL path."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `company_id` | string | yes | `self.company_id` | URL path segment `/c/{company_id}` |\n| `api_token` | secret | yes | `self.api_token` | `Authorization: Bearer <token>` header value |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.recruitee.com/c`) | Override for proxy / sandbox |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"company_id\", \"api_token\"]\n_STATUS_MAP = {\n    401: (\"OFFLINE\",   \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\nDEFAULT_BASE_URL = \"https://api.recruitee.com/c\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `RecruiteeConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::RecruiteeHTTPClient`; payload shaping lives in `helpers/utils.py`; response transforms live in `helpers/normalizer.py`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `company_id` + `api_token`; probe `GET /current_user` to confirm the token resolves to the company; initialise `RecruiteeHTTPClient`; persist via `save_config`.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_token auth — returns a `TokenInfo(access_token=api_token, token_type=\"api_key\")`.\n\n### `async health_check() -> ConnectorStatus`\n`GET /current_user`. Classifies failures by `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/candidates` (offset pagination, page size 100) and `/offers`, normalises each item via `helpers.normalizer`, and ingests via `ingest_document`. Returns `SyncResult(documents_found / synced / failed)`."
+        },
+        {
+          "id": "api-candidates",
+          "title": "Candidates",
+          "content": "### `async get_current_user() -> Dict`\n`GET /current_user` — returns the API token's owning user.\n\n### `async list_candidates(*, limit=50, offset=0, query=None, sort=\"by_date\", scope=\"active\", status=None) -> Dict`\n`GET /candidates` — offset pagination with optional full-text `query`, `sort`, `scope`, `status` filters.\n\n### `async get_candidate(candidate_id) -> Dict`\n`GET /candidates/{id}` — full candidate record.\n\n### `async create_candidate(*, name=None, emails=None, phones=None, source=None, offers=None) -> Dict`\n`POST /candidates` — body: `{candidate: {name, emails, phones, source}, offers: [{id}, ...]}`. Empty / None fields are stripped so Recruitee defaults apply.\n\n### `async update_candidate(candidate_id, fields) -> Dict`\n`PATCH /candidates/{id}` — body: `{candidate: {...fields}}`.\n\n### `async delete_candidate(candidate_id) -> Dict`\n`DELETE /candidates/{id}` — 204 returns `{}`."
+        },
+        {
+          "id": "api-offers",
+          "title": "Offers (Jobs)",
+          "content": "### `async list_offers(*, limit=50, offset=0, status=\"published\", scope=\"active\") -> Dict`\n`GET /offers` — list job offers (requisitions).\n\n### `async get_offer(offer_id) -> Dict`\n`GET /offers/{id}`.\n\n### `async create_offer(*, title, position_type, employment_type_code=\"full_time\", department_id=None, location_ids=None, description_html=\"\", requirements_html=\"\") -> Dict`\n`POST /offers` — body: `{offer: {title, position_type, employment_type_code, description, requirements, department_id?, location_ids?}}`."
+        },
+        {
+          "id": "api-org",
+          "title": "Departments · Pipelines · Stages · Tags · Hiring Managers · Tasks",
+          "content": "### `async list_departments() -> Dict`\n`GET /departments`.\n\n### `async list_pipelines() -> Dict`\n`GET /pipeline_templates` — company pipeline templates.\n\n### `async list_stages(offer_id) -> Dict`\n`GET /offers/{offer_id}/stages` — stages of the offer's pipeline.\n\n### `async list_tags() -> Dict`\n`GET /tags`.\n\n### `async list_tasks(*, limit=50, offset=0) -> Dict`\n`GET /tasks`.\n\n### `async list_hiring_managers() -> Dict`\n`GET /admins`."
+        },
+        {
+          "id": "api-notes",
+          "title": "Notes",
+          "content": "### `async list_notes(candidate_id) -> Dict`\n`GET /candidates/{candidate_id}/notes`.\n\n### `async create_note(candidate_id, body, *, visible_to_team_id=None) -> Dict`\n`POST /candidates/{candidate_id}/notes` — body: `{note: {body, visible_to_team_id?}}`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nRecruiteeError                        # base; carries status_code + response_body\n├── RecruiteeAuthError                # 401 / 403\n├── RecruiteeBadRequestError          # 400\n├── RecruiteeNotFoundError            # 404\n├── RecruiteeConflictError            # 409\n├── RecruiteeRateLimitError           # 429 — retry_after_s\n└── RecruiteeServerError              # 5xx\n```\n\nBack-compat aliases preserved:\n```\nRecruiteeNetworkError = RecruiteeServerError    # legacy name\nRecruiteeNotFound     = RecruiteeNotFoundError\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 | Raise immediately |\n| 429 | Exponential backoff `max(_BACKOFF_BASE * 2 ** attempt, Retry-After)` — retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff — retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `RecruiteeNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n404 (company not found) → ConnectorStatus(OFFLINE, FAILED)\n429 → ConnectorStatus(DEGRADED, CONNECTED)        — logged as warning\n5xx / transport → ConnectorStatus(OFFLINE, CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `company_id` or `api_token` blank | Re-enter both in ACP. Recruitee shows the Personal API Token only once at generation — generate a new one if lost. |\n| `ConnectorStatus(OFFLINE, FAILED)` at install with `Token rejected` | 401 — token revoked or wrong | Verify the token in **Settings → Apps & Plugins → Personal API Tokens** is still active and not for a different company. Re-paste. |\n| `ConnectorStatus(OFFLINE, FAILED)` with `Company not found` | 404 from `/current_user` — wrong `company_id` for this token | Confirm the numeric Company ID under **Settings → Company Profile** matches the company the token belongs to. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — token lacks scope for the endpoint being called | Recruitee Personal API Tokens inherit the owning user's role. Grant the user the right role (e.g. Administrator) in **Settings → Users**. |\n| `recruitee.http.retry` warnings spike | Hitting 429 (Recruitee per-minute rate cap) | The client retries with exponential backoff honouring `Retry-After`. Lower `rate_limit_per_min` or batch fewer requests. |\n| 404 on `list_stages(offer_id)` | Offer was archived or deleted | Confirm the offer exists via `get_offer(offer_id)` first. |\n| `ImportError: cannot import name 'RecruiteeNetworkError'` | Older exceptions.py without back-compat aliases | Already fixed — `RecruiteeNetworkError = RecruiteeServerError` alias added in `exceptions.py`. |\n| Notes / candidates created via `create_*` are missing from later list calls | Eventual consistency — Recruitee indexes lag a few seconds | Re-query after 2–3 s, or call `get_candidate(id)` for an authoritative read. |"
+    }
+  ]
+}

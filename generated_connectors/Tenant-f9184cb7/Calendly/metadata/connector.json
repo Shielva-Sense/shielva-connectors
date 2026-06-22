@@ -1,0 +1,143 @@
+{
+  "connector_type": "calendly",
+  "display_name": "Calendly",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync event_types + scheduled_events, normalize, return SyncResult.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_event_types",
+      "name": "List Event Types",
+      "description": "Return all event types for the user (auto-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_uri",
+          "label": "User Uri",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_scheduled_events",
+      "name": "List Scheduled Events",
+      "description": "Return all scheduled events (auto-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "user_uri",
+          "label": "User Uri",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_scheduled_event",
+      "name": "Get Scheduled Event",
+      "description": "Return a single scheduled event by UUID (or full URI).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event_uuid",
+          "label": "Event Uuid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_event_invitees",
+      "name": "List Event Invitees",
+      "description": "Return all invitees for a scheduled event (auto-paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event_uuid",
+          "label": "Event Uuid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_organization_memberships",
+      "name": "List Organization Memberships",
+      "description": "Return all organization memberships.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "organization_uri",
+          "label": "Organization Uri",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "CalendlyConnector",
+  "provider": "calendly",
+  "service": "calendly",
+  "description": "Shielva connector for Calendly."
+}

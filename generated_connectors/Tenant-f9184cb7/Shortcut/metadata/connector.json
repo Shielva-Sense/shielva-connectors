@@ -1,0 +1,258 @@
+{
+  "connector_type": "shortcut",
+  "name": "ShortcutConnector",
+  "display_name": "Shortcut",
+  "version": "1.0.0",
+  "description": "Connects to the Shortcut (formerly Clubhouse) REST API v3 for issue tracking — search and manage stories, epics, iterations, milestones, projects, workflows, members, groups (teams), labels, and files.",
+  "provider": "shortcut",
+  "service": "shortcut",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Shortcut API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Shortcut API token",
+      "help": "Generate at Shortcut → User Settings → API Tokens → Generate Token. The token is sent in the Shortcut-Token header on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Shortcut API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.app.shortcut.com/api/v3",
+      "placeholder": "https://api.app.shortcut.com/api/v3",
+      "help": "Base URL for the Shortcut REST API. Leave blank to use the default."
+    },
+    {
+      "key": "default_workflow_state_id",
+      "label": "Default Workflow State ID",
+      "type": "number",
+      "required": false,
+      "placeholder": "500000010",
+      "help": "Default workflow state ID for new stories created via create_story() when the caller omits workflow_state_id. Look it up with list_workflows()."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "200",
+      "placeholder": "200",
+      "help": "Maximum Shortcut API requests per minute. Default is 200 (Shortcut's documented limit)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token is present and persists install config. Does NOT call the Shortcut API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Shortcut API connectivity by fetching the authenticated member (GET /member).",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync to KB",
+      "description": "Iterates Shortcut stories (cursor-paginated /search/stories) + epics (/epics) → NormalizedDocument → ingest_document.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "datetime", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_stories",
+      "name": "Search Stories",
+      "description": "Searches stories using the Shortcut search DSL (POST /search/stories). Supports cursor pagination via next_token.",
+      "method": "POST",
+      "params": [
+        { "key": "query", "type": "string", "required": false },
+        { "key": "page_size", "type": "number", "required": false },
+        { "key": "next_token", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_story",
+      "name": "Get Story",
+      "description": "Fetches a story by ID (GET /stories/{id}).",
+      "method": "GET",
+      "params": [
+        { "key": "story_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_story",
+      "name": "Create Story",
+      "description": "Creates a new story (POST /stories). Falls back to default_workflow_state_id when workflow_state_id is omitted.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "story_type", "type": "string", "required": false },
+        { "key": "project_id", "type": "number", "required": false },
+        { "key": "workflow_state_id", "type": "number", "required": false },
+        { "key": "owner_ids", "type": "list", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "epic_id", "type": "number", "required": false },
+        { "key": "iteration_id", "type": "number", "required": false },
+        { "key": "estimate", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_story",
+      "name": "Update Story",
+      "description": "Patches mutable fields on an existing story (PUT /stories/{id}).",
+      "method": "PUT",
+      "params": [
+        { "key": "story_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_story",
+      "name": "Delete Story",
+      "description": "Permanently deletes a story (DELETE /stories/{id}). Returns {} on 204.",
+      "method": "DELETE",
+      "params": [
+        { "key": "story_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_epics",
+      "name": "List Epics",
+      "description": "Lists epics (GET /epics). Pass includes_description=true to include the markdown body.",
+      "method": "GET",
+      "params": [
+        { "key": "includes_description", "type": "boolean", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_epic",
+      "name": "Get Epic",
+      "description": "Fetches an epic by ID (GET /epics/{id}).",
+      "method": "GET",
+      "params": [
+        { "key": "epic_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_epic",
+      "name": "Create Epic",
+      "description": "Creates a new epic (POST /epics).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_iterations",
+      "name": "List Iterations",
+      "description": "Lists all iterations (GET /iterations).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_milestones",
+      "name": "List Milestones",
+      "description": "Lists all milestones (GET /milestones).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Lists all (legacy) projects (GET /projects).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_workflows",
+      "name": "List Workflows",
+      "description": "Lists all workflows and their states (GET /workflows). Use this to discover workflow_state_id values.",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "Lists all workspace members (GET /members).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_member",
+      "name": "Get Member",
+      "description": "Fetches a member by ID (GET /members/{id}); when member_id is omitted, returns the authenticated member (GET /member).",
+      "method": "GET",
+      "params": [
+        { "key": "member_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups (Teams)",
+      "description": "Lists all groups / teams (GET /groups).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_labels",
+      "name": "List Labels",
+      "description": "Lists all workspace labels (GET /labels).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_label",
+      "name": "Create Label",
+      "description": "Creates a workspace label (POST /labels).",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "color", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_files",
+      "name": "List Files",
+      "description": "Lists uploaded files metadata (GET /files).",
+      "method": "GET",
+      "params": [],
+      "returns": "List[Dict]"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

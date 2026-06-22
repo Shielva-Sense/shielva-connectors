@@ -1,0 +1,294 @@
+{
+  "connector_type": "jazzhr",
+  "name": "JazzHRConnector",
+  "display_name": "JazzHR",
+  "version": "1.0.0",
+  "description": "Connects to the JazzHR (Resumator) ATS REST API to read and create jobs, applicants, notes, activities, ratings, contacts, tasks, and workflow data. Paginated reads + form-encoded mutations. API key is sent as the ?apikey= query parameter on every request.",
+  "provider": "jazzhr",
+  "service": "jazzhr",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "JazzHR API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your JazzHR API key",
+      "help": "From JazzHR → Settings → Integrations → API. The key is sent as the ?apikey= query parameter on every request (NOT in an Authorization header)."
+    },
+    {
+      "key": "base_url",
+      "label": "JazzHR API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.resumatorapi.com/v1",
+      "placeholder": "https://api.resumatorapi.com/v1",
+      "help": "Base URL for the JazzHR (Resumator) REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum JazzHR API requests per minute. Default is 60 — the client retries on 429 with jittered exponential backoff."
+    },
+    {
+      "key": "default_user_id",
+      "label": "Default User ID for Notes",
+      "type": "string",
+      "required": false,
+      "placeholder": "Optional fallback JazzHR user UUID",
+      "help": "Default JazzHR user UUID used as the author of add_note() when the caller omits user_id."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the api_key by calling GET /jobs?page=1 and marks the connector as installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (API Key)",
+      "description": "Stores the api_key as the credential. JazzHR uses single-key auth — no OAuth code exchange.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies JazzHR API connectivity by fetching GET /jobs?page=1.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Lists JazzHR users (recruiters, hiring managers). Paginated.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Fetches a single JazzHR user by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "Lists jobs filtered by status / title / type / city / dept / board_code. Paginated.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "title", "type": "string", "required": false },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "city", "type": "string", "required": false },
+        { "key": "dept", "type": "string", "required": false },
+        { "key": "board_code", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_job",
+      "name": "Get Job",
+      "description": "Fetches a single job posting by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "job_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_job",
+      "name": "Create Job",
+      "description": "Creates a new job posting. Requires title, hiring_lead_id, and type. POST body is form-encoded.",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "hiring_lead_id", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "city", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "country_id", "type": "string", "required": false },
+        { "key": "workflow_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applicants",
+      "name": "List Applicants",
+      "description": "Lists applicants filtered by status / name / city / state / apply-date window. Paginated.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false },
+        { "key": "name", "type": "string", "required": false },
+        { "key": "city", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "from_apply_date", "type": "string", "required": false },
+        { "key": "to_apply_date", "type": "string", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "get_applicant",
+      "name": "Get Applicant",
+      "description": "Fetches a single applicant by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "applicant_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_applicant",
+      "name": "Create Applicant",
+      "description": "Creates a new applicant record. POST body is form-encoded.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": true },
+        { "key": "phone", "type": "string", "required": false },
+        { "key": "address", "type": "string", "required": false },
+        { "key": "city", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false },
+        { "key": "country_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "assign_applicant_to_job",
+      "name": "Assign Applicant to Job",
+      "description": "Attaches an applicant to a job posting via POST /applicants2jobs (form-encoded).",
+      "method": "POST",
+      "params": [
+        { "key": "applicant_id", "type": "string", "required": true },
+        { "key": "job_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_applicants_by_job",
+      "name": "List Applicants by Job",
+      "description": "Lists all applicants attached to a specific job posting.",
+      "method": "GET",
+      "params": [
+        { "key": "job_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_notes",
+      "name": "List Notes",
+      "description": "Lists notes on a given applicant.",
+      "method": "GET",
+      "params": [
+        { "key": "applicant_id", "type": "string", "required": true },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "add_note",
+      "name": "Add Note",
+      "description": "Adds a note to an applicant. POST body is form-encoded. user_id falls back to config['default_user_id'] when omitted.",
+      "method": "POST",
+      "params": [
+        { "key": "applicant_id", "type": "string", "required": true },
+        { "key": "contents", "type": "string", "required": true },
+        { "key": "security", "type": "string", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_activities",
+      "name": "List Activities",
+      "description": "Lists JazzHR activity events. Pass applicant_id to scope the feed to a single applicant.",
+      "method": "GET",
+      "params": [
+        { "key": "applicant_id", "type": "string", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_rating_steps",
+      "name": "List Rating Steps",
+      "description": "Lists the hiring-team rating steps configured for the JazzHR account via GET /ratings.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_categories",
+      "name": "List Categories",
+      "description": "Lists JazzHR workflow categories (high-level buckets like Sales, Engineering) via GET /categories.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_workflows",
+      "name": "List Workflows",
+      "description": "Alias of list_categories — JazzHR's categories ARE its workflow buckets.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_workflow_steps",
+      "name": "List Workflow Steps",
+      "description": "Lists workflow steps (stages within a workflow) via GET /workflows.",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Lists external JazzHR contacts (referrers, vendors).",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Lists recruiter to-do items via GET /tasks.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "List"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.1"
+  ]
+}

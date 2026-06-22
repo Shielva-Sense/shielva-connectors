@@ -1,0 +1,188 @@
+{
+  "connector_type": "box",
+  "connector_id": "box",
+  "name": "Box",
+  "provider": "box",
+  "service": "box",
+  "version": "1.0.0",
+  "description": "Sync files and folders from Box cloud storage into the Shielva knowledge base.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Box App Client ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "your-box-client-id",
+      "help": "From Box Developer Console \u2192 My Apps \u2192 Your App \u2192 OAuth 2.0 Credentials \u2192 Client ID"
+    },
+    {
+      "key": "client_secret",
+      "label": "Box App Client Secret",
+      "type": "secret",
+      "required": true,
+      "placeholder": "your-box-client-secret",
+      "help": "The client secret from your Box Developer app OAuth 2.0 Credentials"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "text",
+      "required": false,
+      "placeholder": "https://localhost:8000/connectors/oauth/callback",
+      "help": "Must match exactly what is registered in your Box app Redirect URIs"
+    }
+  ],
+  "oauth_scopes": [
+    "root_readonly"
+  ],
+  "oauth_auth_url": "https://account.box.com/api/oauth2/authorize",
+  "oauth_token_url": "https://api.box.com/api/oauth2/token",
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates client_id and client_secret and marks the connector as installed. Call before OAuth authorization.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "InstallResult"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize (OAuth Code Exchange)",
+      "description": "Returns the Box OAuth2 authorization URL, or exchanges an authorization code for access and refresh tokens.",
+      "method": "POST",
+      "params": [
+        {
+          "key": "auth_code",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "state",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "returns": "str | TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Box API connectivity by fetching the current user (GET /users/me).",
+      "method": "GET",
+      "params": [],
+      "returns": "HealthCheckResult"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Files",
+      "description": "Syncs all files recursively from the Box root folder into the Shielva knowledge base using BFS folder traversal.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "webhook_url",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "list_folder",
+      "name": "List Folder",
+      "description": "Lists items in a Box folder by folder_id. Defaults to root (folder_id='0').",
+      "method": "GET",
+      "params": [
+        {
+          "key": "folder_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "type": "number",
+          "required": false
+        }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file",
+      "name": "Get File",
+      "description": "Fetches metadata for a single Box file by file_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "file_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_folder",
+      "name": "Get Folder",
+      "description": "Fetches metadata for a single Box folder by folder_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "folder_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "search",
+      "name": "Search",
+      "description": "Searches Box for files and folders matching a query string.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "type": "number",
+          "required": false
+        }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.0.0"
+  ],
+  "display_name": "Box"
+}

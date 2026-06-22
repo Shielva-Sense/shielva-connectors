@@ -1,0 +1,234 @@
+{
+  "connector_type": "anthropic",
+  "name": "AnthropicConnector",
+  "display_name": "Anthropic",
+  "version": "1.0.0",
+  "description": "Connects to the Anthropic (Claude) REST API: Messages, token counting, Models, Message Batches, and Files (beta). API-key auth via x-api-key + anthropic-version headers. Sync is a documented no-op — Anthropic is an inference surface, not a document source.",
+  "provider": "anthropic",
+  "service": "anthropic",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Anthropic API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "sk-ant-...",
+      "help": "From Console → Settings → API Keys → Create Key. Sent in the x-api-key header on every request (NOT as a Bearer token)."
+    },
+    {
+      "key": "base_url",
+      "label": "Anthropic API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.anthropic.com/v1",
+      "placeholder": "https://api.anthropic.com/v1",
+      "help": "Override for staging proxies or regional endpoints. Leave blank to use the default."
+    },
+    {
+      "key": "anthropic_version",
+      "label": "Anthropic API Version",
+      "type": "string",
+      "required": false,
+      "default": "2023-06-01",
+      "placeholder": "2023-06-01",
+      "help": "Date-pinned API version sent in the mandatory anthropic-version header. Leave at the default unless you specifically need a newer pin."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Per-Request Timeout (s)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "httpx per-request timeout in seconds. Raise above 60 for long Messages completions with high max_tokens."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "50",
+      "placeholder": "50",
+      "help": "Client-side soft cap. The HTTP client paces outbound requests to stay under this budget. Default is 50."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_key and marks the connector installed. Does NOT call the API.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "No-op for api_key auth — returns TokenInfo(access_token=api_key) for ABI compatibility.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "GET /models?limit=1 — lightweight, token-free reachability probe.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync (no-op)",
+      "description": "Documented no-op. Anthropic is an inference API, not a document source.",
+      "method": "INTERNAL",
+      "params": [
+        { "key": "since", "type": "datetime", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "create_message",
+      "name": "Create Message",
+      "description": "POST /messages — create a Claude chat completion.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "messages", "type": "array", "required": true },
+        { "key": "max_tokens", "type": "number", "required": false },
+        { "key": "system", "type": "string", "required": false },
+        { "key": "temperature", "type": "number", "required": false },
+        { "key": "stream", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "count_tokens",
+      "name": "Count Tokens",
+      "description": "POST /messages/count_tokens — estimate input-token cost before sending.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "messages", "type": "array", "required": true },
+        { "key": "system", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_models",
+      "name": "List Models",
+      "description": "GET /models — list models available to this api key.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "before_id", "type": "string", "required": false },
+        { "key": "after_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_model",
+      "name": "Get Model",
+      "description": "GET /models/{id} — fetch a single model's metadata.",
+      "method": "GET",
+      "params": [
+        { "key": "model_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_batch",
+      "name": "Create Message Batch",
+      "description": "POST /messages/batches — submit a Message Batch for async processing.",
+      "method": "POST",
+      "params": [
+        { "key": "requests", "type": "array", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_batch",
+      "name": "Get Batch",
+      "description": "GET /messages/batches/{id} — fetch batch status.",
+      "method": "GET",
+      "params": [
+        { "key": "batch_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_batches",
+      "name": "List Batches",
+      "description": "GET /messages/batches — list all batches submitted by this api key.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "before_id", "type": "string", "required": false },
+        { "key": "after_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "cancel_batch",
+      "name": "Cancel Batch",
+      "description": "POST /messages/batches/{id}/cancel — cancel an in-flight batch.",
+      "method": "POST",
+      "params": [
+        { "key": "batch_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_batch_results",
+      "name": "Get Batch Results",
+      "description": "GET /messages/batches/{id}/results — fetch results of a completed batch (JSONL).",
+      "method": "GET",
+      "params": [
+        { "key": "batch_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_files",
+      "name": "List Files (beta)",
+      "description": "GET /files — list uploaded files (beta header anthropic-beta: files-api-2025-04-14).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "before_id", "type": "string", "required": false },
+        { "key": "after_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_file",
+      "name": "Get File (beta)",
+      "description": "GET /files/{id} — file metadata (beta).",
+      "method": "GET",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_file",
+      "name": "Delete File (beta)",
+      "description": "DELETE /files/{id} — delete a file (beta).",
+      "method": "POST",
+      "params": [
+        { "key": "file_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}

@@ -1,0 +1,243 @@
+{
+  "connector_type": "workato",
+  "name": "WorkatoConnector",
+  "display_name": "Workato",
+  "version": "1.0.0",
+  "description": "Connects to the Workato enterprise automation REST API (Recipes, Connections, Folders, Jobs, Lookup Tables, Tags, Users, On-Prem Agents, Customers) using an API token. Supports recipe start/stop, connection management, and KB sync of recipes + connections + jobs. Region-aware (US/EU).",
+  "provider": "workato",
+  "service": "workato",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_token",
+      "label": "Workato API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Workato API token",
+      "help": "From Workato → Workspace Admin → API Clients → Generate Token. Sent as Authorization: Bearer <api_token>."
+    },
+    {
+      "key": "region",
+      "label": "Region",
+      "type": "string",
+      "required": false,
+      "default": "us",
+      "placeholder": "us | eu",
+      "help": "Workato data center: 'us' (default) → https://www.workato.com/api; 'eu' → https://app.eu.workato.com/api."
+    },
+    {
+      "key": "base_url",
+      "label": "Workato API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://www.workato.com/api",
+      "placeholder": "https://www.workato.com/api",
+      "help": "Override the resolved base URL. Leave blank to use the region default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Maximum Workato API requests per minute. Default is 100."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout in seconds."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Workato API connectivity by calling GET /users/me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_recipes",
+      "name": "List Recipes",
+      "description": "GET /recipes — list integration recipes.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "folder_id", "type": "number", "required": false },
+        { "key": "order", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_recipe",
+      "name": "Get Recipe",
+      "description": "GET /recipes/{id} — fetch a single recipe.",
+      "method": "GET",
+      "params": [
+        { "key": "recipe_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "start_recipe",
+      "name": "Start Recipe",
+      "description": "PUT /recipes/{id}/start — toggle a recipe to running.",
+      "method": "PUT",
+      "params": [
+        { "key": "recipe_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "stop_recipe",
+      "name": "Stop Recipe",
+      "description": "PUT /recipes/{id}/stop — toggle a recipe to stopped.",
+      "method": "PUT",
+      "params": [
+        { "key": "recipe_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_connections",
+      "name": "List Connections",
+      "description": "GET /connections — list connector connections.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_connection",
+      "name": "Get Connection",
+      "description": "GET /connections/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "connection_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_connection",
+      "name": "Create Connection",
+      "description": "POST /connections — create a new connection.",
+      "method": "POST",
+      "params": [
+        { "key": "payload", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_folders",
+      "name": "List Folders",
+      "description": "GET /folders — list project folders.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "parent_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_jobs",
+      "name": "List Jobs",
+      "description": "GET /recipes/{id}/jobs — list job runs for a recipe.",
+      "method": "GET",
+      "params": [
+        { "key": "recipe_id", "type": "number", "required": true },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_job",
+      "name": "Get Job",
+      "description": "GET /recipes/{id}/jobs/{job_id}.",
+      "method": "GET",
+      "params": [
+        { "key": "recipe_id", "type": "number", "required": true },
+        { "key": "job_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_lookup_tables",
+      "name": "List Lookup Tables",
+      "description": "GET /lookup_tables — list configurable runtime tables.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "GET /tags — list resource tags.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — list workspace users.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_on_prem_agents",
+      "name": "List On-Prem Agents",
+      "description": "GET /on_prem_agents — list OPA fleet.",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "GET /managed_users — list white-label customer accounts (embedded).",
+      "method": "GET",
+      "params": [
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "tenacity>=8.2"
+  ]
+}

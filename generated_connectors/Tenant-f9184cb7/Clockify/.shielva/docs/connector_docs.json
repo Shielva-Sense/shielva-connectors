@@ -1,0 +1,74 @@
+{
+  "title": "Clockify Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Clockify** is a time-tracking SaaS exposing a REST API at `https://api.clockify.me/api/v1` plus a separate Reports (analytics) API at `https://reports.api.clockify.me/v1`. This connector — `ClockifyConnector` (`CONNECTOR_TYPE = \"clockify\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs from a Clockify workspace:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| User | `/user` | Identity probe — used by `health_check()` |\n| Workspaces | `/workspaces` | List every workspace the user belongs to |\n| Projects | `/workspaces/{wid}/projects` | List, get, create projects |\n| Tasks | `/workspaces/{wid}/projects/{pid}/tasks` | List tasks per project |\n| Clients | `/workspaces/{wid}/clients` | List + create clients |\n| Tags | `/workspaces/{wid}/tags` | List tags |\n| Users | `/workspaces/{wid}/users` | List workspace members |\n| Time entries | `/workspaces/{wid}/time-entries` + `/workspaces/{wid}/user/{uid}/time-entries` | Full CRUD + start/stop running timer |\n| Reports | `/workspaces/{wid}/reports/summary` (reports host) | Summary report |\n\nThe connector normalises time entries into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff + jitter (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::ClockifyHTTPClient`)."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Clockify API key\n\n1. Sign in at https://app.clockify.me.\n2. Click your avatar (top-right) → **Profile Settings**.\n3. Scroll to the **API** section.\n4. Click **Generate** and copy the key. Treat it like a password — it grants full read/write access to every workspace the user belongs to.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Clockify**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `default_workspace_id` (text, optional) | Workspace UUID — used by `sync()` when blank caller-side |\n| `base_url` (text, optional) | Override `https://api.clockify.me/api/v1` (self-hosted only) |\n| `reports_base_url` (text, optional) | Override `https://reports.api.clockify.me/v1` (self-hosted only) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_key` is present (it does NOT call the API), initialises the `ClockifyHTTPClient`, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which performs `GET /user` as a lightweight probe. On 2xx → `HEALTHY + CONNECTED`. On 401 / 403 → `DEGRADED + TOKEN_EXPIRED`. On 429 → `DEGRADED + CONNECTED` with structured-log warning."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Clockify REST API uses **server-to-server API key authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth, no token refresh, no expiry — the key lives until explicitly rotated.\n\n### Credential model\n\n- `api_key` is sent in the **`X-Api-Key`** header. Clockify does NOT accept an `Authorization` header — sending one is a no-op and will fail auth.\n- `Content-Type: application/json` and `Accept: application/json` are sent on every request.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Initialises `ClockifyHTTPClient`. Does **not** call any Clockify endpoint. |\n| `authorize(auth_code, state)` | Synthesises a `TokenInfo(token_type=\"ApiKey\", access_token=api_key)` so the SDK session bookkeeping stays uniform; no exchange. |\n| `health_check()` | `GET /user` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | The api_key is stored via `save_config()` at install time; `set_token()` records a synthesised `TokenInfo` for SDK consistency. |\n\n### Header contract\n\nEvery outbound request:\n\n```\nX-Api-Key:    <api_key>\nContent-Type: application/json\nAccept:       application/json\n```\n\nReports API calls go to a different host (`https://reports.api.clockify.me/v1`) but use the same `X-Api-Key` header."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | `X-Api-Key` header value |\n| `default_workspace_id` | text | no | `self.default_workspace_id` | Default workspace for `sync()` |\n| `base_url` | text | no | `self.base_url` (defaults to `https://api.clockify.me/api/v1`) | Override for self-hosted Clockify |\n| `reports_base_url` | text | no | `self.reports_base_url` (defaults to `https://reports.api.clockify.me/v1`) | Override for self-hosted Reports API |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_DEFAULT_API_BASE     = \"https://api.clockify.me/api/v1\"\n_DEFAULT_REPORTS_BASE = \"https://reports.api.clockify.me/v1\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `ClockifyConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::ClockifyHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; initialise `ClockifyHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code='', state=None) -> TokenInfo`\nSynthesise a `TokenInfo(token_type=\"ApiKey\")` — no exchange. Stored via `set_token()` for SDK bookkeeping.\n\n### `async health_check() -> ConnectorStatus`\n`GET /user` — minimal probe. Classifies failures via the exception hierarchy:\n  * `ClockifyAuthError` → `DEGRADED + TOKEN_EXPIRED`\n  * `ClockifyNetworkError` → `OFFLINE + CONNECTED`\n  * other `ClockifyError` → `DEGRADED + CONNECTED`\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nFor the authenticated user, walks time entries from the default workspace (or the first workspace returned by `/workspaces` when blank), normalises each entry → `NormalizedDocument` → `ingest_document`. Returns `SyncResult(status, documents_synced, documents_failed, documents_found, message)`."
+        },
+        {
+          "id": "api-identity",
+          "title": "Identity & Workspaces",
+          "content": "### `async get_current_user() -> Dict`\n`GET /user`.\n\n### `async list_workspaces() -> List[Dict]`\n`GET /workspaces`.\n\n### `async list_users(workspace_id, *, page=1, page_size=50, status=None) -> List[Dict]`\n`GET /workspaces/{wid}/users` — list workspace members. Pass `status='ACTIVE'` / `'PENDING'` / `'INACTIVE'` to filter."
+        },
+        {
+          "id": "api-projects",
+          "title": "Projects & Tasks",
+          "content": "### `async list_projects(workspace_id, *, archived=False, name=None, page=1, page_size=50) -> List[Dict]`\n`GET /workspaces/{wid}/projects`.\n\n### `async get_project(workspace_id, project_id) -> Dict`\n`GET /workspaces/{wid}/projects/{pid}`.\n\n### `async create_project(workspace_id, name, *, client_id=None, color=None, is_public=False, billable=False, hourly_rate=None) -> Dict`\n`POST /workspaces/{wid}/projects` — body builds camelCase (`isPublic`, `clientId`, `hourlyRate`).\n\n### `async list_tasks(workspace_id, project_id, *, page=1, page_size=50, status='ACTIVE') -> List[Dict]`\n`GET /workspaces/{wid}/projects/{pid}/tasks`."
+        },
+        {
+          "id": "api-time-entries",
+          "title": "Time Entries — CRUD + Timer",
+          "content": "### `async list_time_entries(workspace_id, user_id, *, page=1, page_size=50, start=None, end=None, project=None) -> List[Dict]`\n`GET /workspaces/{wid}/user/{uid}/time-entries` — ISO-8601 `start` / `end` filters supported.\n\n### `async get_time_entry(workspace_id, entry_id) -> Dict`\n`GET /workspaces/{wid}/time-entries/{eid}`.\n\n### `async create_time_entry(workspace_id, start, *, end=None, project_id=None, task_id=None, description='', tag_ids=None, billable=False) -> Dict`\n`POST /workspaces/{wid}/time-entries`. Omit `end` for a running timer (prefer `start_time_entry` for clarity).\n\n### `async start_time_entry(workspace_id, *, start=None, project_id=None, task_id=None, description='', tag_ids=None, billable=False) -> Dict`\nStart a running timer. `start` defaults to current UTC if omitted. The payload deliberately omits the `end` field.\n\n### `async stop_time_entry(workspace_id, user_id, *, end=None) -> Dict`\n`PATCH /workspaces/{wid}/user/{uid}/time-entries` with body `{end}`. `end` defaults to current UTC if omitted.\n\n### `async update_time_entry(workspace_id, entry_id, fields) -> Dict`\n`PUT /workspaces/{wid}/time-entries/{eid}` — generic patch body.\n\n### `async delete_time_entry(workspace_id, entry_id) -> Dict`\n`DELETE /workspaces/{wid}/time-entries/{eid}` — 204 returns `{}`."
+        },
+        {
+          "id": "api-tags-clients",
+          "title": "Tags & Clients",
+          "content": "### `async list_tags(workspace_id, *, archived=False, page=1) -> List[Dict]`\n`GET /workspaces/{wid}/tags`.\n\n### `async list_clients(workspace_id, *, archived=False, page=1, page_size=50) -> List[Dict]`\n`GET /workspaces/{wid}/clients`.\n\n### `async create_client(workspace_id, name, *, address=None, email=None) -> Dict`\n`POST /workspaces/{wid}/clients`."
+        },
+        {
+          "id": "api-reports",
+          "title": "Reports",
+          "content": "### `async summary_report(workspace_id, date_range_start, date_range_end, *, summary_filter=None, users=None, projects=None) -> Dict`\n`POST {reports_base}/workspaces/{wid}/reports/summary` — **different host** (`reports.api.clockify.me`). The connector auto-supplies a minimal `summaryFilter` (`{groups: ['PROJECT']}`) when the caller omits it, because Clockify rejects requests without one."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nClockifyError                              # base; carries status_code + response_body\n├── ClockifyAuthError                      # 401 / 403\n├── ClockifyNotFound                       # 404\n├── ClockifyRateLimitError                 # 429\n└── ClockifyNetworkError                   # transport / 5xx (transport-side)\n```\n\n### Retry behaviour\n\nLayered two-step retry:\n\n1. **Inner** (`client/http_client.py::_request`) — retries 429 + 5xx + `httpx.HTTPError` up to `_INNER_RETRIES=2` with exponential backoff + jitter (`0.5 * 2 ** attempt + random[0, 0.25]`). Honours `Retry-After` header when present.\n2. **Outer** (`helpers/utils.py::with_retry`) — wraps each connector call up to `max_retries=3` with `BACKOFF_FACTOR=2.0` and `MAX_RETRY_DELAY_S=32.0`. Catches `ClockifyRateLimitError` + `ClockifyNetworkError` only.\n\n### How errors surface to the gateway\n\n`health_check()` catches the typed exceptions and maps:\n\n```\nClockifyAuthError    → ConnectorStatus(DEGRADED, TOKEN_EXPIRED)\nClockifyNetworkError → ConnectorStatus(OFFLINE,  CONNECTED)\nClockifyError        → ConnectorStatus(DEGRADED, CONNECTED)\n```\n\nFor mutating calls (`create_project`, `update_time_entry`, etc.), the connector lets the exception propagate so the caller (gateway / SDK) can map it to an HTTP status."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. Clockify shows the key only once at generation — rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — API key invalid or revoked | Rotate the key in Clockify → Profile Settings → API. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 — key valid but lacks workspace permissions | Confirm the user owning the key has access to the workspaces you are reading. |\n| `clockify.transient_retry` warnings spike | Hitting 429 (Clockify per-second / per-minute cap) | The client retries with exponential backoff + jitter. Lower request fan-out or batch fewer rows per cycle. |\n| 404 on `summary_report` | Workspace ID wrong OR Reports API host blocked | Confirm `workspace_id` matches `list_workspaces()` output. Reports API uses a different host — check egress allowlist. |\n| `ClockifyError: summaryFilter required` | Caller passed `summary_filter=None` AND removed default | The connector auto-supplies `{groups: ['PROJECT']}` when blank; do not pass `summary_filter={}` (empty dict overrides the default). |\n| `start_time_entry` succeeds but Clockify UI still shows old timer | A running timer already exists | Call `stop_time_entry(workspace_id, user_id)` first — Clockify allows only one running timer per user. |\n| `Authorization` header leaks | Caller code injects `Authorization` thinking Clockify uses it | Clockify ignores `Authorization` entirely — it reads `X-Api-Key`. Remove the wrong header. |\n| Time entries missing in `sync()` | `since` filter excludes them OR they belong to a different user | `sync()` only walks the *authenticated* user's entries. To sync teammates, use `list_users()` + `list_time_entries(user_id=…)` directly. |"
+    }
+  ]
+}

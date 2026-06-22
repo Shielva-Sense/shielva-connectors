@@ -1,0 +1,323 @@
+{
+  "connector_type": "github",
+  "display_name": "GitHub",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "ghp_...",
+      "help": "GitHub Personal Access Token (classic) or fine-grained PAT. From GitHub \u2192 Settings \u2192 Developer settings \u2192 Personal access tokens."
+    },
+    {
+      "key": "org",
+      "label": "Organization (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "my-org",
+      "help": "Optional. GitHub organization slug for org-level repository access. Leave blank for user-level access."
+    }
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "link_header_pagination"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate api_key by calling GET /user. Returns HEALTHY + CONNECTED on success.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /user and return HEALTHY, DEGRADED, or OFFLINE. Includes authenticated username.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full sync of GitHub repositories, issues, and pull requests into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_repos",
+      "name": "List Repositories",
+      "description": "List all repositories accessible by the authenticated user, or org repos when org is set.",
+      "category": "repos",
+      "endpoint": "GET /user/repos or GET /orgs/{org}/repos"
+    },
+    {
+      "id": "get_repo",
+      "name": "Get Repository",
+      "description": "Retrieve a single repository by owner and name.",
+      "category": "repos",
+      "endpoint": "GET /repos/{owner}/{repo}"
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "List issues for a repository, filtered by state.",
+      "category": "issues",
+      "endpoint": "GET /repos/{owner}/{repo}/issues"
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Retrieve a single issue by number.",
+      "category": "issues",
+      "endpoint": "GET /repos/{owner}/{repo}/issues/{number}"
+    },
+    {
+      "id": "list_pull_requests",
+      "name": "List Pull Requests",
+      "description": "List pull requests for a repository, filtered by state.",
+      "category": "pull_requests",
+      "endpoint": "GET /repos/{owner}/{repo}/pulls"
+    },
+    {
+      "id": "get_pull_request",
+      "name": "Get Pull Request",
+      "description": "Retrieve a single pull request by number.",
+      "category": "pull_requests",
+      "endpoint": "GET /repos/{owner}/{repo}/pulls/{number}"
+    },
+    {
+      "id": "list_commits",
+      "name": "List Commits",
+      "description": "List commits for a repository.",
+      "category": "commits",
+      "endpoint": "GET /repos/{owner}/{repo}/commits"
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "List members of a GitHub organization.",
+      "category": "members",
+      "endpoint": "GET /orgs/{org}/members"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "repos",
+    "issues",
+    "pull_requests",
+    "commits",
+    "members"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync GitHub repositories, issues, and pull requests into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_repos",
+      "name": "List Repos",
+      "description": "List repositories \u2014 org-level if org is provided, otherwise user-level.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "org",
+          "label": "Org",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "GET /repos/{owner}/{repo}/issues.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "state",
+          "label": "State",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "GET /repos/{owner}/{repo}/issues/{number}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "number",
+          "label": "Number",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_pull_requests",
+      "name": "List Pull Requests",
+      "description": "GET /repos/{owner}/{repo}/pulls.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "state",
+          "label": "State",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_pull_request",
+      "name": "Get Pull Request",
+      "description": "GET /repos/{owner}/{repo}/pulls/{number}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "number",
+          "label": "Number",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_commits",
+      "name": "List Commits",
+      "description": "GET /repos/{owner}/{repo}/commits.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_members",
+      "name": "List Members",
+      "description": "GET /orgs/{org}/members \u2014 org defaults to self._org when not provided.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "org",
+          "label": "Org",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_repo",
+      "name": "Get Repo",
+      "description": "GET /repos/{owner}/{repo}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "owner",
+          "label": "Owner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "repo",
+          "label": "Repo",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "GitHubConnector",
+  "provider": "github",
+  "service": "github",
+  "description": "Shielva connector for Github."
+}

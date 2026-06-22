@@ -1,0 +1,225 @@
+{
+  "connector_type": "brex",
+  "name": "BrexConnector",
+  "display_name": "Brex",
+  "version": "1.0.0",
+  "description": "Connects to the Brex (corporate cards + spend management) API. Surfaces cards, card + cash transactions, expenses, users, departments, locations, vendors, receipts, budgets, and spend limits. Bearer-token auth.",
+  "provider": "brex",
+  "service": "brex",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Brex Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Brex access token",
+      "help": "Generate at Brex Dashboard → Developer → Tokens. Used as 'Authorization: Bearer <token>' on every request."
+    },
+    {
+      "key": "base_url",
+      "label": "Brex API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://platform.brexapis.com",
+      "placeholder": "https://platform.brexapis.com",
+      "help": "Base URL for the Brex REST API. Leave blank to use the default production URL."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Soft client-side cap on Brex API requests per minute. Brex enforces per-token limits — default 60."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates access_token and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Brex API connectivity by probing GET /v2/users/me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_current_user",
+      "name": "Get Current User",
+      "description": "GET /v2/users/me — fetch the user the access token belongs to.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /v2/users — list users in the Brex account (cursor-paginated).",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "status", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "GET /v2/users/{id} — fetch a single user.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_cards",
+      "name": "List Cards",
+      "description": "GET /v2/cards — list corporate cards.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "user_id", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_card",
+      "name": "Get Card",
+      "description": "GET /v2/cards/{id} — fetch a single card.",
+      "method": "GET",
+      "params": [
+        { "key": "card_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_transactions",
+      "name": "List Card Transactions",
+      "description": "GET /v2/transactions/card/primary — list card transactions.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "posted_at_start", "type": "string", "required": false },
+        { "key": "expand", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_transaction",
+      "name": "Get Transaction",
+      "description": "GET /v2/transactions/card/primary/{id} — fetch a single transaction.",
+      "method": "GET",
+      "params": [
+        { "key": "transaction_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_expenses",
+      "name": "List Expenses",
+      "description": "GET /v1/expenses/card — list card expenses.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "expense_type", "type": "array", "required": false },
+        { "key": "status", "type": "array", "required": false },
+        { "key": "payment_status", "type": "array", "required": false },
+        { "key": "user_id", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_expense",
+      "name": "Get Expense",
+      "description": "GET /v1/expenses/card/{id} — fetch a single expense.",
+      "method": "GET",
+      "params": [
+        { "key": "expense_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_departments",
+      "name": "List Departments",
+      "description": "GET /v2/departments — list org-tree departments.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_locations",
+      "name": "List Locations",
+      "description": "GET /v2/locations — list office locations.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_vendors",
+      "name": "List Vendors",
+      "description": "GET /v1/vendors — list AP vendors.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_receipts",
+      "name": "List Receipts",
+      "description": "GET /v1/expenses/card/receipt_match — list receipts.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_budgets",
+      "name": "List Budgets",
+      "description": "GET /v2/budgets — list budgets.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_spend_limits",
+      "name": "List Spend Limits",
+      "description": "GET /v2/spend_limits — list spend limits per program.",
+      "method": "GET",
+      "params": [
+        { "key": "cursor", "type": "string", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

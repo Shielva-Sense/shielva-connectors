@@ -1,0 +1,131 @@
+{
+  "connector_type": "pagerduty",
+  "display_name": "PagerDuty",
+  "provider": "PagerDuty",
+  "service": "PagerDuty",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "REST API Key",
+      "type": "password",
+      "required": true,
+      "help": "Your PagerDuty REST API Key. Create one at My Profile \u2192 User Settings \u2192 API Access Keys."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "incidents",
+    "services",
+    "users",
+    "schedules",
+    "escalation_policies"
+  ],
+  "api_base": "https://api.pagerduty.com/",
+  "auth_header": "Authorization: Token token={api_key}",
+  "api_version_header": "Accept: application/vnd.pagerduty+json;version=2",
+  "pagination": {
+    "type": "offset",
+    "fields": [
+      "offset",
+      "limit",
+      "more"
+    ],
+    "note": "PagerDuty uses offset+limit pagination. Continue while more==true."
+  },
+  "rate_limit": {
+    "requests_per_minute": 60,
+    "note": "PagerDuty enforces per-user rate limits. The connector retries on 429 with exponential backoff."
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync incidents and services from PagerDuty.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_incidents",
+      "name": "List Incidents",
+      "description": "Fetch all incidents with offset-based pagination, return normalized docs.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "statuses",
+          "label": "Statuses",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "urgencies",
+          "label": "Urgencies",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_incident",
+      "name": "Get Incident",
+      "description": "Return a single raw PagerDuty incident by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "incident_id",
+          "label": "Incident Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_incident_alerts",
+      "name": "List Incident Alerts",
+      "description": "Return raw alert dicts for a given incident.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "incident_id",
+          "label": "Incident Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_services",
+      "name": "List Services",
+      "description": "Fetch all services with offset-based pagination, return normalized docs.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Fetch all users with offset-based pagination, return normalized docs.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_schedules",
+      "name": "List Schedules",
+      "description": "Fetch all schedules with offset-based pagination, return normalized docs.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "PagerDutyConnector",
+  "description": "Shielva connector for Pagerduty."
+}

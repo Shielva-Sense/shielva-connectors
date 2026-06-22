@@ -1,0 +1,5 @@
+# Azure DevOps connector — connector-specific runtime dependencies.
+# httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx are
+# pre-installed in the shared connector venv and MUST NOT be re-listed here.
+
+tenacity>=8.2

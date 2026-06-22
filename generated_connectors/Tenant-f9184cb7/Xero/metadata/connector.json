@@ -1,0 +1,286 @@
+{
+  "connector_type": "xero",
+  "connector_id": "xero",
+  "name": "Xero",
+  "display_name": "Xero Accounting",
+  "provider": "xero",
+  "service": "xero",
+  "version": "1.0.0",
+  "description": "Connects to the Xero Accounting API v2 to sync invoices, contacts, and accounts into the Shielva knowledge base. Uses OAuth2 PKCE flow for secure authorization.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Xero OAuth2 Client ID",
+      "help": "Found in the Xero Developer Portal under your app's OAuth 2.0 credentials."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Enter your Xero OAuth2 Client Secret",
+      "help": "Found alongside the Client ID in the Xero Developer Portal. Stored encrypted."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.ai/connectors/xero/callback",
+      "help": "The OAuth2 callback URI. Must match exactly one of the redirect URIs registered in your Xero app. Leave blank to use the Shielva platform default."
+    },
+    {
+      "key": "xero_tenant_id",
+      "label": "Xero Tenant ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "e.g. b2c3d4e5-f6a7-48b9-c0d1-e2f3a4b5c6d7",
+      "help": "The Xero organisation (tenant) ID. Set automatically after OAuth2 authorization from GET /connections. Only fill in manually if you need to target a specific organisation."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "authorize",
+    "list_contacts",
+    "list_invoices",
+    "list_accounts",
+    "get_connections"
+  ],
+  "oauth2": {
+    "auth_url": "https://login.xero.com/identity/connect/authorize",
+    "token_url": "https://identity.xero.com/connect/token",
+    "scopes": [
+      "accounting.transactions.read",
+      "accounting.contacts.read",
+      "accounting.reports.read",
+      "offline_access",
+      "openid",
+      "profile",
+      "email"
+    ],
+    "pkce": true,
+    "code_challenge_method": "S256"
+  },
+  "features": [
+    "retry",
+    "pagination",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "incremental_sync",
+    "pkce_oauth2"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate",
+      "description": "Validate that client_id and client_secret are present. Returns HEALTHY/PENDING \u2014 OAuth must be completed to fully connect.",
+      "category": "auth"
+    },
+    {
+      "id": "authorize",
+      "name": "Get Authorization URL",
+      "description": "Build and return the Xero OAuth2 PKCE authorization URL. Direct users to this URL to grant access.",
+      "category": "auth"
+    },
+    {
+      "id": "exchange_code",
+      "name": "Exchange Authorization Code",
+      "description": "Exchange the OAuth2 code from the callback for access + refresh tokens. Also fetches and stores xero_tenant_id.",
+      "category": "auth"
+    },
+    {
+      "id": "refresh_token",
+      "name": "Refresh Access Token",
+      "description": "Use the stored refresh token to obtain a new access token.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /Organisation and return HEALTHY, DEGRADED, or OFFLINE with organisation name.",
+      "category": "health",
+      "endpoint": "GET /api.xro/2.0/Organisation"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full or incremental sync of invoices, contacts, and accounts into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Paginated list of Xero invoices. Supports If-Modified-Since for incremental fetch.",
+      "category": "invoices",
+      "endpoint": "GET /api.xro/2.0/Invoices"
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "Retrieve a single invoice by InvoiceID.",
+      "category": "invoices",
+      "endpoint": "GET /api.xro/2.0/Invoices/{invoice_id}"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Paginated list of Xero contacts. Supports If-Modified-Since for incremental fetch.",
+      "category": "contacts",
+      "endpoint": "GET /api.xro/2.0/Contacts"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Retrieve a single contact by ContactID.",
+      "category": "contacts",
+      "endpoint": "GET /api.xro/2.0/Contacts/{contact_id}"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "Retrieve all chart-of-accounts entries.",
+      "category": "accounts",
+      "endpoint": "GET /api.xro/2.0/Accounts"
+    },
+    {
+      "id": "get_connections",
+      "name": "Get Connections",
+      "description": "GET https://api.xero.com/connections \u2014 returns list of Xero tenants the user is connected to. No Xero-Tenant-Id header required.",
+      "category": "auth",
+      "endpoint": "GET https://api.xero.com/connections"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "invoices",
+    "contacts",
+    "accounts"
+  ],
+  "apis": [
+    {
+      "id": "exchange_code",
+      "name": "Exchange Code",
+      "description": "Exchange an OAuth2 authorization code for access + refresh tokens.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "code",
+          "label": "Code",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "refresh_token",
+      "name": "Refresh Token",
+      "description": "Refresh the OAuth2 access token using the stored refresh token.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Xero invoices, contacts, and accounts into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "GET /Invoices \u2014 paginated, optionally filtered by If-Modified-Since.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "GET /Invoices/{invoice_id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "invoice_id",
+          "label": "Invoice Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "GET /Contacts \u2014 paginated, optionally filtered by If-Modified-Since.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "modified_after",
+          "label": "Modified After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "GET /Contacts/{contact_id}.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "GET /Accounts.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_connections",
+      "name": "Get Connections",
+      "description": "GET https://api.xero.com/connections \u2014 returns list of tenants the user is connected to.",
+      "method": "GET",
+      "params": []
+    }
+  ]
+}

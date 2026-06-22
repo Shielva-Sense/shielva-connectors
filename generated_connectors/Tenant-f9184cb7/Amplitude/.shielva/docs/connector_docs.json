@@ -1,0 +1,188 @@
+{
+  "title": "Amplitude Connector",
+  "generated_at": "2026-06-20T00:00:00Z",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "The **Amplitude connector** integrates with the Amplitude Analytics API v2. It enables Shielva to sync event segmentation data, daily active user metrics, and cohort definitions from your Amplitude project into the knowledge base.\n\nThis connector uses **HTTP Basic Auth** \u2014 `api_key` as the username and `api_secret` as the password on every request.\n\n**Key capabilities:**\n- Validate credentials via `GET /taxonomy/category` on install and health check\n- Sync event counts for default events over the last 30 days\n- Sync daily active user (DAU) counts\n- Sync all cohort definitions (name, size, description)\n- Export raw event ZIP archives (YYYYMMDDTHH hour-range format)\n- Direct access to event segmentation, funnel, retention, and user activity endpoints\n- Stable document IDs via `SHA-256(api_key:event_type:date)[:16]` for deduplication\n- Automatic retry with exponential back-off and circuit breaker protection\n- US and EU data residency region support",
+      "children": [
+        {
+          "id": "connector-type",
+          "title": "Connector Type",
+          "content": "`amplitude` \u2014 registered in ACP as **Amplitude**."
+        },
+        {
+          "id": "provider",
+          "title": "Provider",
+          "content": "Amplitude, Inc. (Amplitude Analytics HTTP API v2 \u2014 US: `https://amplitude.com/api/2/` | EU: `https://analytics.eu.amplitude.com/api/2/`)"
+        },
+        {
+          "id": "supported-operations",
+          "title": "Supported Operations",
+          "content": "| Operation | Description |\n|-----------|-------------|\n| `install()` | Validates api_key + api_secret via GET /taxonomy/category; returns HEALTHY/CONNECTED or OFFLINE with reason |\n| `health_check()` | Same call; returns region in message |\n| `sync()` | Fetches event segmentation + DAU + cohorts for last 30 days; normalizes to ConnectorDocuments |\n| `export_events(start, end)` | Downloads raw event ZIP archive (YYYYMMDDTHH format) |\n| `get_event_segmentation(event, start, end)` | Event counts over a date range |\n| `list_cohorts()` | GET /cohorts \u2014 all cohort definitions |\n| `get_cohort(cohort_id)` | GET /cohorts/{id}/members \u2014 cohort user IDs |\n| `get_active_users(start, end)` | GET /active \u2014 DAU/WAU/MAU data |\n| `get_user_activity(user_id)` | GET /usersearch \u2014 event stream for a user |"
+        }
+      ]
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "The fastest path to a working Amplitude connector is four steps: install dependencies, configure credentials, instantiate the connector, and call a method.\n\n### 1. Install dependencies\n\n```bash\npip install -r requirements.txt\n```\n\n### 2. Configure credentials\n\nCollect the values listed in **Configuration** below, then pass them in the `config` dict at construction time:\n\n```python\nfrom connector import AmplitudeConnector\n\nconfig = {\n    \"api_key\": \"<string>\"\n    \"api_secret\": \"<password>\"\n    \"region\": \"<string>\"\n}\n\nconnector = AmplitudeConnector(\n    tenant_id=\"my-tenant\",\n    connector_id=\"amplitude_demo\",\n    config=config,\n)\n```\n\n### 3. Initialize the connection\n\n`initialize()` resolves any deferred credentials (e.g. exchanges an OAuth authorization code for an access token), validates them against a low-cost endpoint, and primes the underlying HTTP client.\n\n```python\nawait connector.initialize()\nhealth = await connector.health_check()\nassert health.healthy, \"connector did not report healthy\"\n```\n\n### 4. Call your first method: `get_event_segmentation`\n\n```python\nresult = await connector.get_event_segmentation()\nprint(result)\n```\n\nFrom here, browse the **API Methods** section for the full list of operations this connector exposes, and **Sync Behavior** to learn how to bulk-ingest Amplitude data into Shielva.",
+      "children": []
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "The connector uses **HTTP Basic Auth**. The api_key is sent as the username and api_secret as the password in a standard `Authorization: Basic base64(api_key:api_secret)` header on every request. This is managed by `aiohttp.BasicAuth(api_key, api_secret)`.",
+      "children": [
+        {
+          "id": "auth-type",
+          "title": "Auth Type",
+          "content": "`api_key` \u2014 find your API Key and Secret in Amplitude \u2192 Settings \u2192 Projects \u2192 [Project] \u2192 General."
+        },
+        {
+          "id": "install-fields",
+          "title": "Install Fields",
+          "content": "| Field | Key | Type | Required | Description |\n|-------|-----|------|----------|-------------|\n| API Key | `api_key` | string | Yes | Amplitude API Key for the project |\n| API Secret | `api_secret` | password | Yes | Amplitude API Secret for the project |\n| Region | `region` | string | No | 'us' (default) or 'eu' \u2014 must match project data residency |"
+        },
+        {
+          "id": "key-validation",
+          "title": "Credential Validation",
+          "content": "The connector validates both credentials by calling `GET /taxonomy/category`. A 401 or 403 response returns `INVALID_CREDENTIALS`. A network error returns `FAILED`. Success returns `HEALTHY/CONNECTED` with the region in the message."
+        },
+        {
+          "id": "credential-security",
+          "title": "Credential Security",
+          "content": "API Keys do not expire unless manually rotated in Amplitude. Shielva stores both the api_key and api_secret AES-256-GCM encrypted at rest via the vault. Neither value ever appears in log output."
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "Every `install_field` listed below is collected from the user **once** at install time and stored in the connector's encrypted config. `config_keys` are values the connector derives at runtime (e.g. tokens) and persists for subsequent calls.\n\n### Install fields\n\n| Key | Label | Type | Required | Description |\n|-----|-------|------|----------|-------------|\n| `api_key` | API Key | `string` | \u2705 | Your Amplitude API Key. Found in Amplitude \u2192 Settings \u2192 Projects \u2192 [Project] \u2192 General. |\n| `api_secret` | API Secret | `password` | \u2705 | Your Amplitude API Secret (paired with the API Key). Keep this secure. |\n| `region` | Data Residency Region | `string` | \u2014 | Data residency region: 'us' (default) or 'eu'. Must match your Amplitude project region. |\n\n### Runtime config keys\n\n_No runtime-derived config keys for this connector._\n\n### Defaults & validation\n\n- All values are validated on `initialize()` \u2014 missing required fields raise `MissingConfigError`, malformed values raise `InvalidConfigError`.\n- Numeric and boolean fields are coerced from strings (e.g. `\"true\"` \u2192 `True`) so configuration loaded from environment variables is accepted unchanged.\n- Secrets are never echoed back in responses or logs; only field keys appear in audit entries.",
+      "children": []
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All methods are implemented in `connector.py` and delegate HTTP calls to `AmplitudeHTTPClient` in `client/http_client.py`.",
+      "children": [
+        {
+          "id": "install",
+          "title": "install()",
+          "content": "**Signature:** `async def install(self) -> InstallResult`\n\nValidates the API credentials and establishes the connector.\n\n**Steps:**\n1. Check `api_key` is non-empty \u2192 MISSING_CREDENTIALS if not.\n2. Check `api_secret` is non-empty \u2192 MISSING_CREDENTIALS if not.\n3. Call `GET /taxonomy/category` via `with_retry`.\n4. On success, create a fresh http_client for subsequent use.\n\n**Returns:**\n- `InstallResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Amplitude (US region)')`\n- `InstallResult(health=OFFLINE, auth_status=MISSING_CREDENTIALS)` \u2014 missing key or secret\n- `InstallResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` \u2014 401/403\n- `InstallResult(health=OFFLINE, auth_status=FAILED)` \u2014 network/server error"
+        },
+        {
+          "id": "health-check",
+          "title": "health_check()",
+          "content": "**Signature:** `async def health_check(self) -> HealthCheckResult`\n\nPings `GET /taxonomy/category` and returns health with region label.\n\n**Returns:**\n- `HealthCheckResult(health=HEALTHY, auth_status=CONNECTED, message='Connected to Amplitude (US region)')`\n- `HealthCheckResult(health=OFFLINE, auth_status=INVALID_CREDENTIALS)` on 401/403\n- `HealthCheckResult(health=DEGRADED, auth_status=FAILED)` on network error (circuit breaker not open)\n- `HealthCheckResult(health=OFFLINE, auth_status=FAILED)` on network error (circuit breaker open)"
+        },
+        {
+          "id": "sync",
+          "title": "sync()",
+          "content": "**Signature:** `async def sync(self, full=False, since=None, kb_id='') -> SyncResult`\n\nFull sync across three data categories (last 30 days):\n1. **Event segmentation** \u2014 fetches daily counts for 'Any Active Event' and 'Any Event'\n2. **Active users** \u2014 fetches DAU data via GET /active\n3. **Cohorts** \u2014 fetches all cohort definitions via GET /cohorts\n\nEvent and cohort failures are non-fatal \u2014 only network-level failures on all paths cause FAILED status.\n\n**Returns:** `SyncResult` with documents_found, documents_synced, documents_failed.\nStatus: `COMPLETED` when no failures; `PARTIAL` when some normalizations or ingestions fail."
+        },
+        {
+          "id": "export-events",
+          "title": "export_events()",
+          "content": "**Signature:** `async def export_events(self, start_date: str, end_date: str) -> bytes`\n\nDownloads a ZIP archive of raw event data.\n\n**Parameters:**\n- `start_date` \u2014 YYYYMMDDTHH (e.g. '20240101T00')\n- `end_date`   \u2014 YYYYMMDDTHH (e.g. '20240101T23')\n\n**Returns:** Raw ZIP bytes from the Amplitude export API.\n\n**Note:** The export endpoint always uses `https://amplitude.com/api/2/export` regardless of region setting."
+        },
+        {
+          "id": "get-event-segmentation",
+          "title": "get_event_segmentation()",
+          "content": "**Signature:** `async def get_event_segmentation(self, event: str, start_date: str, end_date: str) -> dict`\n\nFetches event counts over a date range.\n\n**Parameters:**\n- `event` \u2014 Event type name (plain string or pre-encoded JSON Amplitude event dict)\n- `start_date` \u2014 YYYYMMDD\n- `end_date`   \u2014 YYYYMMDD\n\n**Returns:** Raw Amplitude response with `data.series` and `data.xValues`."
+        },
+        {
+          "id": "list-cohorts",
+          "title": "list_cohorts()",
+          "content": "**Signature:** `async def list_cohorts(self) -> dict`\n\nFetches all cohort definitions via `GET /cohorts`.\n\n**Returns:** Response with `cohorts` list \u2014 each entry has id, name, size, description, lastComputed."
+        },
+        {
+          "id": "get-cohort",
+          "title": "get_cohort()",
+          "content": "**Signature:** `async def get_cohort(self, cohort_id: str) -> dict`\n\nFetches members of a specific cohort via `GET /cohorts/{cohort_id}/members`.\n\n**Parameters:**\n- `cohort_id` \u2014 Amplitude cohort ID string\n\n**Returns:** Response with `users` list of user_id objects.\n\n**Raises:** `AmplitudeNotFoundError` if the cohort does not exist."
+        },
+        {
+          "id": "get-active-users",
+          "title": "get_active_users()",
+          "content": "**Signature:** `async def get_active_users(self, start_date: str, end_date: str) -> dict`\n\nFetches daily active user data via `GET /active`.\n\n**Parameters:**\n- `start_date` \u2014 YYYYMMDD\n- `end_date`   \u2014 YYYYMMDD\n\n**Returns:** Raw Amplitude response with `data.series` (DAU counts) and `data.xValues` (dates)."
+        },
+        {
+          "id": "get-user-activity",
+          "title": "get_user_activity()",
+          "content": "**Signature:** `async def get_user_activity(self, user_id: str) -> dict`\n\nFetches the event stream for a specific user via `GET /usersearch?user={user_id}`.\n\n**Parameters:**\n- `user_id` \u2014 Amplitude user ID or device ID\n\n**Returns:** Response with `userData` containing the user's events."
+        }
+      ]
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Normalized documents produced by `normalize_event_data()` and `normalize_cohort()` in `helpers/utils.py`.",
+      "children": [
+        {
+          "id": "event-document",
+          "title": "Event Segmentation ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(api_key:event_type:date)[:16]>\",\n  \"title\": \"Amplitude event: Any Active Event on 2024-01-01\",\n  \"content\": \"Event type: Any Active Event\\nDate: 2024-01-01\\nCount: 120\",\n  \"source_url\": \"https://app.amplitude.com/analytics\",\n  \"metadata\": {\n    \"event_type\": \"Any Active Event\",\n    \"date\": \"2024-01-01\",\n    \"count\": 120\n  }\n}\n```"
+        },
+        {
+          "id": "cohort-document",
+          "title": "Cohort ConnectorDocument",
+          "content": "```json\n{\n  \"source_id\": \"<sha256(cohort_id)[:16]>\",\n  \"title\": \"Amplitude cohort: Power Users\",\n  \"content\": \"Cohort ID: cohort_abc123\\nName: Power Users\\nSize: 4820\\nDescription: Users with 10+ sessions per week\\nLast computed: 2024-06-01T00:00:00.000Z\",\n  \"source_url\": \"https://app.amplitude.com/analytics/cohorts\",\n  \"metadata\": {\n    \"cohort_id\": \"cohort_abc123\",\n    \"name\": \"Power Users\",\n    \"size\": 4820,\n    \"description\": \"Users with 10+ sessions per week\",\n    \"last_computed\": \"2024-06-01T00:00:00.000Z\"\n  }\n}\n```"
+        },
+        {
+          "id": "document-id-stability",
+          "title": "Document ID Stability",
+          "content": "Event documents use `SHA-256(api_key + ':' + event_type + ':' + date)[:16]` as the stable `source_id`. Cohort documents use `SHA-256(cohort_id)[:16]`. Both are deterministic across syncs \u2014 the same Amplitude data always produces the same Shielva document ID, enabling upsert deduplication without storing seen-ID lists."
+        }
+      ]
+    },
+    {
+      "id": "sync-behavior",
+      "title": "Sync Behavior",
+      "content": "`sync()` is the bulk ingestion entry point. A single call pulls every resource this connector knows how to sync from Amplitude, normalizes each one into a `ConnectorDocument`, and returns a `SyncResult` summarizing what was processed.\n\n### Sync lifecycle\n\n1. **Listing** \u2014 the connector requests the first page of each resource type from the provider's list endpoint.\n2. **Pagination** \u2014 subsequent pages are fetched until the provider signals end-of-stream (cursor exhaustion, `has_more=false`, or empty page).\n3. **Normalization** \u2014 each raw record is passed through the resource-specific `normalize_*` helper, which extracts fields, computes the `source_id`, and emits a `ConnectorDocument`.\n4. **Deduplication** \u2014 when the same resource appears across pages (rare, but possible during eventual-consistency windows), the deterministic `source_id` ensures the downstream knowledge base treats it as a single record, not a duplicate.\n5. **Partial-failure tolerance** \u2014 a per-resource failure is logged and the sync continues with the next resource. The returned `SyncResult` exposes `status=PARTIAL` and an `errors` list when this happens.\n\n### Pagination strategy\n\n- **Cursor-based** providers (most modern APIs) \u2014 the connector tracks the `next_cursor` field on each page and stops when the provider omits it.\n- **Offset/limit** providers \u2014 the connector requests fixed-size pages and stops when a page returns fewer records than `limit`.\n- **Token-based (e.g. `next_page_token`)** \u2014 same as cursor-based but the token is opaque and forwarded verbatim.\n\n### Rate-limit handling\n\nWhen the provider returns `429 Too Many Requests`, the connector honors the `Retry-After` header if present, otherwise applies exponential backoff (1s, 2s, 4s, 8s, 16s capped at 30s) with full jitter. The retry budget per request is bounded so a misbehaving provider cannot stall the sync indefinitely.\n\n### Incremental sync\n\nThe connector treats every `sync()` as a full re-walk of the listing endpoints. Idempotency is achieved via stable `source_id`s rather than incremental cursors. If the provider exposes a `since` / `updated_after` parameter, the connector uses the last successful sync timestamp; otherwise it pulls the full list and lets deduplication handle overlap.\n\n### Features enabled\n\nThis connector is configured with: active_users, circuit_breaker, cohorts, error_handling, event_segmentation, normalizer, rate_limiting, raw_export, region_support, retry.",
+      "children": []
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Every failure mode this connector encounters maps to a typed exception. Catching the base class \u2014 `AmplitudeError` \u2014 handles every connector-raised error in one block; catching a specific subclass lets you react to a particular failure mode.\n\n### Exception hierarchy\n\n```\nAmplitudeError(Exception)\n  AmplitudeAuthError(AmplitudeError)\n  AmplitudeInvalidCredentialsError(AmplitudeAuthError)\n  AmplitudeRateLimitError(AmplitudeError)\n  AmplitudeNotFoundError(AmplitudeError)\n  AmplitudeNetworkError(AmplitudeError)\n  AmplitudeServerError(AmplitudeError)\n```\n\n### When each is raised\n\n- **`AmplitudeError`** \u2014 Base exception for all Amplitude connector errors.\n- **`AmplitudeAuthError`** \u2014 Raised when Amplitude rejects the API key / secret (401/403).\n- **`AmplitudeInvalidCredentialsError`** \u2014 Raised when the api_key or api_secret is explicitly invalid.\n- **`AmplitudeRateLimitError`** \u2014 Raised on 429 Too Many Requests from Amplitude.\n- **`AmplitudeNotFoundError`** \u2014 Raised when a requested Amplitude resource does not exist (404).\n- **`AmplitudeNetworkError`** \u2014 Raised on transient network failures (timeouts, connection errors).\n- **`AmplitudeServerError`** \u2014 Raised on 5xx responses from Amplitude.\n\n### Retry policy\n\n- **Transient HTTP errors** (network resets, `502`, `503`, `504`) \u2014 retried up to 3 times with exponential backoff + jitter.\n- **Rate-limit responses** (`429`) \u2014 retry honoring `Retry-After`, capped at 5 attempts.\n- **Authentication errors** (`401`, `403`) \u2014 not retried; surface immediately so the caller can re-authorize.\n- **4xx client errors** (`400`, `404`, `422`) \u2014 not retried; raised as a typed exception so the caller can fix the request.\n\n### Circuit breaker\n\nA per-connector circuit breaker opens after 5 consecutive failures within a 30-second window and stays open for 30 seconds. While open, every method call raises `CircuitBreakerOpen` immediately instead of incurring the network round-trip \u2014 protecting the provider from a thundering-herd retry storm when it is genuinely down.",
+      "children": []
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "content": "Every connector ships with a unit test suite under `tests/`. Unit tests mock the HTTP layer so they run offline; integration tests (if configured) hit the live provider API and require valid credentials in the environment.\n\n### Running unit tests\n\n```bash\ncd amplitude_connector\npython -m pytest -q tests/\n```\n\n### Test layout\n\n- `tests/test_connector.py` \u2014 the primary suite. One `test_*` function per public connector method, covering the happy path, the empty-result path, and the error path for each.\n- `tests/__init__.py` \u2014 package marker; no shared fixtures live here.\n- HTTP responses are mocked with `httpx.MockTransport` or `pytest-httpx` so the tests are deterministic and fast.\n\n### Test coverage at a glance\n\nThis connector ships **112** test functions. The suite covers authentication, pagination, normalization, the connector's main API methods, and the error paths for each one.\n\n### Integration tests\n\nIntegration tests are gated by the presence of credentials in the environment (e.g. `RUN_INTEGRATION=1` plus the connector's install-field values prefixed with `AMPLITUDE_`). When the gate is absent, the suite short-circuits with a `pytest.skip` so CI doesn't fail in environments without live access.",
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "Common errors and their resolutions.",
+      "children": [
+        {
+          "id": "common-errors",
+          "title": "Common Errors",
+          "content": "| Error | Cause | Fix |\n|-------|-------|-----|\n| `api_key is required` | No key provided | Enter the API Key in the install form |\n| `api_secret is required` | No secret provided | Enter the API Secret in the install form |\n| `401 Unauthorized` | Invalid credentials | Verify key + secret in Amplitude \u2192 Settings \u2192 Projects |\n| `403 Forbidden` | Wrong project or no access | Confirm you are using the correct project's credentials |\n| `429 Too Many Requests` | Rate limit exceeded | Connector retries automatically with exponential back-off |\n| Wrong region | EU project hit US URL | Set `region=eu` in the connector config |\n| No data synced | No events in last 30 days | Verify the project has data in Amplitude |"
+        },
+        {
+          "id": "testing",
+          "title": "Testing",
+          "content": "Run the full test suite (65 tests, all mocked \u2014 no live credentials needed):\n\n```bash\ncd /Users/vivekvarshavaishvik/Documents/client_dir/amplitude_connector\nsource \"/Volumes/V3-SSD/Shielva Project Dirs/.venv/bin/activate\"\npython -m pytest tests/ -v\n```\n\nAll 65 tests must pass before registering the connector."
+        }
+      ]
+    },
+    {
+      "id": "faq",
+      "title": "FAQ",
+      "content": "### Does this connector support multiple accounts of the same provider?\n\nYes. Each Amplitude account is a separate connector *instance* with its own `connector_id`, install fields, and encrypted credentials. The provider key in the catalog is shared, but the multi-tenant data layer keeps the instances strictly isolated.\n\n### Can I sync only some resource types?\n\nYes. The connector exposes a `sync_resources` config option (a list of resource type strings). When set, `sync()` walks only the listed types and skips the rest. Leave it unset to sync everything the connector knows about.\n\n### How does deletion propagate?\n\nOn each `sync()`, the connector compares the set of `source_id`s returned by Amplitude against the set it last persisted to the knowledge base. IDs that are absent on the new walk are deleted from the knowledge base, so deletions in Amplitude propagate to Shielva on the next sync.\n\n### What happens during a rate-limit hit?\n\nThe connector inspects `Retry-After` and waits the indicated interval. If the header is absent, it falls back to exponential backoff (1s, 2s, 4s, 8s, 16s) with full jitter, retrying up to 5 times. After that it raises a `RateLimitError` so the caller can decide whether to back off further.\n\n### Are credentials encrypted at rest?\n\nYes \u2014 AES-256-GCM with a per-tenant data encryption key derived via HKDF-SHA256 from the master key. Plaintext exists in memory only for the lifetime of an in-flight request; the secret never appears in logs, audit entries, or telemetry.\n\n### How do I add a new method?\n\n1. Add the method to the `AmplitudeConnector` class in `connector.py`.\n2. Add a corresponding `test_<method>` to `tests/test_connector.py` covering happy/empty/error paths.\n3. Re-run the documentation generator \u2014 the new method will appear in **API Methods** automatically.\n\n### Can the connector run in a worker / serverless context?\n\nYes. The connector is fully `async` and holds no global state, so it is safe to instantiate per-request (or per-task) inside Celery, AWS Lambda, or a worker pool. For long-running processes, instantiate once and reuse \u2014 the underlying HTTP client maintains a keep-alive connection pool.",
+      "children": []
+    },
+    {
+      "id": "changelog",
+      "title": "Changelog",
+      "content": "All notable changes to the **Amplitude connector** are recorded here. This project follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH` where `MAJOR` is incremented for breaking interface changes, `MINOR` for backwards-compatible features, and `PATCH` for bug fixes.\n\n## [1.0.0] \u2014 Current\n\n### Added\n- Initial release of the Amplitude connector.\n- Full sync of all primary resource types with normalization into `ConnectorDocument`.\n- Public connector methods for direct API access (see **API Methods**).\n- Typed exception hierarchy with retry-aware classification (see **Error Handling**).\n- Health check endpoint for fast credential validation.\n\n### Stability\n- Multi-tenant safe \u2014 every query is scoped by `tenant_id`.\n- Idempotent ingestion \u2014 deterministic `source_id` ensures resyncs don't duplicate.\n- Circuit breaker protects upstream during sustained outage.\n\n### Upgrade notes\n- This is the initial release; no upgrade path is required.\n- Future PATCH releases are guaranteed not to break existing config or method signatures.\n- MINOR releases may introduce new optional methods or features; existing call sites continue to work unchanged.\n- MAJOR releases will be accompanied by a migration guide in this section.",
+      "children": []
+    }
+  ]
+}

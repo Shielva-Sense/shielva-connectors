@@ -1,0 +1,247 @@
+{
+  "connector_type": "harvest",
+  "name": "HarvestConnector",
+  "display_name": "Harvest",
+  "version": "1.0.0",
+  "description": "Connects to the Harvest v2 REST API (Time Entries, Projects, Tasks, Clients, Users, Invoices, Estimates, Expenses) using a Personal Access Token + Account ID. Supports time-entry CRUD, project/client/invoice queries, and KB sync of time entries + invoices + clients.",
+  "provider": "harvest",
+  "service": "harvest",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Harvest Personal Access Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Harvest PAT",
+      "help": "Generate a Personal Access Token at https://id.getharvest.com/developers. The PAT is sent as `Authorization: Bearer <token>`."
+    },
+    {
+      "key": "account_id",
+      "label": "Harvest Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "1234567",
+      "help": "Your numeric Harvest Account ID — shown alongside the PAT at id.getharvest.com/developers. Sent as the `Harvest-Account-Id` header on every request."
+    },
+    {
+      "key": "user_agent",
+      "label": "User-Agent",
+      "type": "string",
+      "required": false,
+      "default": "Shielva Harvest Connector (support@shielva.ai)",
+      "placeholder": "Shielva Harvest Connector (support@shielva.ai)",
+      "help": "Harvest requires a `User-Agent` header that identifies the integration and provides a contact address."
+    },
+    {
+      "key": "base_url",
+      "label": "Harvest API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.harvestapp.com/v2",
+      "placeholder": "https://api.harvestapp.com/v2",
+      "help": "Base URL for the Harvest v2 REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Harvest's documented limit is 100 requests/minute per account."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates access_token and account_id and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Harvest API connectivity by calling GET /users/me.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "get_user_me",
+      "name": "Get Authenticated User",
+      "description": "GET /users/me — return the user the PAT belongs to.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "GET /users — paginated user list.",
+      "method": "GET",
+      "params": [
+        { "key": "is_active", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_clients",
+      "name": "List Clients",
+      "description": "GET /clients — paginated list.",
+      "method": "GET",
+      "params": [
+        { "key": "is_active", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "GET /projects — optionally scoped to a client_id.",
+      "method": "GET",
+      "params": [
+        { "key": "is_active", "type": "boolean", "required": false },
+        { "key": "client_id", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_project",
+      "name": "Get Project",
+      "description": "GET /projects/{id} — fetch a single project.",
+      "method": "GET",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "GET /tasks — list task definitions.",
+      "method": "GET",
+      "params": [
+        { "key": "is_active", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_time_entries",
+      "name": "List Time Entries",
+      "description": "GET /time_entries — filter by date range, user, project, client, or billed state.",
+      "method": "GET",
+      "params": [
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false },
+        { "key": "user_id", "type": "number", "required": false },
+        { "key": "project_id", "type": "number", "required": false },
+        { "key": "client_id", "type": "number", "required": false },
+        { "key": "is_billed", "type": "boolean", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_time_entry",
+      "name": "Get Time Entry",
+      "description": "GET /time_entries/{id}.",
+      "method": "GET",
+      "params": [
+        { "key": "time_entry_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_time_entry",
+      "name": "Create Time Entry",
+      "description": "POST /time_entries — log time for a (project, task, date).",
+      "method": "POST",
+      "params": [
+        { "key": "project_id", "type": "number", "required": true },
+        { "key": "task_id", "type": "number", "required": true },
+        { "key": "spent_date", "type": "string", "required": true },
+        { "key": "hours", "type": "number", "required": false },
+        { "key": "notes", "type": "string", "required": false },
+        { "key": "user_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_time_entry",
+      "name": "Update Time Entry",
+      "description": "PATCH /time_entries/{id} — update arbitrary fields.",
+      "method": "PATCH",
+      "params": [
+        { "key": "time_entry_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_time_entry",
+      "name": "Delete Time Entry",
+      "description": "DELETE /time_entries/{id}.",
+      "method": "DELETE",
+      "params": [
+        { "key": "time_entry_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "GET /invoices — optionally filter by state (draft/open/paid/closed) or client_id.",
+      "method": "GET",
+      "params": [
+        { "key": "state", "type": "string", "required": false },
+        { "key": "client_id", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_estimates",
+      "name": "List Estimates",
+      "description": "GET /estimates — optionally filter by state or client_id.",
+      "method": "GET",
+      "params": [
+        { "key": "state", "type": "string", "required": false },
+        { "key": "client_id", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_expenses",
+      "name": "List Expenses",
+      "description": "GET /expenses — paginated expenses, optional date range / scope.",
+      "method": "GET",
+      "params": [
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false },
+        { "key": "user_id", "type": "number", "required": false },
+        { "key": "project_id", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "tenacity>=8.2"
+  ]
+}

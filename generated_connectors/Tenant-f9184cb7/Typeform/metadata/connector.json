@@ -1,0 +1,151 @@
+{
+  "connector_type": "typeform",
+  "display_name": "Typeform",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": false,
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
+  ],
+  "capabilities": [
+    "install",
+    "authorize",
+    "health_check",
+    "sync",
+    "list_forms",
+    "get_form",
+    "get_responses",
+    "list_workspaces",
+    "get_workspace",
+    "get_insights"
+  ],
+  "provider": "Typeform",
+  "service": "Typeform",
+  "category": "forms",
+  "description": "Connect to Typeform to sync form definitions and responses into Shielva via OAuth 2.0.",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all Typeform forms and their responses into the knowledge base.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_forms",
+      "name": "List Forms",
+      "description": "Return all Typeform forms (auto-paginates).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "workspace_id",
+          "label": "Workspace Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_form",
+      "name": "Get Form",
+      "description": "Return a single form definition.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_responses",
+      "name": "Get Responses",
+      "description": "Return all responses for a form (auto-paginates via before cursor).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Return all workspaces (auto-paginates).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_workspace",
+      "name": "Get Workspace",
+      "description": "Return a single workspace.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "workspace_id",
+          "label": "Workspace Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_insights",
+      "name": "Get Insights",
+      "description": "Return insights summary for a form.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "form_id",
+          "label": "Form Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "TypeformConnector"
+}

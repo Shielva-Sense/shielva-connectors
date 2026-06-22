@@ -1,0 +1,182 @@
+{
+  "connector_type": "adobe_analytics",
+  "connector_id": "adobe_analytics",
+  "name": "Adobe Analytics",
+  "provider": "Adobe",
+  "service": "Adobe Analytics",
+  "version": "1.0.0",
+  "description": "Connects to the Adobe Analytics 2.0 API to sync report suites, segments, and calculated metrics into the Shielva knowledge base. Authenticates via OAuth2 client_credentials grant using Adobe IMS.",
+  "auth_type": "oauth2",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID (API Key)",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. abcdef1234567890",
+      "help": "Your Adobe Analytics OAuth2 Client ID (API Key). Found in Adobe Developer Console \u2192 Projects \u2192 Your Project \u2192 Credentials."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "Your OAuth2 Client Secret",
+      "help": "Your Adobe Analytics OAuth2 Client Secret. Keep this secure \u2014 it is never logged."
+    },
+    {
+      "key": "company_id",
+      "label": "Global Company ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. mycompany",
+      "help": "Your Adobe Analytics Global Company ID. Used in all API URLs: analytics.adobe.io/api/{company_id}/..."
+    },
+    {
+      "key": "organization_id",
+      "label": "Organization ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "e.g. ABCDEF1234567890@AdobeOrg",
+      "help": "Your Adobe IMS Organization ID (optional). Format: {hex}@AdobeOrg. Found in Adobe Admin Console."
+    }
+  ],
+  "features": [
+    "oauth2",
+    "token_refresh",
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "report_suites",
+    "segments",
+    "calculated_metrics",
+    "dimensions",
+    "metrics",
+    "reports"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate client_id, client_secret, and company_id. Acquires an OAuth2 access token via Adobe IMS client_credentials grant. Returns HEALTHY/CONNECTED or OFFLINE with reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Acquire token and list report suites to confirm connectivity. Returns HEALTHY, DEGRADED, or OFFLINE with report suite count.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches all report suites, segments (for first report suite), and calculated metrics. Normalizes each to a ConnectorDocument. Non-primary failures are non-fatal.",
+      "category": "sync"
+    },
+    {
+      "id": "list_report_suites",
+      "name": "List Report Suites",
+      "description": "Return all report suites available for the company.",
+      "category": "report_suites",
+      "endpoint": "GET /api/{company_id}/reportsuites"
+    },
+    {
+      "id": "list_dimensions",
+      "name": "List Dimensions",
+      "description": "Return all dimensions available for a specific report suite.",
+      "category": "dimensions",
+      "endpoint": "GET /api/{company_id}/dimensions?rsid={report_suite_id}"
+    },
+    {
+      "id": "list_metrics",
+      "name": "List Metrics",
+      "description": "Return all metrics available for a specific report suite.",
+      "category": "metrics",
+      "endpoint": "GET /api/{company_id}/metrics?rsid={report_suite_id}"
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "Return all segments for a specific report suite.",
+      "category": "segments",
+      "endpoint": "GET /api/{company_id}/segments?rsid={report_suite_id}"
+    },
+    {
+      "id": "run_report",
+      "name": "Run Report",
+      "description": "Run a ranked Adobe Analytics report for a report suite with given metrics, dimensions, and optional date range.",
+      "category": "reports",
+      "endpoint": "POST /api/{company_id}/reports"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "report_suites",
+    "dimensions",
+    "metrics",
+    "segments",
+    "reports"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate client_id, client_secret, and company_id.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Acquire token and list report suites to verify connectivity.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync report suites, segments, and calculated metrics.",
+      "method": "GET"
+    },
+    {
+      "name": "List Report Suites",
+      "id": "list_report_suites",
+      "category": "report_suites",
+      "description": "Return all report suites for the company.",
+      "method": "GET"
+    },
+    {
+      "name": "List Dimensions",
+      "id": "list_dimensions",
+      "category": "dimensions",
+      "description": "Return all dimensions for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "List Metrics",
+      "id": "list_metrics",
+      "category": "metrics",
+      "description": "Return all metrics for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "List Segments",
+      "id": "list_segments",
+      "category": "segments",
+      "description": "Return all segments for a report suite.",
+      "method": "GET"
+    },
+    {
+      "name": "Run Report",
+      "id": "run_report",
+      "category": "reports",
+      "description": "Run an Adobe Analytics ranked report.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Analytics"
+}

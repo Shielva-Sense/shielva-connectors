@@ -1,0 +1,185 @@
+{
+  "connector_type": "snowflake",
+  "display_name": "Snowflake",
+  "provider": "snowflake",
+  "service": "snowflake",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Sync Snowflake databases, schemas, and tables into the Shielva knowledge base via the Snowflake SQL API v2.",
+  "install_fields": [
+    {
+      "key": "account",
+      "label": "Account Identifier",
+      "type": "string",
+      "required": true,
+      "placeholder": "myorg-account123",
+      "help": "Your Snowflake account identifier. Found in your Snowflake URL: https://<account>.snowflakecomputing.com. For multi-region accounts include the region (e.g. abc12345.us-east-1)."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "SHIELVA_USER",
+      "help": "Snowflake username for the service account."
+    },
+    {
+      "key": "password",
+      "label": "Password",
+      "type": "password",
+      "required": true,
+      "help": "Password for the Snowflake service account."
+    },
+    {
+      "key": "warehouse",
+      "label": "Warehouse (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "COMPUTE_WH",
+      "help": "The virtual warehouse to use for query execution. Uses the account default if not set."
+    },
+    {
+      "key": "database",
+      "label": "Default Database (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "ANALYTICS",
+      "help": "Default database context for SQL execution. The connector will still discover all accessible databases during sync."
+    },
+    {
+      "key": "role",
+      "label": "Role (optional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "SYSADMIN",
+      "help": "Snowflake role to activate for the session. Uses the user's default role if not set."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "query"
+  ],
+  "resources": [
+    "databases",
+    "schemas",
+    "tables",
+    "query_history"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Snowflake databases, schemas (as metadata), and tables into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_databases",
+      "name": "List Databases",
+      "description": "GET /api/v2/databases \u2014 list all accessible Snowflake databases.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_schemas",
+      "name": "List Schemas",
+      "description": "GET /api/v2/databases/{database}/schemas \u2014 list schemas in a database.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_tables",
+      "name": "List Tables",
+      "description": "GET /api/v2/databases/{database}/schemas/{schema}/tables \u2014 list tables.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "schema",
+          "label": "Schema",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "execute_query",
+      "name": "Execute Query",
+      "description": "POST /api/v2/statements \u2014 execute a SQL statement and return the result.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "sql",
+          "label": "Sql",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "warehouse",
+          "label": "Warehouse",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "schema",
+          "label": "Schema",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "role",
+          "label": "Role",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "timeout",
+          "label": "Timeout",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_query_result",
+      "name": "Get Query Result",
+      "description": "GET /api/v2/statements/{handle} \u2014 poll for an async statement result.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "statement_handle",
+          "label": "Statement Handle",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "SnowflakeConnector"
+}

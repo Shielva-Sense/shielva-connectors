@@ -1,0 +1,110 @@
+{
+  "connector_type": "linear",
+  "name": "Linear",
+  "display_name": "Linear",
+  "description": "Connect to Linear to sync issues from all teams into Shielva's knowledge base.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Linear Personal API key from Settings \u2192 API \u2192 Personal API keys.",
+      "help": "API Key."
+    }
+  ],
+  "capabilities": [
+    "list_teams",
+    "list_issues",
+    "get_issue",
+    "list_projects",
+    "sync"
+  ],
+  "provider": "linear",
+  "service": "linear",
+  "category": "project_management",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync all issues from all Linear teams into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "Return all Linear teams: id, name, key.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_issues",
+      "name": "List Issues",
+      "description": "Return a page of Linear issues, optionally filtered by team_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "team_id",
+          "label": "Team Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "after",
+          "label": "After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_issue",
+      "name": "Get Issue",
+      "description": "Return a single Linear issue by its ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "issue_id",
+          "label": "Issue Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_projects",
+      "name": "List Projects",
+      "description": "Return all Linear projects: id, name, description, state.",
+      "method": "GET",
+      "params": []
+    }
+  ]
+}

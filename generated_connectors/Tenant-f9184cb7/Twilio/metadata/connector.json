@@ -1,0 +1,155 @@
+{
+  "connector_type": "twilio",
+  "display_name": "Twilio",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "provider": "Twilio",
+  "service": "Twilio",
+  "description": "Connect to Twilio to sync SMS messages, voice calls, and phone numbers.",
+  "install_fields": [
+    {
+      "key": "account_sid",
+      "label": "Account SID",
+      "type": "string",
+      "required": true,
+      "description": "Your Twilio Account SID from the Twilio Console dashboard.",
+      "help": "Account SID."
+    },
+    {
+      "key": "auth_token",
+      "label": "Auth Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Twilio Auth Token from the Twilio Console dashboard.",
+      "help": "Auth Token."
+    }
+  ],
+  "capabilities": [
+    "list_messages",
+    "get_message",
+    "list_calls",
+    "get_call",
+    "list_recordings",
+    "list_phone_numbers",
+    "sync"
+  ],
+  "category": "communications",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Twilio SMS messages and voice calls into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_messages",
+      "name": "List Messages",
+      "description": "Return all messages, following next_page_uri pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "date_sent_after",
+          "label": "Date Sent After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_message",
+      "name": "Get Message",
+      "description": "Fetch a single message by SID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "message_sid",
+          "label": "Message Sid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Return all calls, following next_page_uri pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "start_time_after",
+          "label": "Start Time After",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_call",
+      "name": "Get Call",
+      "description": "Fetch a single call by SID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "call_sid",
+          "label": "Call Sid",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_recordings",
+      "name": "List Recordings",
+      "description": "Return all recordings, optionally filtered by call_sid.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "call_sid",
+          "label": "Call Sid",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_phone_numbers",
+      "name": "List Phone Numbers",
+      "description": "Return all incoming phone numbers for the account.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "TwilioConnector"
+}

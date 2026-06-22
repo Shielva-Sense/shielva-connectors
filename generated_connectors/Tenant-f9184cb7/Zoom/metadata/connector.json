@@ -1,0 +1,252 @@
+{
+  "connector_type": "zoom",
+  "name": "Zoom",
+  "provider": "Zoom",
+  "service": "zoom",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "install_fields": [
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "string",
+      "required": true,
+      "help": "Account ID."
+    },
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "help": "Client Secret."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_users",
+    "list_meetings",
+    "list_recordings"
+  ],
+  "description": "Sync meetings, recordings, users, and webinar data from Zoom using Server-to-Server OAuth.",
+  "oauth_token_url": "https://zoom.us/oauth/token",
+  "oauth_grant_type": "account_credentials",
+  "api_base_url": "https://api.zoom.us/v2/",
+  "features": [
+    "server_to_server_oauth",
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "token_refresh"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Exchange account credentials for a Bearer token and probe GET /accounts/me.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Probe GET /accounts/me and return HEALTHY, DEGRADED, or OFFLINE. Updates the circuit breaker.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Records",
+      "description": "Full paginated sync of Zoom meetings and recordings into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "List active users in the Zoom account.",
+      "category": "users",
+      "endpoint": "GET /users"
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Paginated list of Zoom meetings for a user.",
+      "category": "meetings",
+      "endpoint": "GET /users/{user_id}/meetings"
+    },
+    {
+      "id": "list_recordings",
+      "name": "List Recordings",
+      "description": "Paginated list of cloud recordings for a user.",
+      "category": "recordings",
+      "endpoint": "GET /users/{user_id}/recordings"
+    },
+    {
+      "id": "list_webinars",
+      "name": "List Webinars",
+      "description": "List webinars for a user.",
+      "category": "webinars",
+      "endpoint": "GET /users/{user_id}/webinars"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "users",
+    "meetings",
+    "recordings",
+    "webinars"
+  ],
+  "apis": [
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Return users from the Zoom account.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Zoom users, meetings, and recordings into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_meetings",
+      "name": "List Meetings",
+      "description": "Calls list_meetings().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "meeting_type",
+          "label": "Meeting Type",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_meeting",
+      "name": "Get Meeting",
+      "description": "Calls get_meeting().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "meeting_id",
+          "label": "Meeting Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_recordings",
+      "name": "List Recordings",
+      "description": "Calls list_recordings().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "from_date",
+          "label": "From Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "to_date",
+          "label": "To Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_recording",
+      "name": "Get Recording",
+      "description": "Calls get_recording().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "meeting_id",
+          "label": "Meeting Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_webinars",
+      "name": "List Webinars",
+      "description": "Calls list_webinars().",
+      "method": "GET",
+      "params": [
+        {
+          "key": "user_id",
+          "label": "User Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Zoom"
+}

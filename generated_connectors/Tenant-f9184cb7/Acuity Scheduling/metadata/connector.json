@@ -1,0 +1,106 @@
+{
+  "connector_type": "acuity_scheduling",
+  "name": "acuity_scheduling",
+  "display_name": "Acuity Scheduling",
+  "description": "Connect to Acuity Scheduling to sync appointments, clients, and appointment types into Shielva using your User ID and API Key (BasicAuth).",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "user_id",
+      "label": "User ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Acuity Scheduling User ID, found in Integrations \u2192 API \u2192 Credentials.",
+      "help": "User ID."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Acuity Scheduling API Key, found in Integrations \u2192 API \u2192 Credentials.",
+      "help": "API Key."
+    }
+  ],
+  "capabilities": [
+    "get_me",
+    "list_appointments",
+    "list_appointment_types",
+    "list_calendars",
+    "list_clients",
+    "sync"
+  ],
+  "provider": "Acuity Scheduling",
+  "service": "Acuity Scheduling",
+  "category": "scheduling",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync appointments, clients, and appointment types into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "min_date",
+          "label": "Min Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "max_date",
+          "label": "Max Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_appointments",
+      "name": "List Appointments",
+      "description": "Return the first page of appointments, optionally filtered by date range.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "min_date",
+          "label": "Min Date",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "max_date",
+          "label": "Max Date",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_clients",
+      "name": "List Clients",
+      "description": "Return the first page of clients.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_appointment_types",
+      "name": "List Appointment Types",
+      "description": "Return all appointment types.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "list_calendars",
+      "name": "List Calendars",
+      "description": "Return all calendars.",
+      "method": "GET",
+      "params": []
+    }
+  ]
+}

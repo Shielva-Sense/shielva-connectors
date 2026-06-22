@@ -1,0 +1,159 @@
+{
+  "connector_type": "plaid",
+  "name": "Plaid",
+  "display_name": "Plaid",
+  "description": "Connect to Plaid to sync bank transactions, account balances, and financial data.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "Your Plaid client_id from Plaid Dashboard \u2192 Team Settings \u2192 Keys.",
+      "help": "Client ID."
+    },
+    {
+      "key": "secret",
+      "label": "Secret",
+      "type": "password",
+      "required": true,
+      "description": "Your Plaid secret for the target environment (sandbox/development/production).",
+      "help": "Secret."
+    },
+    {
+      "key": "access_token",
+      "label": "Access Token",
+      "type": "password",
+      "required": true,
+      "description": "Plaid Item access token obtained through Link flow (access-sandbox-... / access-production-...).",
+      "help": "Access Token."
+    },
+    {
+      "key": "environment",
+      "label": "Environment",
+      "type": "string",
+      "required": false,
+      "description": "Plaid environment: sandbox, development, or production. Default: production.",
+      "help": "Environment."
+    }
+  ],
+  "capabilities": [
+    "get_accounts",
+    "get_balance",
+    "get_transactions",
+    "get_institution",
+    "sync"
+  ],
+  "provider": "plaid",
+  "category": "finance",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Plaid transactions and accounts into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_accounts",
+      "name": "Get Accounts",
+      "description": "List all accounts for the Plaid item.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_balance",
+      "name": "Get Balance",
+      "description": "Fetch real-time balances. Optionally filter by account_ids.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "account_ids",
+          "label": "Account Ids",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_transactions",
+      "name": "Get Transactions",
+      "description": "Fetch paginated transactions. Automatically loops until all fetched.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "start_date",
+          "label": "Start Date",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "end_date",
+          "label": "End Date",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "account_ids",
+          "label": "Account Ids",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_institution",
+      "name": "Get Institution",
+      "description": "Fetch institution metadata by institution_id.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "institution_id",
+          "label": "Institution Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "country_codes",
+          "label": "Country Codes",
+          "type": "json",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "service": "plaid"
+}

@@ -1,0 +1,279 @@
+{
+  "connector_type": "netsuite",
+  "connector_id": "netsuite",
+  "name": "NetSuite",
+  "provider": "oracle",
+  "service": "netsuite",
+  "version": "1.0.0",
+  "description": "Connects to Oracle NetSuite via the SuiteTalk REST API using Token-Based Authentication (OAuth 1.0a with HMAC-SHA256). Syncs customers, invoices, and items into the Shielva knowledge base and exposes SuiteQL for advanced queries.",
+  "auth_type": "oauth2",
+  "auth_config": {
+    "method": "oauth1_tba",
+    "signature_method": "HMAC-SHA256",
+    "rest_base": "https://{account_id}.suitetalk.api.netsuite.com/services/rest"
+  },
+  "install_fields": [
+    {
+      "key": "account_id",
+      "label": "Account ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "1234567",
+      "help": "Your NetSuite account ID. Find it under Setup > Company > Company Information > NetSuite Account ID. For sandbox accounts append _SB1 (e.g. 1234567_SB1)."
+    },
+    {
+      "key": "consumer_key",
+      "label": "Consumer Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "abcdef1234567890...",
+      "help": "The Consumer Key generated when you created your Integration record in NetSuite (Setup > Integration > Integration Management)."
+    },
+    {
+      "key": "consumer_secret",
+      "label": "Consumer Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      "help": "The Consumer Secret from your NetSuite Integration record. Shown only once at creation \u2014 store it securely."
+    },
+    {
+      "key": "token_key",
+      "label": "Token Key",
+      "type": "string",
+      "required": true,
+      "placeholder": "fedcba9876543210...",
+      "help": "The Token ID generated under Setup > Users/Roles > Access Tokens > New or via the User Provisioning page."
+    },
+    {
+      "key": "token_secret",
+      "label": "Token Secret",
+      "type": "password",
+      "required": true,
+      "placeholder": "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      "help": "The Token Secret corresponding to your Token ID. Shown only once at creation."
+    }
+  ],
+  "features": [
+    "oauth1_tba",
+    "hmac_sha256",
+    "retry",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "suiteql"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Validate Credentials",
+      "description": "Validates all five TBA fields are present, then verifies them by calling GET /record/v1/customer?limit=1 against the NetSuite REST API.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies connectivity and credential validity by calling GET /record/v1/customer?limit=1. Returns HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health",
+      "endpoint": "GET /record/v1/customer?limit=1"
+    },
+    {
+      "id": "sync",
+      "name": "Full Sync",
+      "description": "Fetches customers, invoices, and items from NetSuite (up to 100 each) and normalizes them into ConnectorDocuments for the Shielva knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "list_customers",
+      "name": "List Customers",
+      "description": "Paginated list of NetSuite customer records.",
+      "category": "customers",
+      "endpoint": "GET /record/v1/customer",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "default": 100
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "default": 0
+        }
+      ]
+    },
+    {
+      "id": "get_customer",
+      "name": "Get Customer",
+      "description": "Retrieve a single NetSuite customer by internal ID.",
+      "category": "customers",
+      "endpoint": "GET /record/v1/customer/{customer_id}",
+      "params": [
+        {
+          "name": "customer_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Paginated list of NetSuite invoice records.",
+      "category": "invoices",
+      "endpoint": "GET /record/v1/invoice",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "default": 100
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "default": 0
+        }
+      ]
+    },
+    {
+      "id": "get_invoice",
+      "name": "Get Invoice",
+      "description": "Retrieve a single NetSuite invoice by internal ID.",
+      "category": "invoices",
+      "endpoint": "GET /record/v1/invoice/{invoice_id}",
+      "params": [
+        {
+          "name": "invoice_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_items",
+      "name": "List Items",
+      "description": "Paginated list of NetSuite item records.",
+      "category": "items",
+      "endpoint": "GET /record/v1/item",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "default": 100
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "default": 0
+        }
+      ]
+    },
+    {
+      "id": "suiteql",
+      "name": "SuiteQL Query",
+      "description": "Execute an arbitrary SuiteQL query against the NetSuite query engine. SuiteQL is NetSuite's SQL-like language for cross-record queries including custom fields and joins.",
+      "category": "query",
+      "endpoint": "POST /query/v1/suiteql",
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "default": 1000
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "default": 0
+        }
+      ]
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "customers",
+    "invoices",
+    "items",
+    "query"
+  ],
+  "apis": [
+    {
+      "name": "Install / Validate Credentials",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate all five TBA install fields and verify connectivity.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Verify connectivity via GET /record/v1/customer?limit=1.",
+      "method": "GET"
+    },
+    {
+      "name": "Full Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Sync NetSuite customers, invoices, and items into the knowledge base.",
+      "method": "GET"
+    },
+    {
+      "name": "List Customers",
+      "id": "list_customers",
+      "category": "customers",
+      "description": "GET /record/v1/customer \u2014 paginated customer list.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Customer",
+      "id": "get_customer",
+      "category": "customers",
+      "description": "GET /record/v1/customer/{customer_id} \u2014 single customer by internal ID.",
+      "method": "GET"
+    },
+    {
+      "name": "List Invoices",
+      "id": "list_invoices",
+      "category": "invoices",
+      "description": "GET /record/v1/invoice \u2014 paginated invoice list.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Invoice",
+      "id": "get_invoice",
+      "category": "invoices",
+      "description": "GET /record/v1/invoice/{invoice_id} \u2014 single invoice by internal ID.",
+      "method": "GET"
+    },
+    {
+      "name": "List Items",
+      "id": "list_items",
+      "category": "items",
+      "description": "GET /record/v1/item \u2014 paginated item list.",
+      "method": "GET"
+    },
+    {
+      "name": "SuiteQL Query",
+      "id": "suiteql",
+      "category": "query",
+      "description": "POST /query/v1/suiteql \u2014 execute a SuiteQL query.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Netsuite"
+}

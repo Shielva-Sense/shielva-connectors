@@ -1,0 +1,269 @@
+{
+  "connector_type": "aircall",
+  "name": "AircallConnector",
+  "display_name": "Aircall",
+  "version": "1.0.0",
+  "description": "Connects to the Aircall (telephony) Public REST API. Reads users, numbers, calls, contacts, tags, teams, and webhooks; places outbound calls; transfers/assigns in-flight calls; CRUDs CRM contacts; manages webhook subscriptions. Uses HTTP Basic authentication (api_id + api_token).",
+  "provider": "aircall",
+  "service": "aircall",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_id",
+      "label": "API ID",
+      "type": "string",
+      "required": true,
+      "placeholder": "Enter your Aircall API ID",
+      "help": "Aircall Dashboard → Integrations & API → Aircall API → API ID. Sent as the Basic-auth username."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Enter your Aircall API Token",
+      "help": "Aircall Dashboard → Integrations & API → Aircall API → API Token. Shown only once at creation; treat as a password. Sent as the Basic-auth password."
+    },
+    {
+      "key": "base_url",
+      "label": "Aircall API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.aircall.io/v1",
+      "placeholder": "https://api.aircall.io/v1",
+      "help": "Base URL for the Aircall REST API. Leave blank to use the default."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum Aircall API requests per minute. Default is 60 (Aircall's standard per-token quota)."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates api_id and api_token by calling /ping. Persists credentials on success.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Aircall API connectivity by calling /ping.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_calls",
+      "name": "List Calls",
+      "description": "Lists Aircall call events. Supports per_page, page, from/to date range (Unix epoch seconds), direction (inbound|outbound), and user_id filter.",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false },
+        { "key": "direction", "type": "string", "required": false },
+        { "key": "user_id", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_call",
+      "name": "Get Call",
+      "description": "Fetches a single Aircall call by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "call_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "Lists Aircall agents (users) with pagination.",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_user",
+      "name": "Get User",
+      "description": "Fetches a single Aircall user by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_numbers",
+      "name": "List Numbers",
+      "description": "Lists Aircall phone numbers (DIDs) assigned to the account.",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_number",
+      "name": "Get Number",
+      "description": "Fetches a single Aircall phone number by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "number_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Lists Aircall CRM contacts with pagination and optional search.",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false },
+        { "key": "search", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Fetches a single Aircall contact by ID.",
+      "method": "GET",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "Creates a new Aircall CRM contact with name, optional company, phone numbers, and emails.",
+      "method": "POST",
+      "params": [
+        { "key": "first_name", "type": "string", "required": true },
+        { "key": "last_name", "type": "string", "required": true },
+        { "key": "company_name", "type": "string", "required": false },
+        { "key": "phone_numbers", "type": "array", "required": false },
+        { "key": "emails", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "Partial-updates an existing Aircall CRM contact. At least one field is required.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "first_name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "company_name", "type": "string", "required": false },
+        { "key": "phone_numbers", "type": "array", "required": false },
+        { "key": "emails", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "Deletes an Aircall CRM contact by ID.",
+      "method": "DELETE",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tags",
+      "name": "List Tags",
+      "description": "Lists Aircall call tags configured on the account.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_teams",
+      "name": "List Teams",
+      "description": "Lists Aircall teams (groups of users).",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_webhooks",
+      "name": "List Webhooks",
+      "description": "Lists Aircall webhook subscriptions for the account.",
+      "method": "GET",
+      "params": [
+        { "key": "per_page", "type": "number", "required": false },
+        { "key": "page", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_webhook",
+      "name": "Create Webhook",
+      "description": "Creates a new Aircall webhook subscription on the given URL for the given event types.",
+      "method": "POST",
+      "params": [
+        { "key": "url", "type": "string", "required": true },
+        { "key": "events", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "start_outbound_call",
+      "name": "Start Outbound Call",
+      "description": "Initiates an outbound call from an Aircall user (agent) to a phone number, using one of the account's numbers as the caller ID.",
+      "method": "POST",
+      "params": [
+        { "key": "user_id", "type": "number", "required": true },
+        { "key": "number_id", "type": "number", "required": true },
+        { "key": "to", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "transfer_call",
+      "name": "Transfer Call",
+      "description": "Transfers an in-progress call to another Aircall user.",
+      "method": "POST",
+      "params": [
+        { "key": "call_id", "type": "number", "required": true },
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "assign_call",
+      "name": "Assign Call",
+      "description": "Reassigns a call to a different Aircall user.",
+      "method": "PUT",
+      "params": [
+        { "key": "call_id", "type": "number", "required": true },
+        { "key": "user_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

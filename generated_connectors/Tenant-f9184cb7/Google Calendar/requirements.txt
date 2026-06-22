@@ -1,0 +1,18 @@
+# Shielva connector SDK — provides BaseConnector and shared utilities.
+# For local development this installs directly from the monorepo.
+# For production replace with: shielva-connector-sdk>=1.0.0
+-e /Volumes/V3-SSD/Shielva Project Dirs/shielva-connectors/core
+
+# ── Connector-specific dependencies ──────────────────────────────
+# IMPORTANT: Do NOT add packages that are pre-installed in the shared
+# venv (pydantic, structlog, pytest plugins).
+# Use >= minimum-floor specifiers for any packages you do add.
+aiohttp>=3.9.0
+structlog>=24.0.0
+
+# ── Test dependencies ──
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.1
+pytest-cov>=4.1.0
+pytest-timeout==2.4.0

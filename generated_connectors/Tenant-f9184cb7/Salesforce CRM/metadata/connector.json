@@ -1,0 +1,273 @@
+{
+  "connector_type": "salesforce",
+  "name": "Salesforce",
+  "provider": "Salesforce",
+  "service": "salesforce",
+  "service_slug": "salesforce",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Sync contacts, accounts, opportunities, leads, and cases from Salesforce CRM.",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Consumer Key (Client ID)",
+      "type": "string",
+      "required": true,
+      "placeholder": "3MVG9...",
+      "help": "From Salesforce Setup \u2192 App Manager \u2192 Connected App \u2192 Consumer Key"
+    },
+    {
+      "key": "client_secret",
+      "label": "Consumer Secret (Client Secret)",
+      "type": "password",
+      "required": true,
+      "placeholder": "Consumer Secret from Connected App",
+      "help": "Consumer Secret from your Salesforce Connected App"
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Callback URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://app.shielva.ai/oauth/callback/salesforce",
+      "help": "OAuth redirect/callback URL registered in your Salesforce Connected App"
+    },
+    {
+      "key": "sandbox",
+      "label": "Use Sandbox",
+      "type": "boolean",
+      "required": false,
+      "help": "Enable to use test.salesforce.com instead of login.salesforce.com"
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "authorize",
+    "query",
+    "list_contacts",
+    "list_accounts",
+    "list_opportunities",
+    "list_leads",
+    "list_cases"
+  ],
+  "oauth_scopes": [
+    "api",
+    "refresh_token",
+    "offline_access"
+  ],
+  "oauth_auth_url": "https://login.salesforce.com/services/oauth2/authorize",
+  "oauth_token_url": "https://login.salesforce.com/services/oauth2/token",
+  "oauth_auth_url_sandbox": "https://test.salesforce.com/services/oauth2/authorize",
+  "oauth_token_url_sandbox": "https://test.salesforce.com/services/oauth2/token",
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the OAuth access token by pinging the Salesforce REST API root.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping the Salesforce REST API root and return HEALTHY, DEGRADED, or OFFLINE.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync CRM Records",
+      "description": "Full or incremental sync of Leads, Contacts, and Opportunities into the knowledge base.",
+      "category": "sync"
+    },
+    {
+      "id": "query",
+      "name": "SOQL Query",
+      "description": "Execute an arbitrary SOQL query against the org.",
+      "category": "query",
+      "endpoint": "GET /services/data/v58.0/query?q={soql}"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List Contacts ordered by LastModifiedDate descending via SOQL.",
+      "category": "contacts",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Contact"
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "List Accounts ordered by LastModifiedDate descending via SOQL.",
+      "category": "accounts",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Account"
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List Opportunities ordered by LastModifiedDate descending via SOQL.",
+      "category": "opportunities",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Opportunity"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List Leads ordered by LastModifiedDate descending via SOQL.",
+      "category": "leads",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Lead"
+    },
+    {
+      "id": "list_cases",
+      "name": "List Cases",
+      "description": "List Cases ordered by LastModifiedDate descending via SOQL.",
+      "category": "cases",
+      "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Case"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync Salesforce Leads, Contacts, and Opportunities into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "query",
+      "name": "Query",
+      "description": "Execute an arbitrary SOQL query.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "soql",
+          "label": "Soql",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_objects",
+      "name": "List Objects",
+      "description": "List all available SObject types in this org.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_object",
+      "name": "Get Object",
+      "description": "Retrieve a single SObject record by type and ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "object_type",
+          "label": "Object Type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "record_id",
+          "label": "Record Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "List Leads via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "List Contacts via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_opportunities",
+      "name": "List Opportunities",
+      "description": "List Opportunities via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_accounts",
+      "name": "List Accounts",
+      "description": "List Accounts via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_cases",
+      "name": "List Cases",
+      "description": "List Cases via SOQL.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "display_name": "Salesforce"
+}

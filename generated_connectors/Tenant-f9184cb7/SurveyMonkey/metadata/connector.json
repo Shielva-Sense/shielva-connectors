@@ -1,0 +1,218 @@
+{
+  "connector_type": "surveymonkey",
+  "display_name": "SurveyMonkey",
+  "provider": "surveymonkey",
+  "service": "surveymonkey",
+  "auth_type": "oauth2",
+  "version": "1.0.0",
+  "description": "Connect to SurveyMonkey to sync surveys, responses, collectors, contacts, and contact lists via the SurveyMonkey API v3.",
+  "category": "surveys",
+  "install_fields": [
+    {
+      "key": "client_id",
+      "label": "Client ID",
+      "type": "string",
+      "required": true,
+      "description": "OAuth 2.0 Client ID from the SurveyMonkey Developer Portal.",
+      "help": "Client ID."
+    },
+    {
+      "key": "client_secret",
+      "label": "Client Secret",
+      "type": "password",
+      "required": true,
+      "description": "OAuth 2.0 Client Secret from the SurveyMonkey Developer Portal.",
+      "help": "Client Secret."
+    },
+    {
+      "key": "redirect_uri",
+      "label": "Redirect URI",
+      "type": "string",
+      "required": true,
+      "description": "The callback URL registered in your SurveyMonkey app settings.",
+      "help": "OAuth callback URL. Leave blank to use the default."
+    }
+  ],
+  "scopes": [
+    "surveys_read",
+    "responses_read"
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "oauth2"
+  ],
+  "resources": [
+    "surveys",
+    "responses",
+    "collectors",
+    "contacts",
+    "contact_lists"
+  ],
+  "auth_flow": {
+    "type": "oauth2",
+    "authorization_url": "https://api.surveymonkey.com/oauth/authorize",
+    "token_url": "https://api.surveymonkey.com/oauth/token",
+    "scopes": [
+      "surveys_read",
+      "responses_read"
+    ]
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync surveys, responses, and collectors into the knowledge base.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_surveys",
+      "name": "List Surveys",
+      "description": "Return a flat list of surveys for the current page.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_survey",
+      "name": "Get Survey",
+      "description": "Return survey metadata.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "survey_id",
+          "label": "Survey Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "get_survey_details",
+      "name": "Get Survey Details",
+      "description": "Return full survey with all pages and questions.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "survey_id",
+          "label": "Survey Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_responses",
+      "name": "List Responses",
+      "description": "Return a flat list of bulk responses for a survey.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "survey_id",
+          "label": "Survey Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_survey_responses",
+      "name": "Get Survey Responses",
+      "description": "Return a flat list of bulk responses for a survey (spec canonical name).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "survey_id",
+          "label": "Survey Id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_collectors",
+      "name": "List Collectors",
+      "description": "Return all global collectors via GET /collectors (paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "Return all groups/teams via GET /groups (paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "name": "SurveyMonkeyConnector"
+}

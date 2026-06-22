@@ -1,0 +1,309 @@
+{
+  "connector_type": "honeycomb",
+  "name": "HoneycombConnector",
+  "display_name": "Honeycomb",
+  "version": "1.0.0",
+  "description": "Connects to the Honeycomb observability API (api.honeycomb.io / api.eu1.honeycomb.io) using a Honeycomb Environment API key (X-Honeycomb-Team header). Manages datasets, columns, saved queries, query results, markers, triggers, boards, SLOs, and notification recipients; ingests events via /events/{dataset}.",
+  "provider": "honeycomb",
+  "service": "honeycomb",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "Honeycomb API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste your Honeycomb Environment API key",
+      "help": "Environment-level API key from Honeycomb → Environment Settings → API Keys. Sent in the X-Honeycomb-Team header on every request (NOT Authorization: Bearer)."
+    },
+    {
+      "key": "region",
+      "label": "Region",
+      "type": "string",
+      "required": false,
+      "default": "us",
+      "placeholder": "us",
+      "help": "'us' for honeycomb.io (default), 'eu' for eu1.honeycomb.io. Ignored if base_url is set."
+    },
+    {
+      "key": "base_url",
+      "label": "API Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.honeycomb.io/1",
+      "placeholder": "https://api.honeycomb.io/1",
+      "help": "Override only if your organization routes Honeycomb traffic through a proxy. Leave blank to use the region default."
+    },
+    {
+      "key": "default_dataset",
+      "label": "Default Dataset",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "placeholder": "my-service",
+      "help": "Optional default dataset slug used as a fallback for methods that accept a dataset parameter."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "100",
+      "placeholder": "100",
+      "help": "Client-side soft cap on outbound requests per minute. Default is 100."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates the API key by calling GET /auth and persists the configuration.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "authorize",
+      "name": "Authorize",
+      "description": "API-key auth has no consent flow — wraps the configured api_key into a TokenInfo for the platform.",
+      "method": "POST",
+      "params": [
+        { "key": "auth_code", "type": "string", "required": false },
+        { "key": "state", "type": "string", "required": false }
+      ],
+      "returns": "TokenInfo"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Honeycomb API connectivity by calling GET /auth.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "sync",
+      "name": "Sync Datasets",
+      "description": "Syncs Honeycomb dataset metadata (name, description, columns) into the Shielva knowledge base.",
+      "method": "GET",
+      "params": [
+        { "key": "since", "type": "string", "required": false },
+        { "key": "full", "type": "boolean", "required": false },
+        { "key": "kb_id", "type": "string", "required": false },
+        { "key": "webhook_url", "type": "string", "required": false }
+      ],
+      "returns": "SyncResult"
+    },
+    {
+      "id": "auth_info",
+      "name": "Auth Info",
+      "description": "Returns team, environment, and api_key_access info from GET /auth.",
+      "method": "GET",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_datasets",
+      "name": "List Datasets",
+      "description": "Lists all datasets visible to the API key (GET /datasets).",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "get_dataset",
+      "name": "Get Dataset",
+      "description": "Fetches a single dataset by slug (GET /datasets/{slug}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_dataset",
+      "name": "Create Dataset",
+      "description": "Creates a new dataset (POST /datasets). Requires Configuration scope.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "expand_json_depth", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_columns",
+      "name": "List Columns",
+      "description": "Lists all columns for a dataset (GET /datasets/{slug}/columns).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_queries",
+      "name": "List Queries",
+      "description": "Lists saved queries for a dataset (GET /queries/{slug}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_query",
+      "name": "Create Query",
+      "description": "Creates a query spec on a dataset (POST /queries/{slug}). Returns a query id usable in run_query().",
+      "method": "POST",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "breakdowns", "type": "array", "required": false },
+        { "key": "calculations", "type": "array", "required": false },
+        { "key": "filters", "type": "array", "required": false },
+        { "key": "time_range", "type": "number", "required": false },
+        { "key": "granularity", "type": "number", "required": false },
+        { "key": "orders", "type": "array", "required": false },
+        { "key": "having", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_query",
+      "name": "Get Query",
+      "description": "Fetches a query spec (GET /queries/{slug}/{id}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "query_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "run_query",
+      "name": "Run Query",
+      "description": "Kicks off async query execution (POST /query_results/{slug}). Poll get_query_result() until complete=true.",
+      "method": "POST",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "query_id", "type": "string", "required": true },
+        { "key": "disable_series", "type": "boolean", "required": false },
+        { "key": "limit", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_query_result",
+      "name": "Get Query Result",
+      "description": "Polls a query result by id (GET /query_results/{slug}/{rid}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "result_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_markers",
+      "name": "List Markers",
+      "description": "Lists markers for a dataset (GET /markers/{slug}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_marker",
+      "name": "Create Marker",
+      "description": "Creates a marker on a dataset timeline (POST /markers/{slug}). Typical use: record deploys.",
+      "method": "POST",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "url", "type": "string", "required": false },
+        { "key": "start_time", "type": "number", "required": false },
+        { "key": "end_time", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_triggers",
+      "name": "List Triggers",
+      "description": "Lists alert triggers for a dataset (GET /triggers/{slug}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "create_trigger",
+      "name": "Create Trigger",
+      "description": "Creates an alert trigger (POST /triggers/{slug}). Threshold must be {op, value}; recipients is a list of {type, target}.",
+      "method": "POST",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "name", "type": "string", "required": true },
+        { "key": "query_id", "type": "string", "required": true },
+        { "key": "threshold", "type": "object", "required": true },
+        { "key": "frequency", "type": "number", "required": false },
+        { "key": "alert_type", "type": "string", "required": false },
+        { "key": "recipients", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_boards",
+      "name": "List Boards",
+      "description": "Lists boards in the environment (GET /boards).",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "get_board",
+      "name": "Get Board",
+      "description": "Fetches a single board by id (GET /boards/{id}).",
+      "method": "GET",
+      "params": [
+        { "key": "board_id", "type": "string", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_slos",
+      "name": "List SLOs",
+      "description": "Lists SLOs for a dataset (GET /slos/{slug}).",
+      "method": "GET",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true }
+      ],
+      "returns": "List"
+    },
+    {
+      "id": "list_recipients",
+      "name": "List Recipients",
+      "description": "Lists notification recipients (email / Slack / webhook / PagerDuty) (GET /recipients).",
+      "method": "GET",
+      "params": [],
+      "returns": "List"
+    },
+    {
+      "id": "send_event",
+      "name": "Send Event",
+      "description": "Ingests a single event row into a dataset (POST /events/{slug}). Every top-level key in the event becomes a column.",
+      "method": "POST",
+      "params": [
+        { "key": "dataset_slug", "type": "string", "required": true },
+        { "key": "event", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0"
+  ]
+}

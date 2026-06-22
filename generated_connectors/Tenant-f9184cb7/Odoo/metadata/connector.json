@@ -1,0 +1,243 @@
+{
+  "connector_type": "odoo",
+  "name": "OdooConnector",
+  "display_name": "Odoo",
+  "version": "1.0.0",
+  "description": "Connects to an Odoo (open source ERP + CRM) instance over JSON-RPC. Reads and writes res.partner, crm.lead, sale.order, account.move, product.template, project.task, hr.employee and stock.picking — plus a generic execute_method escape hatch for any other Odoo model.",
+  "provider": "odoo",
+  "service": "odoo",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "base_url",
+      "label": "Odoo Instance URL",
+      "type": "string",
+      "required": true,
+      "placeholder": "https://mycompany.odoo.com",
+      "help": "Root URL of your Odoo instance, e.g. https://mycompany.odoo.com or https://erp.mycompany.com. The connector appends /jsonrpc automatically."
+    },
+    {
+      "key": "db",
+      "label": "Database name",
+      "type": "string",
+      "required": true,
+      "placeholder": "mycompany",
+      "help": "The database name shown on the Odoo login page (above the Email / Password fields). For Odoo.com SaaS this is usually the subdomain of your instance URL."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "string",
+      "required": true,
+      "placeholder": "alice@mycompany.com",
+      "help": "The Odoo user login — typically an email address. Must belong to a user with permission on the models you intend to read or write."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "Paste the API key generated in Odoo",
+      "help": "Generate from Odoo → Preferences → Account Security → API Keys. Use an API key, never your account password — Odoo blocks JSON-RPC logins that present a password when 2FA is enabled."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Maximum requests per minute the connector will issue. Odoo has no hard public rate-limit; the default keeps traffic gentle on shared instances."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates base_url, db, username, api_key by calling common.authenticate. Returns ConnectorStatus(HEALTHY, AUTHENTICATED) on success.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Odoo connectivity by re-authenticating against common.authenticate. Always forces a fresh round-trip (uid cache cleared) so a revoked API key surfaces immediately.",
+      "method": "GET",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "list_partners",
+      "name": "List Partners",
+      "description": "Returns res.partner records via execute_kw('res.partner', 'search_read', ...). Supports an Odoo search domain and explicit field selection.",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false },
+        { "key": "fields", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "get_partner",
+      "name": "Get Partner",
+      "description": "Returns a single res.partner record via execute_kw('res.partner', 'read', [[id]]).",
+      "method": "GET",
+      "params": [
+        { "key": "partner_id", "type": "number", "required": true },
+        { "key": "fields", "type": "array", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_partner",
+      "name": "Create Partner",
+      "description": "Creates a res.partner via execute_kw('res.partner', 'create', [values]). Returns the new partner id.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "email", "type": "string", "required": false },
+        { "key": "phone", "type": "string", "required": false },
+        { "key": "is_company", "type": "boolean", "required": false }
+      ],
+      "returns": "number"
+    },
+    {
+      "id": "update_partner",
+      "name": "Update Partner",
+      "description": "Updates a res.partner via execute_kw('res.partner', 'write', [[id], fields]).",
+      "method": "POST",
+      "params": [
+        { "key": "partner_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "boolean"
+    },
+    {
+      "id": "delete_partner",
+      "name": "Delete Partner",
+      "description": "Deletes (unlinks) a res.partner via execute_kw('res.partner', 'unlink', [[id]]).",
+      "method": "POST",
+      "params": [
+        { "key": "partner_id", "type": "number", "required": true }
+      ],
+      "returns": "boolean"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "Returns crm.lead records via execute_kw('crm.lead', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "Creates a crm.lead via execute_kw('crm.lead', 'create', [values]). Returns the new lead id.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": true },
+        { "key": "partner_id", "type": "number", "required": false },
+        { "key": "email_from", "type": "string", "required": false },
+        { "key": "expected_revenue", "type": "number", "required": false }
+      ],
+      "returns": "number"
+    },
+    {
+      "id": "list_sale_orders",
+      "name": "List Sale Orders",
+      "description": "Returns sale.order records via execute_kw('sale.order', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "Returns customer invoices via execute_kw('account.move', 'search_read', [[('move_type','=','out_invoice')]], ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_products",
+      "name": "List Products",
+      "description": "Returns product.template records via execute_kw('product.template', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "Returns project.task records via execute_kw('project.task', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_employees",
+      "name": "List Employees",
+      "description": "Returns hr.employee records via execute_kw('hr.employee', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "list_pickings",
+      "name": "List Stock Pickings",
+      "description": "Returns stock.picking records via execute_kw('stock.picking', 'search_read', ...).",
+      "method": "GET",
+      "params": [
+        { "key": "limit", "type": "number", "required": false },
+        { "key": "offset", "type": "number", "required": false },
+        { "key": "domain", "type": "array", "required": false }
+      ],
+      "returns": "List[Dict]"
+    },
+    {
+      "id": "execute_method",
+      "name": "Execute Method (escape hatch)",
+      "description": "Generic execute_kw entry point. Lets callers reach any Odoo model/method (account.payment, hr.leave, mail.message, ...) without modifying the connector.",
+      "method": "POST",
+      "params": [
+        { "key": "model", "type": "string", "required": true },
+        { "key": "method", "type": "string", "required": true },
+        { "key": "args", "type": "array", "required": false },
+        { "key": "kwargs", "type": "object", "required": false }
+      ],
+      "returns": "Any"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "structlog>=24.0.0",
+    "pydantic>=2.5.0"
+  ]
+}

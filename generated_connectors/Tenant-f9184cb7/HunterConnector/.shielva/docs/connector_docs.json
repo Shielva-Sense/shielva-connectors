@@ -1,0 +1,69 @@
+{
+  "title": "Hunter.io Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Hunter.io** is an email-discovery + verification + lead-management SaaS exposing a REST API under `https://api.hunter.io/v2`. This connector — `HunterConnector` (`CONNECTOR_TYPE = \"hunter\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically uses to research, verify, and pipeline B2B contacts:\n\n| Surface | Base path | Capability |\n|---|---|---|\n| Account | `/account` | Returns plan, requests remaining, team info |\n| Domain Search | `/domain-search` | List all email addresses Hunter knows for a domain / company |\n| Email Finder | `/email-finder` | Guess the most likely email for a person at a domain |\n| Email Verifier | `/email-verifier` | SMTP-level deliverability + risk verdict |\n| Email Count | `/email-count` | Count of public emails Hunter knows for a domain |\n| Leads | `/leads` | List + read + create + update + delete leads |\n| Lead Lists | `/leads_lists` | List + create lead-lists (folders for leads) |\n| Campaigns | `/campaigns` | List outbound email campaigns |\n\nThe connector normalises **leads** into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces one standalone public `async def` method per Hunter operation (OCP), retries 429 + 5xx with exponential backoff that honours `Retry-After`, and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::HunterHTTPClient`).\n\n**Hunter-specific gotcha:** the API key is passed as a `?api_key=<key>` **query parameter** — NOT a header. The HTTP client owns this detail; consumers of `HunterConnector` never see the key on the wire."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate a Hunter.io API key\n\n1. Sign in to https://hunter.io.\n2. Open **Dashboard → API → API Key**.\n3. Copy the key. Hunter shows the key in full each visit, but rotate it via the same screen if it ever leaks.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Hunter.io**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 3 |\n| `base_url` (string, optional) | Override `https://api.hunter.io/v2` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_key` is present (it does NOT call the API), initialises the `HunterHTTPClient`, stores a `TokenInfo` whose `access_token` is the api_key, and returns `ConnectorStatus(HEALTHY, CONNECTED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /account`. On 2xx → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` with structured-log warning. On network failure → `OFFLINE + CONNECTED`."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Hunter REST API uses **API-key authentication via a query parameter** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is sent as `?api_key=<key>` on every request — **NOT** as an `Authorization` header.\n- The HTTP client's `_params()` helper appends `api_key` **last** so a caller cannot accidentally clobber the auth token via the `params` kwarg.\n- `None` values are dropped from query params so `httpx` never emits `?domain=None`.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key`. Calls `save_config()` + `set_token()`. Does **not** call any Hunter endpoint. |\n| `authorize(...)` | Returns a `TokenInfo(access_token=api_key, token_type=\"ApiKey\")` for ABI compatibility — no real exchange. |\n| `health_check()` | `GET /account?api_key=<key>` — minimal probe that also verifies the key. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | `set_token()` records the api_key once at install — purely for framework consistency. |\n\n### Wire contract\n\n```\nGET  https://api.hunter.io/v2/<path>?api_key=<key>&<other-params>\nPOST https://api.hunter.io/v2/<path>?api_key=<key>      body: application/json\n```"
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | Query-param token on every request |\n| `base_url` | string | no | `self.base_url` (defaults to `https://api.hunter.io/v2`) | Override for sandbox / proxy |\n| `rate_limit_per_min` | number | no | `self.rate_limit_per_min` (default 60) | Soft client-side ceiling — Hunter also enforces its own quota |\n\n### Class constants (provider-wide)\n\n```python\nCONNECTOR_TYPE = \"hunter\"\nCONNECTOR_NAME = \"Hunter.io\"\nAUTH_TYPE      = \"api_key\"\nREQUIRED_CONFIG_KEYS = [\"api_key\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_HUNTER_BASE = \"https://api.hunter.io/v2\"\n```"
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `HunterConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::HunterHTTPClient`. Each method auto-injects the configured `api_key` into the query string.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key`; persist config; set token. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose access_token is the configured key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /account` and classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPaginates `GET /leads` (100-per-page) → `normalize_lead()` → `ingest_document`. When `since` is provided, leads with older `created_at` are skipped client-side."
+        },
+        {
+          "id": "api-account",
+          "title": "Account",
+          "content": "### `async get_account() -> Dict`\n`GET /account` — returns plan, requests remaining, team membership."
+        },
+        {
+          "id": "api-discovery",
+          "title": "Email Discovery",
+          "content": "### `async domain_search(domain=None, company=None, limit=25, offset=0, type=None, seniority=None, department=None) -> Dict`\n`GET /domain-search?domain=…&limit=…&offset=…&type=…&seniority=…&department=…`.\n\n### `async email_finder(domain=None, company=None, first_name=None, last_name=None, full_name=None, max_duration=10) -> Dict`\n`GET /email-finder?domain=…&first_name=…&last_name=…`.\n\n### `async email_verifier(email) -> Dict`\n`GET /email-verifier?email=…`.\n\n### `async email_count(domain=None, company=None, type=None) -> Dict`\n`GET /email-count?domain=…`."
+        },
+        {
+          "id": "api-leads",
+          "title": "Leads CRUD",
+          "content": "### `async list_leads(offset=0, limit=20, lead_list_id=None, email=None, domain=None, company=None) -> Dict`\n`GET /leads?offset=…&limit=…&lead_list_id=…`.\n\n### `async get_lead(lead_id) -> Dict`\n`GET /leads/{lead_id}`.\n\n### `async create_lead(email=None, first_name=None, last_name=None, company=None, lead_list_id=None, source=None) -> Dict`\n`POST /leads` — body: only fields the caller supplied (None values omitted). NOTE: Hunter's payload key for `lead_list_id` on writes is `leads_list_id` (with the trailing s); the connector handles this translation.\n\n### `async update_lead(lead_id, fields) -> Dict`\n`PUT /leads/{lead_id}` — body is the `fields` dict verbatim.\n\n### `async delete_lead(lead_id) -> Dict`\n`DELETE /leads/{lead_id}`."
+        },
+        {
+          "id": "api-lists-campaigns",
+          "title": "Lead Lists + Campaigns",
+          "content": "### `async list_lead_lists(offset=0, limit=20) -> Dict`\n`GET /leads_lists`.\n\n### `async create_lead_list(name, team_id=None) -> Dict`\n`POST /leads_lists` — body: `{name, team_id?}`.\n\n### `async list_campaigns(offset=0, limit=20) -> Dict`\n`GET /campaigns`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nHunterError                           # base; carries status_code + response_body\n├── HunterAuthError                   # 401 / 403\n├── HunterNotFoundError               # 404\n├── HunterRateLimitError              # 429 — retry_after_s\n├── HunterServerError                 # 5xx\n└── HunterNetworkError                # httpx transport (DNS, connect, timeout)\n```\n\nBack-compat alias preserved:\n```\nHunterNotFound = HunterNotFoundError  # legacy name from older code\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 | Raise `HunterError` immediately |\n| 401 / 403 | Raise `HunterAuthError` immediately |\n| 404 | Raise `HunterNotFoundError` immediately |\n| 429 | Exponential backoff `(2^attempt) + jitter` (capped at 30s), honour `Retry-After`, retry up to `_max_retries=3`; raise `HunterRateLimitError` if exhausted |\n| 5xx | Same exponential backoff, retry up to 3; raise `HunterServerError` if exhausted |\n| `httpx.TimeoutException` / `httpx.ConnectError` / `ReadError` / `WriteError` | Backoff + retry up to 3, then raise `HunterNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\nHunterAuthError      → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\nHunterNetworkError   → ConnectorStatus(OFFLINE,   CONNECTED)\nHunterRateLimitError → ConnectorStatus(DEGRADED,  CONNECTED)\nHunterError          → ConnectorStatus(DEGRADED,  CONNECTED)\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` blank | Re-enter the key in ACP. The Hunter Dashboard → API screen always shows it; rotate if lost. |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 from Hunter — key invalid or rotated | Verify the key in Hunter Dashboard → API. Paste it again in ACP and retry. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Hunter — usually means the plan quota is exhausted or the team disabled the key | Check **Dashboard → API → Requests** — the monthly meter resets on plan renewal. Upgrade or wait. |\n| `hunter.http.retryable_status` warnings spike | Hitting 429 (Hunter per-minute rate cap) | The client retries with exponential backoff that honours `Retry-After`. Lower `rate_limit_per_min` in ACP, or batch fewer concurrent requests. |\n| 404 on `get_lead(lead_id=N)` | The lead was deleted or belongs to a different team | Confirm the lead ID by listing leads first; check team membership. |\n| `ImportError: cannot import name 'HunterNotFound'` | Older code expecting the legacy alias | Already covered — `HunterNotFound = HunterNotFoundError` alias is exported from `exceptions.py`. |\n| `api_key` accidentally appears in shared structured logs | Caller passed `api_key=...` through `params=` themselves | The HTTP client's `_params()` helper never logs the merged dict; check the caller. Always pass auth-sensitive values via the dedicated `api_key` argument. |\n| `sync()` reports 0 documents on a populated account | The `/leads` endpoint is filtered by team membership tied to the key | Re-issue the API key under a team that has lead-list access. |"
+    }
+  ]
+}

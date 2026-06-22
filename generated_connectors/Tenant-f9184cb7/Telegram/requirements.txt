@@ -1,0 +1,4 @@
+# Telegram connector-specific dependencies.
+# httpx, structlog, pydantic, pytest, pytest-asyncio, respx, pytest-mock
+# are pre-installed in the shared Shielva connector venv — no additional
+# runtime deps are required to integrate with the Telegram Bot API.

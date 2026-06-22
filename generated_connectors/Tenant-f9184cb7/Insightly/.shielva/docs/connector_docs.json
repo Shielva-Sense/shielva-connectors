@@ -1,0 +1,74 @@
+{
+  "title": "Insightly Documentation",
+  "generated_by": "Electron runDocsGeneration() — BuilderView.tsx:779",
+  "prompt_source": "Inline docs prompt; CONNECTOR_DOCUMENTATION_GUIDELINES fetched via getDocGuidelines()",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "**Insightly** is an SMB-focused CRM exposing a comprehensive REST API at `https://api.{pod}.insightly.com/v3.1`. This connector — `InsightlyConnector` (`CONNECTOR_TYPE = \"insightly\"`, `AUTH_TYPE = \"api_key\"`) — wraps the operational surfaces a Shielva tenant typically needs:\n\n| Surface | Endpoint root | Capability |\n|---|---|---|\n| Contacts | `/Contacts` | list, get, create, update, delete |\n| Organisations | `/Organisations` | list, get, create, update, delete |\n| Opportunities | `/Opportunities` | list, get, create, update, delete |\n| Leads | `/Leads` | list, get, create, update, delete |\n| Projects | `/Projects` | list, get, create, update, delete |\n| Tasks | `/Tasks` | list, get, create, update, delete |\n| Events | `/Events` | list |\n| Notes | `/Notes` | list |\n| Emails | `/Emails` | list |\n| Pipelines | `/Pipelines` | list |\n| Users | `/Users` | list (health-check probes `/Users/Me`) |\n| Custom Objects | `/CustomObjects` | list |\n| Tags | `/Tags/{record_type}` | list |\n\nThe connector normalises Contacts (and the helpers normalise Organisations / Opportunities / Leads) into `NormalizedDocument` (id = `f\"{tenant_id}_{source_id}\"`), surfaces standalone `async def` methods per user-requested operation (OCP), retries 429/5xx with exponential backoff (3 attempts), and never embeds raw HTTP in `connector.py` (SOC — all HTTP delegated to `client/http_client.py::InsightlyHTTPClient`).\n\n### Pod-aware base URL\n\nInsightly hosts each tenant on a **regional pod** — `na1` (North America), `eu1` (Europe), `apac1` (Asia-Pacific), etc. The pod is part of every URL when you are signed in, and the connector builds the REST base URL from it:\n\n```\nhttps://api.{pod}.insightly.com/v3.1\n```\n\nDefault pod is `na1`. Override via the `pod` install field, or supply a custom `base_url` for private/staging deployments."
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start",
+      "content": "### 1. Generate an Insightly API key\n\n1. Sign in to https://crm.insightly.com.\n2. Click your **profile avatar** (top-right) → **User Settings**.\n3. Scroll to the **API Key** section.\n4. Click **Copy** next to the long alphanumeric key (format: `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX`).\n5. Note your pod from the URL (e.g. `https://crm.na1.insightly.com/...` → pod is `na1`).\n\n> **Important:** The free Insightly plan does not include API access. You must be on a paid plan (Plus, Professional, or Enterprise) or trial.\n\n### 2. Install in ACP\n\nIn **ACP → Manage Connectors → Insightly**, fill in:\n\n| Field | Value |\n|---|---|\n| `api_key` (secret) | API key from step 4 |\n| `pod` (text) | Region pod (`na1`, `eu1`, `apac1`, …) |\n| `base_url` (text, optional) | Override `https://api.{pod}.insightly.com/v3.1` (rarely needed) |\n| `rate_limit_per_min` (number) | Soft cap, default 60 |\n\nClick **Install**. `install()` validates `api_key` + `pod` are present (it does NOT call the API), initialises the `InsightlyHTTPClient`, and returns `ConnectorStatus(HEALTHY, AUTHENTICATED)`.\n\n### 3. First health check\n\nThe gateway calls `health_check()` which probes `GET /Users/Me` as the cheapest authenticated request. On 200 → `HEALTHY + CONNECTED`. On 401 → `DEGRADED + TOKEN_EXPIRED`. On 403 → `UNHEALTHY + INVALID_CREDENTIALS`. On 429 → `DEGRADED + CONNECTED` (with a structured-log warning)."
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "content": "Insightly REST API uses **HTTP Basic authentication** (`AUTH_TYPE = \"api_key\"`). No OAuth dance, no token refresh, no expiry.\n\n### Credential model\n\n- `api_key` is the HTTP Basic **username**; the **password is empty**.\n- Wire format: `Authorization: Basic base64(api_key + \":\")`.\n- This is the Insightly-specific gotcha — the trailing colon is mandatory, otherwise the server returns 401.\n\n### Lifecycle\n\n| Phase | Behaviour |\n|---|---|\n| `install()` | Validates `api_key` + `pod`. Initialises `InsightlyHTTPClient`. Does **not** call any Insightly endpoint. |\n| `authorize(auth_code, state)` | Returns a `TokenInfo` whose `access_token` is the api_key (surface compatibility with BaseConnector). |\n| `health_check()` | `GET /Users/Me` — minimal probe. |\n| `ensure_token()` | Not called — no token to refresh. |\n| token storage | None — the api_key lives in `self.config` (encrypted by the gateway). |\n\n### Header contract\n\nEvery outbound request:\n\n```\nAuthorization: Basic base64(api_key:)\nContent-Type:  application/json\nAccept:        application/json\n```\n\nNote the trailing `:` inside the base64 — it represents the empty password."
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "content": "### Install fields (per-tenant)\n\nRead via `self.config.get(...)` in `connector.py::__init__` — never hardcoded.\n\n| Key | Type | Required | Read in code | Purpose |\n|---|---|---|---|---|\n| `api_key` | secret | yes | `self.api_key` | HTTP Basic username; password is empty |\n| `pod` | text | yes (default `\"na1\"`) | `self.pod` | Region pod — drives the base URL template |\n| `base_url` | text | no | `self.base_url` | Full URL override; computed from pod when blank |\n| `rate_limit_per_min` | number | no (default `60`) | `self.rate_limit_per_min` | Client-side soft cap |\n\n### Class constants (provider-wide)\n\n```python\nREQUIRED_CONFIG_KEYS = [\"api_key\", \"pod\"]\n_STATUS_MAP = {\n    401: (\"DEGRADED\",  \"TOKEN_EXPIRED\"),\n    403: (\"UNHEALTHY\", \"INVALID_CREDENTIALS\"),\n    429: (\"DEGRADED\",  \"CONNECTED\"),\n}\n_INSIGHTLY_BASE_TEMPLATE = \"https://api.{pod}.insightly.com/v3.1\"\n```\n\n`api_key` is **never** a class constant — it's per-tenant and read only from `self.config`."
+    },
+    {
+      "id": "api-methods",
+      "title": "API Methods",
+      "content": "All public async methods on `InsightlyConnector`. SOC: connector.py orchestrates only; HTTP lives in `client/http_client.py::InsightlyHTTPClient`.",
+      "children": [
+        {
+          "id": "api-lifecycle",
+          "title": "Lifecycle",
+          "content": "### `async install() -> ConnectorStatus`\nValidate `api_key` + `pod`; initialise `InsightlyHTTPClient`. Does NOT call the API.\n\n### `async authorize(auth_code, state) -> TokenInfo`\nNo-op for api_key auth — returns a TokenInfo whose access_token is the api_key.\n\n### `async health_check() -> ConnectorStatus`\nProbes `GET /Users/Me` — single-record authenticated probe. Classifies failures via `_STATUS_MAP`.\n\n### `async sync(since=None, full=False, kb_id=None, webhook_url=None) -> SyncResult`\nPages through `/Contacts?top=200&skip=…`, normalises each Contact via `helpers.normalizer.normalize_contact`, and ingests via `ingest_document`. Stores last skip offset in metadata key `\"last_skip\"`."
+        },
+        {
+          "id": "api-contacts",
+          "title": "Contacts",
+          "content": "### `async list_contacts(top=50, skip=0, brief=False) -> List[Dict]`\n`GET /Contacts?top=&skip=&brief=`.\n\n### `async get_contact(contact_id) -> Dict`\n`GET /Contacts/{id}`.\n\n### `async create_contact(first_name?, last_name?, email?, phone?) -> Dict`\n`POST /Contacts`. At least one of first_name/last_name/email is needed.\n\n### `async update_contact(contact_id, fields: Dict) -> Dict`\n`PUT /Contacts/{id}` — Insightly's PUT requires CONTACT_ID inside the body; the connector merges it in automatically.\n\n### `async delete_contact(contact_id) -> Dict`\n`DELETE /Contacts/{id}`. Idempotent — 404 → `{deleted, already_missing: True}`."
+        },
+        {
+          "id": "api-organisations",
+          "title": "Organisations",
+          "content": "### `async list_organisations(top=50, skip=0)`\n`GET /Organisations`.\n\n### `async get_organisation(organisation_id)`\n`GET /Organisations/{id}`.\n\n### `async create_organisation(organisation_name, phone?, website?)`\n`POST /Organisations`. organisation_name is required.\n\n### `async update_organisation(organisation_id, fields)`\n`PUT /Organisations/{id}` — adds ORGANISATION_ID to the body.\n\n### `async delete_organisation(organisation_id)`\n`DELETE /Organisations/{id}`. Idempotent."
+        },
+        {
+          "id": "api-opportunities-leads",
+          "title": "Opportunities + Leads",
+          "content": "### `async list_opportunities / get_opportunity / create_opportunity / update_opportunity / delete_opportunity`\n`GET|POST|PUT|DELETE /Opportunities[/{id}]`. `create_opportunity` requires `opportunity_name` and a probability in `[0, 100]`.\n\n### `async list_leads / get_lead / create_lead / update_lead / delete_lead`\n`GET|POST|PUT|DELETE /Leads[/{id}]`."
+        },
+        {
+          "id": "api-projects-tasks",
+          "title": "Projects + Tasks",
+          "content": "### `async list_projects / get_project / create_project / update_project / delete_project`\n`GET|POST|PUT|DELETE /Projects[/{id}]`. `create_project` requires `project_name`.\n\n### `async list_tasks / get_task / create_task / update_task / delete_task`\n`GET|POST|PUT|DELETE /Tasks[/{id}]`. `create_task` requires `title`."
+        },
+        {
+          "id": "api-readonly",
+          "title": "Events · Notes · Emails · Pipelines · Users · Custom Objects · Tags",
+          "content": "### `async list_events(top=50, skip=0)`\n`GET /Events`.\n\n### `async list_notes(top=50, skip=0)`\n`GET /Notes`.\n\n### `async list_emails(top=50, skip=0)`\n`GET /Emails`.\n\n### `async list_pipelines()`\n`GET /Pipelines`.\n\n### `async list_users()`\n`GET /Users`.\n\n### `async list_custom_objects()`\n`GET /CustomObjects`.\n\n### `async list_tags(record_type=\"contacts\")`\n`GET /Tags/{record_type}` — record_type ∈ `contacts | organisations | opportunities | leads | projects | tasks`."
+        }
+      ]
+    },
+    {
+      "id": "error-handling",
+      "title": "Error Handling",
+      "content": "Exception hierarchy in `exceptions.py`:\n\n```\nInsightlyError                        # base; carries status_code + response_body\n├── InsightlyAuthError                # 401 / 403\n├── InsightlyBadRequestError          # 400\n├── InsightlyNotFoundError            # 404\n├── InsightlyConflictError            # 409\n├── InsightlyRateLimitError           # 429 — retry_after_s\n└── InsightlyServerError              # 5xx\n```\n\nBack-compat aliases preserved:\n```\nInsightlyNotFound     = InsightlyNotFoundError\nInsightlyNetworkError = InsightlyServerError    # legacy name from older code\n```\n\n### Retry behaviour (`client/http_client.py::_request`)\n\n| Status | Action |\n|---|---|\n| 400 / 401 / 403 / 404 / 409 | Raise immediately |\n| 429 | Exponential backoff `_BACKOFF_BASE * 2 ** attempt` (0.5s, 1s, 2s), retry up to `_MAX_RETRIES=3` |\n| 5xx | Same exponential backoff, retry up to 3 |\n| `httpx.TimeoutException` / `httpx.TransportError` | Backoff, retry up to 3, then raise `InsightlyNetworkError` |\n\n### How errors surface to the gateway\n\n`health_check()` catches exceptions and maps via `_STATUS_MAP`:\n\n```\n401 → ConnectorStatus(DEGRADED,  TOKEN_EXPIRED)\n403 → ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)\n429 → ConnectorStatus(DEGRADED,  CONNECTED)   — logged as warning\n5xx → ConnectorStatus(OFFLINE,   AUTHENTICATED) — via InsightlyNetworkError\n```"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "content": "| Symptom | Probable cause | Fix |\n|---|---|---|\n| `ConnectorStatus(OFFLINE, MISSING_CREDENTIALS)` at install | `api_key` or `pod` blank | Re-enter both in ACP. Pod is the subdomain in your Insightly URL — `https://crm.na1.insightly.com/...` → pod is `na1`. |\n| `ConnectorStatus(UNHEALTHY, INVALID_CREDENTIALS)` at health_check | 403 from Insightly — API key plan does not include API access | Upgrade to a paid Insightly plan (free plan has no API). |\n| `ConnectorStatus(DEGRADED, TOKEN_EXPIRED)` at health_check | 401 — API key revoked, wrong, or rotated | Re-copy from User Settings → API Key. Note the trailing `:` in the Basic auth is part of the format, not your key. |\n| 404 on EVERY endpoint | Wrong pod | The base URL must match your tenant's region. Check the URL while signed in and update the `pod` install field. |\n| `insightly.http.retry` warnings spike | 429 from Insightly's per-minute cap | The client retries with exponential backoff. Lower `rate_limit_per_min` to 30 or batch fewer requests. |\n| `Synced 0/0 contacts` | Sandbox or empty account | Verify in Insightly UI that contacts exist; check the API key has full account access (no scope filter). |\n| `ImportError: cannot import name 'InsightlyNetworkError'` | Older `exceptions.py` without back-compat aliases | Already fixed — `InsightlyNetworkError = InsightlyServerError` alias added in `exceptions.py`. |\n| Network error on health_check from inside a corporate network | Outbound HTTPS to `api.{pod}.insightly.com` blocked | Allowlist the pod-specific hostname and port 443 in the egress policy. |"
+    }
+  ]
+}

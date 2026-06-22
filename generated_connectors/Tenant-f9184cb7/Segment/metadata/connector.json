@@ -1,0 +1,181 @@
+{
+  "connector_type": "segment",
+  "connector_id": "segment",
+  "name": "Segment",
+  "provider": "Twilio Segment",
+  "service": "segment",
+  "version": "1.0.0",
+  "description": "Sync sources, destinations, and workspace data from Segment CDP.",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "access_token",
+      "label": "Access Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "your-segment-public-api-token",
+      "help": "Your Segment Public API access token. Found in Segment \u2192 Settings \u2192 Access Management \u2192 Tokens. Requires workspace:read scope at minimum."
+    },
+    {
+      "key": "workspace_slug",
+      "label": "Workspace Slug",
+      "type": "string",
+      "required": false,
+      "placeholder": "my-workspace",
+      "help": "Optional. Your Segment workspace slug (visible in the workspace URL). Used for constructing direct links to resources."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "list_sources",
+    "list_destinations"
+  ],
+  "features": [
+    "retry",
+    "pagination",
+    "circuit_breaker",
+    "normalizer",
+    "rate_limiting",
+    "error_handling",
+    "cursor_pagination"
+  ],
+  "methods": [
+    {
+      "id": "install",
+      "name": "Install / Authenticate",
+      "description": "Validate the access token via GET /workspaces. Returns HEALTHY/CONNECTED or OFFLINE with the failure reason.",
+      "category": "auth"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Ping GET /workspaces and return HEALTHY, DEGRADED, or OFFLINE with the Segment workspace name.",
+      "category": "health"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Full sync: fetches all sources (cursor-paginated), spaces, and functions. Normalizes each to a ConnectorDocument.",
+      "category": "sync"
+    },
+    {
+      "id": "list_workspaces",
+      "name": "List Workspaces",
+      "description": "Retrieve the single workspace associated with the access token.",
+      "category": "workspaces",
+      "endpoint": "GET /workspaces"
+    },
+    {
+      "id": "list_sources",
+      "name": "List Sources",
+      "description": "Cursor-based paginated list of all Segment sources in the workspace.",
+      "category": "sources",
+      "endpoint": "GET /sources"
+    },
+    {
+      "id": "get_source",
+      "name": "Get Source",
+      "description": "Retrieve a single source by ID.",
+      "category": "sources",
+      "endpoint": "GET /sources/{source_id}"
+    },
+    {
+      "id": "list_destinations",
+      "name": "List Destinations",
+      "description": "Retrieve all destinations connected to a specific source.",
+      "category": "destinations",
+      "endpoint": "GET /sources/{source_id}/destinations"
+    },
+    {
+      "id": "list_spaces",
+      "name": "List Spaces",
+      "description": "Retrieve all Segment Profiles AI spaces in the workspace.",
+      "category": "spaces",
+      "endpoint": "GET /spaces"
+    },
+    {
+      "id": "list_functions",
+      "name": "List Functions",
+      "description": "Cursor-based paginated list of all Segment functions (source, destination, insert).",
+      "category": "functions",
+      "endpoint": "GET /functions"
+    }
+  ],
+  "categories": [
+    "auth",
+    "health",
+    "sync",
+    "workspaces",
+    "sources",
+    "destinations",
+    "spaces",
+    "functions"
+  ],
+  "apis": [
+    {
+      "name": "Install / Authenticate",
+      "id": "install",
+      "category": "auth",
+      "description": "Validate the access_token via GET /workspaces.",
+      "method": "GET"
+    },
+    {
+      "name": "Health Check",
+      "id": "health_check",
+      "category": "health",
+      "description": "Ping GET /workspaces and return current health with workspace name.",
+      "method": "GET"
+    },
+    {
+      "name": "Sync",
+      "id": "sync",
+      "category": "sync",
+      "description": "Fetch sources, spaces, and functions; normalize and ingest.",
+      "method": "GET"
+    },
+    {
+      "name": "List Workspaces",
+      "id": "list_workspaces",
+      "category": "workspaces",
+      "description": "GET /workspaces \u2014 returns the single workspace for the token.",
+      "method": "GET"
+    },
+    {
+      "name": "List Sources",
+      "id": "list_sources",
+      "category": "sources",
+      "description": "GET /sources \u2014 cursor-paginated list of sources.",
+      "method": "GET"
+    },
+    {
+      "name": "Get Source",
+      "id": "get_source",
+      "category": "sources",
+      "description": "GET /sources/{source_id}.",
+      "method": "GET"
+    },
+    {
+      "name": "List Destinations",
+      "id": "list_destinations",
+      "category": "destinations",
+      "description": "GET /sources/{source_id}/destinations.",
+      "method": "GET"
+    },
+    {
+      "name": "List Spaces",
+      "id": "list_spaces",
+      "category": "spaces",
+      "description": "GET /spaces \u2014 all Profiles AI spaces.",
+      "method": "GET"
+    },
+    {
+      "name": "List Functions",
+      "id": "list_functions",
+      "category": "functions",
+      "description": "GET /functions \u2014 cursor-paginated list of functions.",
+      "method": "GET"
+    }
+  ],
+  "display_name": "Segment"
+}

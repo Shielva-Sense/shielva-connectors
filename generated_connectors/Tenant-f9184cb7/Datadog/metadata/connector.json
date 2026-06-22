@@ -1,0 +1,282 @@
+{
+  "connector_type": "datadog",
+  "display_name": "Datadog",
+  "provider": "datadog",
+  "service": "datadog",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect Datadog to sync monitors, dashboards, incidents, hosts, and events for observability intelligence.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Datadog \u2192 Organization Settings \u2192 API Keys"
+    },
+    {
+      "key": "app_key",
+      "label": "Application Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Datadog \u2192 Organization Settings \u2192 Application Keys"
+    },
+    {
+      "key": "site",
+      "label": "Datadog Site (default: datadoghq.com)",
+      "type": "string",
+      "required": false,
+      "help": "Use datadoghq.eu for EU, us3.datadoghq.com for US3, or leave blank for US (datadoghq.com)",
+      "options": [
+        {
+          "label": "US (datadoghq.com)",
+          "value": "datadoghq.com"
+        },
+        {
+          "label": "EU (datadoghq.eu)",
+          "value": "datadoghq.eu"
+        },
+        {
+          "label": "US3 (us3.datadoghq.com)",
+          "value": "us3.datadoghq.com"
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "monitors",
+    "dashboards",
+    "incidents",
+    "hosts",
+    "events"
+  ],
+  "auth": {
+    "headers": [
+      {
+        "name": "DD-API-KEY",
+        "from": "api_key"
+      },
+      {
+        "name": "DD-APPLICATION-KEY",
+        "from": "app_key"
+      }
+    ],
+    "validation_endpoint": "GET /api/v1/validate"
+  },
+  "api": {
+    "base_url_template": "https://api.{site}/api/",
+    "versions": [
+      "v1",
+      "v2"
+    ]
+  },
+  "methods": [
+    {
+      "name": "install",
+      "description": "Validate credentials and record connector as installed"
+    },
+    {
+      "name": "health_check",
+      "description": "Verify credentials are still valid via GET /v1/validate"
+    },
+    {
+      "name": "sync",
+      "description": "Sync monitors, dashboards, hosts, and events to knowledge base"
+    },
+    {
+      "name": "list_monitors",
+      "description": "List all Datadog monitors with pagination"
+    },
+    {
+      "name": "get_monitor",
+      "description": "Get a single Datadog monitor by ID"
+    },
+    {
+      "name": "list_dashboards",
+      "description": "List all Datadog dashboards"
+    },
+    {
+      "name": "list_hosts",
+      "description": "List all Datadog hosts with pagination"
+    },
+    {
+      "name": "list_events",
+      "description": "List Datadog events for a time window (last 24h default)"
+    }
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync monitors, dashboards, hosts, and events from Datadog.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_monitors",
+      "name": "List Monitors",
+      "description": "Fetch all monitors from Datadog, paginating automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "tags",
+          "label": "Tags",
+          "type": "json",
+          "required": false
+        },
+        {
+          "key": "page_size",
+          "label": "Page Size",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_monitor",
+      "name": "Get Monitor",
+      "description": "Retrieve a single Datadog monitor by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "monitor_id",
+          "label": "Monitor Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_dashboards",
+      "name": "List Dashboards",
+      "description": "Fetch all dashboards from Datadog.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "get_dashboard",
+      "name": "Get Dashboard",
+      "description": "Retrieve a single Datadog dashboard by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "dashboard_id",
+          "label": "Dashboard Id",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_hosts",
+      "name": "List Hosts",
+      "description": "Fetch all hosts from Datadog, paginating automatically.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "count",
+          "label": "Count",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "Fetch events from Datadog for the last 24 hours (default) or a custom range.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "start",
+          "label": "Start",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "end",
+          "label": "End",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "query_logs",
+      "name": "Query Logs",
+      "description": "Search Datadog log events via the v2 Logs API.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "from_ts",
+          "label": "From Ts",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "to_ts",
+          "label": "To Ts",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_metrics_list",
+      "name": "Get Metrics List",
+      "description": "Search available Datadog metrics by name query.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "q",
+          "label": "Q",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_service_checks",
+      "name": "List Service Checks",
+      "description": "List all Datadog service check results.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "DatadogConnector"
+}

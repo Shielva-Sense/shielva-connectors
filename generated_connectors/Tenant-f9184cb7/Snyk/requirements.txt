@@ -1,0 +1,2 @@
+# No connector-specific dependencies — Snyk uses only pre-installed packages
+# (httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx).

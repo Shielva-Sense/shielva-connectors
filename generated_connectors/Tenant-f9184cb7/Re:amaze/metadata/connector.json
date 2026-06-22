@@ -1,0 +1,139 @@
+{
+  "connector_type": "reamaze",
+  "display_name": "Re:amaze",
+  "provider": "reamaze",
+  "service": "reamaze",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Connect to Re:amaze to sync customer support conversations, contacts, knowledge base articles, and reports for eCommerce businesses.",
+  "install_fields": [
+    {
+      "key": "brand_subdomain",
+      "label": "Brand Subdomain",
+      "type": "string",
+      "required": true,
+      "description": "Your Re:amaze brand subdomain (e.g. 'mystore' for mystore.reamaze.com).",
+      "help": "Brand Subdomain."
+    },
+    {
+      "key": "email",
+      "label": "Email",
+      "type": "string",
+      "required": true,
+      "description": "The email address associated with your Re:amaze account.",
+      "help": "Email."
+    },
+    {
+      "key": "api_token",
+      "label": "API Token",
+      "type": "password",
+      "required": true,
+      "description": "Your Re:amaze API token from Settings > Account > API.",
+      "help": "API Token."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check"
+  ],
+  "resources": [
+    "conversations",
+    "contacts",
+    "articles",
+    "reports"
+  ],
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync conversations, contacts, and articles from Re:amaze.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_conversations",
+      "name": "List Conversations",
+      "description": "Return one page of conversations.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_conversation",
+      "name": "Get Conversation",
+      "description": "Return a single conversation by slug.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "slug",
+          "label": "Slug",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return one page of contacts.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Return a single contact by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_articles",
+      "name": "List Articles",
+      "description": "Return one page of knowledge base articles.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_report_summary",
+      "name": "Get Report Summary",
+      "description": "Return report summary statistics.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "name": "ReamazeConnector"
+}

@@ -1,0 +1,186 @@
+{
+  "connector_type": "freshdesk",
+  "name": "Freshdesk",
+  "display_name": "Freshdesk",
+  "description": "Connect to Freshdesk to sync support tickets, contacts, and agents.",
+  "version": "1.0.0",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "domain",
+      "label": "Domain",
+      "type": "string",
+      "required": true,
+      "description": "Your Freshdesk domain (e.g. mycompany.freshdesk.com).",
+      "help": "Domain."
+    },
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "description": "Your Freshdesk API key from Profile Settings \u2192 Your API Key.",
+      "help": "API Key."
+    }
+  ],
+  "capabilities": [
+    "list_tickets",
+    "get_ticket",
+    "list_contacts",
+    "get_contact",
+    "list_agents",
+    "sync"
+  ],
+  "provider": "freshdesk",
+  "category": "customer_support",
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync tickets and contacts from Freshdesk.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_tickets",
+      "name": "List Tickets",
+      "description": "Return one page of tickets; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "updated_since",
+          "label": "Updated Since",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_ticket",
+      "name": "Get Ticket",
+      "description": "Return a single ticket and its conversations as a combined dict.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "ticket_id",
+          "label": "Ticket Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "Return one page of contacts; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "Return a single contact by ID.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "contact_id",
+          "label": "Contact Id",
+          "type": "number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "list_agents",
+      "name": "List Agents",
+      "description": "Return one page of agents; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "Return one page of companies; empty list signals end of pagination.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "per_page",
+          "label": "Per Page",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_groups",
+      "name": "List Groups",
+      "description": "Return all support groups.",
+      "method": "GET",
+      "params": []
+    }
+  ],
+  "service": "freshdesk"
+}

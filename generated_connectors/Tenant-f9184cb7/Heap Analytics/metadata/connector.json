@@ -1,0 +1,163 @@
+{
+  "connector_type": "heap",
+  "display_name": "Heap Analytics",
+  "provider": "heap",
+  "service": "heap",
+  "auth_type": "api_key",
+  "version": "1.0.0",
+  "description": "Heap product analytics \u2014 sync users, events, segments, funnels, and user properties via the Heap REST and Server-Side APIs.",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "password",
+      "required": true,
+      "help": "Found in Heap Dashboard \u2192 Account \u2192 Privacy & Security \u2192 API Key"
+    },
+    {
+      "key": "account_id",
+      "label": "App ID / Account ID",
+      "type": "string",
+      "required": true,
+      "help": "Your Heap App ID (numeric). Found in Heap Dashboard \u2192 Account \u2192 General or in your Heap tracking snippet."
+    }
+  ],
+  "capabilities": [
+    "sync",
+    "health_check",
+    "track"
+  ],
+  "resources": [
+    "users",
+    "events",
+    "segments",
+    "user_properties"
+  ],
+  "api_base": "https://heapanalytics.com/api/",
+  "docs_url": "https://developers.heap.io/reference/",
+  "rate_limits": {
+    "note": "Heap enforces per-account rate limits on their REST API. Track and identify calls are generally more permissive. Respect 429 responses with Retry-After headers."
+  },
+  "apis": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "description": "Sync users, events, and segments from Heap Analytics.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "full",
+          "label": "Full",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "key": "since",
+          "label": "Since",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "kb_id",
+          "label": "Kb Id",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "List Heap users (paginated).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_events",
+      "name": "List Events",
+      "description": "List Heap events (aggregated counts).",
+      "method": "GET",
+      "params": [
+        {
+          "key": "event_name",
+          "label": "Event Name",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "time_range_days",
+          "label": "Time Range Days",
+          "type": "number",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "list_segments",
+      "name": "List Segments",
+      "description": "List all Heap segments.",
+      "method": "GET",
+      "params": []
+    },
+    {
+      "id": "track_event",
+      "name": "Track Event",
+      "description": "Server-side event tracking via POST /api/track.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "identity",
+          "label": "Identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "event",
+          "label": "Event",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "properties",
+          "label": "Properties",
+          "type": "json",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "identify_user",
+      "name": "Identify User",
+      "description": "Server-side user identification via POST /api/identify.",
+      "method": "GET",
+      "params": [
+        {
+          "key": "identity",
+          "label": "Identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "properties",
+          "label": "Properties",
+          "type": "json",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "name": "HeapConnector"
+}

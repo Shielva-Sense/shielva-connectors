@@ -1,0 +1,139 @@
+{
+  "connector_type": "openai",
+  "name": "OpenAIConnector",
+  "display_name": "OpenAI",
+  "version": "1.0.0",
+  "description": "OpenAI connector covering Chat Completions (GPT-4o family), Embeddings, Files, Images (DALL·E + gpt-image), Speech (TTS), Audio (Whisper), Moderations, and Models. Single API-key auth, Bearer in Authorization, optional OpenAI-Organization scoping.",
+  "provider": "openai",
+  "service": "openai",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "api_key",
+      "label": "API Key",
+      "type": "secret",
+      "required": true,
+      "placeholder": "sk-…",
+      "help": "OpenAI API key from https://platform.openai.com/api-keys. Sent as 'Authorization: Bearer <key>'."
+    },
+    {
+      "key": "base_url",
+      "label": "Base URL",
+      "type": "string",
+      "required": false,
+      "default": "https://api.openai.com/v1",
+      "placeholder": "https://api.openai.com/v1",
+      "help": "Override for Azure-compatible proxies or self-hosted OpenAI-compatible endpoints."
+    },
+    {
+      "key": "organization_id",
+      "label": "Organization ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "org-…",
+      "help": "Optional OpenAI organization id. Sent as 'OpenAI-Organization' header when set."
+    },
+    {
+      "key": "timeout_s",
+      "label": "HTTP Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "60",
+      "placeholder": "60",
+      "help": "Per-request httpx timeout in seconds."
+    },
+    {
+      "key": "webhook_secret",
+      "label": "Webhook Signing Secret",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Optional — HMAC-SHA256 secret",
+      "help": "HMAC-SHA256 secret used to verify OpenAI webhook (Realtime / Assistants / batch) callback signatures."
+    }
+  ],
+  "apis": [
+    { "id": "install",              "name": "Install",              "description": "Validate required config keys and persist them via save_config. Does NOT call the API.", "method": "install",        "params": [], "returns": "ConnectorStatus" },
+    { "id": "authorize",            "name": "Authorize",            "description": "API-key wrapper that returns a TokenInfo whose access_token is the configured api_key.", "method": "authorize",      "params": [
+      { "key": "auth_code", "type": "string", "required": false },
+      { "key": "state",     "type": "string", "required": false }
+    ], "returns": "TokenInfo" },
+    { "id": "health_check",         "name": "Health Check",         "description": "Probe GET /v1/models?limit=1 to verify the key and reachability. Maps 401/403/429 via _STATUS_MAP.", "method": "health_check",   "params": [], "returns": "ConnectorStatus" },
+    { "id": "sync",                 "name": "Sync",                 "description": "List /v1/files and ingest each as a NormalizedDocument (tenant-scoped id). LLM provider — no document corpus; returns SUCCESS+0 if no files.", "method": "sync",           "params": [
+      { "key": "since",       "type": "string",  "required": false },
+      { "key": "full",        "type": "boolean", "required": false },
+      { "key": "kb_id",       "type": "string",  "required": false },
+      { "key": "webhook_url", "type": "string",  "required": false }
+    ], "returns": "SyncResult" },
+    { "id": "list_models",          "name": "List Models",          "description": "GET /v1/models — list every model the API key has access to.",                            "method": "GET",  "params": [], "returns": "object" },
+    { "id": "get_model",            "name": "Get Model",            "description": "GET /v1/models/{model_id} — fetch metadata for a single model.",                          "method": "GET",  "params": [
+      { "key": "model_id", "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "create_chat_completion","name": "Create Chat Completion","description": "POST /v1/chat/completions — run a chat completion. Returns the normalised response (flat content/usage/finish_reason + raw envelope).", "method": "POST", "params": [
+      { "key": "model",       "type": "string", "required": true  },
+      { "key": "messages",    "type": "array",  "required": true  },
+      { "key": "temperature", "type": "number", "required": false },
+      { "key": "max_tokens",  "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "create_embedding",     "name": "Create Embedding",     "description": "POST /v1/embeddings — embed input text into a vector.",                                  "method": "POST", "params": [
+      { "key": "model",      "type": "string", "required": true  },
+      { "key": "input",      "type": "string", "required": true  },
+      { "key": "dimensions", "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "list_files",           "name": "List Files",           "description": "GET /v1/files — list uploaded files (optionally filter by purpose).",                    "method": "GET",  "params": [
+      { "key": "purpose", "type": "string", "required": false }
+    ], "returns": "object" },
+    { "id": "upload_file",          "name": "Upload File",          "description": "POST /v1/files — multipart upload. Purpose must be one of assistants|batch|fine-tune|vision|user_data.", "method": "POST", "params": [
+      { "key": "purpose",   "type": "string", "required": true },
+      { "key": "file_name", "type": "string", "required": true },
+      { "key": "content",   "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "delete_file",          "name": "Delete File",          "description": "DELETE /v1/files/{file_id}.",                                                                "method": "DELETE","params": [
+      { "key": "file_id", "type": "string", "required": true }
+    ], "returns": "object" },
+    { "id": "create_image",         "name": "Create Image",         "description": "POST /v1/images/generations — generate one or more images (DALL·E 2/3, gpt-image-1).", "method": "POST", "params": [
+      { "key": "prompt", "type": "string", "required": true  },
+      { "key": "model",  "type": "string", "required": false },
+      { "key": "size",   "type": "string", "required": false },
+      { "key": "n",      "type": "number", "required": false }
+    ], "returns": "object" },
+    { "id": "create_speech",        "name": "Create Speech",        "description": "POST /v1/audio/speech — synthesise speech, returns raw audio bytes (mp3/opus/aac/flac/wav/pcm).", "method": "POST", "params": [
+      { "key": "model",           "type": "string", "required": true  },
+      { "key": "voice",           "type": "string", "required": true  },
+      { "key": "input",           "type": "string", "required": true  },
+      { "key": "response_format", "type": "string", "required": false }
+    ], "returns": "bytes" },
+    { "id": "create_transcription", "name": "Create Transcription", "description": "POST /v1/audio/transcriptions — multipart audio → text via Whisper.",               "method": "POST", "params": [
+      { "key": "file_name",       "type": "string", "required": true  },
+      { "key": "content",         "type": "string", "required": true  },
+      { "key": "model",           "type": "string", "required": false },
+      { "key": "response_format", "type": "string", "required": false },
+      { "key": "language",        "type": "string", "required": false }
+    ], "returns": "object" },
+    { "id": "create_moderation",    "name": "Create Moderation",    "description": "POST /v1/moderations — classify text for policy violations.",                            "method": "POST", "params": [
+      { "key": "input", "type": "string", "required": true  },
+      { "key": "model", "type": "string", "required": false }
+    ], "returns": "object" },
+    { "id": "handle_webhook",       "name": "Handle Webhook",       "description": "Route an OpenAI webhook (Realtime / Assistants / batch) through process_callback then per-event handler.", "method": "handle_webhook", "params": [
+      { "key": "payload", "type": "object", "required": true  },
+      { "key": "headers", "type": "object", "required": false }
+    ], "returns": "object" },
+    { "id": "process_callback",     "name": "Process Callback",     "description": "Verify OpenAI-Signature header using HMAC-SHA256 with webhook_secret. Returns {verified, data, error?}.", "method": "process_callback", "params": [
+      { "key": "payload", "type": "object", "required": true  },
+      { "key": "headers", "type": "object", "required": false }
+    ], "returns": "object" },
+    { "id": "handle_event",         "name": "Handle Event",         "description": "Idempotency-keyed event acknowledgement.",                                                    "method": "handle_event",   "params": [
+      { "key": "event", "type": "object", "required": true }
+    ], "returns": "object" },
+    { "id": "batch_processor",      "name": "Batch Processor",      "description": "Iterate events through handle_event with per-item error capture.",                            "method": "batch_processor","params": [
+      { "key": "items", "type": "array", "required": true }
+    ], "returns": "object" }
+  ],
+  "dependencies": [
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "structlog>=24.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12"
+  ]
+}

@@ -1,0 +1,424 @@
+{
+  "connector_type": "bitrix24",
+  "name": "Bitrix24Connector",
+  "display_name": "Bitrix24",
+  "version": "2.0.0",
+  "description": "Connects to the Bitrix24 REST API (User, CRM Leads/Contacts/Companies/Deals/Quotes/Invoices/Activities, Tasks, Disk, Messaging, Lists, Calendar) using an inbound webhook URL (or OAuth2 access_token). Normalizes leads/contacts/deals/tasks into NormalizedDocument and supports KB sync.",
+  "provider": "bitrix24",
+  "service": "bitrix24",
+  "auth_type": "api_key",
+  "install_fields": [
+    {
+      "key": "webhook_url",
+      "label": "Inbound Webhook URL",
+      "type": "secret",
+      "required": true,
+      "placeholder": "https://{portal}.bitrix24.com/rest/{user_id}/{webhook_code}/",
+      "help": "Bitrix24 → Developer resources → Other → Inbound webhook. Copy the full URL — the connector appends `{method}.json` per call."
+    },
+    {
+      "key": "access_token",
+      "label": "OAuth Access Token",
+      "type": "secret",
+      "required": false,
+      "placeholder": "Leave blank when using a webhook URL",
+      "help": "Optional. When set, the connector calls `{base_url}/{method}.json?auth={access_token}` instead of the webhook URL."
+    },
+    {
+      "key": "portal",
+      "label": "Portal Subdomain",
+      "type": "string",
+      "required": false,
+      "placeholder": "mycompany",
+      "help": "Auto-derived from `webhook_url`. Override only when using OAuth mode without a webhook URL."
+    },
+    {
+      "key": "base_url",
+      "label": "REST Base URL",
+      "type": "string",
+      "required": false,
+      "placeholder": "https://mycompany.bitrix24.com/rest",
+      "help": "Override the REST base URL. Auto-derived when blank."
+    },
+    {
+      "key": "rate_limit_per_min",
+      "label": "Rate Limit (requests/min)",
+      "type": "number",
+      "required": false,
+      "default": "2",
+      "placeholder": "2",
+      "help": "Bitrix24 enforces an aggressive operating quota (Operation Time Limit). Default 2/min for free tier."
+    },
+    {
+      "key": "timeout_s",
+      "label": "Request Timeout (seconds)",
+      "type": "number",
+      "required": false,
+      "default": "30",
+      "placeholder": "30",
+      "help": "Per-request httpx timeout."
+    }
+  ],
+  "apis": [
+    {
+      "id": "install",
+      "name": "Install Connector",
+      "description": "Validates webhook_url (or access_token + portal) and marks the connector installed.",
+      "method": "INTERNAL",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "health_check",
+      "name": "Health Check",
+      "description": "Verifies Bitrix24 API connectivity by calling user.current.",
+      "method": "POST",
+      "params": [],
+      "returns": "ConnectorStatus"
+    },
+    {
+      "id": "user_current",
+      "name": "Current User",
+      "description": "POST user.current.json — identify the caller.",
+      "method": "POST",
+      "params": [],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_users",
+      "name": "List Users",
+      "description": "POST user.get.json — list portal users (Bitrix pages by 50).",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_leads",
+      "name": "List Leads",
+      "description": "POST crm.lead.list.json — page leads with optional select/filter/order.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "select", "type": "array", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "order", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_lead",
+      "name": "Get Lead",
+      "description": "POST crm.lead.get.json — fetch a single lead by ID.",
+      "method": "POST",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_lead",
+      "name": "Create Lead",
+      "description": "POST crm.lead.add.json — body: {fields: {...}}.",
+      "method": "POST",
+      "params": [
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_lead",
+      "name": "Update Lead",
+      "description": "POST crm.lead.update.json — body: {id, fields}.",
+      "method": "POST",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_lead",
+      "name": "Delete Lead",
+      "description": "POST crm.lead.delete.json.",
+      "method": "POST",
+      "params": [
+        { "key": "lead_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_contacts",
+      "name": "List Contacts",
+      "description": "POST crm.contact.list.json — defaults select=['*','PHONE','EMAIL'].",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "select", "type": "array", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "order", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_contact",
+      "name": "Get Contact",
+      "description": "POST crm.contact.get.json.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_contact",
+      "name": "Create Contact",
+      "description": "POST crm.contact.add.json — accepts name/last_name/phone/email shortcuts (normalized to {VALUE,VALUE_TYPE}) or raw fields.",
+      "method": "POST",
+      "params": [
+        { "key": "name", "type": "string", "required": false },
+        { "key": "last_name", "type": "string", "required": false },
+        { "key": "phone", "type": "array", "required": false },
+        { "key": "email", "type": "array", "required": false },
+        { "key": "fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_contact",
+      "name": "Update Contact",
+      "description": "POST crm.contact.update.json.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_contact",
+      "name": "Delete Contact",
+      "description": "POST crm.contact.delete.json.",
+      "method": "POST",
+      "params": [
+        { "key": "contact_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_companies",
+      "name": "List Companies",
+      "description": "POST crm.company.list.json.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "select", "type": "array", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_company",
+      "name": "Create Company",
+      "description": "POST crm.company.add.json.",
+      "method": "POST",
+      "params": [
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_deals",
+      "name": "List Deals",
+      "description": "POST crm.deal.list.json.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "select", "type": "array", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "order", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_deal",
+      "name": "Get Deal",
+      "description": "POST crm.deal.get.json.",
+      "method": "POST",
+      "params": [
+        { "key": "deal_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_deal",
+      "name": "Create Deal",
+      "description": "POST crm.deal.add.json.",
+      "method": "POST",
+      "params": [
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_deal",
+      "name": "Update Deal",
+      "description": "POST crm.deal.update.json.",
+      "method": "POST",
+      "params": [
+        { "key": "deal_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "delete_deal",
+      "name": "Delete Deal",
+      "description": "POST crm.deal.delete.json.",
+      "method": "POST",
+      "params": [
+        { "key": "deal_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_quotes",
+      "name": "List Quotes",
+      "description": "POST crm.quote.list.json.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_invoices",
+      "name": "List Invoices",
+      "description": "POST crm.invoice.list.json.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_activities",
+      "name": "List Activities",
+      "description": "POST crm.activity.list.json.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_activity",
+      "name": "Create Activity",
+      "description": "POST crm.activity.add.json.",
+      "method": "POST",
+      "params": [
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_tasks",
+      "name": "List Tasks",
+      "description": "POST tasks.task.list.json — result rows nested under result.tasks.",
+      "method": "POST",
+      "params": [
+        { "key": "start", "type": "number", "required": false },
+        { "key": "filter", "type": "object", "required": false },
+        { "key": "select", "type": "array", "required": false },
+        { "key": "order", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "get_task",
+      "name": "Get Task",
+      "description": "POST tasks.task.get.json.",
+      "method": "POST",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "create_task",
+      "name": "Create Task",
+      "description": "POST tasks.task.add.json — body: {fields: {TITLE, RESPONSIBLE_ID, ...}}.",
+      "method": "POST",
+      "params": [
+        { "key": "title", "type": "string", "required": true },
+        { "key": "responsible_id", "type": "number", "required": true },
+        { "key": "description", "type": "string", "required": false },
+        { "key": "fields", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "update_task",
+      "name": "Update Task",
+      "description": "POST tasks.task.update.json.",
+      "method": "POST",
+      "params": [
+        { "key": "task_id", "type": "number", "required": true },
+        { "key": "fields", "type": "object", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_disk_children",
+      "name": "List Disk Folder Children",
+      "description": "POST disk.folder.getchildren.json.",
+      "method": "POST",
+      "params": [
+        { "key": "folder_id", "type": "number", "required": true }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "send_im_message",
+      "name": "Send Im Message",
+      "description": "POST im.message.add.json.",
+      "method": "POST",
+      "params": [
+        { "key": "dialog_id", "type": "string", "required": true },
+        { "key": "message", "type": "string", "required": true },
+        { "key": "system", "type": "boolean", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_lists_elements",
+      "name": "List Lists Elements",
+      "description": "POST lists.element.get.json.",
+      "method": "POST",
+      "params": [
+        { "key": "iblock_id", "type": "number", "required": true },
+        { "key": "filter", "type": "object", "required": false }
+      ],
+      "returns": "Dict"
+    },
+    {
+      "id": "list_calendar_events",
+      "name": "List Calendar Events",
+      "description": "POST calendar.event.get.json.",
+      "method": "POST",
+      "params": [
+        { "key": "owner_id", "type": "number", "required": true },
+        { "key": "type", "type": "string", "required": false },
+        { "key": "from_date", "type": "string", "required": false },
+        { "key": "to_date", "type": "string", "required": false }
+      ],
+      "returns": "Dict"
+    }
+  ],
+  "dependencies": [
+    "httpx>=0.27.0",
+    "respx>=0.21.0"
+  ]
+}
