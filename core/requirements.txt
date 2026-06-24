@@ -32,4 +32,7 @@ redis>=5.0.0
 APScheduler>=3.10.4
 
 # Shared resilient discovery client + sop_sdk live here (v1.1.0+).
-shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@shielva-common-v1.1.0#subdirectory=shielva-common
+shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@shielva-common-v1.2.1#subdirectory=shielva-common
+
+pymongo>=4.6.0
+motor>=3.3.0

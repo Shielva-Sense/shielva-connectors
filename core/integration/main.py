@@ -15,6 +15,12 @@ _core_dir = _EnvPath(__file__).resolve().parent.parent  # shielva-connectors/cor
 load_dotenv(_core_dir / ".env", override=False)                       # shared secrets
 load_dotenv(_core_dir / "integration" / ".env", override=False)       # integration-specific vars
 
+# Decrypt vault:v1: sealed secrets BEFORE config reads env (VAULT_ENVELOPE_DIRECT
+# → AppRole-login + transit-decrypt against shielva-vault). No-op when unset.
+from shielva_common.envelope import bootstrap as _envelope_bootstrap
+
+_envelope_bootstrap()
+
 import asyncio
 import logging
 import sys
