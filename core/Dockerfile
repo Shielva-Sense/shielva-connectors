@@ -19,6 +19,30 @@ RUN --mount=type=secret,id=github_token \
     && pip install --no-cache-dir -r requirements.txt \
     && rm -f /root/.netrc
 
+# Connector ARTIFACTS — install the connector library (one wheel per connector)
+# from the JFrog PyPI repo, pinned by the committed manifest. The gateway then
+# discovers them at runtime via the `shielva.connectors` entry-points
+# (_load_installed_connectors). Token is a BuildKit secret (.netrc written→used→
+# deleted in one layer, never persisted). Skipped when no secret/manifest is
+# supplied, so local/dev images build without JFrog.
+#   docker build --secret id=jfrog_token,env=JFROG_TOKEN \
+#                --build-arg JFROG_USER=<you> -t shielva-connectors:dev .
+ARG JFROG_INDEX_HOST=trialrifms4.jfrog.io
+ARG JFROG_REPO=shielva592-42
+ARG JFROG_USER=""
+COPY connectors-requirements.txt ./connectors-requirements.txt
+RUN --mount=type=secret,id=jfrog_token \
+    if [ -s /run/secrets/jfrog_token ] && [ -f connectors-requirements.txt ]; then \
+      printf 'machine %s\n  login %s\n  password %s\n' \
+        "${JFROG_INDEX_HOST}" "${JFROG_USER}" "$(cat /run/secrets/jfrog_token)" > /root/.netrc \
+      && chmod 600 /root/.netrc \
+      && pip install --no-cache-dir \
+           --index-url "https://${JFROG_INDEX_HOST}/artifactory/api/pypi/${JFROG_REPO}/simple" \
+           --extra-index-url https://pypi.org/simple/ \
+           -r connectors-requirements.txt \
+      && rm -f /root/.netrc ; \
+    else echo "no jfrog secret/manifest — skipping connector artifact install"; fi
+
 FROM python:3.12-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 libssl3 curl \
