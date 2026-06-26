@@ -72,30 +72,65 @@ def _norm(name: str) -> str:
 
 
 def _parse_connector(connector_py: Path) -> tuple[str, str] | None:
-    """Return (connector_type, ClassName) parsed from connector.py, or None."""
+    """Return (connector_type, ClassName) parsed from connector.py, or None.
+
+    Robust to the common shapes seen across the library:
+      • ``class XConnector(BaseConnector)``            — direct base
+      • ``_BASE = BaseConnector; class XConnector(_BASE)``  — aliased base (try/except import)
+      • ``CONNECTOR_TYPE`` declared at module OR class level
+    The connector class is identified by ANY of: a base resolving to BaseConnector
+    (directly or via alias), a ``CONNECTOR_TYPE`` class attribute, or a ``*Connector``
+    class name.
+    """
     try:
         tree = ast.parse(connector_py.read_text(encoding="utf-8"))
     except (SyntaxError, OSError):
         return None
+
     ctype: str | None = None
-    cls: str | None = None
+    base_aliases: set[str] = set()  # names bound to BaseConnector, e.g. `_BASE = BaseConnector`
+
+    def _is_base_ref(v: ast.expr | None) -> bool:
+        return (isinstance(v, ast.Name) and v.id.endswith("BaseConnector")) or \
+               (isinstance(v, ast.Attribute) and v.attr.endswith("BaseConnector"))
+
+    # Pass 1 — CONNECTOR_TYPE literal (any scope) + BaseConnector aliases.
     for node in ast.walk(tree):
-        # module-level CONNECTOR_TYPE: str = "x"
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for t in targets:
                 if isinstance(t, ast.Name) and t.id == "CONNECTOR_TYPE":
-                    val = node.value
-                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
-                        ctype = ctype or val.value
-        # class XConnector(BaseConnector)
+                    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        ctype = ctype or node.value.value
+                if isinstance(t, ast.Name) and _is_base_ref(node.value):
+                    base_aliases.add(t.id)
+
+    def _base_matches(b: ast.expr) -> bool:
+        if isinstance(b, ast.Name):
+            return b.id.endswith("BaseConnector") or b.id in base_aliases
+        if isinstance(b, ast.Attribute):
+            return b.attr.endswith("BaseConnector")
+        return False
+
+    def _declares_ctype(cd: ast.ClassDef) -> bool:
+        for n in cd.body:
+            if isinstance(n, (ast.Assign, ast.AnnAssign)):
+                tg = n.targets if isinstance(n, ast.Assign) else [n.target]
+                if any(isinstance(t, ast.Name) and t.id == "CONNECTOR_TYPE" for t in tg):
+                    return True
+        return False
+
+    # Pass 2 — pick the connector class. Strong signals first, name suffix as fallback.
+    cls: str | None = None
+    fallback: str | None = None
+    for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            if any(
-                (isinstance(b, ast.Name) and b.id.endswith("BaseConnector"))
-                or (isinstance(b, ast.Attribute) and b.attr.endswith("BaseConnector"))
-                for b in node.bases
-            ):
+            if any(_base_matches(b) for b in node.bases) or _declares_ctype(node):
                 cls = cls or node.name
+            elif node.name.endswith("Connector"):
+                fallback = fallback or node.name
+    cls = cls or fallback
+
     if ctype and cls:
         return ctype, cls
     return None
