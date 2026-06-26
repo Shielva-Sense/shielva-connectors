@@ -522,6 +522,57 @@ async def _connector_reload_subscriber() -> None:
         raise
 
 
+def _sync_connectors_from_r2() -> int:
+    """Pull the connector library from R2 into the local GENERATED_CODE_DIR cache.
+
+    The artifact source of truth is R2 (``s3://{bucket}/{prefix}`` →
+    ``prod/connectors/{service}_connector/...``). At startup the gateway mirrors
+    that prefix onto its local volume so ``_load_generated_connectors()`` can
+    import + register the classes — the "download from R2 into the VM volume for
+    quick access" half of the artifact model. Connectors are global
+    (tenant-agnostic) so they land under a single ``{CONNECTOR_R2_TENANT_DIR}``
+    to satisfy the loader's 2-level ``{tenant}/{pkg}`` layout.
+
+    No-op (returns 0) when R2 isn't configured — local dev keeps using the
+    on-disk ``generated_connectors/`` tree committed to the repo.
+    """
+    account = os.getenv("R2_ACCOUNT_ID") or os.getenv("INTEGRATION_R2_ACCOUNT_ID") or ""
+    akid    = os.getenv("R2_ACCESS_KEY_ID") or os.getenv("INTEGRATION_R2_ACCESS_KEY_ID") or ""
+    sak     = os.getenv("R2_SECRET_ACCESS_KEY") or os.getenv("INTEGRATION_R2_SECRET_ACCESS_KEY") or ""
+    bucket  = os.getenv("R2_SHARED_BUCKET") or os.getenv("R2_BUCKET_NAME") or "shielvasense"
+    prefix  = os.getenv("CONNECTOR_R2_PREFIX", "prod/connectors/")
+    if not (account and akid and sak):
+        logger.info("connector R2 sync skipped — R2 not configured (using on-disk tree)")
+        return 0
+    try:
+        import boto3  # lazy — only when R2 is configured
+        client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{account}.r2.cloudflarestorage.com",
+            aws_access_key_id=akid,
+            aws_secret_access_key=sak,
+            region_name="auto",
+        )
+        dest = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR) / os.getenv("CONNECTOR_R2_TENANT_DIR", "shared")
+        dest.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                rel = key[len(prefix):]
+                if not rel or rel.endswith("/"):
+                    continue
+                target = dest / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                client.download_file(bucket, key, str(target))
+                n += 1
+        logger.info("connectors synced from R2", count=n, bucket=bucket, prefix=prefix, dest=str(dest))
+        return n
+    except Exception as exc:  # noqa: BLE001 — never let an R2 hiccup block startup
+        logger.error("connector R2 sync failed (continuing with on-disk tree)", error=str(exc)[:300])
+        return 0
+
+
 def _load_generated_connectors(generated_root: str = None) -> None:
     """Dynamically discover and register AI-generated connectors from generated_connectors/.
 
@@ -844,6 +895,9 @@ async def lifespan(app: FastAPI):
     # Startup: Start Scheduler
     scheduler.start()
 
+    # Mirror the connector library from R2 into the local cache, THEN load it.
+    # (No-op when R2 isn't configured — local dev uses the on-disk tree.)
+    _sync_connectors_from_r2()
     # Load AI-generated connectors dynamically
     _load_generated_connectors()
 
