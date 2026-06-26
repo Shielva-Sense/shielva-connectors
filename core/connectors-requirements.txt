@@ -10,8 +10,6 @@ shielva-connector-aircall==1.0.0
 shielva-connector-airtable==1.0.0
 shielva-connector-algolia==1.0.0
 shielva-connector-amplitude==1.0.0
-shielva-connector-adobe-analytics==1.0.0
-shielva-connector-google-analytics==1.0.0
 shielva-connector-anthropic==1.0.0
 shielva-connector-apollo==1.0.0
 shielva-connector-asana==1.0.0
@@ -32,10 +30,8 @@ shielva-connector-braze==1.0.0
 shielva-connector-brevo==1.0.0
 shielva-connector-brex==1.0.0
 shielva-connector-bugsnag==1.0.0
-shielva-connector-google-calendar==1.0.0
 shielva-connector-calendly==1.0.0
 shielva-connector-chargebee==1.0.0
-shielva-connector-stripe-payments==1.0.0
 shielva-connector-clearbit==1.0.0
 shielva-connector-clickup==1.0.0
 shielva-connector-clockify==1.0.0
@@ -47,7 +43,6 @@ shielva-connector-constant-contact==1.0.0
 shielva-connector-convertkit==1.0.0
 shielva-connector-copper==1.0.0
 shielva-connector-crisp==1.0.0
-shielva-connector-freshworks-crm==1.0.0
 shielva-connector-culture-amp==1.0.0
 shielva-connector-customerio==1.0.0
 shielva-connector-databricks==1.0.0
@@ -60,9 +55,8 @@ shielva-connector-domo==1.0.0
 shielva-connector-drata==1.0.0
 shielva-connector-drift==1.0.0
 shielva-connector-drip==1.0.0
-shielva-connector-google-drive==1.0.0
-shielva-connector-dropbox==1.0.0
 shielva-connector-dropbox-sign==1.0.0
+shielva-connector-dropbox==1.0.0
 shielva-connector-dynamics365==1.0.0
 shielva-connector-elasticsearch==1.0.0
 shielva-connector-engagebay==1.0.0
@@ -83,8 +77,6 @@ shielva-connector-gong==1.0.0
 shielva-connector-google-analytics==1.0.0
 shielva-connector-google-calendar==1.0.0
 shielva-connector-google-drive==1.0.0
-shielva-connector-google-gmail==1.0.0
-shielva-connector-google-gmail==1.0.0
 shielva-connector-google-gmail-connector==1.0.0
 shielva-connector-google-sheets==1.0.0
 shielva-connector-gorgias==1.0.0
@@ -174,12 +166,10 @@ shielva-connector-sage-intacct==1.0.0
 shielva-connector-salesforce==1.0.0
 shielva-connector-salesloft==1.0.0
 shielva-connector-segment==1.0.0
-shielva-connector-zendesk-sell==1.0.0
 shielva-connector-sendgrid==1.0.0
 shielva-connector-sentry==1.0.0
 shielva-connector-servicenow==1.0.0
 shielva-connector-sharepoint==1.0.0
-shielva-connector-google-sheets==1.0.0
 shielva-connector-shopify==1.0.0
 shielva-connector-shortcut==1.0.0
 shielva-connector-signwell==1.0.0
@@ -196,7 +186,6 @@ shielva-connector-sugarcrm==1.0.0
 shielva-connector-supabase==1.0.0
 shielva-connector-surveymonkey==1.0.0
 shielva-connector-tableau==1.0.0
-shielva-connector-microsoft-teams==1.0.0
 shielva-connector-telegram==1.0.0
 shielva-connector-tidio==1.0.0
 shielva-connector-toggl==1.0.0
@@ -220,7 +209,7 @@ shielva-connector-wrike==1.0.0
 shielva-connector-wufoo==1.0.0
 shielva-connector-xero==1.0.0
 shielva-connector-youtrack==1.0.0
-shielva-connector-zendesk==1.0.0
 shielva-connector-zendesk-sell==1.0.0
+shielva-connector-zendesk==1.0.0
 shielva-connector-zoho-crm==1.0.0
 shielva-connector-zoom==1.0.0
