@@ -885,6 +885,13 @@ async def lifespan(app: FastAPI):
     _load_installed_connectors()
     # Load AI-generated connectors dynamically
     _load_generated_connectors()
+    # Seed the advanced-connector catalog (Mongo) from the baked snapshot —
+    # hash-gated, so subsequent boots that match the marker skip the bulk write.
+    try:
+        from services.connector_catalog import seed_catalog_if_needed
+        await seed_catalog_if_needed()
+    except Exception as exc:  # noqa: BLE001 — catalog seed must never sink boot
+        logger.error("connector_catalog.seed_unhandled", error=str(exc)[:200])
 
     # HA: subscribe to the cluster-wide connector-reload channel so a deploy/reload
     # on any pod fans out to this one (no stale/404 connectors across replicas).
@@ -1173,14 +1180,51 @@ async def list_tenant_connectors(
 
 @app.get("/connectors/types")
 async def list_connector_types():
-    """List available connector types"""
-    # Legacy hardcoded vendor connectors removed — connectors are authored via the
-    # Integration Builder and loaded dynamically into CONNECTOR_CLASSES. Surface the
-    # live (generated) connectors plus the remaining coming-soon placeholders.
-    generated = [
-        {"type": ct, "name": ct, "description": "Integration Builder connector", "auth_type": "oauth2"}
-        for ct in sorted(CONNECTOR_CLASSES.keys())
-    ]
+    """List available connector types — rich metadata from the seeded catalog.
+
+    Source-of-truth order:
+      1. Mongo `advanced_connector_catalog` — seeded from the baked snapshot at
+         boot via `services.connector_catalog.seed_catalog_if_needed`. Each doc
+         is the raw `metadata/connector.json` (display_name, description,
+         auth_type, oauth_scopes, apis, install_fields, categories, …).
+      2. Live entry-point names from CONNECTOR_CLASSES as fallback (e.g. for
+         freshly registered classes the snapshot hasn't caught up to, or local
+         dev without a snapshot).
+    Plus the legacy coming-soon placeholders.
+    """
+    try:
+        from services.connector_catalog import list_catalog
+        catalog = await list_catalog()
+    except Exception:  # noqa: BLE001
+        catalog = []
+
+    seen: set[str] = set()
+    generated: list[dict] = []
+    for c in catalog:
+        ctype = c.get("connector_type") or c.get("type")
+        if not ctype or ctype in seen:
+            continue
+        seen.add(ctype)
+        generated.append({
+            "type": ctype,
+            "name": c.get("display_name") or c.get("name") or ctype,
+            "display_name": c.get("display_name") or c.get("name") or ctype,
+            "description": c.get("description") or "",
+            "auth_type": c.get("auth_type") or "oauth2",
+            "category": (c.get("categories") or [None])[0] if c.get("categories") else c.get("category"),
+            "provider": c.get("provider"),
+            "service": c.get("service"),
+            "version": c.get("version"),
+            "oauth_scopes": c.get("oauth_scopes"),
+            "install_fields": c.get("install_fields"),
+            "features": c.get("features"),
+        })
+    # Fallback: any class loaded in this pod but missing from the seeded catalog.
+    for ct in sorted(CONNECTOR_CLASSES.keys()):
+        if ct in seen:
+            continue
+        seen.add(ct)
+        generated.append({"type": ct, "name": ct, "description": "Integration Builder connector", "auth_type": "oauth2"})
     return {
         "connector_types": generated + [
             {

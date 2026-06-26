@@ -263,6 +263,38 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
     return (dist, str(wheel) if wheel else "")
 
 
+def write_snapshot(src_root: Path, version: str, dest: Path) -> int:
+    """Consolidate every connector's metadata/connector.json into one file.
+
+    The runtime catalog seeder (`services/connector_catalog.py`) reads this single
+    file at boot, hashes it, and seeds Mongo when the hash changed — so the per-dir
+    walk of ~200 connector.json files happens ONCE at build time, never at runtime.
+    Schema:
+        { "version": "1.0.0",
+          "connectors": [ <metadata/connector.json verbatim, plus connector_type>, ... ] }
+    """
+    import json as _json
+    chosen, _ = _discover(src_root)
+    items: list[dict] = []
+    for (dir_, ctype, _cls) in chosen.values():
+        meta_path = dir_ / "metadata" / "connector.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, _json.JSONDecodeError):
+            continue
+        # Belt-and-braces: stamp connector_type in case the metadata file omits it
+        # or disagrees with the deduped type chosen by _discover().
+        meta["connector_type"] = ctype
+        items.append(meta)
+    items.sort(key=lambda c: c.get("connector_type") or "")
+    payload = {"version": version, "count": len(items), "connectors": items}
+    dest.write_text(_json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"→ wrote snapshot ({len(items)} connectors) → {dest}")
+    return len(items)
+
+
 def write_manifest(src_root: Path, version: str, dest: Path) -> int:
     """Write a pip requirements manifest of every connector artifact.
 
@@ -321,6 +353,10 @@ def main() -> int:
                     help="committed pip manifest the gateway image installs from")
     ap.add_argument("--manifest-only", action="store_true",
                     help="just (re)write the manifest by scanning source — no build/publish")
+    ap.add_argument("--snapshot", default=str(Path(__file__).resolve().parent / "shielva_connectors.json"),
+                    help="consolidated metadata/connector.json snapshot, baked into the image")
+    ap.add_argument("--snapshot-only", action="store_true",
+                    help="just (re)write the snapshot from metadata/connector.json — no build/publish")
     args = ap.parse_args()
 
     src_root = Path(args.src).expanduser()
@@ -330,6 +366,9 @@ def main() -> int:
 
     if args.manifest_only:
         return 0 if write_manifest(src_root, args.version, Path(args.manifest)) else 1
+
+    if args.snapshot_only:
+        return 0 if write_snapshot(src_root, args.version, Path(args.snapshot)) else 1
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -353,8 +392,9 @@ def main() -> int:
     if failed:
         print("  failed:", ", ".join(failed[:20]) + (" …" if len(failed) > 20 else ""))
 
-    # Keep the committed manifest in lock-step with what we just built.
+    # Keep the committed manifest + snapshot in lock-step with what we just built.
     write_manifest(src_root, args.version, Path(args.manifest))
+    write_snapshot(src_root, args.version, Path(args.snapshot))
 
     if args.publish:
         return publish(out_dir)
