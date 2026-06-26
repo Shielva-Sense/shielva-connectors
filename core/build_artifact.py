@@ -246,8 +246,12 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )
+        # --no-isolation reuses this interpreter's setuptools/wheel (already present
+        # in the venv) instead of building a fresh env per wheel — ~15× faster across
+        # 200+ connectors. The build needs no exotic build deps, so this is safe.
         proc = subprocess.run(
-            [sys.executable, "-m", "build", "--wheel", "--outdir", str(out_dir)],
+            [sys.executable, "-m", "build", "--wheel", "--no-isolation",
+             "--outdir", str(out_dir)],
             cwd=tmp_path, capture_output=True, text=True,
         )
         if proc.returncode != 0:
