@@ -249,6 +249,56 @@ async def v3_list_providers():
     return {"providers": result, "count": len(result)}
 
 
+@catalog_v3_router.get("/advanced-connectors")
+async def v3_list_advanced_connectors():
+    """Rich advanced-connector catalog seeded from each connector's metadata/connector.json.
+
+    Source-of-truth pipeline:
+      metadata/connector.json (per dir)
+        → build_artifact.py consolidates → core/shielva_connectors.json (baked)
+        → integration.main lifespan: seed_catalog_if_needed() upserts into
+          Mongo ShielvaIntegration.advanced_connector_catalog (hash-gated)
+        → THIS endpoint serves the rich catalog: type, display_name,
+          description, auth_type, oauth_scopes, apis, install_fields, …
+
+    ACP `/connectors/advanced` proxies this through the gateway, so the
+    advanced-connectors page renders full cards without any extra wiring.
+    """
+    import sys as _sysep, os as _osep
+    _root = _osep.path.dirname(_osep.path.dirname(_osep.path.dirname(_osep.path.abspath(__file__))))
+    if _root not in _sysep.path:
+        _sysep.path.insert(0, _root)
+    try:
+        from services.connector_catalog import list_catalog
+        items = await list_catalog()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("catalog_v3.advanced_connectors_failed", error=str(exc)[:200])
+        items = []
+    # Normalise the response shape so the FE can render directly.
+    out = []
+    for c in items:
+        ctype = c.get("connector_type") or c.get("type")
+        if not ctype:
+            continue
+        out.append({
+            "type": ctype,
+            "name": c.get("display_name") or c.get("name") or ctype,
+            "display_name": c.get("display_name") or c.get("name") or ctype,
+            "description": c.get("description") or "",
+            "auth_type": c.get("auth_type") or "oauth2",
+            "category": (c.get("categories") or [None])[0] if c.get("categories") else c.get("category"),
+            "provider": c.get("provider"),
+            "service": c.get("service"),
+            "version": c.get("version"),
+            "oauth_scopes": c.get("oauth_scopes"),
+            "install_fields": c.get("install_fields"),
+            "features": c.get("features"),
+            "apis": c.get("apis"),
+        })
+    logger.info("catalog_v3.advanced_connectors", count=len(out))
+    return {"connectors": out, "count": len(out)}
+
+
 @catalog_v3_router.get("/providers/{provider}/services")
 async def v3_list_services(provider: str):
     """Return services for a provider. No tenant scope.

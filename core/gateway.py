@@ -885,13 +885,10 @@ async def lifespan(app: FastAPI):
     _load_installed_connectors()
     # Load AI-generated connectors dynamically
     _load_generated_connectors()
-    # Seed the advanced-connector catalog (Mongo) from the baked snapshot —
-    # hash-gated, so subsequent boots that match the marker skip the bulk write.
-    try:
-        from services.connector_catalog import seed_catalog_if_needed
-        await seed_catalog_if_needed()
-    except Exception as exc:  # noqa: BLE001 — catalog seed must never sink boot
-        logger.error("connector_catalog.seed_unhandled", error=str(exc)[:200])
+    # NOTE: the advanced-connector catalog seed lives in `integration.main`'s
+    # lifespan (the actually-deployed entrypoint), not here. gateway.py runs
+    # locally / in SAD, never as the prod pod, so seeding from here would never
+    # touch prod Mongo.
 
     # HA: subscribe to the cluster-wide connector-reload channel so a deploy/reload
     # on any pod fans out to this one (no stale/404 connectors across replicas).

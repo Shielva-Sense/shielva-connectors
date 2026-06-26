@@ -297,6 +297,20 @@ async def lifespan(app: FastAPI):
     from integration.services import category_service as _category_service
     await _category_service.ensure_indexes()
     await _category_service.seed_categories_from_json()
+    # Advanced-connector catalog: seed Mongo from the baked
+    # /app/shielva_connectors.json snapshot. Hash-gated — only writes when the
+    # snapshot content changed since the last marker. Source-of-truth is each
+    # connector's metadata/connector.json, consolidated at build time by
+    # core/build_artifact.py. Surfaced via /api/v3/catalog/advanced-connectors.
+    try:
+        import sys as _sysseed, os as _osseed
+        _root = _osseed.path.dirname(_osseed.path.dirname(_osseed.path.abspath(__file__)))
+        if _root not in _sysseed.path:
+            _sysseed.path.insert(0, _root)
+        from services.connector_catalog import seed_catalog_if_needed
+        await seed_catalog_if_needed()
+    except Exception as _seed_exc:  # noqa: BLE001 — never crash boot
+        logger.error("connector_catalog.seed_unhandled", error=str(_seed_exc)[:200])
     # Background watchdog — heals sessions that get stuck mid-execution
     watchdog_task = asyncio.create_task(_session_watchdog())
 
