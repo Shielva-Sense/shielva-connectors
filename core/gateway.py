@@ -2758,20 +2758,36 @@ async def get_connector_status(
 async def list_connectors(
     tenant_id: str = Depends(get_tenant_id)
 ):
-    """List all connectors for tenant"""
+    """List a tenant's installed connectors.
+
+    Source of truth is the PERSISTED connector_store, not the in-memory registry
+    (which is empty after a restart or when a connector failed to re-initialize on
+    boot). Reading the registry made installs disappear on refresh. We enrich with
+    live health from the registry when the connector happens to be loaded.
+    """
     connectors = []
-    
-    for connector_id in registry.list_all():
-        connector = registry.get(connector_id)
-        if connector and connector.tenant_id == tenant_id:
-            status = connector.get_status()
-            connectors.append({
-                "connector_id": connector_id,
-                "connector_type": connector.CONNECTOR_TYPE,
-                "health": status.health.value,
-                "auth_status": status.auth_status.value
-            })
-    
+    try:
+        stored = await connector_store.list_connectors()
+    except Exception as exc:  # noqa: BLE001 — never sink the page on a store hiccup
+        logger.error("list_connectors store read failed", error=str(exc)[:200])
+        stored = []
+    for cfg in stored:
+        if getattr(cfg, "tenant_id", None) != tenant_id:
+            continue
+        cid = getattr(cfg, "connector_id", None)
+        if not cid:
+            continue
+        health, auth = "unknown", "unknown"
+        conn = registry.get(cid)
+        if conn:
+            status = conn.get_status()
+            health, auth = status.health.value, status.auth_status.value
+        connectors.append({
+            "connector_id": cid,
+            "connector_type": getattr(cfg, "connector_type", None),
+            "health": health,
+            "auth_status": auth,
+        })
     return {"connectors": connectors}
 
 
