@@ -558,6 +558,114 @@ def _load_installed_connectors() -> int:
     return loaded
 
 
+# ── On-demand connector install (runtime pip-install from JFrog) ──────────────
+# The image no longer bakes all 213 connector wheels. Instead a connector's wheel
+# is pip-installed from the JFrog PyPI index the first time it's needed (install,
+# apis, test) or re-hydrated on boot for already-installed connectors. Keeps the
+# image small and only lands the SDK dependency closure for connectors in use.
+_CONNECTOR_INSTALL_LOCKS: Dict[str, asyncio.Lock] = {}
+_WHEEL_VERSIONS: Dict[str, str] = {}
+
+
+def _norm_dist(name: str) -> str:
+    """PEP 503-style normalize a connector_type. NOTE: does NOT strip a
+    `_connector` suffix — some wheels keep it (shielva-connector-google-gmail-connector)
+    while others don't (shielva-connector-activecampaign). Resolution against the
+    manifest (below) tries both forms."""
+    import re
+    return re.sub(r"[-_.]+", "-", (name or "").strip().lower()).strip("-")
+
+
+def _resolve_wheel_suffix(connector_type: str) -> Optional[str]:
+    """Map a connector_type to the manifest's wheel dist suffix, trying the type
+    as-is and with/without a trailing '-connector' (catalog type 'google_gmail'
+    and runtime type 'google_gmail_connector' both resolve to the published
+    'google-gmail-connector')."""
+    _load_wheel_versions()
+    n = _norm_dist(connector_type)
+    base = n[: -len("-connector")] if n.endswith("-connector") else n
+    for cand in (n, f"{base}-connector", base):
+        if cand in _WHEEL_VERSIONS:
+            return cand
+    return None
+
+
+def _load_wheel_versions() -> None:
+    """Parse connectors-requirements.txt -> {dist_suffix: version} (cached)."""
+    if _WHEEL_VERSIONS:
+        return
+    path = os.path.join(os.path.dirname(__file__), "connectors-requirements.txt")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "==" not in line:
+                    continue
+                if line.startswith("shielva-connector-"):
+                    pkg, ver = line.split("==", 1)
+                    _WHEEL_VERSIONS[pkg[len("shielva-connector-"):]] = ver.strip()
+    except FileNotFoundError:
+        logger.warning("connectors-requirements.txt missing — on-demand install cannot pin versions")
+
+
+async def _ensure_connector_installed(connector_type: str) -> bool:
+    """If the connector class isn't loaded, pip-install its wheel from JFrog at
+    runtime then re-scan entry-points. Returns True if the class is available."""
+    if _resolve_connector_type(connector_type) in CONNECTOR_CLASSES:
+        return True
+    suffix = _resolve_wheel_suffix(connector_type)
+    if not suffix:
+        logger.error("on-demand install: no wheel in manifest for connector", connector_type=connector_type)
+        return False
+    ver = _WHEEL_VERSIONS.get(suffix)
+    pkg = f"shielva-connector-{suffix}" + (f"=={ver}" if ver else "")
+
+    token = os.getenv("JFROG_TOKEN") or os.getenv("JFROG_PASSWORD")
+    if not token:
+        logger.error("on-demand install: JFROG_TOKEN unset", connector_type=connector_type)
+        return False
+    user = os.getenv("JFROG_USER", "")
+    host = os.getenv("JFROG_INDEX_HOST", "trialrifms4.jfrog.io")
+    repo = os.getenv("JFROG_REPO", "shielva592-42")
+    import urllib.parse as _u
+    cred = f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
+    index_url = f"https://{cred}{host}/artifactory/api/pypi/{repo}/simple"
+
+    lock = _CONNECTOR_INSTALL_LOCKS.setdefault(suffix, asyncio.Lock())
+    async with lock:
+        # Another request may have installed it while we waited for the lock.
+        if _resolve_connector_type(connector_type) in CONNECTOR_CLASSES:
+            return True
+        logger.info("on-demand installing connector wheel", pkg=pkg)
+        # Pass index URLs (which carry the token) via env, NOT argv — keeps the
+        # credential out of `ps`, pip's echoed command, and error output.
+        env = {**os.environ, "PIP_INDEX_URL": index_url,
+               "PIP_EXTRA_INDEX_URL": "https://pypi.org/simple/"}
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", "--no-cache-dir",
+            "--disable-pip-version-check", "--user", pkg,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env,
+        )
+        out, _ = await proc.communicate()
+        if proc.returncode != 0:
+            tail = out.decode(errors="replace")[-400:] if out else ""
+            logger.error("on-demand pip install failed", pkg=pkg, rc=proc.returncode, tail=tail)
+            return False
+        import importlib, site
+        # The --user install lands in the user-site dir. If that dir didn't exist at
+        # process start, site.py never added it to sys.path, so entry_points() can't
+        # see the new dist. Add it explicitly, then re-scan.
+        usersite = site.getusersitepackages()
+        if usersite and usersite not in sys.path:
+            site.addsitedir(usersite)
+        importlib.invalidate_caches()
+        _load_installed_connectors()
+        ok = _resolve_connector_type(connector_type) in CONNECTOR_CLASSES
+        if not ok:
+            logger.error("on-demand install: wheel installed but class not registered", pkg=pkg)
+        return ok
+
+
 def _load_generated_connectors(generated_root: str = None) -> None:
     """Dynamically discover and register AI-generated connectors from generated_connectors/.
 
@@ -898,6 +1006,9 @@ async def lifespan(app: FastAPI):
     stored_connectors = await connector_store.list_connectors()
     for config in stored_connectors:
         try:
+            # On-demand: re-hydrate the wheel for this already-installed connector
+            # (image no longer bakes them; site-packages is ephemeral per pod).
+            await _ensure_connector_installed(config.connector_type)
             if config.connector_type not in CONNECTOR_CLASSES:
                 logger.warning(f"Skipping unknown connector type: {config.connector_type}")
                 continue
@@ -1357,6 +1468,8 @@ async def install_connector(
 
     # Re-scan generated connectors in case a new one was just built
     _load_generated_connectors()
+    # On-demand: pull the connector's wheel from JFrog if it isn't loaded yet.
+    await _ensure_connector_installed(connector_type)
     connector_type = _resolve_connector_type(connector_type)
 
     if connector_type not in CONNECTOR_CLASSES:
