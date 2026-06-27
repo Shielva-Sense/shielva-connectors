@@ -197,6 +197,56 @@ def _copy_pkg(src_pkg: Path, dst_pkg: Path) -> None:
     shutil.copytree(src_pkg, dst_pkg, ignore=_ignore)
 
 
+def _rewrite_imports(pkg_dst: Path, pkg_name: str) -> int:
+    """Make the connector's intra-package ABSOLUTE imports package-qualified.
+
+    The sources use ``from connector import``, ``from client import``,
+    ``from models import`` etc. — valid only when the connector dir sits on
+    sys.path (the filesystem loader's trick). As an installed wheel that breaks
+    (`ModuleNotFoundError: No module named 'connector'`) AND every connector's
+    bare `client`/`models` would collide. We rewrite each LOCAL module reference
+    to ``from {pkg_name}.{module}`` — depth-independent, collision-free, importable
+    by plain `pip install`. External imports (shared.*, aiohttp, structlog, …) are
+    left untouched because they're not local top-level module names.
+    """
+    locals_: set[str] = set()
+    for p in pkg_dst.iterdir():
+        if p.is_dir() and (p / "__init__.py").exists():
+            locals_.add(p.name)
+        elif p.suffix == ".py" and p.stem != "__init__":
+            locals_.add(p.stem)
+    if not locals_:
+        return 0
+    alt = "|".join(re.escape(m) for m in sorted(locals_, key=len, reverse=True))
+    from_re = re.compile(r"^(\s*)from\s+(" + alt + r")((?:\.[A-Za-z0-9_]+)*)\s+import\b")
+    import_re = re.compile(r"^(\s*)import\s+(" + alt + r")\s*(?:#.*)?$")
+    changed = 0
+    for py in pkg_dst.rglob("*.py"):
+        try:
+            lines = py.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        dirty = False
+        out: list[str] = []
+        for ln in lines:
+            m = from_re.match(ln)
+            if m:
+                indent, mod, sub = m.group(1), m.group(2), m.group(3)
+                ln = f"{indent}from {pkg_name}.{mod}{sub} import" + ln[m.end():]
+                dirty = True
+            else:
+                mi = import_re.match(ln)
+                if mi:
+                    indent, mod = mi.group(1), mi.group(2)
+                    ln = f"{indent}import {pkg_name}.{mod} as {mod}"
+                    dirty = True
+            out.append(ln)
+        if dirty:
+            py.write_text("\n".join(out) + "\n", encoding="utf-8")
+            changed += 1
+    return changed
+
+
 def _pyproject(dist: str, version: str, pkg_dir_name: str, ctype: str,
                cls: str, deps: list[str]) -> str:
     dep_lines = ",\n    ".join(f'"{d}"' for d in deps)
@@ -243,6 +293,10 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
         tmp_path = Path(tmp)
         pkg_dst = tmp_path / src_pkg.name
         _copy_pkg(src_pkg, pkg_dst)
+        # Make intra-package absolute imports package-qualified so the wheel
+        # imports cleanly once pip-installed (the connectors' `from client import`
+        # etc. only work when the dir is on sys.path otherwise).
+        _rewrite_imports(pkg_dst, src_pkg.name)
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )
