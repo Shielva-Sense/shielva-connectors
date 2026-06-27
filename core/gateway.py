@@ -916,8 +916,18 @@ async def lifespan(app: FastAPI):
             
             # Initialize (load tokens from Redis)
             await connector.initialize()
-            
+
             registry.register(config.connector_id, connector)
+
+            # Run a live health check so the registry status reflects reality
+            # (otherwise the connector lingers as "offline" in GET /connectors until
+            # something probes it). Best-effort — never let a slow/failing probe
+            # abort the restore of the remaining connectors.
+            try:
+                await connector.health_check()
+            except Exception as _hc_exc:  # noqa: BLE001
+                logger.warning("restore health_check failed", connector_id=config.connector_id, error=str(_hc_exc)[:120])
+
             logger.info(f"Restored connector: {config.connector_id}")
             
             # Auto-restore schedule if it was active
@@ -2263,27 +2273,45 @@ async def list_connector_apis(
     if connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Try reading connector.json from generated_connectors
-    generated_root = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
     connector_type = connector.CONNECTOR_TYPE
-
-    # Search all tenant dirs for this connector_type
     metadata: dict | None = None
-    for tenant_dir in generated_root.iterdir():
-        if not tenant_dir.is_dir():
-            continue
-        for pkg_dir in tenant_dir.iterdir():
-            meta_file = pkg_dir / "metadata" / "connector.json"
-            if meta_file.exists():
-                try:
-                    candidate = json.loads(meta_file.read_text())
-                    if candidate.get("connector_type") == connector_type and tenant_dir.name == tenant_id:
-                        metadata = candidate
-                        break
-                except Exception:
-                    pass
-        if metadata:
-            break
+
+    # 1. Wheel-installed connectors bundle metadata/connector.json IN their package
+    #    (build_artifact ships metadata/* as package-data). Read it directly from the
+    #    loaded class's package dir — the generated_connectors filesystem scan below
+    #    only exists for local/SAD connectors and FileNotFound'd here (→ the 500).
+    try:
+        _mod = sys.modules.get(type(connector).__module__)
+        _mf = getattr(_mod, "__file__", None) if _mod else None
+        if _mf:
+            _pkg_meta = Path(_mf).parent / "metadata" / "connector.json"
+            if _pkg_meta.exists():
+                metadata = json.loads(_pkg_meta.read_text(encoding="utf-8"))
+    except Exception:
+        metadata = None
+
+    # 2. Fallback: scan the on-disk generated_connectors tree (guarded — the dir may
+    #    not exist in a wheels-only deployment).
+    if metadata is None:
+        try:
+            generated_root = Path(os.getenv("GENERATED_CODE_DIR") or _DEFAULT_GENERATED_DIR).resolve()
+            for tenant_dir in generated_root.iterdir():
+                if not tenant_dir.is_dir():
+                    continue
+                for pkg_dir in tenant_dir.iterdir():
+                    meta_file = pkg_dir / "metadata" / "connector.json"
+                    if meta_file.exists():
+                        try:
+                            candidate = json.loads(meta_file.read_text())
+                            if candidate.get("connector_type") == connector_type and tenant_dir.name == tenant_id:
+                                metadata = candidate
+                                break
+                        except Exception:
+                            pass
+                if metadata:
+                    break
+        except (FileNotFoundError, OSError):
+            pass
 
     # Internal/system methods that must never appear in the Test APIs step
     _SYSTEM_METHODS = {
