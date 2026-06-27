@@ -1421,9 +1421,15 @@ async def install_connector(
     # Get OAuth URL
     oauth_url = None
     if status.auth_status.value == "pending":
-        # If redirect_uri is provided in config, use it. 
-        # Otherwise, let the connector use its internal default if it has one.
-        redirect_uri = final_config.get("redirect_uri")
+        # redirect_uri is the platform's deterministic public OAuth callback. Mirror
+        # the /connectors/check default so an OAuth install returns a COMPLETE
+        # authorization URL — an empty redirect_uri makes Google reject the consent.
+        # Use the PUBLIC gateway origin (the user's browser is redirected there),
+        # not the in-cluster GATEWAY_URL used for service discovery.
+        _redir_base = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
+        redirect_uri = final_config.get("redirect_uri") or f"{_redir_base}/connectors/oauth/callback"
+        # Persist so authorize() reuses the SAME redirect_uri at token exchange.
+        connector.config["redirect_uri"] = redirect_uri
         oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
     
     return ConnectorInstallResponse(
@@ -1496,7 +1502,7 @@ async def check_connector_connection(
     body = await request.json()
     connector_type = body.get("connector_type", "")
     config = body.get("config", {})
-    _gw = os.getenv("GATEWAY_URL", "https://localhost:8000")
+    _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
     redirect_uri = body.get("redirect_uri") or config.get("redirect_uri") or _default_redirect
 
@@ -2188,7 +2194,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # needs to (re)authorize (pending, missing_credentials, token_expired, failed, …)
     # always has it. The old status gate skipped token_expired/failed, which broke
     # re-authorization. Non-OAuth connectors simply ignore the value.
-    _gw = os.getenv("GATEWAY_URL", "https://localhost:8000")
+    _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
     redirect_uri = final_config.get("redirect_uri") or _default_redirect
     connector.config["redirect_uri"] = redirect_uri
