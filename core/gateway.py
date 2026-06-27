@@ -2227,6 +2227,35 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     }
 
 
+@app.post("/connectors/{connector_id}/reauthorize")
+async def reauthorize_connector(
+    connector_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Generate a fresh OAuth authorization URL for an ALREADY-installed connector.
+
+    Re-auth is needed when the access token expired and there's no usable refresh
+    token. The connector still holds its stored client_id/secret, so we build the
+    auth URL from it (base_connector.get_oauth_url adds access_type=offline +
+    prompt=consent for Google, so this run yields a refresh token). The FE opens it
+    in the OAuth popup and exchanges the code via /connectors/{id}/callback.
+    """
+    connector = registry.get(connector_id)
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    if connector.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    _base = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
+    redirect_uri = f"{_base}/connectors/oauth/callback"
+    connector.config["redirect_uri"] = redirect_uri
+    try:
+        oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("reauthorize get_oauth_url failed", connector_id=connector_id, error=str(exc)[:200])
+        raise HTTPException(status_code=400, detail=f"Could not build authorization URL: {str(exc)[:160]}")
+    return {"oauth_url": oauth_url, "connector_id": connector_id}
+
+
 @app.get("/connectors/{connector_type}/docs")
 async def get_connector_docs(
     connector_type: str,
