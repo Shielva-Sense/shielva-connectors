@@ -297,6 +297,13 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
         # imports cleanly once pip-installed (the connectors' `from client import`
         # etc. only work when the dir is on sys.path otherwise).
         _rewrite_imports(pkg_dst, src_pkg.name)
+        # Bundle the authored docs INTO the wheel so they travel with the connector
+        # artifact and the runtime can serve them live (GET /connectors/{type}/docs).
+        # .shielva is excluded from the package, so lift just the docs json to a
+        # package-data path (package-data already includes *.json).
+        _docs_src = src_pkg / ".shielva" / "docs" / "connector_docs.json"
+        if _docs_src.exists():
+            shutil.copy2(_docs_src, pkg_dst / "_shielva_docs.json")
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )

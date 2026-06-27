@@ -2217,6 +2217,37 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     }
 
 
+@app.get("/connectors/{connector_type}/docs")
+async def get_connector_docs(
+    connector_type: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Serve the connector's authored documentation, bundled in the wheel.
+
+    The docs travel with the connector artifact (build_artifact lifts
+    .shielva/docs/connector_docs.json → {pkg}/_shielva_docs.json). We read it
+    live from the loaded connector class's package — single source of truth, no
+    static snapshot. Returns the {title, sections} doc tree the SiteRenderer expects.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    resolved = _resolve_connector_type(connector_type)
+    cls = CONNECTOR_CLASSES.get(resolved)
+    if cls is None:
+        raise HTTPException(status_code=404, detail=f"Connector type '{connector_type}' not found")
+    mod = sys.modules.get(cls.__module__)
+    mod_file = getattr(mod, "__file__", None) if mod else None
+    if mod_file:
+        docs_path = _Path(mod_file).parent / "_shielva_docs.json"
+        if docs_path.exists():
+            try:
+                return _json.loads(docs_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                logger.error("connector docs read failed", connector_type=resolved, error=str(exc)[:200])
+                raise HTTPException(status_code=500, detail="Failed to read documentation")
+    raise HTTPException(status_code=404, detail="No documentation bundled for this connector")
+
+
 @app.get("/connectors/{connector_id}/apis")
 async def list_connector_apis(
     connector_id: str,
