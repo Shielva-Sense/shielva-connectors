@@ -2615,6 +2615,14 @@ async def test_connector_method(
     except Exception:
         params = {}
 
+    # Drop empty/None params so each method's own declared defaults apply. The test
+    # UI (and resolved live-action params) submit EVERY field, empty when unset —
+    # and passing e.g. max_results="" to a typed (uint32) arg makes the upstream API
+    # 400. Omitting an unset optional lets its Python default (max_results=500, etc.)
+    # take effect; a genuinely-required arg left empty still surfaces as a clear error.
+    if isinstance(params, dict):
+        params = {k: v for k, v in params.items() if v not in ("", None)}
+
     # Hydrate connector with stored credentials before invoking any method.
     # The connector may have been installed with empty config (credentials-free install),
     # with credentials only saved later during Check Connection. Reload from Redis now.
