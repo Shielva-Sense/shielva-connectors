@@ -949,6 +949,27 @@ class ConnectorRegistry:
     def get(self, connector_id: str):
         """Get connector by ID"""
         return self._connectors.get(connector_id)
+
+    def find_authorized(self, tenant_id: str, connector_type: str):
+        """Pick this tenant's deployed instance of a type that holds a usable token.
+
+        Several install instances can exist for one (tenant, type); only some
+        captured an OAuth refresh token AND carry the client config. Action schemas
+        reference a connector by TYPE, so resolve to a COMPLETE restored instance —
+        prefer one whose in-memory token has a refresh token (so ensure_token() can
+        silently refresh), falling back to any matching instance.
+        """
+        fallback = None
+        for inst in self._connectors.values():
+            if getattr(inst, "tenant_id", None) != tenant_id:
+                continue
+            if str(getattr(inst, "CONNECTOR_TYPE", "")) != connector_type:
+                continue
+            _ti = getattr(inst, "_token_info", None)
+            if _ti is not None and getattr(_ti, "refresh_token", None):
+                return inst  # complete: client config + refresh token
+            fallback = fallback or inst
+        return fallback
     
     def remove(self, connector_id: str):
         """Remove connector"""
@@ -2566,11 +2587,14 @@ async def test_connector_method(
         _cls = CONNECTOR_CLASSES.get(_ctype)
         if _cls is None:
             raise HTTPException(status_code=404, detail="Connector not found")
+        # Prefer a COMPLETE restored instance (client config + refresh token) for
+        # this tenant — the config-less canonical id can load the token but has no
+        # client_id/secret, so its refresh hits Google's 400 invalid_request.
         _canonical_id = f"canonical_{_ctype}_{tenant_id}"
-        connector = registry.get(_canonical_id) or _cls(
-            tenant_id=tenant_id,
-            connector_id=_canonical_id,
-            config={},
+        connector = (
+            registry.find_authorized(tenant_id, _ctype)
+            or registry.get(_canonical_id)
+            or _cls(tenant_id=tenant_id, connector_id=_canonical_id, config={})
         )
     if connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
