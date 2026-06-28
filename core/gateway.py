@@ -949,6 +949,19 @@ class ConnectorRegistry:
     def get(self, connector_id: str):
         """Get connector by ID"""
         return self._connectors.get(connector_id)
+
+    def find_by_type(self, tenant_id: str, connector_type: str):
+        """Find this tenant's deployed instance whose CONNECTOR_TYPE matches.
+
+        Action schemas (and live bot actions) reference a connector by its TYPE
+        slug (e.g. "google_gmail_connector"), not by the deployed-instance id the
+        registry is keyed on. Resolve the type to the tenant's live instance.
+        """
+        for inst in self._connectors.values():
+            if getattr(inst, "tenant_id", None) == tenant_id and \
+               str(getattr(inst, "CONNECTOR_TYPE", "")) == connector_type:
+                return inst
+        return None
     
     def remove(self, connector_id: str):
         """Remove connector"""
@@ -2544,11 +2557,31 @@ async def test_connector_method(
     Body: JSON dict of parameters matching the method signature.
     Returns the method's return value serialized as JSON.
     """
-    import inspect, dataclasses
+    import inspect, dataclasses, uuid as _uuid
 
     connector = registry.get(connector_id)
     if not connector:
-        raise HTTPException(status_code=404, detail="Connector not found")
+        # The action-schema bridge (and live bot actions) reference a connector by
+        # TYPE slug (e.g. "google_gmail_connector"), not by the deployed-instance id
+        # the registry is keyed on — so a direct registry.get() misses. Resolve the
+        # type to the tenant's live instance; if none is deployed, build a temp
+        # instance from CONNECTOR_CLASSES (mirrors the /connectors/{type}/test path).
+        # Either way the credential hydration below loads the tenant's stored creds
+        # by CONNECTOR_TYPE, so the method runs exactly as a live action would.
+        _ctype = _resolve_connector_type(connector_id)
+        if _ctype not in CONNECTOR_CLASSES:
+            _load_generated_connectors()  # pick up a freshly-built generated connector
+            _ctype = _resolve_connector_type(connector_id)
+        connector = registry.find_by_type(tenant_id, _ctype)
+        if connector is None:
+            _cls = CONNECTOR_CLASSES.get(_ctype)
+            if _cls is None:
+                raise HTTPException(status_code=404, detail="Connector not found")
+            connector = _cls(
+                tenant_id=tenant_id,
+                connector_id=f"test_{_ctype}_{_uuid.uuid4().hex[:8]}",
+                config={},
+            )
     if connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
