@@ -1516,13 +1516,15 @@ async def install_connector(
                 final_config[k] = v
         logger.info("Injected stored credentials", connector_type=connector_type)
     
-    # Generate connector ID
+    # ONE instance per (tenant, connector type): use the canonical id as the
+    # connector_id so re-install / re-authorize REUSES the same instance (config +
+    # token) instead of minting a new time-hashed id each call. This is what makes
+    # OAuth idempotent — a fresh grant REPLACES the existing token in place rather
+    # than accumulating a stray instance + duplicate refresh token alongside the old
+    # ones. (The canonical id is also where the OAuth callback persists the token.)
     import uuid
-    import hashlib as _hl, time as _time
-    _ts = str(int(_time.time() * 1000))
-    _hash = _hl.sha256(f"{connector_type}:{tenant_id}:{_ts}".encode()).hexdigest()[:8]
-    connector_id = f"{connector_type}_{_hash}"
-    
+    connector_id = f"canonical_{connector_type}_{tenant_id}"
+
     # Create connector instance
     ConnectorClass = CONNECTOR_CLASSES[connector_type]
     try:
@@ -2270,10 +2272,10 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
             if k not in final_config:
                 final_config[k] = v
 
-    import hashlib as _hl, time as _time
-    _ts = str(int(_time.time() * 1000))
-    _hash = _hl.sha256(f"{connector_type}:{tenant_id}:{_ts}".encode()).hexdigest()[:8]
-    connector_id = f"{connector_type}_{_hash}"
+    # ONE instance per (tenant, connector type) — see install_connector. Reusing the
+    # canonical id makes deploy / re-auth idempotent (replaces the token in place; no
+    # proliferation of stray instances + duplicate refresh tokens).
+    connector_id = f"canonical_{connector_type}_{tenant_id}"
 
     try:
         connector = ConnectorClassEarly(
