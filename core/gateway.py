@@ -2576,6 +2576,17 @@ async def test_connector_method(
     except Exception as _hydrate_err:
         logger.warning("test_method.hydrate_failed", connector_id=connector_id, error=str(_hydrate_err))
 
+    # Silent token refresh (universal, all connectors): for any OAuth connector, refresh
+    # the short-lived access token from the stored long-lived refresh token BEFORE
+    # invoking the method, and persist it (ensure_token → on_token_refresh → set_token).
+    # The customer never re-authorizes while the refresh token is valid; re-auth is only
+    # needed if the refresh token itself is revoked/expired (provider publishing policy).
+    try:
+        if hasattr(connector, "ensure_token") and str(getattr(connector, "AUTH_TYPE", "")).lower().startswith("oauth"):
+            await connector.ensure_token()
+    except Exception as _tok_err:
+        logger.info("test_method.token_refresh_skipped", connector_id=connector_id, error=str(_tok_err)[:160])
+
     try:
         # Layer 3 — bound the invocation wall-clock, and offload SYNC connector
         # methods to a worker thread so a runaway/blocking method can't freeze the

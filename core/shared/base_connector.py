@@ -415,10 +415,18 @@ class BaseConnector(ABC):
         if state:
             params["state"] = state
 
-        # Google-specific params (other providers reject unknown params)
+        # Request a long-lived REFRESH TOKEN so the connector can silently refresh the
+        # short-lived access token (no customer re-auth). The mechanism is per-provider:
+        #   • Google → access_type=offline + prompt=consent (params)
+        #   • OIDC/OAuth2 (Microsoft, Okta, Auth0, Atlassian, Salesforce, …) → the
+        #     `offline_access` scope. Providers that issue a refresh token by default in
+        #     the auth-code flow simply ignore the extra scope.
         if "google" in auth_uri.lower():
             params["access_type"] = "offline"   # request refresh_token
-            params["prompt"] = "consent"         # always show consent screen so refresh_token is issued
+            params["prompt"] = "consent"         # always show consent so refresh_token is issued
+        elif scope_str and "offline_access" not in scope_str.split():
+            scope_str = (scope_str + " offline_access").strip()
+            params["scope"] = scope_str
 
         # PKCE (RFC 7636) — S256 method
         if use_pkce or getattr(self.__class__, "AUTH_TYPE", "") == "oauth2_pkce":
