@@ -2599,6 +2599,20 @@ async def test_connector_method(
     except Exception as _hydrate_err:
         logger.warning("test_method.hydrate_failed", connector_id=connector_id, error=str(_hydrate_err))
 
+    # Load persisted OAuth tokens (incl. the long-lived refresh token) from Redis.
+    # ensure_token() only inspects in-memory state, so a freshly-resolved canonical
+    # instance must initialize() to populate self._token_info — otherwise the refresh
+    # below sees an empty token and reports "no refresh token available" even though
+    # the tenant's canonical grant has one. Run it AFTER install() so a config-only
+    # hydration can't leave _token_info cleared.
+    try:
+        if hasattr(connector, "initialize"):
+            await connector.initialize()
+    except Exception as _init_err:
+        logger.warning("test_method.initialize_failed",
+                       connector_id=getattr(connector, "connector_id", connector_id),
+                       error=str(_init_err)[:160])
+
     # Silent token refresh (universal, all connectors): for any OAuth connector, refresh
     # the short-lived access token from the stored long-lived refresh token BEFORE
     # invoking the method, and persist it (ensure_token → on_token_refresh → set_token).
