@@ -1,0 +1,133 @@
+name: Publish — Connectors
+
+on:
+  push:
+    tags: ["connectors-v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag_override:
+        description: "Override image tag (defaults to manual-<sha>)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: shielva-ai/shielva-connectors
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build-and-publish:
+    name: Build, push, sign (multi-arch)
+    runs-on: ubuntu-latest
+    needs: [ci]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/connectors-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/connectors-v}"
+          elif [[ -n "${{ inputs.tag_override }}" ]]; then
+            VERSION="${{ inputs.tag_override }}"
+          else
+            VERSION="manual-${GITHUB_SHA::7}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tags
+        run: |
+          BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          V="${{ steps.version.outputs.version }}"
+          if [[ "${GITHUB_REF}" == refs/tags/connectors-v* ]]; then
+            TAGS="${BASE}:${V},${BASE}:latest"
+          else
+            TAGS="${BASE}:${V}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: core
+          file: core/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          secrets: |
+            github_token=${{ secrets.SHIELVA_COMMON_PAT }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign image
+        run: cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+      - name: Verify signature
+        run: |
+          cosign verify "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            --certificate-identity-regexp="^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@.*$"
+
+  deploy:
+    name: Trigger deploy
+    runs-on: ubuntu-latest
+    needs: [build-and-publish]
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Login to DevOps (AppRole)
+        id: devops-auth
+        env:
+          DEVOPS_API_URL: ${{ secrets.DEVOPS_API_URL }}
+        run: |
+          TOKEN=$(curl -sf -X POST "${DEVOPS_API_URL}/api/v1/auth/approle/login" \
+            -H "Content-Type: application/json" \
+            -d '{"role_id":"${{ secrets.DEVOPS_APPROLE_ROLE_ID }}","secret_id":"${{ secrets.DEVOPS_APPROLE_SECRET_ID }}"}' \
+            | jq -r '.token // .access_token // empty')
+          [ -z "$TOKEN" ] && echo "::warning::DevOps AppRole login failed — skipping deploy" && exit 0
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger flow-pipeline
+        env:
+          DEVOPS_API_URL: ${{ secrets.DEVOPS_API_URL }}
+          DEVOPS_DEPLOY_TOKEN: ${{ steps.devops-auth.outputs.token }}
+          PIPELINE_ID: ${{ secrets.CONNECTORS_PIPELINE_ID }}
+        run: |
+          [ -z "${PIPELINE_ID}" ] && echo "Pipeline ID not set — skipping" && exit 0
+          curl -sf -X POST "${DEVOPS_API_URL}/api/v1/flow-pipelines/${PIPELINE_ID}/runs" \
+            -H "Authorization: Bearer ${DEVOPS_DEPLOY_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"context\": {
+                \"image_tag\": \"${{ needs.build-and-publish.outputs.version }}\",
+                \"image_digest\": \"${{ needs.build-and-publish.outputs.digest }}\",
+                \"service_name\": \"connectors\",
+                \"triggered_by\": \"github-actions\",
+                \"commit_sha\": \"${GITHUB_SHA}\"
+              }
+            }" || echo "::warning::Deploy trigger failed — may need manual action."
+      - name: Summary
+        run: |
+          {
+            echo "## shielva-connectors published"
+            echo "- **Version**: \`${{ needs.build-and-publish.outputs.version }}\`"
+            echo "- **Digest**: \`${{ needs.build-and-publish.outputs.digest }}\`"
+            echo "- **Signed**: cosign keyless (OIDC)"
+          } >> "$GITHUB_STEP_SUMMARY"

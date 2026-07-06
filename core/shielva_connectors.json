@@ -304,8 +304,8 @@
         }
       ],
       "name": "ActiveCampaign",
-      "provider": "ActiveCampaign",
-      "service": "Email Marketing & CRM",
+      "provider": "activecampaign",
+      "service": "activecampaign",
       "version": "1.0.0"
     },
     {
@@ -410,8 +410,8 @@
         }
       ],
       "name": "acuity_scheduling",
-      "provider": "Acuity Scheduling",
-      "service": "Acuity Scheduling",
+      "provider": "acuity_scheduling",
+      "service": "acuity_scheduling",
       "version": "1.0.0"
     },
     {
@@ -592,8 +592,8 @@
         }
       ],
       "name": "Adobe Analytics",
-      "provider": "Adobe",
-      "service": "Adobe Analytics",
+      "provider": "adobe",
+      "service": "analytics",
       "version": "1.0.0"
     },
     {
@@ -1448,8 +1448,8 @@
         }
       ],
       "name": "aha",
-      "provider": "Aha!",
-      "service": "Aha!",
+      "provider": "aha",
+      "service": "aha",
       "version": "1.0.0"
     },
     {
@@ -2042,8 +2042,8 @@
         }
       ],
       "name": "AirtableConnector",
-      "provider": "Airtable",
-      "service": "Airtable",
+      "provider": "airtable",
+      "service": "airtable",
       "version": "1.0.0"
     },
     {
@@ -3195,8 +3195,8 @@
         }
       ],
       "name": "Apollo.io",
-      "provider": "Apollo",
-      "service": "Apollo.io",
+      "provider": "apollo",
+      "service": "apollo",
       "version": "1.0.0"
     },
     {
@@ -8060,8 +8060,8 @@
         }
       ],
       "name": "Braze",
-      "provider": "Braze",
-      "service": "Customer Engagement",
+      "provider": "braze",
+      "service": "braze",
       "version": "1.0.0"
     },
     {
@@ -8211,8 +8211,8 @@
         }
       ],
       "name": "Brevo",
-      "provider": "Brevo",
-      "service": "Brevo",
+      "provider": "brevo",
+      "service": "brevo",
       "version": "1.0.0"
     },
     {
@@ -8679,14 +8679,14 @@
       ],
       "name": "BugsnagConnector",
       "pagination": "x_next_page_link_header",
-      "provider": "Bugsnag",
+      "provider": "bugsnag",
       "resources": [
         "projects",
         "errors",
         "releases",
         "collaborators"
       ],
-      "service": "Bugsnag",
+      "service": "bugsnag",
       "version": "1.0.0"
     },
     {
@@ -9113,8 +9113,8 @@
         }
       ],
       "name": "Clearbit",
-      "provider": "Clearbit",
-      "service": "Clearbit",
+      "provider": "clearbit",
+      "service": "clearbit",
       "version": "1.0.0"
     },
     {
@@ -10007,7 +10007,7 @@
         ],
         "strategy": "skip_limit"
       },
-      "provider": "Close",
+      "provider": "close",
       "resources": [
         "leads",
         "contacts",
@@ -10016,7 +10016,7 @@
         "call_activities",
         "sequences"
       ],
-      "service": "CRM",
+      "service": "crm",
       "version": "1.0.0"
     },
     {
@@ -10803,8 +10803,8 @@
         }
       ],
       "name": "ConfluenceConnector",
-      "provider": "Atlassian",
-      "service": "Confluence",
+      "provider": "atlassian",
+      "service": "confluence",
       "version": "1.0.0"
     },
     {
@@ -10970,9 +10970,9 @@
         }
       ],
       "name": "Constant Contact",
-      "provider": "Constant Contact",
+      "provider": "constant_contact",
       "scopes": "contact_data campaign_data account_read",
-      "service": "Constant Contact",
+      "service": "constant_contact",
       "token_url": "https://authz.constantcontact.com/oauth2/default/v1/token",
       "version": "1.0.0"
     },
@@ -11147,8 +11147,8 @@
         }
       ],
       "name": "ConvertKit",
-      "provider": "ConvertKit",
-      "service": "ConvertKit",
+      "provider": "convertkit",
+      "service": "convertkit",
       "version": "1.0.0"
     },
     {
@@ -11746,8 +11746,8 @@
         }
       ],
       "name": "Culture Amp",
-      "provider": "Culture Amp",
-      "service": "Culture Amp",
+      "provider": "culture_amp",
+      "service": "culture_amp",
       "version": "1.0.0"
     },
     {
@@ -12080,7 +12080,7 @@
         }
       ],
       "name": "DatabricksConnector",
-      "provider": "Databricks",
+      "provider": "databricks",
       "resources": [
         "clusters",
         "jobs",
@@ -12089,7 +12089,7 @@
         "models",
         "sql_warehouses"
       ],
-      "service": "Databricks",
+      "service": "databricks",
       "version": "1.0.0"
     },
     {
@@ -12544,8 +12544,8 @@
         "users"
       ],
       "oauth_token_url": "https://dialpad.com/oauth2/token",
-      "provider": "Dialpad",
-      "service": "Dialpad",
+      "provider": "dialpad",
+      "service": "dialpad",
       "version": "1.0.0"
     },
     {
@@ -13723,7 +13723,7 @@
         "token_url": "https://account.docusign.com/oauth/token",
         "userinfo_url": "https://account.docusign.com/oauth/userinfo"
       },
-      "provider": "DocuSign",
+      "provider": "docusign",
       "service": "docusign",
       "version": "1.0.0"
     },
@@ -13820,14 +13820,14 @@
         }
       ],
       "name": "DomoConnector",
-      "provider": "Domo",
+      "provider": "domo",
       "resources": [
         "datasets",
         "pages",
         "users",
         "groups"
       ],
-      "service": "Domo",
+      "service": "domo",
       "token_url": "https://api.domo.com/oauth/token",
       "version": "1.0.0"
     },
@@ -16997,8 +16997,8 @@
         }
       ],
       "name": "15Five",
-      "provider": "15Five",
-      "service": "15Five",
+      "provider": "15five",
+      "service": "15five",
       "version": "1.0.0"
     },
     {
@@ -17184,7 +17184,7 @@
         }
       ],
       "name": "FigmaConnector",
-      "provider": "Figma",
+      "provider": "figma",
       "rate_limits": {
         "notes": "Figma enforces ~100 req/min per token. The connector will receive 429 on breach and retries with exponential backoff.",
         "requests_per_minute": 100
@@ -17197,7 +17197,7 @@
         "comments",
         "versions"
       ],
-      "service": "Figma",
+      "service": "figma",
       "version": "1.0.0"
     },
     {
@@ -18164,7 +18164,7 @@
       ],
       "name": "Freshworks CRM",
       "provider": "freshworks",
-      "service": "freshworks_crm",
+      "service": "crm",
       "version": "1.0.0"
     },
     {
@@ -18435,7 +18435,7 @@
         }
       ],
       "name": "FullStoryConnector",
-      "provider": "FullStory",
+      "provider": "fullstory",
       "rate_limits": {
         "note": "FullStory enforces per-organization rate limits on REST API v2 calls. The connector respects 429 responses and retries with exponential backoff."
       },
@@ -18445,7 +18445,7 @@
         "segments",
         "events"
       ],
-      "service": "FullStory",
+      "service": "fullstory",
       "version": "1.0.0"
     },
     {
@@ -19477,8 +19477,8 @@
         }
       ],
       "name": "Gong",
-      "provider": "Gong",
-      "service": "Gong",
+      "provider": "gong",
+      "service": "gong",
       "version": "1.0.0"
     },
     {
@@ -19684,7 +19684,7 @@
       "scopes": [
         "https://www.googleapis.com/auth/analytics.readonly"
       ],
-      "service": "google_analytics",
+      "service": "analytics",
       "version": "1.0.0"
     },
     {
@@ -19852,7 +19852,7 @@
       ],
       "oauth_token_url": "https://oauth2.googleapis.com/token",
       "provider": "google",
-      "service": "google_calendar",
+      "service": "calendar",
       "version": "1.0.0"
     },
     {
@@ -20035,7 +20035,7 @@
       ],
       "oauth_token_url": "https://oauth2.googleapis.com/token",
       "provider": "google",
-      "service": "google_drive",
+      "service": "drive",
       "version": "1.0.0"
     },
     {
@@ -20522,7 +20522,7 @@
       ],
       "name": "Google Sheets",
       "provider": "google",
-      "service": "google_sheets",
+      "service": "sheets",
       "version": "1.0.0"
     },
     {
@@ -21418,8 +21418,8 @@
         "scopes": [],
         "token_url": "https://api.gusto.com/oauth/token"
       },
-      "provider": "Gusto",
-      "service": "Payroll & HR",
+      "provider": "gusto",
+      "service": "gusto",
       "version": "1.0.0"
     },
     {
@@ -23519,8 +23519,8 @@
         ],
         "token_url": "https://api.hubapi.com/oauth/v1/token"
       },
-      "provider": "HubSpot",
-      "service": "CRM",
+      "provider": "hubspot",
+      "service": "crm",
       "version": "1.0.0"
     },
     {
@@ -27187,8 +27187,8 @@
         }
       ],
       "name": "JiraConnector",
-      "provider": "Atlassian",
-      "service": "Jira",
+      "provider": "atlassian",
+      "service": "jira",
       "version": "1.0.0"
     },
     {
@@ -27325,8 +27325,8 @@
         }
       ],
       "name": "Jotform",
-      "provider": "Jotform",
-      "service": "Jotform",
+      "provider": "jotform",
+      "service": "jotform",
       "version": "1.0.0"
     },
     {
@@ -28571,8 +28571,8 @@
         }
       ],
       "name": "Lattice",
-      "provider": "Lattice",
-      "service": "Lattice",
+      "provider": "lattice",
+      "service": "lattice",
       "version": "1.0.0"
     },
     {
@@ -28898,7 +28898,7 @@
         }
       ],
       "name": "Lever",
-      "provider": "Lever",
+      "provider": "lever",
       "resources": [
         "opportunities",
         "postings",
@@ -30128,8 +30128,8 @@
         }
       ],
       "name": "Looker",
-      "provider": "Google",
-      "service": "Looker",
+      "provider": "google",
+      "service": "looker",
       "version": "1.0.0"
     },
     {
@@ -32474,8 +32474,8 @@
         ],
         "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token"
       },
-      "provider": "Microsoft",
-      "service": "microsoft_teams",
+      "provider": "microsoft",
+      "service": "teams",
       "version": "1.0.0"
     },
     {
@@ -33055,8 +33055,8 @@
         }
       ],
       "name": "MixpanelConnector",
-      "provider": "Mixpanel",
-      "service": "Mixpanel",
+      "provider": "mixpanel",
+      "service": "mixpanel",
       "service_slug": "mixpanel",
       "version": "1.0.0"
     },
@@ -34824,8 +34824,8 @@
         }
       ],
       "name": "NotionConnector",
-      "provider": "Notion",
-      "service": "Notion",
+      "provider": "notion",
+      "service": "notion",
       "version": "1.0.0"
     },
     {
@@ -38212,8 +38212,8 @@
         ],
         "token_url": "https://api.outreach.io/oauth/token"
       },
-      "provider": "Outreach",
-      "service": "Outreach",
+      "provider": "outreach",
+      "service": "outreach",
       "version": "1.0.0"
     },
     {
@@ -38332,7 +38332,7 @@
         "note": "PagerDuty uses offset+limit pagination. Continue while more==true.",
         "type": "offset"
       },
-      "provider": "PagerDuty",
+      "provider": "pagerduty",
       "rate_limit": {
         "note": "PagerDuty enforces per-user rate limits. The connector retries on 429 with exponential backoff.",
         "requests_per_minute": 60
@@ -38344,7 +38344,7 @@
         "schedules",
         "escalation_policies"
       ],
-      "service": "PagerDuty",
+      "service": "pagerduty",
       "version": "1.0.0"
     },
     {
@@ -38839,8 +38839,8 @@
         }
       ],
       "name": "Pendo",
-      "provider": "Pendo",
-      "service": "Pendo",
+      "provider": "pendo",
+      "service": "pendo",
       "version": "1.0.0"
     },
     {
@@ -39963,7 +39963,7 @@
         }
       ],
       "name": "Pipedrive",
-      "provider": "Pipedrive",
+      "provider": "pipedrive",
       "service": "pipedrive",
       "version": "1.0.0"
     },
@@ -42901,12 +42901,12 @@
       "name": "PowerBIConnector",
       "oauth_auth_url_template": "https://login.microsoftonline.com/{tenant_id_azure}/oauth2/v2.0/authorize",
       "oauth_token_url_template": "https://login.microsoftonline.com/{tenant_id_azure}/oauth2/v2.0/token",
-      "provider": "Microsoft",
+      "provider": "microsoft",
       "scopes": [
         "https://analysis.windows.net/powerbi/api/.default",
         "offline_access"
       ],
-      "service": "Power BI",
+      "service": "powerbi",
       "version": "1.0.0"
     },
     {
@@ -44991,7 +44991,7 @@
       ],
       "long_description": "Connect Shielva to Rippling to sync your HR data \u2014 employees, departments, teams, roles, and leave requests \u2014 into your knowledge base for AI-powered search and analysis.",
       "name": "Rippling",
-      "provider": "Rippling",
+      "provider": "rippling",
       "service": "rippling",
       "version": "1.0.0"
     },
@@ -45086,13 +45086,13 @@
       ],
       "name": "RollbarConnector",
       "pagination": "page_offset",
-      "provider": "Rollbar",
+      "provider": "rollbar",
       "resources": [
         "items",
         "occurrences",
         "deploys"
       ],
-      "service": "Rollbar",
+      "service": "rollbar",
       "version": "1.0.0"
     },
     {
@@ -46405,7 +46405,7 @@
       ],
       "oauth_token_url": "https://login.salesforce.com/services/oauth2/token",
       "oauth_token_url_sandbox": "https://test.salesforce.com/services/oauth2/token",
-      "provider": "Salesforce",
+      "provider": "salesforce",
       "service": "salesforce",
       "service_slug": "salesforce",
       "version": "1.0.0"
@@ -46599,8 +46599,8 @@
         ],
         "token_url": "https://accounts.salesloft.com/oauth/token"
       },
-      "provider": "Salesloft",
-      "service": "Salesloft",
+      "provider": "salesloft",
+      "service": "salesloft",
       "version": "1.0.0"
     },
     {
@@ -46780,7 +46780,7 @@
         }
       ],
       "name": "Segment",
-      "provider": "Twilio Segment",
+      "provider": "twilio_segment",
       "service": "segment",
       "version": "1.0.0"
     },
@@ -47455,8 +47455,8 @@
         ],
         "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token"
       },
-      "provider": "Microsoft",
-      "service": "SharePoint & OneDrive",
+      "provider": "microsoft",
+      "service": "sharepoint",
       "version": "1.0.0"
     },
     {
@@ -47627,7 +47627,7 @@
         }
       ],
       "name": "Shopify",
-      "provider": "Shopify",
+      "provider": "shopify",
       "service": "shopify",
       "version": "1.0.0"
     },
@@ -48532,7 +48532,7 @@
         }
       ],
       "name": "Slack",
-      "provider": "Slack",
+      "provider": "slack",
       "service": "slack",
       "version": "1.0.0"
     },
@@ -48653,8 +48653,8 @@
         }
       ],
       "name": "SmartRecruiters",
-      "provider": "SmartRecruiters",
-      "service": "SmartRecruiters",
+      "provider": "smartrecruiters",
+      "service": "smartrecruiters",
       "version": "1.0.0"
     },
     {
@@ -48757,8 +48757,8 @@
         }
       ],
       "name": "Smartsheet",
-      "provider": "Smartsheet",
-      "service": "Project Management",
+      "provider": "smartsheet",
+      "service": "smartsheet",
       "version": "1.0.0"
     },
     {
@@ -49515,14 +49515,14 @@
         }
       ],
       "name": "SplunkConnector",
-      "provider": "Splunk",
+      "provider": "splunk",
       "resources": [
         "saved_searches",
         "indexes",
         "apps",
         "users"
       ],
-      "service": "Splunk Enterprise / Splunk Cloud",
+      "service": "splunk",
       "version": "1.0.0"
     },
     {
@@ -50639,7 +50639,7 @@
       ],
       "name": "Stripe Payments",
       "provider": "stripe",
-      "service": "stripe_payments",
+      "service": "payments",
       "version": "1.0.0"
     },
     {
@@ -51887,8 +51887,8 @@
         }
       ],
       "name": "Tableau",
-      "provider": "Tableau",
-      "service": "Tableau",
+      "provider": "tableau",
+      "service": "tableau",
       "version": "1.0.0"
     },
     {
@@ -52549,7 +52549,7 @@
         }
       ],
       "name": "TidioConnector",
-      "provider": "Tidio",
+      "provider": "tidio",
       "resources": [
         "conversations",
         "visitors",
@@ -52557,7 +52557,7 @@
         "operators",
         "messages"
       ],
-      "service": "Tidio",
+      "service": "tidio",
       "version": "1.0.0"
     },
     {
@@ -53199,8 +53199,8 @@
         }
       ],
       "name": "TwilioConnector",
-      "provider": "Twilio",
-      "service": "Twilio",
+      "provider": "twilio",
+      "service": "twilio",
       "version": "1.0.0"
     },
     {
@@ -53350,8 +53350,8 @@
         }
       ],
       "name": "TypeformConnector",
-      "provider": "Typeform",
-      "service": "Typeform",
+      "provider": "typeform",
+      "service": "typeform",
       "version": "1.0.0"
     },
     {
@@ -55236,8 +55236,8 @@
         "meeting:schedules_read"
       ],
       "oauth_token_url": "https://webexapis.com/v1/access_token",
-      "provider": "Cisco",
-      "service": "Webex",
+      "provider": "cisco",
+      "service": "webex",
       "version": "1.0.0"
     },
     {
@@ -56083,8 +56083,8 @@
         }
       ],
       "name": "WooCommerce",
-      "provider": "WooCommerce",
-      "service": "E-Commerce",
+      "provider": "woocommerce",
+      "service": "woocommerce",
       "service_slug": "woocommerce",
       "version": "1.0.0"
     },
@@ -56422,8 +56422,8 @@
         }
       ],
       "name": "Workable",
-      "provider": "Workable",
-      "service": "Workable",
+      "provider": "workable",
+      "service": "workable",
       "version": "1.0.0"
     },
     {
@@ -56894,7 +56894,7 @@
         }
       ],
       "name": "Workday",
-      "provider": "Workday",
+      "provider": "workday",
       "resources": [
         "workers",
         "organizations",
@@ -58696,7 +58696,7 @@
       "scopes": [
         "read"
       ],
-      "service": "zendesk_sell",
+      "service": "sell",
       "version": "1.0.0"
     },
     {
@@ -59021,8 +59021,8 @@
         ],
         "token_url": "https://accounts.zoho.com/oauth/v2/token"
       },
-      "provider": "Zoho",
-      "service": "CRM",
+      "provider": "zoho",
+      "service": "crm",
       "version": "1.0.0"
     },
     {
@@ -59273,11 +59273,11 @@
       "name": "Zoom",
       "oauth_grant_type": "account_credentials",
       "oauth_token_url": "https://zoom.us/oauth/token",
-      "provider": "Zoom",
+      "provider": "zoom",
       "service": "zoom",
       "version": "1.0.0"
     }
   ],
   "count": 212,
-  "version": "1.0.2"
+  "version": "1.0.3"
 }
