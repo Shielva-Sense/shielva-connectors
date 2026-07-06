@@ -2,12 +2,12 @@ name: CI — Connectors
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "core/**"
       - ".github/workflows/ci.yml"
   pull_request:
-    branches: [main]
+    branches: [master]
     paths:
       - "core/**"
       - ".github/workflows/ci.yml"
