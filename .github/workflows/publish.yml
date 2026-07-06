@@ -97,7 +97,7 @@ jobs:
         env:
           DEVOPS_API_URL: ${{ secrets.DEVOPS_API_URL }}
         run: |
-          TOKEN=$(curl -sf -X POST "${DEVOPS_API_URL}/api/v1/auth/approle/login" \
+          TOKEN=$(curl -sf -X POST "${DEVOPS_API_URL}/auth/approle/login" \
             -H "Content-Type: application/json" \
             -d '{"role_id":"${{ secrets.DEVOPS_APPROLE_ROLE_ID }}","secret_id":"${{ secrets.DEVOPS_APPROLE_SECRET_ID }}"}' \
             | jq -r '.token // .access_token // empty')
@@ -112,7 +112,7 @@ jobs:
           PIPELINE_ID: ${{ secrets.CONNECTORS_PIPELINE_ID }}
         run: |
           [ -z "${PIPELINE_ID}" ] && echo "Pipeline ID not set — skipping" && exit 0
-          curl -sf -X POST "${DEVOPS_API_URL}/api/v1/flow-pipelines/${PIPELINE_ID}/runs" \
+          curl -sf -X POST "${DEVOPS_API_URL}/flow-pipelines/${PIPELINE_ID}/runs" \
             -H "Authorization: Bearer ${DEVOPS_DEPLOY_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{
