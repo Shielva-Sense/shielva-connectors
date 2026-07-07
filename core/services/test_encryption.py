@@ -6,8 +6,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
 
+import pytest
+
 from services.credentials import CredentialManager
 from services.encryption import EncryptionService
+
+# EncryptionService persists per-tenant DEK state in Redis (KeyManager → redis_service),
+# so this is an integration test that needs a reachable Redis. CI has none; opt in with
+# RUN_INTEGRATION=1 when Redis is up.
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_INTEGRATION") != "1",
+    reason="needs a reachable Redis for per-tenant DEK storage (set RUN_INTEGRATION=1)",
+)
 
 
 async def test_encryption():
