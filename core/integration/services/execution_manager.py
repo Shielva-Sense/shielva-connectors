@@ -17,8 +17,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import structlog
 
@@ -26,24 +26,24 @@ logger = structlog.get_logger(__name__)
 
 # In-memory execution state — keyed by session_id
 # Each entry: { "task": asyncio.Task, "events": list[str], "done": bool, "started_at": float }
-_EXECUTIONS: Dict[str, Dict[str, Any]] = {}
+_EXECUTIONS: dict[str, dict[str, Any]] = {}
 
 # Max events to buffer per session (prevent unbounded memory growth)
 _MAX_EVENTS = 2000
 
 
-def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
+def _sse_event(event_type: str, data: dict[str, Any]) -> str:
     """Format SSE event string."""
     return f"event: {event_type}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
 async def start_execution(
     session_id: str,
-    tenant_id: Optional[str],
+    tenant_id: str | None,
     from_step_index: int = 0,
     force_restart: bool = False,
     skip_llm: bool = False,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
 ) -> bool:
     """Start execution as a background task (survives HTTP disconnect).
 
@@ -72,7 +72,9 @@ async def start_execution(
         """Consume the execute_plan generator and buffer all events."""
         try:
             logger.info("exec_manager.task_started", session_id=session_id)
-            async for event_str in execute_plan(session_id, tenant_id, from_step_index, force_restart, skip_llm=skip_llm):
+            async for event_str in execute_plan(
+                session_id, tenant_id, from_step_index, force_restart, skip_llm=skip_llm
+            ):
                 buf = _EXECUTIONS.get(session_id)
                 if buf is None:
                     break  # session was cleaned up
@@ -83,16 +85,26 @@ async def start_execution(
             logger.warning("exec_manager.task_cancelled", session_id=session_id)
             buf = _EXECUTIONS.get(session_id)
             if buf:
-                buf["events"].append(_sse_event("execution_error", {
-                    "message": "Execution was cancelled",
-                }))
+                buf["events"].append(
+                    _sse_event(
+                        "execution_error",
+                        {
+                            "message": "Execution was cancelled",
+                        },
+                    )
+                )
         except Exception as exc:
             logger.error("exec_manager.task_failed", session_id=session_id, error=str(exc))
             buf = _EXECUTIONS.get(session_id)
             if buf:
-                buf["events"].append(_sse_event("execution_error", {
-                    "message": f"Execution failed: {type(exc).__name__}",
-                }))
+                buf["events"].append(
+                    _sse_event(
+                        "execution_error",
+                        {
+                            "message": f"Execution failed: {type(exc).__name__}",
+                        },
+                    )
+                )
         finally:
             buf = _EXECUTIONS.get(session_id)
             if buf:
@@ -133,9 +145,14 @@ async def start_auto_run(session_id: str, tenant_id: str) -> bool:
             logger.error("exec_manager.auto_run_failed", session_id=session_id, error=str(exc))
             buf = _EXECUTIONS.get(session_id)
             if buf:
-                buf["events"].append(_sse_event("execution_error", {
-                    "message": f"Auto-run failed: {type(exc).__name__}",
-                }))
+                buf["events"].append(
+                    _sse_event(
+                        "execution_error",
+                        {
+                            "message": f"Auto-run failed: {type(exc).__name__}",
+                        },
+                    )
+                )
         finally:
             buf = _EXECUTIONS.get(session_id)
             if buf:

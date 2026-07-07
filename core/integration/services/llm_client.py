@@ -9,12 +9,14 @@ Default: "cli" for local dev. Use "worker" for production.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
-import structlog
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+import structlog
 
 from integration.core.config import settings
 
@@ -70,11 +72,12 @@ _CLI_SEMAPHORE = asyncio.Semaphore(1)
 
 # ── CLI mode ─────────────────────────────────────────────────────────
 
+
 async def _call_cli(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Call Claude via the CLI using `claude -p` (non-interactive pipe mode).
 
@@ -122,7 +125,12 @@ async def _call_cli(
     # No --system-prompt flag: passing large text via a CLI arg causes silent empty output.
     cmd = [cli_path, "-p", "--output-format", "text", "--model", settings.LLM_MODEL]
 
-    logger.info("llm.cli_call", prompt_length=len(stdin_payload), system_length=len(system), model=settings.LLM_MODEL)
+    logger.info(
+        "llm.cli_call",
+        prompt_length=len(stdin_payload),
+        system_length=len(system),
+        model=settings.LLM_MODEL,
+    )
 
     # Allow Claude CLI to run even inside an existing Claude Code session.
     # Newer Claude Code versions check CLAUDECODE env var and block nesting;
@@ -174,10 +182,10 @@ async def _call_cli(
 
 
 async def _call_cli_streaming(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
     on_chunk=None,
 ) -> str:
     """Call Claude CLI and stream stdout chunks via on_chunk callback.
@@ -213,7 +221,11 @@ async def _call_cli_streaming(
 
     cmd = [cli_path, "-p", "--output-format", "text", "--model", settings.LLM_MODEL]
 
-    logger.info("llm.cli_stream_call", prompt_length=len(stdin_payload), model=settings.LLM_MODEL)
+    logger.info(
+        "llm.cli_stream_call",
+        prompt_length=len(stdin_payload),
+        model=settings.LLM_MODEL,
+    )
 
     # Allow Claude CLI to run even inside an existing Claude Code session.
     # Clear CLAUDECODE so newer Claude Code versions don't block the nested call.
@@ -247,10 +259,8 @@ async def _call_cli_streaming(
             full_so_far = "".join(collected)
 
             if on_chunk:
-                try:
+                with contextlib.suppress(Exception):
                     await on_chunk(full_so_far, text_chunk)
-                except Exception:
-                    pass
 
         await proc.wait()
         full_text = "".join(collected).strip()
@@ -268,6 +278,7 @@ async def _call_cli_streaming(
 
 # ── Kimi mode (Moonshot AI — OpenAI-compatible) ───────────────────────
 
+
 def _kimi_provider_name() -> str:
     """Derive a human-readable provider name from KIMI_BASE_URL at runtime."""
     base = settings.KIMI_BASE_URL.lower()
@@ -277,16 +288,17 @@ def _kimi_provider_name() -> str:
         return "kimi"
     # Generic fallback: strip scheme and take the first hostname segment
     import re
+
     m = re.search(r"://([^/]+)", base)
     return m.group(1).split(".")[0] if m else "openai-compat"
 
 
 async def _call_kimi(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
 ) -> str:
     """Call any OpenAI-compatible LLM endpoint (DeepSeek, Kimi, etc.).
@@ -301,15 +313,14 @@ async def _call_kimi(
 
     if not settings.KIMI_API_KEY:
         raise RuntimeError(
-            f"INTEGRATION_KIMI_API_KEY is not set — required for provider '{provider}'. "
-            "Add it to integration/.env"
+            f"INTEGRATION_KIMI_API_KEY is not set — required for provider '{provider}'. Add it to integration/.env"
         )
 
     model = model or settings.KIMI_MODEL
     max_tokens = max_tokens or 8192
 
     # Build message list: system first, then user/assistant turns
-    msgs: List[Dict[str, str]] = []
+    msgs: list[dict[str, str]] = []
     if system:
         msgs.append({"role": "system", "content": system})
     msgs.extend(messages)
@@ -321,7 +332,13 @@ async def _call_kimi(
         "temperature": temperature,
     }
 
-    logger.info("llm.openai_compat_call", provider=provider, model=model, msg_count=len(msgs), max_tokens=max_tokens)
+    logger.info(
+        "llm.openai_compat_call",
+        provider=provider,
+        model=model,
+        msg_count=len(msgs),
+        max_tokens=max_tokens,
+    )
 
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(
@@ -349,14 +366,14 @@ async def _call_kimi(
 
 
 async def _call_gemini(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
-    on_chunk=None,   # optional async callback(chars_so_far: int, latest_chunk: str)
-    on_retry=None,   # optional async callback(attempt: int, wait_seconds: int, status: int)
+    on_chunk=None,  # optional async callback(chars_so_far: int, latest_chunk: str)
+    on_retry=None,  # optional async callback(attempt: int, wait_seconds: int, status: int)
 ) -> str:
     """Call Google Gemini via the streaming SSE endpoint (streamGenerateContent).
 
@@ -366,9 +383,7 @@ async def _call_gemini(
     import httpx
 
     if not settings.GEMINI_API_KEY:
-        raise RuntimeError(
-            "INTEGRATION_GEMINI_API_KEY is not set. Add it to integration/.env"
-        )
+        raise RuntimeError("INTEGRATION_GEMINI_API_KEY is not set. Add it to integration/.env")
 
     model = model or settings.GEMINI_MODEL
     max_tokens = max_tokens or 8192
@@ -379,7 +394,7 @@ async def _call_gemini(
         role = "user" if msg.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
 
-    gen_config: Dict[str, Any] = {
+    gen_config: dict[str, Any] = {
         "maxOutputTokens": max_tokens,
         "temperature": temperature,
     }
@@ -389,7 +404,7 @@ async def _call_gemini(
     if settings.GEMINI_THINKING_BUDGET != 0:
         gen_config["thinkingConfig"] = {"thinkingBudget": settings.GEMINI_THINKING_BUDGET}
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "contents": contents,
         "generationConfig": gen_config,
     }
@@ -397,12 +412,13 @@ async def _call_gemini(
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
     # Use streaming endpoint — alt=sse streams SSE events as tokens are generated
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:streamGenerateContent?alt=sse&key={settings.GEMINI_API_KEY}"
-    )
 
-    logger.info("llm.gemini_stream_call", model=model, msg_count=len(contents), max_tokens=max_tokens)
+    logger.info(
+        "llm.gemini_stream_call",
+        model=model,
+        msg_count=len(contents),
+        max_tokens=max_tokens,
+    )
 
     # Retry config — 503 (high demand) and 429 (rate limit) are both transient.
     # 429 (rate limit) needs longer waits than 503 (momentary overload).
@@ -411,8 +427,8 @@ async def _call_gemini(
     _RETRYABLE_STATUSES = {429, 503}
     # Delays indexed by attempt number (0 = first try, no delay).
     # 429: wait longer — quota windows are typically 60s on free/low-tier keys.
-    _RETRY_DELAYS_429 = [20, 60, 120]   # 3 retries: 20s, 60s, 120s
-    _RETRY_DELAYS_503 = [5, 15, 30]     # 3 retries: 5s, 15s, 30s (transient overload)
+    _RETRY_DELAYS_429 = [20, 60, 120]  # 3 retries: 20s, 60s, 120s
+    _RETRY_DELAYS_503 = [5, 15, 30]  # 3 retries: 5s, 15s, 30s (transient overload)
 
     # Fallback model when primary exhausts 429 retries (higher quota tier)
     _FALLBACK_MODEL = "gemini-2.0-flash"
@@ -424,7 +440,7 @@ async def _call_gemini(
     if model != _FALLBACK_MODEL:
         _models_to_try.append(_FALLBACK_MODEL)
 
-    _last_error: Optional[str] = None
+    _last_error: str | None = None
 
     for _model_idx, _current_model in enumerate(_models_to_try):
         # Build URL for this model
@@ -440,20 +456,19 @@ async def _call_gemini(
                 reason=_last_error,
             )
 
-        _last_status: Optional[int] = None
+        _last_status: int | None = None
         _succeeded = False
 
-        for _attempt, _delay in enumerate([0] + _RETRY_DELAYS_429, start=1):
+        for _attempt, _delay in enumerate([0, *_RETRY_DELAYS_429], start=1):
             # Choose delay list based on last seen status
-            if _last_status == 429:
-                _delays = _RETRY_DELAYS_429
-            else:
-                _delays = _RETRY_DELAYS_503
+            _delays = _RETRY_DELAYS_429 if _last_status == 429 else _RETRY_DELAYS_503
 
-            _actual_delay = 0 if _attempt == 1 else _delays[_attempt - 2] if _attempt - 2 < len(_delays) else _delays[-1]
+            _actual_delay = (
+                0 if _attempt == 1 else _delays[_attempt - 2] if _attempt - 2 < len(_delays) else _delays[-1]
+            )
 
             if _actual_delay:
-                _status_str = f"429 rate-limit" if _last_status == 429 else f"{_last_status}"
+                _status_str = "429 rate-limit" if _last_status == 429 else f"{_last_status}"
                 logger.warning(
                     "llm.gemini_retrying",
                     model=_current_model,
@@ -462,13 +477,11 @@ async def _call_gemini(
                     status=_last_status,
                 )
                 if on_retry:
-                    try:
+                    with contextlib.suppress(Exception):
                         await on_retry(_attempt, _actual_delay, _last_status or 429)
-                    except Exception:
-                        pass
                 await _asyncio.sleep(_actual_delay)
 
-            collected_chunks: List[str] = []
+            collected_chunks: list[str] = []
             total_chars = 0
 
             try:
@@ -501,7 +514,12 @@ async def _call_gemini(
                         if resp.status_code != 200:
                             body = await resp.aread()
                             err = body.decode("utf-8", errors="replace")[:300]
-                            logger.error("llm.gemini_error", model=_current_model, status=resp.status_code, body=err)
+                            logger.error(
+                                "llm.gemini_error",
+                                model=_current_model,
+                                status=resp.status_code,
+                                body=err,
+                            )
                             raise RuntimeError(f"Gemini API error {resp.status_code}: {err}")
 
                         # Use aiter_lines() — gives one SSE line at a time
@@ -509,7 +527,7 @@ async def _call_gemini(
                             line = line.strip()
                             if not line.startswith("data:"):
                                 continue
-                            data_str = line[len("data:"):].strip()
+                            data_str = line[len("data:") :].strip()
                             if not data_str or data_str == "[DONE]":
                                 continue
                             try:
@@ -525,12 +543,14 @@ async def _call_gemini(
                                     collected_chunks.append(chunk_text)
                                     total_chars += len(chunk_text)
                                     if on_chunk:
-                                        try:
+                                        with contextlib.suppress(Exception):
                                             await on_chunk(total_chars, chunk_text)
-                                        except Exception:
-                                            pass
                             except Exception as parse_exc:
-                                logger.debug("llm.gemini_sse_parse_error", line_preview=line[:120], error=str(parse_exc))
+                                logger.debug(
+                                    "llm.gemini_sse_parse_error",
+                                    line_preview=line[:120],
+                                    error=str(parse_exc),
+                                )
 
                 # Successful response — mark success and break out of retry loop
                 _succeeded = True
@@ -543,7 +563,12 @@ async def _call_gemini(
                 _last_error = str(conn_exc)
                 if _attempt > len(_RETRY_DELAYS_503):
                     raise RuntimeError(f"Gemini request failed after {_attempt} attempts: {conn_exc}") from conn_exc
-                logger.warning("llm.gemini_connection_error_retrying", model=_current_model, attempt=_attempt, error=str(conn_exc))
+                logger.warning(
+                    "llm.gemini_connection_error_retrying",
+                    model=_current_model,
+                    attempt=_attempt,
+                    error=str(conn_exc),
+                )
                 continue
 
         if _succeeded:
@@ -557,7 +582,12 @@ async def _call_gemini(
         )
 
     text = "".join(collected_chunks)
-    logger.info("llm.gemini_stream_response", model=model, response_length=len(text), chunks=len(collected_chunks))
+    logger.info(
+        "llm.gemini_stream_response",
+        model=model,
+        response_length=len(text),
+        chunks=len(collected_chunks),
+    )
     return text
 
 
@@ -574,14 +604,14 @@ def _strip_code_fences(text: str) -> str:
 
 
 async def call_llm_tests(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
     expect_code: bool = True,
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
 ) -> str:
     """LLM call specifically for test generation.
 
@@ -625,15 +655,15 @@ async def call_llm_tests(
 
 
 async def call_llm_fix(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
     expect_code: bool = True,
     on_chunk=None,  # optional async callback(chars_so_far: int, chunk: str) for live progress
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
 ) -> str:
     """LLM call for AI fix operations (Attempt Fix on any step).
 
@@ -670,6 +700,7 @@ async def call_llm_fix(
         effective_tenant_id = tenant_id or get_llm_tenant_id()
         if effective_tenant_id:
             from integration.services.mcp_client import fix_code_via_mcp_agent
+
             # Extract broken code from messages (last user message content)
             broken_code = ""
             error_output = ""
@@ -685,9 +716,13 @@ async def call_llm_fix(
             if not broken_code.strip():
                 logger.warning("llm.fix_mcp_no_code_fallback", msg_count=len(messages))
                 return await call_llm(
-                    messages, system=system, model=model,
-                    max_tokens=max_tokens, temperature=temperature,
-                    expect_code=expect_code, tenant_id=tenant_id,
+                    messages,
+                    system=system,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    expect_code=expect_code,
+                    tenant_id=tenant_id,
                 )
 
             return await fix_code_via_mcp_agent(
@@ -719,16 +754,17 @@ def _get_api_client():
     global _api_client
     if _api_client is None:
         from anthropic import AsyncAnthropic
+
         _api_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     return _api_client
 
 
 async def _call_api(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
 ) -> str:
     """Call Claude via the Anthropic API (requires API key)."""
@@ -736,7 +772,7 @@ async def _call_api(
     model = model or settings.LLM_MODEL
     max_tokens = max_tokens or settings.LLM_MAX_TOKENS
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -765,7 +801,8 @@ async def _call_api(
 
 # ── Worker mode (Redis queue → remote Claude CLI) ───────────────────
 
-def _build_prompt(messages: List[Dict[str, str]], system: str = "") -> str:
+
+def _build_prompt(messages: list[dict[str, str]], system: str = "") -> str:
     """Combine system + messages into a single prompt string."""
     parts = []
     if system:
@@ -781,10 +818,10 @@ def _build_prompt(messages: List[Dict[str, str]], system: str = "") -> str:
 
 
 async def _call_worker(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Push LLM job to Redis queue and wait for the worker to process it.
 
@@ -820,14 +857,14 @@ def _looks_like_code(text: str) -> bool:
 
 
 async def call_llm(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
     expect_code: bool = True,
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
 ) -> str:
     """Call the configured LLM and return the text response.
 
@@ -846,14 +883,17 @@ async def call_llm(
     async def _do_call(msgs, sys_prompt):
         if mode == "cli":
             return await _call_cli(msgs, system=sys_prompt, max_tokens=max_tokens)
-        elif mode == "worker":
+        if mode == "worker":
             return await _call_worker(msgs, system=sys_prompt, max_tokens=max_tokens)
-        elif mode == "api":
+        if mode == "api":
             return await _call_api(
-                msgs, system=sys_prompt, model=model,
-                max_tokens=max_tokens, temperature=temperature,
+                msgs,
+                system=sys_prompt,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
             )
-        elif mode == "mcp":
+        if mode == "mcp":
             # Resolve tenant_id: explicit param wins, else read from ContextVar
             # set once per execution by codegen_service.set_llm_tenant_id().
             effective_tenant_id = tenant_id or get_llm_tenant_id()
@@ -866,6 +906,7 @@ async def call_llm(
                     f"at the start of execute_plan() or attempt_fix_step()."
                 )
             from integration.services.mcp_client import call_llm_via_mcp
+
             return await call_llm_via_mcp(
                 msgs,
                 system=sys_prompt,
@@ -874,10 +915,7 @@ async def call_llm(
                 max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
                 temperature=temperature,
             )
-        else:
-            raise ValueError(
-                f"Unknown LLM_MODE: '{mode}'. Use 'cli', 'worker', 'api', or 'mcp'."
-            )
+        raise ValueError(f"Unknown LLM_MODE: '{mode}'. Use 'cli', 'worker', 'api', or 'mcp'.")
 
     text = await _do_call(messages, system)
 
@@ -899,19 +937,22 @@ async def call_llm(
         text = await _do_call(messages, retry_system)
 
         if not _looks_like_code(text):
-            logger.error("llm.retry_also_non_code", response_preview=text[:100] if text else "(empty)")
+            logger.error(
+                "llm.retry_also_non_code",
+                response_preview=text[:100] if text else "(empty)",
+            )
 
     return text
 
 
 async def call_llm_streaming(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
     on_chunk=None,
     expect_code: bool = True,
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
 ) -> str:
     """Call the LLM with streaming progress via on_chunk callback.
 
@@ -926,12 +967,18 @@ async def call_llm_streaming(
 
     if mode == "cli" and on_chunk:
         return await _call_cli_streaming(
-            messages, system=system, max_tokens=max_tokens, on_chunk=on_chunk,
+            messages,
+            system=system,
+            max_tokens=max_tokens,
+            on_chunk=on_chunk,
         )
 
     # For worker/api/mcp modes, fall back to non-streaming call
     return await call_llm(
-        messages, system=system, max_tokens=max_tokens, expect_code=expect_code,
+        messages,
+        system=system,
+        max_tokens=max_tokens,
+        expect_code=expect_code,
         tenant_id=tenant_id,
     )
 
@@ -950,13 +997,13 @@ def _strip_json_fences(raw: str) -> str:
 
 
 async def call_llm_json(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
-    model: Optional[str] = None,
-    max_tokens: Optional[int] = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
     temperature: float = 0.2,
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
 ) -> Any:
     """Call the primary LLM and parse the response as JSON.
 
@@ -967,8 +1014,11 @@ async def call_llm_json(
     Strips markdown code fences if present, then parses.
     """
     raw = await call_llm(
-        messages, system=system, model=model,
-        max_tokens=max_tokens, temperature=temperature,
+        messages,
+        system=system,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
         expect_code=False,  # We want JSON, not Python code — skip the code-look check
         tenant_id=tenant_id,
     )
@@ -977,7 +1027,12 @@ async def call_llm_json(
     # retry once via Gemini which is an HTTP API and not subject to CLI concurrency limits.
     if not raw and settings.GEMINI_API_KEY:
         logger.warning("llm.json_claude_empty_fallback_gemini")
-        raw = await _call_gemini(messages, system=system, max_tokens=max_tokens or 8192, temperature=temperature)
+        raw = await _call_gemini(
+            messages,
+            system=system,
+            max_tokens=max_tokens or 8192,
+            temperature=temperature,
+        )
 
     if not raw:
         raise ValueError(

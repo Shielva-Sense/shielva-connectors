@@ -11,8 +11,6 @@ Connector-specific customization happens at runtime via Gemini researching
 the actual provider portal and credentials.
 """
 
-from typing import Any, Dict, Optional
-
 import structlog
 
 from integration.services import r2_service
@@ -152,16 +150,16 @@ v1.0 — Initial structure guidelines for Shielva connector setup instructions
 
 # ── Service functions ──────────────────────────────────────────────────
 
+
 async def get_instruction_guidelines() -> str:
     """Fetch the INSTRUCTION_SETUP_GUIDELINES from R2/local cache.
 
     Falls back to the hardcoded default if not found in R2.
     """
-    content = await r2_service.get_step_prompt(
+    return await r2_service.get_step_prompt(
         _GUIDELINES_KEY,
         DEFAULT_INSTRUCTION_SETUP_GUIDELINES,
     )
-    return content
 
 
 async def seed_instruction_guidelines() -> None:
@@ -172,7 +170,7 @@ async def seed_instruction_guidelines() -> None:
     """
     key = r2_service._step_prompt_key(_GUIDELINES_KEY)
     try:
-        existing: Optional[str] = None
+        existing: str | None = None
         if r2_service._use_local():
             lp = r2_service._local_path(key)
             existing = lp.read_text(encoding="utf-8") if lp.exists() else None

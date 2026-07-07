@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import json
@@ -26,9 +27,10 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -52,7 +54,7 @@ sync_request_router = APIRouter(prefix="/sync-requests", tags=["sync-requests"])
 
 # ── Branch access by role ────────────────────────────────────────────────────
 
-BRANCH_ACCESS: Dict[str, List[str]] = {
+BRANCH_ACCESS: dict[str, list[str]] = {
     # Platform identity roles (issued by the identity service in the JWT `role` claim)
     "platform_owner": ["connector-development", "qa", "uat", "master", "main"],
     "org_owner": ["connector-development", "qa", "uat"],
@@ -66,18 +68,63 @@ BRANCH_ACCESS: Dict[str, List[str]] = {
 # Default GitHub repo for shielva-connectors
 DEFAULT_GITHUB_REPO = "git@github.com:shielvaAdmin/shielva-connectors"
 
-SYNC_PERMISSIONS: Dict[str, Dict[str, bool]] = {
+SYNC_PERMISSIONS: dict[str, dict[str, bool]] = {
     # Platform identity roles (issued by the identity service in the JWT `role` claim)
-    "platform_owner": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
-    "org_owner": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
+    "platform_owner": {
+        "can_raise": True,
+        "can_approve": True,
+        "can_hold": True,
+        "can_configure_approvers": True,
+    },
+    "org_owner": {
+        "can_raise": True,
+        "can_approve": True,
+        "can_hold": True,
+        "can_configure_approvers": True,
+    },
     # Sync-route operational roles
-    "super_admin": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
-    "tenant_admin": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
-    "bot_manager": {"can_raise": True, "can_approve": False, "can_hold": False, "can_configure_approvers": False},
-    "admin": {"can_raise": True, "can_approve": True, "can_hold": True, "can_configure_approvers": True},
-    "analyst": {"can_raise": False, "can_approve": False, "can_hold": False, "can_configure_approvers": False},
-    "viewer": {"can_raise": False, "can_approve": False, "can_hold": False, "can_configure_approvers": False},
-    "partner": {"can_raise": False, "can_approve": False, "can_hold": False, "can_configure_approvers": False},
+    "super_admin": {
+        "can_raise": True,
+        "can_approve": True,
+        "can_hold": True,
+        "can_configure_approvers": True,
+    },
+    "tenant_admin": {
+        "can_raise": True,
+        "can_approve": True,
+        "can_hold": True,
+        "can_configure_approvers": True,
+    },
+    "bot_manager": {
+        "can_raise": True,
+        "can_approve": False,
+        "can_hold": False,
+        "can_configure_approvers": False,
+    },
+    "admin": {
+        "can_raise": True,
+        "can_approve": True,
+        "can_hold": True,
+        "can_configure_approvers": True,
+    },
+    "analyst": {
+        "can_raise": False,
+        "can_approve": False,
+        "can_hold": False,
+        "can_configure_approvers": False,
+    },
+    "viewer": {
+        "can_raise": False,
+        "can_approve": False,
+        "can_hold": False,
+        "can_configure_approvers": False,
+    },
+    "partner": {
+        "can_raise": False,
+        "can_approve": False,
+        "can_hold": False,
+        "can_configure_approvers": False,
+    },
 }
 
 # Maximum payload size for /raise (25 MB)
@@ -87,7 +134,7 @@ MAX_SYNC_PAYLOAD_BYTES = 25 * 1024 * 1024
 # In-memory per-tenant SSE queues. Each connected client gets its own queue.
 # Keyed by tenant_id → set of asyncio.Queue instances.
 
-_sse_clients: Dict[str, set] = {}
+_sse_clients: dict[str, set] = {}
 
 # ── Active CI task registry ───────────────────────────────────────────────────
 # Maps sync_request_id → asyncio.Task for the running CI pipeline.
@@ -95,7 +142,7 @@ _sse_clients: Dict[str, set] = {}
 # long-running SDK security scan). Entries are removed automatically when the
 # task finishes via a done-callback.
 
-_ci_tasks: Dict[str, "asyncio.Task[Any]"] = {}
+_ci_tasks: dict[str, "asyncio.Task[Any]"] = {}
 
 
 def _broadcast(tenant_id: str, event: str, data: Any) -> None:
@@ -124,6 +171,7 @@ async def connector_sync_broadcast(
 
 
 # ── MongoDB collections ─────────────────────────────────────────────────────
+
 
 def _sync_requests_col():
     return get_db()["sync_requests"]
@@ -158,10 +206,12 @@ def _get_fernet():
         key = settings.SYNC_TOKEN_ENCRYPTION_KEY
         if not key:
             return None
-        from cryptography.fernet import Fernet
         # Key must be 32 url-safe base64-encoded bytes. If the user provided a
         # plain passphrase, derive a proper key via SHA-256 + base64.
         import base64
+
+        from cryptography.fernet import Fernet
+
         if len(key) == 44 and key.endswith("="):
             # Looks like a valid Fernet key already
             _fernet = Fernet(key.encode())
@@ -194,6 +244,7 @@ def _decrypt_token(stored: str) -> str:
 
 # ── Request / Response models ────────────────────────────────────────────────
 
+
 class SyncFilePayload(BaseModel):
     path: str
     content: str
@@ -203,7 +254,7 @@ class RaiseSyncRequestBody(BaseModel):
     session_id: str
     connector_name: str
     target_branch: str
-    files: List[SyncFilePayload]
+    files: list[SyncFilePayload]
 
 
 class ApproveSyncRequestBody(BaseModel):
@@ -215,20 +266,23 @@ class RerunSyncRequestBody(BaseModel):
 
 
 class RaisePrBody(BaseModel):
-    branch_name: Optional[str] = None  # if set, overrides the branch recorded on the sync request
+    branch_name: str | None = None  # if set, overrides the branch recorded on the sync request
 
 
 class SyncSettingsBody(BaseModel):
-    github_repo_url: Optional[str] = None
-    github_token: Optional[str] = None
-    default_target_branch: Optional[str] = None
-    authorized_approvers: Optional[List[str]] = None
+    github_repo_url: str | None = None
+    github_token: str | None = None
+    default_target_branch: str | None = None
+    authorized_approvers: list[str] | None = None
 
 
 # ── Security checks (CI Gate 1) ─────────────────────────────────────────────
 
 SECRET_PATTERNS = [
-    re.compile(r"""(?:api[_-]?key|secret|password|token|auth)\s*[:=]\s*['"][A-Za-z0-9+/=_\-]{16,}['"]""", re.I),
+    re.compile(
+        r"""(?:api[_-]?key|secret|password|token|auth)\s*[:=]\s*['"][A-Za-z0-9+/=_\-]{16,}['"]""",
+        re.I,
+    ),
     re.compile(r"""(?:aws_access_key_id|aws_secret_access_key)\s*=\s*\S+""", re.I),
     re.compile(r"""-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"""),
     re.compile(r"""ghp_[A-Za-z0-9]{36}"""),  # GitHub PAT
@@ -238,12 +292,20 @@ SECRET_PATTERNS = [
 DANGEROUS_CALLS = re.compile(r"""\b(?:eval|exec|os\.system|subprocess\.call|subprocess\.Popen)\s*\(""")
 
 JUNK_PATTERNS = [
-    "__pycache__/", ".pyc", ".pyo", ".DS_Store", ".idea/", ".vscode/",
-    "Thumbs.db", ".env", ".env.local", "node_modules/",
+    "__pycache__/",
+    ".pyc",
+    ".pyo",
+    ".DS_Store",
+    ".idea/",
+    ".vscode/",
+    "Thumbs.db",
+    ".env",
+    ".env.local",
+    "node_modules/",
 ]
 
 
-def _write_files_to_tempdir(files: List["SyncFilePayload"]) -> Path:
+def _write_files_to_tempdir(files: list["SyncFilePayload"]) -> Path:
     """Write sync request files into a fresh temp directory.
 
     Strips the leading 'generated_connectors/{name}/' prefix so that
@@ -261,7 +323,7 @@ def _write_files_to_tempdir(files: List["SyncFilePayload"]) -> Path:
     for f in files:
         rel = f.path.replace("\\", "/")
         if prefix and rel.startswith(prefix):
-            rel = rel[len(prefix):]
+            rel = rel[len(prefix) :]
         dest = tmp / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(f.content, encoding="utf-8")
@@ -270,12 +332,10 @@ def _write_files_to_tempdir(files: List["SyncFilePayload"]) -> Path:
 
 def _validate_path(rel_path: str) -> bool:
     """Return True if the path is safe (no traversal, no absolute)."""
-    if ".." in rel_path or rel_path.startswith("/") or rel_path.startswith("\\"):
-        return False
-    return True
+    return not (".." in rel_path or rel_path.startswith(("/", "\\")))
 
 
-def _security_audit_sync(files: List[dict]) -> Dict[str, Any]:
+def _security_audit_sync(files: list[dict]) -> dict[str, Any]:
     """Gate 1: Scan files for secrets, dangerous calls, credential files.
 
     This is the CPU-bound version that runs in a thread pool.
@@ -286,19 +346,51 @@ def _security_audit_sync(files: List[dict]) -> Dict[str, Any]:
         path = f["path"]
         content = f["content"]
         if not _validate_path(path):
-            findings.append({"file": path, "issue": "Path traversal attempt", "severity": "critical"})
+            findings.append(
+                {
+                    "file": path,
+                    "issue": "Path traversal attempt",
+                    "severity": "critical",
+                }
+            )
             continue
         basename = os.path.basename(path).lower()
-        if basename in (".env", ".env.local", ".env.production", "credentials.json", "secrets.json"):
-            findings.append({"file": path, "issue": f"Credential file detected: {basename}", "severity": "critical"})
+        if basename in (
+            ".env",
+            ".env.local",
+            ".env.production",
+            "credentials.json",
+            "secrets.json",
+        ):
+            findings.append(
+                {
+                    "file": path,
+                    "issue": f"Credential file detected: {basename}",
+                    "severity": "critical",
+                }
+            )
             continue
         for i, line in enumerate(content.split("\n"), 1):
             for pat in SECRET_PATTERNS:
                 if pat.search(line):
-                    findings.append({"file": path, "line": i, "issue": "Potential hardcoded secret", "severity": "high"})
+                    findings.append(
+                        {
+                            "file": path,
+                            "line": i,
+                            "issue": "Potential hardcoded secret",
+                            "severity": "high",
+                        }
+                    )
                     break
             if DANGEROUS_CALLS.search(line):
-                findings.append({"file": path, "line": i, "issue": "Dangerous function call (eval/exec/os.system)", "severity": "high"})
+                findings.append(
+                    {
+                        "file": path,
+                        "line": i,
+                        "issue": "Dangerous function call (eval/exec/os.system)",
+                        "severity": "high",
+                    }
+                )
 
     passed = not any(f["severity"] == "critical" for f in findings)
     return {
@@ -309,14 +401,14 @@ def _security_audit_sync(files: List[dict]) -> Dict[str, Any]:
     }
 
 
-async def _security_audit(files: List[SyncFilePayload]) -> Dict[str, Any]:
+async def _security_audit(files: list[SyncFilePayload]) -> dict[str, Any]:
     """Gate 1 async wrapper — offloads CPU-bound regex scanning to a thread pool."""
     file_dicts = [{"path": f.path, "content": f.content} for f in files]
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, functools.partial(_security_audit_sync, file_dicts))
 
 
-async def _enrich_findings_with_ai(findings: List[Dict]) -> List[Dict]:
+async def _enrich_findings_with_ai(findings: list[dict]) -> list[dict]:
     """Call shielva-security-ai /api/v1/enrich/batch to add AI fix suggestions.
 
     Returns the findings list with ai_fix populated. Never raises — on error
@@ -333,25 +425,27 @@ async def _enrich_findings_with_ai(findings: List[Dict]) -> List[Dict]:
     # Build payload — give each finding a stable finding_id
     payload_findings = []
     for i, f in enumerate(findings):
-        payload_findings.append({
-            "finding_id":    f.get("id") or f.get("finding_id") or str(i),
-            "title":         f.get("issue") or f.get("title") or "Security finding",
-            "severity":      (f.get("severity") or "medium").upper(),
-            "file_path":     f.get("file") or f.get("file_path"),
-            "line_start":    f.get("line") or f.get("line_number"),
-            "description":   f.get("description") or "",
-            "scanner":       f.get("scanner") or "shielva-security",
-            "code_snippet":  f.get("code_snippet") or "",
-        })
+        payload_findings.append(
+            {
+                "finding_id": f.get("id") or f.get("finding_id") or str(i),
+                "title": f.get("issue") or f.get("title") or "Security finding",
+                "severity": (f.get("severity") or "medium").upper(),
+                "file_path": f.get("file") or f.get("file_path"),
+                "line_start": f.get("line") or f.get("line_number"),
+                "description": f.get("description") or "",
+                "scanner": f.get("scanner") or "shielva-security",
+                "code_snippet": f.get("code_snippet") or "",
+            }
+        )
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:  # noqa: S501 — internal in-cluster call; harden w/ CA bundle (SOC2 debt)
             resp = await client.post(
                 f"{ai_url}/api/v1/enrich/batch",
                 json={"findings": payload_findings},
             )
             resp.raise_for_status()
-            results: List[Dict] = resp.json().get("results", [])
+            results: list[dict] = resp.json().get("results", [])
 
         # Map enrichment results back by finding_id
         enrich_map = {r["finding_id"]: r for r in results}
@@ -359,11 +453,13 @@ async def _enrich_findings_with_ai(findings: List[Dict]) -> List[Dict]:
         for i, f in enumerate(findings):
             fid = f.get("id") or f.get("finding_id") or str(i)
             r = enrich_map.get(fid) or enrich_map.get(str(i), {})
-            enriched.append({
-                **f,
-                "ai_fix":        r.get("fix_suggestion"),
-                "ai_explanation": r.get("explanation"),
-            })
+            enriched.append(
+                {
+                    **f,
+                    "ai_fix": r.get("fix_suggestion"),
+                    "ai_explanation": r.get("explanation"),
+                }
+            )
         return enriched
     except Exception as exc:
         logger.warning("security_ai_enrich_failed", ai_url=ai_url, error=str(exc)[:300])
@@ -374,9 +470,9 @@ async def _security_audit_sdk(
     sync_request_id: str,
     branch_name: str,
     commit_sha: str,
-    sync_settings: Dict,
-    files: Optional[List[Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    sync_settings: dict,
+    files: list[Any] | None = None,
+) -> dict[str, Any] | None:
     """Gate 1 via shielva-security-sdk — full scan, identical to the stepper flow.
 
     Strategy (local-first, mirrors vuln_scan_service):
@@ -406,7 +502,7 @@ async def _security_audit_sdk(
     gh_token = sync_settings.get("github_token", "")
 
     client = None
-    _scan_tmpdir: Optional[Path] = None
+    _scan_tmpdir: Path | None = None
     _scan_branch_pushed = False
     _owner = _repo_name = ""
 
@@ -425,7 +521,7 @@ async def _security_audit_sdk(
         # The security-api and connectors service run on the same host, so a
         # local path avoids the GitHub clone roundtrip and enables full scanning.
         scan_target: str
-        scan_kwargs: Dict[str, Any] = {}
+        scan_kwargs: dict[str, Any] = {}
 
         if files:
             # Write ONLY connector source files (no tests, no fixtures)
@@ -439,9 +535,7 @@ async def _security_audit_sdk(
                     return False
                 if fn.endswith(".py"):
                     return True
-                if fn.startswith("requirements") and fn.endswith(".txt"):
-                    return True
-                return False
+                return bool(fn.startswith("requirements") and fn.endswith(".txt"))
 
             source_files = [f for f in files if _is_source_file(f.path)] or list(files)
             _scan_tmpdir = _write_files_to_tempdir(source_files)
@@ -505,21 +599,21 @@ async def _security_audit_sdk(
         findings_raw = await client.scans.findings(scan.id)
         findings = [
             {
-                "id":           f.id,
-                "file":         f.file_path or "",
-                "line":         f.line_number,
-                "issue":        f.title,
-                "severity":     f.severity.lower(),
-                "description":  f.description or "",
-                "scanner":      f.scanner,
-                "rule_id":      f.rule_id or "",
+                "id": f.id,
+                "file": f.file_path or "",
+                "line": f.line_number,
+                "issue": f.title,
+                "severity": f.severity.lower(),
+                "description": f.description or "",
+                "scanner": f.scanner,
+                "rule_id": f.rule_id or "",
                 "code_snippet": f.code_snippet or None,
                 # Extra fields matching stepper/vuln_scan_service output
                 "fix_guidance": f.remediation or "",
-                "cwe":          [f.cwe] if f.cwe else [],
-                "owasp":        [f.owasp] if f.owasp else [],
-                "package":      f.package_name or "",
-                "fix_version":  f.fix_version or "",
+                "cwe": [f.cwe] if f.cwe else [],
+                "owasp": [f.owasp] if f.owasp else [],
+                "package": f.package_name or "",
+                "fix_version": f.fix_version or "",
             }
             for f in findings_raw
         ]
@@ -539,7 +633,7 @@ async def _security_audit_sdk(
 
         # ── Gate decision: CRITICAL = fail, else pass (informational) ──────────
         has_critical = any(f["severity"].lower() == "critical" for f in findings)
-        sev_counts: Dict[str, int] = {}
+        sev_counts: dict[str, int] = {}
         for f in findings:
             sev_counts[f["severity"].upper()] = sev_counts.get(f["severity"].upper(), 0) + 1
 
@@ -547,22 +641,28 @@ async def _security_audit_sdk(
         summary_parts = [f"{sev_counts[s]} {s}" for s in _SEV_ORDER if sev_counts.get(s)]
         summary = (
             ("Security scan FAILED — " if has_critical else "Security scan passed — ")
-            + ", ".join(summary_parts) + " finding(s)"
-            if summary_parts else "No security issues detected"
+            + ", ".join(summary_parts)
+            + " finding(s)"
+            if summary_parts
+            else "No security issues detected"
         )
 
         return {
-            "gate":    "security_audit",
-            "status":  "failed" if has_critical else "passed",
+            "gate": "security_audit",
+            "status": "failed" if has_critical else "passed",
             "summary": summary,
             "details": json.dumps(findings) if findings else None,
         }
 
     except ScanTimeoutError:
-        logger.warning("security_sdk_timeout", sync_request_id=sync_request_id, timeout=settings.SHIELVA_SECURITY_SCAN_TIMEOUT)
+        logger.warning(
+            "security_sdk_timeout",
+            sync_request_id=sync_request_id,
+            timeout=settings.SHIELVA_SECURITY_SCAN_TIMEOUT,
+        )
         return {
-            "gate":    "security_audit",
-            "status":  "passed",
+            "gate": "security_audit",
+            "status": "passed",
             "summary": f"Security scan timed out after {settings.SHIELVA_SECURITY_SCAN_TIMEOUT}s — review manually",
             "details": None,
         }
@@ -578,18 +678,19 @@ async def _security_audit_sdk(
             shutil.rmtree(_scan_tmpdir, ignore_errors=True)
         # Clean up ephemeral GitHub scan branch (fallback path only)
         if _scan_branch_pushed and gh_token and _owner and _repo_name:
-            try:
-                await _delete_branch(_owner, _repo_name, gh_token, f"security-scan-{sync_request_id[-12:]}")
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                await _delete_branch(
+                    _owner,
+                    _repo_name,
+                    gh_token,
+                    f"security-scan-{sync_request_id[-12:]}",
+                )
         if client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await client.close()
-            except Exception:
-                pass
 
 
-async def _delete_ci_branch(branch_name: str, sync_settings: Dict) -> None:
+async def _delete_ci_branch(branch_name: str, sync_settings: dict) -> None:
     """Delete a CI branch from GitHub after a failed pipeline run.
 
     Called when CI gates fail or an unrecoverable error occurs, so that
@@ -599,7 +700,7 @@ async def _delete_ci_branch(branch_name: str, sync_settings: Dict) -> None:
     if not branch_name or not sync_settings:
         return
     repo_url = sync_settings.get("github_repo_url", "")
-    token    = sync_settings.get("github_token", "")
+    token = sync_settings.get("github_token", "")
     if not repo_url or not token:
         return
     try:
@@ -610,7 +711,7 @@ async def _delete_ci_branch(branch_name: str, sync_settings: Dict) -> None:
         logger.warning("ci_branch_delete_failed", branch=branch_name, error=str(exc)[:200])
 
 
-def _smart_diff(files: List[SyncFilePayload], drop_empty: bool = True) -> tuple[List[SyncFilePayload], Dict[str, Any]]:
+def _smart_diff(files: list[SyncFilePayload], drop_empty: bool = True) -> tuple[list[SyncFilePayload], dict[str, Any]]:
     """Gate 2: Strip junk files (pycache, .pyc, IDE configs, etc.).
 
     drop_empty: when True (sync push), whitespace-only files are also stripped.
@@ -648,7 +749,7 @@ def _smart_diff(files: List[SyncFilePayload], drop_empty: bool = True) -> tuple[
 GITHUB_API = "https://api.github.com"
 
 # Module-level persistent httpx client for GitHub API — connection pooling
-_gh_client: Optional[httpx.AsyncClient] = None
+_gh_client: httpx.AsyncClient | None = None
 
 
 def _get_gh_client() -> httpx.AsyncClient:
@@ -694,11 +795,13 @@ def _parse_repo(repo_url: str) -> tuple[str, str]:
 
 
 async def _github_request(
-    method: str, path: str, token: str,
-    json_body: Optional[Dict] = None,
+    method: str,
+    path: str,
+    token: str,
+    json_body: dict | None = None,
     timeout: float = 30.0,
     max_retries: int = 3,
-) -> Dict:
+) -> dict:
     """Make an authenticated GitHub API request with retry/backoff.
 
     Retries on 5xx and 429 (rate-limit) with exponential backoff.
@@ -711,7 +814,7 @@ async def _github_request(
     }
     client = _get_gh_client()
 
-    last_exc: Optional[Exception] = None
+    last_exc: Exception | None = None
     for attempt in range(max_retries):
         try:
             resp = await client.request(
@@ -723,13 +826,24 @@ async def _github_request(
             )
             # Retry on server errors and rate limits
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
-                wait = (2 ** attempt) + random.uniform(0, 1)
-                logger.warning("github_api_retry", status=resp.status_code, path=path, attempt=attempt, wait_s=round(wait, 1))
+                wait = (2**attempt) + random.uniform(0, 1)  # noqa: S311 — non-crypto retry jitter
+                logger.warning(
+                    "github_api_retry",
+                    status=resp.status_code,
+                    path=path,
+                    attempt=attempt,
+                    wait_s=round(wait, 1),
+                )
                 await asyncio.sleep(wait)
                 continue
 
             if resp.status_code >= 400:
-                logger.error("github_api_error", status=resp.status_code, path=path, body=resp.text[:500])
+                logger.error(
+                    "github_api_error",
+                    status=resp.status_code,
+                    path=path,
+                    body=resp.text[:500],
+                )
                 raise HTTPException(
                     status_code=resp.status_code,
                     detail=f"GitHub API error: {resp.status_code} — {resp.text[:200]}",
@@ -741,21 +855,38 @@ async def _github_request(
         except Exception as e:
             last_exc = e
             if attempt < max_retries - 1:
-                wait = (2 ** attempt) + random.uniform(0, 1)
-                logger.warning("github_api_network_retry", error=str(e)[:100], path=path, attempt=attempt, wait_s=round(wait, 1))
+                wait = (2**attempt) + random.uniform(0, 1)  # noqa: S311 — non-crypto retry jitter
+                logger.warning(
+                    "github_api_network_retry",
+                    error=str(e)[:100],
+                    path=path,
+                    attempt=attempt,
+                    wait_s=round(wait, 1),
+                )
                 await asyncio.sleep(wait)
             else:
-                logger.error("github_api_exhausted", error=str(e)[:200], path=path, attempts=max_retries)
-                raise HTTPException(status_code=502, detail=f"GitHub API unreachable after {max_retries} retries: {str(e)[:100]}")
+                logger.error(
+                    "github_api_exhausted",
+                    error=str(e)[:200],
+                    path=path,
+                    attempts=max_retries,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"GitHub API unreachable after {max_retries} retries: {str(e)[:100]}",
+                )
 
     # Should not reach here, but just in case
     raise HTTPException(status_code=502, detail=f"GitHub API request failed: {last_exc}")
 
 
 async def _push_branch(
-    owner: str, repo: str, token: str,
-    branch_name: str, target_branch: str,
-    files: List[SyncFilePayload],
+    owner: str,
+    repo: str,
+    token: str,
+    branch_name: str,
+    target_branch: str,
+    files: list[SyncFilePayload],
     commit_message: str = "Shielva sync — automated commit",
 ) -> str:
     """Push connector files onto a new GitHub branch. Returns the commit SHA.
@@ -774,11 +905,16 @@ async def _push_branch(
     base_tree_sha = commit_data["tree"]["sha"]
 
     # 3. Create blobs for each file — PARALLEL via asyncio.gather()
-    async def _create_blob(f: SyncFilePayload) -> Dict:
-        blob = await _github_request("POST", f"{repo_path}/git/blobs", token, {
-            "content": f.content,
-            "encoding": "utf-8",
-        })
+    async def _create_blob(f: SyncFilePayload) -> dict:
+        blob = await _github_request(
+            "POST",
+            f"{repo_path}/git/blobs",
+            token,
+            {
+                "content": f.content,
+                "encoding": "utf-8",
+            },
+        )
         return {
             "path": f.path,
             "mode": "100644",
@@ -789,32 +925,52 @@ async def _push_branch(
     tree_items = await asyncio.gather(*[_create_blob(f) for f in files])
 
     # 4. Create tree
-    tree = await _github_request("POST", f"{repo_path}/git/trees", token, {
-        "base_tree": base_tree_sha,
-        "tree": list(tree_items),
-    })
+    tree = await _github_request(
+        "POST",
+        f"{repo_path}/git/trees",
+        token,
+        {
+            "base_tree": base_tree_sha,
+            "tree": list(tree_items),
+        },
+    )
 
     # 5. Create commit
-    commit = await _github_request("POST", f"{repo_path}/git/commits", token, {
-        "message": commit_message,
-        "tree": tree["sha"],
-        "parents": [base_sha],
-    })
+    commit = await _github_request(
+        "POST",
+        f"{repo_path}/git/commits",
+        token,
+        {
+            "message": commit_message,
+            "tree": tree["sha"],
+            "parents": [base_sha],
+        },
+    )
     commit_sha = commit["sha"]
 
     # 6. Create branch ref (or update if it already exists from a re-run)
     try:
-        await _github_request("POST", f"{repo_path}/git/refs", token, {
-            "ref": f"refs/heads/{branch_name}",
-            "sha": commit_sha,
-        })
+        await _github_request(
+            "POST",
+            f"{repo_path}/git/refs",
+            token,
+            {
+                "ref": f"refs/heads/{branch_name}",
+                "sha": commit_sha,
+            },
+        )
     except HTTPException as e:
         if e.status_code == 422:
             # Branch already exists (re-run scenario) — force-update it
-            await _github_request("PATCH", f"{repo_path}/git/refs/heads/{branch_name}", token, {
-                "sha": commit_sha,
-                "force": True,
-            })
+            await _github_request(
+                "PATCH",
+                f"{repo_path}/git/refs/heads/{branch_name}",
+                token,
+                {
+                    "sha": commit_sha,
+                    "force": True,
+                },
+            )
         else:
             raise
 
@@ -822,9 +978,11 @@ async def _push_branch(
 
 
 async def _push_security_scan_branch(
-    owner: str, repo: str, token: str,
+    owner: str,
+    repo: str,
+    token: str,
     scan_branch: str,
-    files: List["SyncFilePayload"],
+    files: list["SyncFilePayload"],
 ) -> str:
     """Push ONLY connector source files to a clean orphan branch for security scanning.
 
@@ -856,9 +1014,7 @@ async def _push_security_scan_branch(
         if filename.endswith(".py"):
             return True
         # Include requirements (SCA — dependency vulnerability detection)
-        if filename.startswith("requirements") and filename.endswith(".txt"):
-            return True
-        return False
+        return bool(filename.startswith("requirements") and filename.endswith(".txt"))
 
     scan_files = [f for f in files if _is_source_file(f.path)]
     if not scan_files:
@@ -875,51 +1031,80 @@ async def _push_security_scan_branch(
     )
 
     # ── Create blobs in parallel ───────────────────────────────────────────────
-    async def _create_blob(f: "SyncFilePayload") -> Dict:
-        blob = await _github_request("POST", f"{repo_path}/git/blobs", token, {
-            "content": f.content,
-            "encoding": "utf-8",
-        })
+    async def _create_blob(f: "SyncFilePayload") -> dict:
+        blob = await _github_request(
+            "POST",
+            f"{repo_path}/git/blobs",
+            token,
+            {
+                "content": f.content,
+                "encoding": "utf-8",
+            },
+        )
         return {"path": f.path, "mode": "100644", "type": "blob", "sha": blob["sha"]}
 
     tree_items = await asyncio.gather(*[_create_blob(f) for f in scan_files])
 
     # ── Create tree with NO base_tree (clean slate) ────────────────────────────
-    tree = await _github_request("POST", f"{repo_path}/git/trees", token, {
-        "tree": list(tree_items),
-        # Deliberately NO "base_tree" — orphan tree, only our files
-    })
+    tree = await _github_request(
+        "POST",
+        f"{repo_path}/git/trees",
+        token,
+        {
+            "tree": list(tree_items),
+            # Deliberately NO "base_tree" — orphan tree, only our files
+        },
+    )
 
     # ── Orphan commit (no parents) ─────────────────────────────────────────────
-    commit = await _github_request("POST", f"{repo_path}/git/commits", token, {
-        "message": f"security-scan: connector source snapshot ({scan_branch})",
-        "tree": tree["sha"],
-        "parents": [],
-    })
+    commit = await _github_request(
+        "POST",
+        f"{repo_path}/git/commits",
+        token,
+        {
+            "message": f"security-scan: connector source snapshot ({scan_branch})",
+            "tree": tree["sha"],
+            "parents": [],
+        },
+    )
     commit_sha = commit["sha"]
 
     # ── Create branch ref ──────────────────────────────────────────────────────
-    await _github_request("POST", f"{repo_path}/git/refs", token, {
-        "ref": f"refs/heads/{scan_branch}",
-        "sha": commit_sha,
-    })
+    await _github_request(
+        "POST",
+        f"{repo_path}/git/refs",
+        token,
+        {
+            "ref": f"refs/heads/{scan_branch}",
+            "sha": commit_sha,
+        },
+    )
 
     return commit_sha
 
 
 async def _open_pr(
-    owner: str, repo: str, token: str,
-    branch_name: str, target_branch: str,
-    title: str, body: str,
-) -> Dict[str, Any]:
+    owner: str,
+    repo: str,
+    token: str,
+    branch_name: str,
+    target_branch: str,
+    title: str,
+    body: str,
+) -> dict[str, Any]:
     """Open a GitHub PR from an existing branch. Returns {pr_number, pr_url, branch_name}."""
     repo_path = f"/repos/{owner}/{repo}"
-    pr = await _github_request("POST", f"{repo_path}/pulls", token, {
-        "title": title,
-        "body": body,
-        "head": branch_name,
-        "base": target_branch,
-    })
+    pr = await _github_request(
+        "POST",
+        f"{repo_path}/pulls",
+        token,
+        {
+            "title": title,
+            "body": body,
+            "head": branch_name,
+            "base": target_branch,
+        },
+    )
     return {
         "pr_number": pr["number"],
         "pr_url": pr["html_url"],
@@ -928,11 +1113,15 @@ async def _open_pr(
 
 
 async def _create_pr(
-    owner: str, repo: str, token: str,
-    branch_name: str, target_branch: str,
-    title: str, body: str,
-    files: List[SyncFilePayload],
-) -> Dict[str, Any]:
+    owner: str,
+    repo: str,
+    token: str,
+    branch_name: str,
+    target_branch: str,
+    title: str,
+    body: str,
+    files: list[SyncFilePayload],
+) -> dict[str, Any]:
     """Create a branch, commit files, and open a PR. Returns PR data.
 
     Convenience wrapper around _push_branch + _open_pr.
@@ -948,7 +1137,7 @@ async def _create_pr(
     }
 
 
-async def _get_pr_diff(owner: str, repo: str, token: str, pr_number: int) -> List[Dict]:
+async def _get_pr_diff(owner: str, repo: str, token: str, pr_number: int) -> list[dict]:
     """Fetch file-by-file diff from a PR."""
     files = await _github_request("GET", f"/repos/{owner}/{repo}/pulls/{pr_number}/files", token)
     return [
@@ -963,11 +1152,16 @@ async def _get_pr_diff(owner: str, repo: str, token: str, pr_number: int) -> Lis
     ]
 
 
-async def _merge_pr(owner: str, repo: str, token: str, pr_number: int) -> Dict:
+async def _merge_pr(owner: str, repo: str, token: str, pr_number: int) -> dict:
     """Merge a PR with squash."""
-    return await _github_request("PUT", f"/repos/{owner}/{repo}/pulls/{pr_number}/merge", token, {
-        "merge_method": "squash",
-    })
+    return await _github_request(
+        "PUT",
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/merge",
+        token,
+        {
+            "merge_method": "squash",
+        },
+    )
 
 
 async def _delete_branch(owner: str, repo: str, token: str, branch_name: str) -> None:
@@ -980,17 +1174,21 @@ async def _delete_branch(owner: str, repo: str, token: str, branch_name: str) ->
 
 async def _close_pr(owner: str, repo: str, token: str, pr_number: int) -> None:
     """Close a PR without merging."""
-    try:
-        await _github_request("PATCH", f"/repos/{owner}/{repo}/pulls/{pr_number}", token, {
-            "state": "closed",
-        })
-    except Exception:
-        pass
+    with contextlib.suppress(Exception):
+        await _github_request(
+            "PATCH",
+            f"/repos/{owner}/{repo}/pulls/{pr_number}",
+            token,
+            {
+                "state": "closed",
+            },
+        )
 
 
 # ── Tenant sync settings helpers ─────────────────────────────────────────────
 
-async def _get_tenant_sync_settings(tenant_id: str) -> Dict:
+
+async def _get_tenant_sync_settings(tenant_id: str) -> dict:
     """Get or create sync settings for a tenant. Decrypts the GitHub token."""
     col = _sync_settings_col()
     doc = await col.find_one({"tenant_id": tenant_id})
@@ -1011,10 +1209,11 @@ async def _get_tenant_sync_settings(tenant_id: str) -> Dict:
 
 # ── Cancellable subprocess helpers ───────────────────────────────────────────
 
+
 async def _run_pytest_cancellable(
     out_dir: Path,
     test_mode: str = "unit",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run pytest as a real subprocess (asyncio.create_subprocess_exec).
 
     Unlike asyncio.to_thread(subprocess.run, ...), this coroutine is truly
@@ -1023,14 +1222,26 @@ async def _run_pytest_cancellable(
 
     Returns a dict with keys: passed, failed, errors, skipped, details, output.
     """
-    import sysconfig as _sc2, site as _st2
+    import site as _st2
+    import sysconfig as _sc2
+
     _site_pkgs2 = _sc2.get_paths().get("purelib", "")
     _user_site2 = _st2.getusersitepackages() if hasattr(_st2, "getusersitepackages") else ""
     import sys as _sys2
+
     repo_root = Path(os.environ.get("GENERATED_CODE_DIR", str(out_dir.parent.parent))).resolve().parent
-    python_path = os.pathsep.join(filter(None, [
-        str(out_dir), str(out_dir.parent), _site_pkgs2, _user_site2, str(repo_root),
-    ]))
+    python_path = os.pathsep.join(
+        filter(
+            None,
+            [
+                str(out_dir),
+                str(out_dir.parent),
+                _site_pkgs2,
+                _user_site2,
+                str(repo_root),
+            ],
+        )
+    )
 
     tests_dir = out_dir / "tests"
 
@@ -1051,15 +1262,26 @@ async def _run_pytest_cancellable(
 
     # If no test files found, report as skipped
     if not tests_dir.exists() or not list(tests_dir.glob("test_*.py")):
-        return {"passed": 0, "failed": 0, "errors": 0, "skipped": 0, "details": [], "output": "No test files found"}
+        return {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "details": [],
+            "output": "No test files found",
+        }
 
     cov_json = out_dir / ".coverage_report.json"
-    run_cov = (test_mode == "full")
+    run_cov = test_mode == "full"
 
     cmd = [
-        _sys2.executable, "-m", "pytest",
+        _sys2.executable,
+        "-m",
+        "pytest",
         str(tests_dir),
-        "-v", "--tb=short", "--no-header",
+        "-v",
+        "--tb=short",
+        "--no-header",
         f"--rootdir={out_dir}",
     ]
     if run_cov:
@@ -1082,21 +1304,27 @@ async def _run_pytest_cancellable(
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except (asyncio.TimeoutError, asyncio.CancelledError) as _kill_exc:
+        except (TimeoutError, asyncio.CancelledError) as _kill_exc:
             try:
                 proc.kill()
                 await asyncio.wait_for(proc.wait(), timeout=5)
             except Exception:
                 pass
             raise _kill_exc
-        return stdout.decode(errors="replace"), stderr.decode(errors="replace"), proc.returncode
+        return (
+            stdout.decode(errors="replace"),
+            stderr.decode(errors="replace"),
+            proc.returncode,
+        )
 
     stdout, stderr, returncode = await _exec(cmd)
     output = stdout + stderr
 
     # Retry without --cov if coverage flags caused failure
-    if run_cov and returncode != 0 and (
-        "unrecognized arguments" in output or "no module named pytest_cov" in output.lower()
+    if (
+        run_cov
+        and returncode != 0
+        and ("unrecognized arguments" in output or "no module named pytest_cov" in output.lower())
     ):
         cmd_no_cov = [c for c in cmd if not c.startswith("--cov")]
         stdout, stderr, returncode = await _exec(cmd_no_cov)
@@ -1121,8 +1349,9 @@ async def _run_pytest_cancellable(
 
     # Parse per-test failure messages
     import re as _re2
+
     _failure_msgs: dict = {}
-    _cur_test: Optional[str] = None
+    _cur_test: str | None = None
     _cur_lines: list = []
     for _line in output.split("\n"):
         _hdr = _re2.match(r"^_{5,}\s+(\S+)\s+_{5,}", _line)
@@ -1132,7 +1361,7 @@ async def _run_pytest_cancellable(
             _cur_test = _hdr.group(1).split("::")[-1]
             _cur_lines = []
         elif _cur_test:
-            if _line.startswith("E ") or _line.startswith("E\t"):
+            if _line.startswith(("E ", "E\t")):
                 _cur_lines.append(_line[2:].strip())
             elif _line.startswith("======"):
                 if _cur_test and _cur_lines:
@@ -1159,15 +1388,16 @@ async def _run_pytest_cancellable(
 
 # ── CI pipeline runner ───────────────────────────────────────────────────────
 
+
 async def _run_ci_pipeline(
     sync_request_id: str,
     tenant_id: str,
     session_id: str,
-    files: List[SyncFilePayload],
+    files: list[SyncFilePayload],
     run_all: bool = False,
-    branch_name: Optional[str] = None,
-    sync_settings: Optional[Dict] = None,
-) -> tuple[List[Dict], List[SyncFilePayload]]:
+    branch_name: str | None = None,
+    sync_settings: dict | None = None,
+) -> tuple[list[dict], list[SyncFilePayload]]:
     """Run all CI gates sequentially. Broadcasts SSE progress. Returns (ci_results, cleaned_files).
 
     Test gates respect the session's ``test_type`` field:
@@ -1186,6 +1416,7 @@ async def _run_ci_pipeline(
 
     # Fetch session to determine test_type
     from integration.db.database import sessions_collection
+
     session_doc = await sessions_collection().find_one(
         {"_id": ObjectId(session_id)},
         {"test_type": 1},
@@ -1196,21 +1427,29 @@ async def _run_ci_pipeline(
     # per gate. We strip `details` from what we $set into Mongo (saves ~10–50
     # KB per gate × ~6 gates) and shuttle the dumps to R2 instead so the
     # diff modal can fetch them in one call when the user opens it.
-    ci_results_details_by_gate: Dict[str, str] = {}
+    ci_results_details_by_gate: dict[str, str] = {}
 
-    async def _update_gate(gate_result: Dict):
+    async def _update_gate(gate_result: dict):
         ci_results.append(gate_result)
 
         # Slim copy for Mongo: drop the verbose `details` field.
         details_str = gate_result.get("details") if isinstance(gate_result, dict) else None
         if isinstance(details_str, str) and details_str:
-            ci_results_details_by_gate[gate_result.get("gate", f"gate_{len(ci_results)-1}")] = details_str
+            ci_results_details_by_gate[gate_result.get("gate", f"gate_{len(ci_results) - 1}")] = details_str
         slim_results = [{k: v for k, v in r.items() if k != "details"} for r in ci_results]
-        slim_results = [{**r, "details_in_r2": True} if r.get("gate") in ci_results_details_by_gate else r for r in slim_results]
+        slim_results = [
+            {**r, "details_in_r2": True} if r.get("gate") in ci_results_details_by_gate else r for r in slim_results
+        ]
 
         await col.update_one(
             {"_id": oid},
-            {"$set": {"ci_results": slim_results, "ci_results_r2_offloaded": True, "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    "ci_results": slim_results,
+                    "ci_results_r2_offloaded": True,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
 
         # Best-effort R2 sync: writes the latest accumulated details blob.
@@ -1221,17 +1460,26 @@ async def _run_ci_pipeline(
             blob.setdefault("files", [])  # preserve files written at raise time
             blob["ci_results_details"] = ci_results_details_by_gate
             await r2_service.save_sync_request_blob(
-                tenant_id=tenant_id, sync_request_id=sync_request_id, payload=blob,
+                tenant_id=tenant_id,
+                sync_request_id=sync_request_id,
+                payload=blob,
             )
         except Exception as _exc:
-            logger.warning("sync_request.gate_details_r2_failed",
-                           sync_request_id=sync_request_id,
-                           gate=gate_result.get("gate"), error=str(_exc))
+            logger.warning(
+                "sync_request.gate_details_r2_failed",
+                sync_request_id=sync_request_id,
+                gate=gate_result.get("gate"),
+                error=str(_exc),
+            )
 
-        _broadcast(tenant_id, "sync:ci_progress", {
-            "sync_request_id": sync_request_id,
-            "gate": gate_result,   # broadcast the FULL gate result via SSE
-        })
+        _broadcast(
+            tenant_id,
+            "sync:ci_progress",
+            {
+                "sync_request_id": sync_request_id,
+                "gate": gate_result,  # broadcast the FULL gate result via SSE
+            },
+        )
 
     # ── Gate: GitHub Sync — push connector files to GitHub (for PR creation later) ─
     # The branch is NOT used for security scanning (that now runs locally); it is
@@ -1239,17 +1487,30 @@ async def _run_ci_pipeline(
     # This is a first-class CI gate: if the push fails (bad/expired token, repo
     # access, network), the whole sync request FAILS with a clear reason instead of
     # silently reporting ci_passed while nothing reached GitHub.
-    _broadcast(tenant_id, "sync:ci_progress", {
-        "sync_request_id": sync_request_id,
-        "gate": {"gate": "github_sync", "status": "running", "summary": "Pushing branch to GitHub..."},
-    })
-    branch_commit_sha: Optional[str] = None
-    if not (branch_name and sync_settings and sync_settings.get("github_repo_url") and sync_settings.get("github_token")):
-        await _update_gate({
-            "gate": "github_sync", "status": "failed",
-            "summary": "GitHub not configured",
-            "details": "GitHub repo URL and token must be configured in Sync Settings before the branch can be pushed.",
-        })
+    _broadcast(
+        tenant_id,
+        "sync:ci_progress",
+        {
+            "sync_request_id": sync_request_id,
+            "gate": {
+                "gate": "github_sync",
+                "status": "running",
+                "summary": "Pushing branch to GitHub...",
+            },
+        },
+    )
+    branch_commit_sha: str | None = None
+    if not (
+        branch_name and sync_settings and sync_settings.get("github_repo_url") and sync_settings.get("github_token")
+    ):
+        await _update_gate(
+            {
+                "gate": "github_sync",
+                "status": "failed",
+                "summary": "GitHub not configured",
+                "details": "GitHub repo URL and token must be configured in Sync Settings before the branch can be pushed.",
+            }
+        )
         return ci_results, files
     try:
         owner, repo = _parse_repo(sync_settings["github_repo_url"])
@@ -1257,45 +1518,72 @@ async def _run_ci_pipeline(
         sr_doc = await col.find_one({"_id": oid}, {"target_branch": 1})
         target_branch = (sr_doc or {}).get("target_branch", "connector-development")
         branch_commit_sha = await _push_branch(
-            owner, repo, token,
-            branch_name, target_branch,
+            owner,
+            repo,
+            token,
+            branch_name,
+            target_branch,
             files,
             commit_message=f"[Shielva CI] {branch_name}",
         )
         await col.update_one(
             {"_id": oid},
-            {"$set": {"branch_commit_sha": branch_commit_sha, "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    "branch_commit_sha": branch_commit_sha,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
-        logger.info("ci_branch_pushed", sync_request_id=sync_request_id, branch=branch_name, sha=branch_commit_sha[:8])
-        await _update_gate({
-            "gate": "github_sync", "status": "passed",
-            "summary": f"Branch pushed to GitHub ({branch_commit_sha[:8]})",
-        })
+        logger.info(
+            "ci_branch_pushed",
+            sync_request_id=sync_request_id,
+            branch=branch_name,
+            sha=branch_commit_sha[:8],
+        )
+        await _update_gate(
+            {
+                "gate": "github_sync",
+                "status": "passed",
+                "summary": f"Branch pushed to GitHub ({branch_commit_sha[:8]})",
+            }
+        )
     except Exception as push_err:
-        logger.warning("ci_branch_push_failed", error=str(push_err)[:300], sync_request_id=sync_request_id)
-        await _update_gate({
-            "gate": "github_sync", "status": "failed",
-            "summary": "GitHub push failed",
-            "details": str(push_err)[:1000],
-        })
+        logger.warning(
+            "ci_branch_push_failed",
+            error=str(push_err)[:300],
+            sync_request_id=sync_request_id,
+        )
+        await _update_gate(
+            {
+                "gate": "github_sync",
+                "status": "failed",
+                "summary": "GitHub push failed",
+                "details": str(push_err)[:1000],
+            }
+        )
         # Abort the pipeline — a sync request that can't reach GitHub is a failure.
         return ci_results, files
 
     # Gate 1: Security Audit — full scan via SDK (local files) or regex fallback
-    _broadcast(tenant_id, "sync:ci_progress", {
-        "sync_request_id": sync_request_id,
-        "gate": {
-            "gate": "security_audit",
-            "status": "running",
-            "summary": (
-                "Running full security scan (SAST + SCA + Secrets)..."
-                if settings.SHIELVA_SECURITY_API_KEY else
-                "Scanning for secrets and dangerous code..."
-            ),
+    _broadcast(
+        tenant_id,
+        "sync:ci_progress",
+        {
+            "sync_request_id": sync_request_id,
+            "gate": {
+                "gate": "security_audit",
+                "status": "running",
+                "summary": (
+                    "Running full security scan (SAST + SCA + Secrets)..."
+                    if settings.SHIELVA_SECURITY_API_KEY
+                    else "Scanning for secrets and dangerous code..."
+                ),
+            },
         },
-    })
+    )
 
-    security_result: Optional[Dict] = None
+    security_result: dict | None = None
     if settings.SHIELVA_SECURITY_API_KEY:
         security_result = await _security_audit_sdk(
             sync_request_id=sync_request_id,
@@ -1314,10 +1602,18 @@ async def _run_ci_pipeline(
         return ci_results, files
 
     # Gate 2: Smart Diff
-    _broadcast(tenant_id, "sync:ci_progress", {
-        "sync_request_id": sync_request_id,
-        "gate": {"gate": "smart_diff", "status": "running", "summary": "Filtering unnecessary files..."},
-    })
+    _broadcast(
+        tenant_id,
+        "sync:ci_progress",
+        {
+            "sync_request_id": sync_request_id,
+            "gate": {
+                "gate": "smart_diff",
+                "status": "running",
+                "summary": "Filtering unnecessary files...",
+            },
+        },
+    )
     cleaned_files, diff_result = _smart_diff(files)
     await _update_gate(diff_result)
     if not cleaned_files:
@@ -1329,12 +1625,24 @@ async def _run_ci_pipeline(
         cleaned_files = files  # fall back to all files so remaining gates can still run
 
     # Gate 3: Import/Compilation Check — direct call (same process, no HTTP)
-    _broadcast(tenant_id, "sync:ci_progress", {
-        "sync_request_id": sync_request_id,
-        "gate": {"gate": "import_check", "status": "running", "summary": "Checking imports and compilation..."},
-    })
-    import_result = {"gate": "import_check", "status": "passed", "summary": "Imports OK"}
-    _import_tmpdir: Optional[Path] = None
+    _broadcast(
+        tenant_id,
+        "sync:ci_progress",
+        {
+            "sync_request_id": sync_request_id,
+            "gate": {
+                "gate": "import_check",
+                "status": "running",
+                "summary": "Checking imports and compilation...",
+            },
+        },
+    )
+    import_result = {
+        "gate": "import_check",
+        "status": "passed",
+        "summary": "Imports OK",
+    }
+    _import_tmpdir: Path | None = None
     try:
         # Write the files being synced to a temp dir — never touches the server's
         # GENERATED_CODE_DIR or any hardcoded path; each CI run is fully isolated.
@@ -1342,6 +1650,7 @@ async def _run_ci_pipeline(
         out_dir = _import_tmpdir
 
         import sys as _sys
+
         # Connectors import the platform-provided `shared.base_connector` package,
         # which lives at the connectors repo root (sibling of generated_connectors/),
         # NOT in the synced connector files. The isolated import check must put that
@@ -1416,7 +1725,7 @@ async def _run_ci_pipeline(
             "            r = subprocess.run(\n"
             "                [sys.executable, '-c', f'import sys; sys.path.insert(0,\".\"); import {mod_name}'],\n"
             "                cwd=str(cwd), capture_output=True, text=True, timeout=5,\n"
-            "                env=__import__(\"os\").environ.copy(),\n"
+            '                env=__import__("os").environ.copy(),\n'
             "            )\n"
             "            if r.returncode != 0:\n"
             "                err = (r.stdout + r.stderr).strip()\n"
@@ -1434,17 +1743,17 @@ async def _run_ci_pipeline(
 
         # Use create_subprocess_exec so CancelledError actually kills the process.
         _import_proc = await asyncio.create_subprocess_exec(
-            _sys.executable, "-c", check_script,
+            _sys.executable,
+            "-c",
+            check_script,
             cwd=str(out_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, "PYTHONPATH": pythonpath},
         )
         try:
-            _imp_stdout, _imp_stderr = await asyncio.wait_for(
-                _import_proc.communicate(), timeout=30
-            )
-        except (asyncio.TimeoutError, asyncio.CancelledError) as _imp_exc:
+            _imp_stdout, _imp_stderr = await asyncio.wait_for(_import_proc.communicate(), timeout=30)
+        except (TimeoutError, asyncio.CancelledError) as _imp_exc:
             try:
                 _import_proc.kill()
                 await asyncio.wait_for(_import_proc.wait(), timeout=5)
@@ -1471,16 +1780,28 @@ async def _run_ci_pipeline(
 
     # Gates 4 & 5: write sync request files to a shared temp dir so run_tests
     # operates on the exact files being synced — not whatever is on the server's disk.
-    _tests_tmpdir: Optional[Path] = None
+    _tests_tmpdir: Path | None = None
     try:
         _tests_tmpdir = _write_files_to_tempdir(cleaned_files or files)
 
         # Gate 4: Unit Tests
-        _broadcast(tenant_id, "sync:ci_progress", {
-            "sync_request_id": sync_request_id,
-            "gate": {"gate": "unit_tests", "status": "running", "summary": "Running unit tests..."},
-        })
-        unit_result = {"gate": "unit_tests", "status": "passed", "summary": "Unit tests passed"}
+        _broadcast(
+            tenant_id,
+            "sync:ci_progress",
+            {
+                "sync_request_id": sync_request_id,
+                "gate": {
+                    "gate": "unit_tests",
+                    "status": "running",
+                    "summary": "Running unit tests...",
+                },
+            },
+        )
+        unit_result = {
+            "gate": "unit_tests",
+            "status": "passed",
+            "summary": "Unit tests passed",
+        }
         try:
             pytest_data = await _run_pytest_cancellable(_tests_tmpdir, test_mode="unit")
             passed = pytest_data.get("passed", 0)
@@ -1501,11 +1822,23 @@ async def _run_ci_pipeline(
 
         # Gate 5: Integration Tests — always run when run_all=True, else only if test_type == "both"
         if run_all or test_type == "both":
-            _broadcast(tenant_id, "sync:ci_progress", {
-                "sync_request_id": sync_request_id,
-                "gate": {"gate": "integration_tests", "status": "running", "summary": "Running integration tests..."},
-            })
-            int_result = {"gate": "integration_tests", "status": "passed", "summary": "Integration tests passed"}
+            _broadcast(
+                tenant_id,
+                "sync:ci_progress",
+                {
+                    "sync_request_id": sync_request_id,
+                    "gate": {
+                        "gate": "integration_tests",
+                        "status": "running",
+                        "summary": "Running integration tests...",
+                    },
+                },
+            )
+            int_result = {
+                "gate": "integration_tests",
+                "status": "passed",
+                "summary": "Integration tests passed",
+            }
             try:
                 pytest_data = await _run_pytest_cancellable(_tests_tmpdir, test_mode="full")
                 passed = pytest_data.get("passed", 0)
@@ -1539,13 +1872,14 @@ async def _run_ci_pipeline(
 # ENDPOINTS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @sync_request_router.post("/raise")
 async def raise_sync_request(
     body: RaiseSyncRequestBody,
     request: Request,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Raise a new sync request — triggers CI pipeline, then creates PR if all gates pass."""
     user_role = (x_user_role or "viewer").lower()
@@ -1584,7 +1918,8 @@ async def raise_sync_request(
     # generated_connectors/<placeholder>/... and the loader never picks it up under the
     # real tenant. (Also a CC6.7 tenant-isolation fix: path derives from auth, not client.)
     import re as _re_tenant
-    _gc_prefix = _re_tenant.compile(r'^generated_connectors/[^/]+/')
+
+    _gc_prefix = _re_tenant.compile(r"^generated_connectors/[^/]+/")
     for f in body.files:
         if f.path.startswith("generated_connectors/") and _gc_prefix.match(f.path):
             f.path = _gc_prefix.sub(f"generated_connectors/{x_tenant_id}/", f.path)
@@ -1593,11 +1928,13 @@ async def raise_sync_request(
 
     # Atomic hold check — use find_one with conditions to avoid race window
     # Check if ANY active sync request in this tenant has a hold
-    held = await col.find_one({
-        "tenant_id": x_tenant_id,
-        "held_by": {"$ne": None},
-        "status": {"$nin": ["merged", "dismissed", "error"]},
-    })
+    held = await col.find_one(
+        {
+            "tenant_id": x_tenant_id,
+            "held_by": {"$ne": None},
+            "status": {"$nin": ["merged", "dismissed", "error"]},
+        }
+    )
     if held:
         raise HTTPException(
             status_code=409,
@@ -1607,7 +1944,10 @@ async def raise_sync_request(
     # Get sync settings
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
     if not sync_settings.get("github_repo_url") or not sync_settings.get("github_token"):
-        raise HTTPException(status_code=400, detail="GitHub repo URL and token must be configured in sync settings before raising a request.")
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub repo URL and token must be configured in sync settings before raising a request.",
+        )
 
     # Create sync request document
     now = datetime.utcnow()
@@ -1656,15 +1996,22 @@ async def raise_sync_request(
             payload={"files": _files_payload, "ci_results_details": {}},
         )
     except Exception as _exc:
-        logger.warning("sync_request.r2_files_save_failed",
-                       sync_request_id=sync_request_id, error=str(_exc))
+        logger.warning(
+            "sync_request.r2_files_save_failed",
+            sync_request_id=sync_request_id,
+            error=str(_exc),
+        )
 
-    _broadcast(x_tenant_id, "sync:request_created", {
-        "sync_request_id": sync_request_id,
-        "connector_name": body.connector_name,
-        "raised_by": user_email,
-        "status": "validating",
-    })
+    _broadcast(
+        x_tenant_id,
+        "sync:request_created",
+        {
+            "sync_request_id": sync_request_id,
+            "connector_name": body.connector_name,
+            "raised_by": user_email,
+            "status": "validating",
+        },
+    )
 
     # Run CI pipeline in background (semaphore caps concurrent GitHub API usage
     # to avoid hitting GitHub's secondary rate limit when many requests run together)
@@ -1672,7 +2019,10 @@ async def raise_sync_request(
         async with _CI_SEMAPHORE:
             try:
                 ci_results, cleaned_files = await _run_ci_pipeline(
-                    sync_request_id, x_tenant_id, body.session_id, body.files,
+                    sync_request_id,
+                    x_tenant_id,
+                    body.session_id,
+                    body.files,
                     branch_name=branch_name,
                     sync_settings=sync_settings,
                 )
@@ -1683,19 +2033,36 @@ async def raise_sync_request(
                     await _delete_ci_branch(branch_name, sync_settings)
                     await col.update_one(
                         {"_id": ObjectId(sync_request_id)},
-                        {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                        {
+                            "$set": {
+                                "status": "validation_failed",
+                                "branch_commit_sha": None,
+                                "updated_at": datetime.utcnow(),
+                            }
+                        },
                     )
-                    _broadcast(x_tenant_id, "sync:request_validation_failed", {
-                        "sync_request_id": sync_request_id,
-                        "ci_results": ci_results,
-                    })
+                    _broadcast(
+                        x_tenant_id,
+                        "sync:request_validation_failed",
+                        {
+                            "sync_request_id": sync_request_id,
+                            "ci_results": ci_results,
+                        },
+                    )
                     return
 
                 if not cleaned_files:
                     await _delete_ci_branch(branch_name, sync_settings)
                     await col.update_one(
                         {"_id": ObjectId(sync_request_id)},
-                        {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                        {
+                            "$set": {
+                                "status": "validation_failed",
+                                "error": "No files to sync after filtering",
+                                "branch_commit_sha": None,
+                                "updated_at": datetime.utcnow(),
+                            }
+                        },
                     )
                     return
 
@@ -1703,31 +2070,61 @@ async def raise_sync_request(
                     {"_id": ObjectId(sync_request_id)},
                     {"$set": {"status": "ci_passed", "updated_at": datetime.utcnow()}},
                 )
-                _broadcast(x_tenant_id, "sync:ci_passed", {
-                    "sync_request_id": sync_request_id,
-                    "ci_results": ci_results,
-                })
+                _broadcast(
+                    x_tenant_id,
+                    "sync:ci_passed",
+                    {
+                        "sync_request_id": sync_request_id,
+                        "ci_results": ci_results,
+                    },
+                )
 
             except asyncio.CancelledError:
                 logger.info("sync_request.pipeline_cancelled", sync_request_id=sync_request_id)
                 await _delete_ci_branch(branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "dismissed",
+                            "error": "CI cancelled by user",
+                            "branch_commit_sha": None,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
+                _broadcast(
+                    x_tenant_id,
+                    "sync:request_cancelled",
+                    {"sync_request_id": sync_request_id},
+                )
 
             except Exception as e:
-                logger.error("sync_request.pipeline_error", error=str(e), sync_request_id=sync_request_id)
+                logger.error(
+                    "sync_request.pipeline_error",
+                    error=str(e),
+                    sync_request_id=sync_request_id,
+                )
                 await _delete_ci_branch(branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "error",
+                            "error": str(e)[:500],
+                            "branch_commit_sha": None,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:request_error", {
-                    "sync_request_id": sync_request_id,
-                    "error": str(e)[:200],
-                })
+                _broadcast(
+                    x_tenant_id,
+                    "sync:request_error",
+                    {
+                        "sync_request_id": sync_request_id,
+                        "error": str(e)[:200],
+                    },
+                )
 
     _task = asyncio.create_task(_run_pipeline())
     _ci_tasks[sync_request_id] = _task
@@ -1743,7 +2140,7 @@ async def raise_sync_request(
 @sync_request_router.get("")
 async def list_sync_requests(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     include_terminal: bool = Query(False),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=1000),
@@ -1758,7 +2155,7 @@ async def list_sync_requests(
     The total-count header lets the panel render "Showing 20 of N".
     """
     col = _sync_requests_col()
-    query: Dict[str, Any] = {"tenant_id": x_tenant_id}
+    query: dict[str, Any] = {"tenant_id": x_tenant_id}
     if status:
         query["status"] = status
     elif not include_terminal:
@@ -1770,12 +2167,21 @@ async def list_sync_requests(
     # client-side derivation logic needs. ci_results compressed to a count
     # + last gate name; full per-gate breakdown loads when the card opens.
     projection = {
-        "_id": 1, "tenant_id": 1, "session_id": 1, "connector_name": 1,
-        "status": 1, "pr_state": 1,
-        "target_branch": 1, "branch_name": 1,
-        "pr_number": 1, "pr_url": 1,
-        "raised_by": 1, "approved_by": 1,
-        "created_at": 1, "updated_at": 1, "merged_at": 1,
+        "_id": 1,
+        "tenant_id": 1,
+        "session_id": 1,
+        "connector_name": 1,
+        "status": 1,
+        "pr_state": 1,
+        "target_branch": 1,
+        "branch_name": 1,
+        "pr_number": 1,
+        "pr_url": 1,
+        "raised_by": 1,
+        "approved_by": 1,
+        "created_at": 1,
+        "updated_at": 1,
+        "merged_at": 1,
         "error": 1,
         # ci_results compressed: per-gate {gate, status, summary} only,
         # never the verbose `details` blob.
@@ -1796,10 +2202,10 @@ class ReconcileRequest(BaseModel):
     # When set, reconcile only this one sync request (per-card refresh icon).
     # When omitted, reconcile every non-terminal sync request for the tenant
     # (login-time bulk reconcile).
-    sync_request_id: Optional[str] = None
+    sync_request_id: str | None = None
 
 
-def _parse_gh_ts(ts: Optional[str]) -> Optional[datetime]:
+def _parse_gh_ts(ts: str | None) -> datetime | None:
     """Parse a GitHub ISO-8601 timestamp (e.g. '2026-06-14T07:57:04Z')."""
     if not ts:
         return None
@@ -1830,13 +2236,16 @@ async def reconcile_sync_requests(
     token = sync_settings.get("github_token", "")
     repo_url = sync_settings.get("github_repo_url", "")
     if not token or not repo_url:
-        raise HTTPException(status_code=400, detail="GitHub token and repo URL must be configured first.")
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub token and repo URL must be configured first.",
+        )
     owner, repo = _parse_repo(repo_url)
 
     col = _sync_requests_col()
     # Non-terminal statuses whose PR can still change on GitHub.
     open_states = ["validating", "ci_passed", "ready", "approving"]
-    query: Dict[str, Any] = {"tenant_id": x_tenant_id, "pr_number": {"$ne": None}}
+    query: dict[str, Any] = {"tenant_id": x_tenant_id, "pr_number": {"$ne": None}}
     if body.sync_request_id:
         try:
             query["_id"] = ObjectId(body.sync_request_id)
@@ -1845,7 +2254,7 @@ async def reconcile_sync_requests(
     else:
         query["status"] = {"$in": open_states}
 
-    reconciled: List[Dict[str, Any]] = []
+    reconciled: list[dict[str, Any]] = []
     async for doc in col.find(query):
         pr_number = doc.get("pr_number")
         if not pr_number:
@@ -1865,49 +2274,89 @@ async def reconcile_sync_requests(
         # Live PR lifecycle state, ALWAYS persisted (even for terminal local statuses)
         # so the UI can show "PR closed"/"PR merged" instead of forever "PR open".
         pr_state = "merged" if gh_merged else (gh_state or "open")  # open | closed | merged
-        set_fields: Dict[str, Any] = {"pr_state": pr_state, "updated_at": now}
+        set_fields: dict[str, Any] = {"pr_state": pr_state, "updated_at": now}
 
         if gh_merged and local_status != "merged":
             merged_at = _parse_gh_ts(pr.get("merged_at")) or now
             set_fields.update({"status": "merged", "merged_at": merged_at})
             await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
-            _broadcast(x_tenant_id, "sync:request_merged", {
-                "sync_request_id": sid,
-                "approved_by": "github-reconcile",
-                "merged_at": merged_at.isoformat(),
-            })
-            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "merged"})
+            _broadcast(
+                x_tenant_id,
+                "sync:request_merged",
+                {
+                    "sync_request_id": sid,
+                    "approved_by": "github-reconcile",
+                    "merged_at": merged_at.isoformat(),
+                },
+            )
+            reconciled.append(
+                {
+                    "sync_request_id": sid,
+                    "pr_number": pr_number,
+                    "from": local_status,
+                    "to": "merged",
+                }
+            )
         elif gh_state == "closed" and not gh_merged and local_status not in ("merged", "dismissed"):
             set_fields["status"] = "dismissed"
             await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
-            _broadcast(x_tenant_id, "sync:request_dismissed", {
-                "sync_request_id": sid, "reason": "closed_on_github",
-            })
-            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": "dismissed"})
+            _broadcast(
+                x_tenant_id,
+                "sync:request_dismissed",
+                {
+                    "sync_request_id": sid,
+                    "reason": "closed_on_github",
+                },
+            )
+            reconciled.append(
+                {
+                    "sync_request_id": sid,
+                    "pr_number": pr_number,
+                    "from": local_status,
+                    "to": "dismissed",
+                }
+            )
         else:
             # No status transition, but the PR state on GitHub may still have changed
             # (e.g. an already-dismissed request whose PR was just closed). Persist it +
             # broadcast so the open client re-renders the PR badge.
             await col.update_one({"_id": doc["_id"]}, {"$set": set_fields})
-            _broadcast(x_tenant_id, "sync:pr_state", {"sync_request_id": sid, "pr_state": pr_state})
-            reconciled.append({"sync_request_id": sid, "pr_number": pr_number, "from": local_status, "to": local_status, "pr_state": pr_state})
+            _broadcast(
+                x_tenant_id,
+                "sync:pr_state",
+                {"sync_request_id": sid, "pr_state": pr_state},
+            )
+            reconciled.append(
+                {
+                    "sync_request_id": sid,
+                    "pr_number": pr_number,
+                    "from": local_status,
+                    "to": local_status,
+                    "pr_state": pr_state,
+                }
+            )
 
-    logger.info("reconcile.done", tenant_id=x_tenant_id, reconciled=len(reconciled),
-                scope=("single" if body.sync_request_id else "all"))
+    logger.info(
+        "reconcile.done",
+        tenant_id=x_tenant_id,
+        reconciled=len(reconciled),
+        scope=("single" if body.sync_request_id else "all"),
+    )
     return {"reconciled_count": len(reconciled), "reconciled": reconciled}
 
 
 def _git_blob_sha(content: str) -> str:
     """Git blob SHA-1 for text content — matches the SHA GitHub stores for a pushed file."""
     import hashlib
+
     data = content.encode("utf-8")
-    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data, usedforsecurity=False).hexdigest()
 
 
 class DiffPreviewBody(BaseModel):
     connector_name: str
     target_branch: str = "connector-development"
-    files: List[SyncFilePayload]
+    files: list[SyncFilePayload]
 
 
 @sync_request_router.post("/diff-preview")
@@ -1931,19 +2380,28 @@ async def diff_preview(
 
     # Normalize tenant segment + strip junk so we compare exactly what WOULD be pushed.
     import re as _re_dp
-    _gc = _re_dp.compile(r'^generated_connectors/[^/]+/')
-    norm: List[SyncFilePayload] = []
+
+    _gc = _re_dp.compile(r"^generated_connectors/[^/]+/")
+    norm: list[SyncFilePayload] = []
     for f in body.files:
-        p = _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path) if (f.path.startswith("generated_connectors/") and _gc.match(f.path)) else f.path
+        p = (
+            _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path)
+            if (f.path.startswith("generated_connectors/") and _gc.match(f.path))
+            else f.path
+        )
         norm.append(SyncFilePayload(path=p, content=f.content))
     cleaned, _ = _smart_diff(norm, drop_empty=False)  # keep empty files — branch has them too
 
     prefix = f"generated_connectors/{x_tenant_id}/{body.connector_name}".rstrip("/")
     local = {f.path: _git_blob_sha(f.content) for f in cleaned}
 
-    repo_tree: Dict[str, str] = {}
+    repo_tree: dict[str, str] = {}
     try:
-        tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1", token)
+        tree = await _github_request(
+            "GET",
+            f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1",
+            token,
+        )
         for item in tree.get("tree", []):
             ipath = item.get("path", "")
             if item.get("type") == "blob" and ipath.startswith(prefix + "/"):
@@ -1951,24 +2409,35 @@ async def diff_preview(
     except HTTPException as exc:
         # Branch/tree/connector dir not found → connector was never synced → all new.
         logger.info("diff_preview.tree_unavailable", status=exc.status_code, prefix=prefix)
-        return {"has_diff": bool(local), "added": list(local.keys()), "modified": [], "removed": []}
+        return {
+            "has_diff": bool(local),
+            "added": list(local.keys()),
+            "modified": [],
+            "removed": [],
+        }
 
     added = [p for p in local if p not in repo_tree]
     removed = [p for p in repo_tree if p not in local]
     modified = [p for p in local if p in repo_tree and local[p] != repo_tree[p]]
-    return {"has_diff": bool(added or removed or modified), "added": added, "modified": modified, "removed": removed}
+    return {
+        "has_diff": bool(added or removed or modified),
+        "added": added,
+        "modified": modified,
+        "removed": removed,
+    }
 
 
 class DiffDetailBody(BaseModel):
     connector_name: str
     target_branch: str = "connector-development"
-    files: List[SyncFilePayload]
+    files: list[SyncFilePayload]
 
 
 async def _fetch_branch_blob(owner: str, repo: str, sha: str, token: str) -> str:
     """Fetch a git blob's text content by SHA from GitHub."""
     blob = await _github_request("GET", f"/repos/{owner}/{repo}/git/blobs/{sha}", token)
     import base64 as _b64
+
     if blob.get("encoding") == "base64":
         return _b64.b64decode(blob.get("content", "")).decode("utf-8", errors="replace")
     return blob.get("content", "")
@@ -1986,6 +2455,7 @@ async def diff_detail(
     isn't set up (so the UI can say so instead of implying a phantom diff).
     """
     import difflib
+
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
     token = sync_settings.get("github_token", "")
     repo_url = sync_settings.get("github_repo_url", "")
@@ -1994,10 +2464,15 @@ async def diff_detail(
     owner, repo = _parse_repo(repo_url)
 
     import re as _re_dd
-    _gc = _re_dd.compile(r'^generated_connectors/[^/]+/')
-    norm: List[SyncFilePayload] = []
+
+    _gc = _re_dd.compile(r"^generated_connectors/[^/]+/")
+    norm: list[SyncFilePayload] = []
     for f in body.files:
-        p = _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path) if (f.path.startswith("generated_connectors/") and _gc.match(f.path)) else f.path
+        p = (
+            _gc.sub(f"generated_connectors/{x_tenant_id}/", f.path)
+            if (f.path.startswith("generated_connectors/") and _gc.match(f.path))
+            else f.path
+        )
         norm.append(SyncFilePayload(path=p, content=f.content))
     cleaned, _ = _smart_diff(norm, drop_empty=False)  # keep empty files — branch has them too
 
@@ -2005,9 +2480,13 @@ async def diff_detail(
     local_content = {f.path: f.content for f in cleaned}
     local_sha = {p: _git_blob_sha(c) for p, c in local_content.items()}
 
-    repo_tree: Dict[str, str] = {}
+    repo_tree: dict[str, str] = {}
     try:
-        tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1", token)
+        tree = await _github_request(
+            "GET",
+            f"/repos/{owner}/{repo}/git/trees/{body.target_branch}?recursive=1",
+            token,
+        )
         for item in tree.get("tree", []):
             ipath = item.get("path", "")
             if item.get("type") == "blob" and ipath.startswith(prefix + "/"):
@@ -2020,19 +2499,25 @@ async def diff_detail(
     removed = [p for p in repo_tree if p not in local_content]
     modified = [p for p in local_content if p in repo_tree and local_sha[p] != repo_tree[p]]
 
-    def _unified(path: str, old: str, new: str) -> Dict[str, Any]:
+    def _unified(path: str, old: str, new: str) -> dict[str, Any]:
         ol, nl = old.splitlines(keepends=True), new.splitlines(keepends=True)
         diff = list(difflib.unified_diff(ol, nl, fromfile=f"a/{path}", tofile=f"b/{path}"))
         adds = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
         dels = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
         return {"diff": "".join(diff), "additions": adds, "deletions": dels}
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for p in sorted(added):
         out.append({"path": p, "status": "added", **_unified(p, "", local_content[p])})
     for p in sorted(modified):
         branch_text = await _fetch_branch_blob(owner, repo, repo_tree[p], token)
-        out.append({"path": p, "status": "modified", **_unified(p, branch_text, local_content[p])})
+        out.append(
+            {
+                "path": p,
+                "status": "modified",
+                **_unified(p, branch_text, local_content[p]),
+            }
+        )
     for p in sorted(removed):
         branch_text = await _fetch_branch_blob(owner, repo, repo_tree[p], token)
         out.append({"path": p, "status": "removed", **_unified(p, branch_text, "")})
@@ -2044,7 +2529,7 @@ async def diff_detail(
 
 _PROMOTE_TARGET_BRANCH = "connector-development"
 # Files under the connector dir that aren't part of the connector's committed code.
-_OUTDATED_SKIP = re.compile(r'(^|/)(__pycache__|\.pytest_cache|\.ruff_cache|node_modules)(/|$)|\.pyc$')
+_OUTDATED_SKIP = re.compile(r"(^|/)(__pycache__|\.pytest_cache|\.ruff_cache|node_modules)(/|$)|\.pyc$")
 
 
 def _deployed_connector_dir(tenant_id: str, connector_name: str) -> Path:
@@ -2052,10 +2537,10 @@ def _deployed_connector_dir(tenant_id: str, connector_name: str) -> Path:
     return Path(settings.GENERATED_CODE_DIR) / tenant_id / connector_name
 
 
-def _read_deployed_files(tenant_id: str, connector_name: str) -> Dict[str, str]:
+def _read_deployed_files(tenant_id: str, connector_name: str) -> dict[str, str]:
     """Map of repo-relative path → git blob SHA for the deployed connector on disk."""
     base = _deployed_connector_dir(tenant_id, connector_name)
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     if not base.exists():
         return out
     for fp in base.rglob("*"):
@@ -2072,7 +2557,7 @@ def _read_deployed_files(tenant_id: str, connector_name: str) -> Dict[str, str]:
     return out
 
 
-async def _merged_sync_request(tenant_id: str, connector_name: str) -> Optional[Dict]:
+async def _merged_sync_request(tenant_id: str, connector_name: str) -> dict | None:
     """Most recent sync request for this connector whose PR is merged to connector-development."""
     return await _sync_requests_col().find_one(
         {"tenant_id": tenant_id, "connector_name": connector_name, "status": "merged"},
@@ -2098,14 +2583,19 @@ async def connector_outdated(
     promotable = bool(merged)
     if not token or not repo_url:
         # Can't compare → don't cry wolf. Outdated only if we have a merged PR to pull.
-        return {"outdated": promotable, "promotable": promotable, "changed": [], "reason": "sync_not_configured",
-                "sync_request_id": str(merged["_id"]) if merged else None}
+        return {
+            "outdated": promotable,
+            "promotable": promotable,
+            "changed": [],
+            "reason": "sync_not_configured",
+            "sync_request_id": str(merged["_id"]) if merged else None,
+        }
     owner, repo = _parse_repo(repo_url)
     target_branch = sync_settings.get("default_target_branch") or _PROMOTE_TARGET_BRANCH
 
     local = _read_deployed_files(x_tenant_id, connector_name)
     prefix = f"generated_connectors/{x_tenant_id}/{connector_name}"
-    repo_tree: Dict[str, str] = {}
+    repo_tree: dict[str, str] = {}
     try:
         tree = await _github_request("GET", f"/repos/{owner}/{repo}/git/trees/{target_branch}?recursive=1", token)
         for item in tree.get("tree", []):
@@ -2114,13 +2604,17 @@ async def connector_outdated(
                 repo_tree[ipath] = item.get("sha", "")
     except HTTPException as exc:
         logger.info("outdated.tree_unavailable", status=exc.status_code, prefix=prefix)
-        return {"outdated": False, "promotable": promotable, "changed": [],
-                "sync_request_id": str(merged["_id"]) if merged else None}
+        return {
+            "outdated": False,
+            "promotable": promotable,
+            "changed": [],
+            "sync_request_id": str(merged["_id"]) if merged else None,
+        }
 
     changed = (
-        [p for p in repo_tree if p not in local]                                   # added on dev
-        + [p for p in local if p not in repo_tree]                                  # removed on dev
-        + [p for p in local if p in repo_tree and local[p] != repo_tree[p]]         # modified
+        [p for p in repo_tree if p not in local]  # added on dev
+        + [p for p in local if p not in repo_tree]  # removed on dev
+        + [p for p in local if p in repo_tree and local[p] != repo_tree[p]]  # modified
     )
     return {
         "outdated": bool(changed),
@@ -2132,7 +2626,7 @@ async def connector_outdated(
 
 class PromoteBody(BaseModel):
     connector_name: str
-    session_id: str = ""   # the enhanced session to keep as primary (others are deleted)
+    session_id: str = ""  # the enhanced session to keep as primary (others are deleted)
 
 
 @sync_request_router.post("/promote")
@@ -2158,27 +2652,38 @@ async def promote_connector(
     token = sync_settings.get("github_token", "")
     repo_url = sync_settings.get("github_repo_url", "")
     if not token or not repo_url:
-        raise HTTPException(status_code=400, detail="GitHub repo URL and token must be configured to promote.")
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub repo URL and token must be configured to promote.",
+        )
 
     # ── Pull the merged code in-place + hot-reload (preserves connector_type + creds) ──
     # Authenticate to the internal reload endpoint with the shared service token
     # (NOT by spoofing a role). The caller's real role is forwarded for audit only.
     target_branch = sync_settings.get("default_target_branch") or _PROMOTE_TARGET_BRANCH
     import os as _os
+
     internal_token = _os.getenv("CONNECTOR_INTERNAL_TOKEN", "")
     if not internal_token:
         # Robust fallback: read straight from core/.env by EXPLICIT path (auto-discovery
         # finds core/integration/.env first, which lacks this secret).
         try:
-            from dotenv import dotenv_values
             from pathlib import Path as _P
-            _core_env = _P(__file__).resolve().parents[2] / ".env"   # core/.env
+
+            from dotenv import dotenv_values
+
+            _core_env = _P(__file__).resolve().parents[2] / ".env"  # core/.env
             internal_token = (dotenv_values(_core_env) or {}).get("CONNECTOR_INTERNAL_TOKEN", "") or ""
         except Exception:
             internal_token = ""
-    logger.info("promote.reload_call", token_present=bool(internal_token), token_len=len(internal_token), gateway=settings.CONNECTOR_GATEWAY_URL)
+    logger.info(
+        "promote.reload_call",
+        token_present=bool(internal_token),
+        token_len=len(internal_token),
+        gateway=settings.CONNECTOR_GATEWAY_URL,
+    )
     try:
-        async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=60.0) as client:  # noqa: S501 — internal in-cluster call; harden w/ CA bundle (SOC2 debt)
             resp = await client.post(
                 f"{settings.CONNECTOR_GATEWAY_URL}/internal/pull-and-reload",
                 headers={
@@ -2186,18 +2691,27 @@ async def promote_connector(
                     "X-Internal-Token": internal_token,
                     "X-User-Role": (request.headers.get("X-User-Role") or ""),
                 },
-                json={"target_branch": target_branch, "github_token": token, "github_repo_url": repo_url},
+                json={
+                    "target_branch": target_branch,
+                    "github_token": token,
+                    "github_repo_url": repo_url,
+                },
             )
             resp.raise_for_status()
             reload_result = resp.json()
     except httpx.HTTPError as e:
-        logger.error("promote.pull_and_reload_failed", connector=body.connector_name, error=str(e))
+        logger.error(
+            "promote.pull_and_reload_failed",
+            connector=body.connector_name,
+            error=str(e),
+        )
         raise HTTPException(status_code=502, detail=f"Failed to pull/reload promoted code: {e}")
 
     # ── Delete superseded sessions: every session for this connector EXCEPT the kept one ──
     # Safety: a kept session is REQUIRED. Without a valid session_id we must never
     # mass-delete (that would wipe every session for the connector). Refuse instead.
     from integration.db.database import sessions_collection
+
     try:
         keep_oid = ObjectId(body.session_id) if body.session_id else None
     except Exception:
@@ -2208,16 +2722,29 @@ async def promote_connector(
             detail="promote requires a valid session_id to keep — refusing to delete all sessions.",
         )
     del_res = await sessions_collection().delete_many(
-        {"tenant_id": x_tenant_id, "connector_name": body.connector_name, "_id": {"$ne": keep_oid}}
+        {
+            "tenant_id": x_tenant_id,
+            "connector_name": body.connector_name,
+            "_id": {"$ne": keep_oid},
+        }
     )
 
-    _broadcast(x_tenant_id, "sync:connector_promoted", {
-        "connector_name": body.connector_name,
-        "kept_session_id": body.session_id or None,
-        "deleted_sessions": del_res.deleted_count,
-    })
-    logger.info("promote.success", connector=body.connector_name, tenant=x_tenant_id,
-                deleted_sessions=del_res.deleted_count, reload=reload_result.get("reload"))
+    _broadcast(
+        x_tenant_id,
+        "sync:connector_promoted",
+        {
+            "connector_name": body.connector_name,
+            "kept_session_id": body.session_id or None,
+            "deleted_sessions": del_res.deleted_count,
+        },
+    )
+    logger.info(
+        "promote.success",
+        connector=body.connector_name,
+        tenant=x_tenant_id,
+        deleted_sessions=del_res.deleted_count,
+        reload=reload_result.get("reload"),
+    )
     return {
         "promoted": True,
         "connector_name": body.connector_name,
@@ -2245,7 +2772,7 @@ async def sync_events_stream(
                 try:
                     msg = await asyncio.wait_for(q.get(), timeout=30.0)
                     yield msg
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Keep-alive ping
                     yield f"event: ping\ndata: {json.dumps({'ts': int(time.time() * 1000)})}\n\n"
         except asyncio.CancelledError:
@@ -2274,14 +2801,13 @@ async def sync_request_counts(
         {"$match": {"tenant_id": x_tenant_id}},
         {"$group": {"_id": "$status", "n": {"$sum": 1}}},
     ]
-    by_status: Dict[str, int] = {}
+    by_status: dict[str, int] = {}
     async for d in col.aggregate(pipeline):
         by_status[d["_id"] or "unknown"] = d["n"]
     return {
         "by_status": by_status,
         "mergeable": by_status.get("ci_passed", 0) + by_status.get("ready", 0),
-        "active": sum(n for s, n in by_status.items()
-                       if s not in ("merged", "dismissed", "error")),
+        "active": sum(n for s, n in by_status.items() if s not in ("merged", "dismissed", "error")),
         "total": sum(by_status.values()),
     }
 
@@ -2289,7 +2815,7 @@ async def sync_request_counts(
 @sync_request_router.post("/cleanup-stuck")
 async def cleanup_stuck_sync_requests(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
     older_than_minutes: int = Query(5, ge=1),
 ):
     """Roll back rows stuck mid-transition (e.g. ``approving`` after a failed
@@ -2299,7 +2825,11 @@ async def cleanup_stuck_sync_requests(
     cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
     col = _sync_requests_col()
     r = await col.update_many(
-        {"tenant_id": x_tenant_id, "status": "approving", "updated_at": {"$lt": cutoff}},
+        {
+            "tenant_id": x_tenant_id,
+            "status": "approving",
+            "updated_at": {"$lt": cutoff},
+        },
         {"$set": {"status": "ready", "updated_at": datetime.utcnow()}},
     )
     return {"rolled_back": r.modified_count}
@@ -2333,8 +2863,11 @@ async def get_sync_request(
         try:
             blob = await r2_service.get_sync_request_blob(x_tenant_id, sync_request_id)
         except Exception as _exc:
-            logger.warning("sync_request.r2_hydrate_failed",
-                           sync_request_id=sync_request_id, error=str(_exc))
+            logger.warning(
+                "sync_request.r2_hydrate_failed",
+                sync_request_id=sync_request_id,
+                error=str(_exc),
+            )
             blob = None
         if isinstance(blob, dict):
             if doc.get("files_r2_offloaded") and isinstance(blob.get("files"), list):
@@ -2342,9 +2875,10 @@ async def get_sync_request(
             details_map = blob.get("ci_results_details") or {}
             if doc.get("ci_results_r2_offloaded") and isinstance(details_map, dict):
                 merged = []
-                for r in (doc.get("ci_results") or []):
+                for r in doc.get("ci_results") or []:
                     if not isinstance(r, dict):
-                        merged.append(r); continue
+                        merged.append(r)
+                        continue
                     gate = r.get("gate")
                     if gate and gate in details_map and r.get("details_in_r2"):
                         r = {**r, "details": details_map[gate]}
@@ -2362,8 +2896,8 @@ async def rerun_sync_request(
     sync_request_id: str,
     body: RerunSyncRequestBody = RerunSyncRequestBody(),
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Re-run the CI pipeline for an existing sync request.
 
@@ -2395,12 +2929,24 @@ async def rerun_sync_request(
     now = datetime.utcnow()
     await col.update_one(
         {"_id": ObjectId(doc["_id"])},
-        {"$set": {"status": "validating", "ci_results": [], "error": None, "branch_commit_sha": None, "updated_at": now}},
+        {
+            "$set": {
+                "status": "validating",
+                "ci_results": [],
+                "error": None,
+                "branch_commit_sha": None,
+                "updated_at": now,
+            }
+        },
     )
-    _broadcast(x_tenant_id, "sync:ci_rerun", {
-        "sync_request_id": sync_request_id,
-        "triggered_by": x_user_email or "unknown",
-    })
+    _broadcast(
+        x_tenant_id,
+        "sync:ci_rerun",
+        {
+            "sync_request_id": sync_request_id,
+            "triggered_by": x_user_email or "unknown",
+        },
+    )
 
     # Re-run pipeline in background using the original files stored in doc
     files = [SyncFilePayload(path=f["path"], content=f["content"]) for f in (doc.get("files") or [])]
@@ -2411,7 +2957,11 @@ async def rerun_sync_request(
         async with _CI_SEMAPHORE:
             try:
                 ci_results, cleaned_files = await _run_ci_pipeline(
-                    sync_request_id, x_tenant_id, doc["session_id"], files, run_all=body.run_all,
+                    sync_request_id,
+                    x_tenant_id,
+                    doc["session_id"],
+                    files,
+                    run_all=body.run_all,
                     branch_name=_rerun_branch_name,
                     sync_settings=sync_settings,
                 )
@@ -2420,44 +2970,99 @@ async def rerun_sync_request(
                     await _delete_ci_branch(_rerun_branch_name, sync_settings)
                     await col.update_one(
                         {"_id": ObjectId(sync_request_id)},
-                        {"$set": {"status": "validation_failed", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                        {
+                            "$set": {
+                                "status": "validation_failed",
+                                "branch_commit_sha": None,
+                                "updated_at": datetime.utcnow(),
+                            }
+                        },
                     )
-                    _broadcast(x_tenant_id, "sync:request_validation_failed", {
-                        "sync_request_id": sync_request_id,
-                        "ci_results": ci_results,
-                    })
+                    _broadcast(
+                        x_tenant_id,
+                        "sync:request_validation_failed",
+                        {
+                            "sync_request_id": sync_request_id,
+                            "ci_results": ci_results,
+                        },
+                    )
                     return
                 if not cleaned_files:
                     await _delete_ci_branch(_rerun_branch_name, sync_settings)
                     await col.update_one(
                         {"_id": ObjectId(sync_request_id)},
-                        {"$set": {"status": "validation_failed", "error": "No files to sync after filtering", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                        {
+                            "$set": {
+                                "status": "validation_failed",
+                                "error": "No files to sync after filtering",
+                                "branch_commit_sha": None,
+                                "updated_at": datetime.utcnow(),
+                            }
+                        },
                     )
                     return
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "ci_passed", "pr_number": None, "pr_url": None, "diff": None, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "ci_passed",
+                            "pr_number": None,
+                            "pr_url": None,
+                            "diff": None,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:ci_passed", {
-                    "sync_request_id": sync_request_id,
-                    "ci_results": ci_results,
-                })
+                _broadcast(
+                    x_tenant_id,
+                    "sync:ci_passed",
+                    {
+                        "sync_request_id": sync_request_id,
+                        "ci_results": ci_results,
+                    },
+                )
             except asyncio.CancelledError:
                 logger.info("sync_request.rerun_cancelled", sync_request_id=sync_request_id)
                 await _delete_ci_branch(_rerun_branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "dismissed",
+                            "error": "CI cancelled by user",
+                            "branch_commit_sha": None,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
+                _broadcast(
+                    x_tenant_id,
+                    "sync:request_cancelled",
+                    {"sync_request_id": sync_request_id},
+                )
             except Exception as e:
-                logger.error("sync_request.rerun_error", error=str(e), sync_request_id=sync_request_id)
+                logger.error(
+                    "sync_request.rerun_error",
+                    error=str(e),
+                    sync_request_id=sync_request_id,
+                )
                 await _delete_ci_branch(_rerun_branch_name, sync_settings)
                 await col.update_one(
                     {"_id": ObjectId(sync_request_id)},
-                    {"$set": {"status": "error", "error": str(e)[:500], "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "error",
+                            "error": str(e)[:500],
+                            "branch_commit_sha": None,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
+                _broadcast(
+                    x_tenant_id,
+                    "sync:request_error",
+                    {"sync_request_id": sync_request_id, "error": str(e)[:200]},
+                )
 
     _rerun_task = asyncio.create_task(_rerun())
     _ci_tasks[sync_request_id] = _rerun_task
@@ -2469,8 +3074,8 @@ async def rerun_sync_request(
 async def cancel_ci_pipeline(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Cancel a running CI pipeline immediately.
 
@@ -2510,7 +3115,14 @@ async def cancel_ci_pipeline(
     await _delete_ci_branch(branch_name, sync_settings)
     await col.update_one(
         {"_id": ObjectId(sync_request_id)},
-        {"$set": {"status": "dismissed", "error": "CI cancelled by user", "branch_commit_sha": None, "updated_at": datetime.utcnow()}},
+        {
+            "$set": {
+                "status": "dismissed",
+                "error": "CI cancelled by user",
+                "branch_commit_sha": None,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     _broadcast(x_tenant_id, "sync:request_cancelled", {"sync_request_id": sync_request_id})
     return {"status": "dismissed", "message": "CI pipeline cancelled."}
@@ -2521,8 +3133,8 @@ async def raise_pr_for_sync_request(
     sync_request_id: str,
     body: RaisePrBody = None,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Create a GitHub PR for a sync request whose CI has passed.
 
@@ -2549,7 +3161,10 @@ async def raise_pr_for_sync_request(
 
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
     if not sync_settings.get("github_repo_url") or not sync_settings.get("github_token"):
-        raise HTTPException(status_code=400, detail="GitHub repo URL and token must be configured in sync settings")
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub repo URL and token must be configured in sync settings",
+        )
 
     user_email = x_user_email or "unknown"
     try:
@@ -2573,17 +3188,25 @@ async def raise_pr_for_sync_request(
         # skip the branch push step and just open the PR from the existing branch.
         if doc.get("branch_commit_sha"):
             pr_data = await _open_pr(
-                owner, repo, token,
-                effective_branch, doc["target_branch"],
-                pr_title, pr_body,
+                owner,
+                repo,
+                token,
+                effective_branch,
+                doc["target_branch"],
+                pr_title,
+                pr_body,
             )
             pr_data["commit_sha"] = doc["branch_commit_sha"]
         else:
             # Fallback: branch was not pushed during CI (e.g. GitHub not configured then)
             pr_data = await _create_pr(
-                owner, repo, token,
-                effective_branch, doc["target_branch"],
-                pr_title, pr_body,
+                owner,
+                repo,
+                token,
+                effective_branch,
+                doc["target_branch"],
+                pr_title,
+                pr_body,
                 files,
             )
 
@@ -2592,30 +3215,50 @@ async def raise_pr_for_sync_request(
         now = datetime.utcnow()
         await col.update_one(
             {"_id": ObjectId(sync_request_id)},
-            {"$set": {
-                "status": "ready",
+            {
+                "$set": {
+                    "status": "ready",
+                    "pr_number": pr_data["pr_number"],
+                    "pr_url": pr_data["pr_url"],
+                    "pr_state": "open",
+                    "diff": diff,
+                    "updated_at": now,
+                }
+            },
+        )
+        _broadcast(
+            x_tenant_id,
+            "sync:request_ready",
+            {
+                "sync_request_id": sync_request_id,
                 "pr_number": pr_data["pr_number"],
                 "pr_url": pr_data["pr_url"],
-                "pr_state": "open",
                 "diff": diff,
-                "updated_at": now,
-            }},
+            },
         )
-        _broadcast(x_tenant_id, "sync:request_ready", {
-            "sync_request_id": sync_request_id,
+        return {
+            "status": "ready",
             "pr_number": pr_data["pr_number"],
             "pr_url": pr_data["pr_url"],
-            "diff": diff,
-        })
-        return {"status": "ready", "pr_number": pr_data["pr_number"], "pr_url": pr_data["pr_url"]}
+        }
     except HTTPException:
         raise
     except Exception as e:
         await col.update_one(
             {"_id": ObjectId(sync_request_id)},
-            {"$set": {"status": "error", "error": str(e)[:500], "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    "status": "error",
+                    "error": str(e)[:500],
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
-        _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
+        _broadcast(
+            x_tenant_id,
+            "sync:request_error",
+            {"sync_request_id": sync_request_id, "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=500, detail=f"PR creation failed: {str(e)[:200]}")
 
 
@@ -2623,8 +3266,8 @@ async def raise_pr_for_sync_request(
 async def approve_sync_request(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Approve and merge the PR."""
     user_role = (x_user_role or "viewer").lower()
@@ -2643,23 +3286,42 @@ async def approve_sync_request(
     if not doc:
         raise HTTPException(status_code=404, detail="Sync request not found")
     if doc["status"] != "ready":
-        raise HTTPException(status_code=409, detail=f"Cannot approve — status is '{doc['status']}', expected 'ready'")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot approve — status is '{doc['status']}', expected 'ready'",
+        )
 
     # Check authorized approvers
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
     approvers = sync_settings.get("authorized_approvers", [])
     if approvers and user_email not in approvers and user_role != "super_admin":
-        raise HTTPException(status_code=403, detail="You are not in the authorized approvers list for this tenant")
+        raise HTTPException(
+            status_code=403,
+            detail="You are not in the authorized approvers list for this tenant",
+        )
 
     # Atomic status transition: ready → approving (prevents double-approve race)
     update_result = await col.update_one(
         {"_id": ObjectId(sync_request_id), "status": "ready"},
-        {"$set": {"status": "approving", "approved_by": user_email, "updated_at": datetime.utcnow()}},
+        {
+            "$set": {
+                "status": "approving",
+                "approved_by": user_email,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     if update_result.modified_count == 0:
-        raise HTTPException(status_code=409, detail="Sync request is no longer in 'ready' state — it may have been approved by someone else")
+        raise HTTPException(
+            status_code=409,
+            detail="Sync request is no longer in 'ready' state — it may have been approved by someone else",
+        )
 
-    _broadcast(x_tenant_id, "sync:request_approving", {"sync_request_id": sync_request_id, "approved_by": user_email})
+    _broadcast(
+        x_tenant_id,
+        "sync:request_approving",
+        {"sync_request_id": sync_request_id, "approved_by": user_email},
+    )
 
     # Merge PR
     try:
@@ -2672,55 +3334,82 @@ async def approve_sync_request(
         now = datetime.utcnow()
         await col.update_one(
             {"_id": ObjectId(sync_request_id)},
-            {"$set": {"status": "merged", "pr_state": "merged", "merged_at": now, "updated_at": now}},
+            {
+                "$set": {
+                    "status": "merged",
+                    "pr_state": "merged",
+                    "merged_at": now,
+                    "updated_at": now,
+                }
+            },
         )
 
-        _broadcast(x_tenant_id, "sync:request_merged", {
-            "sync_request_id": sync_request_id,
-            "approved_by": user_email,
-            "merged_at": now.isoformat(),
-        })
+        _broadcast(
+            x_tenant_id,
+            "sync:request_merged",
+            {
+                "sync_request_id": sync_request_id,
+                "approved_by": user_email,
+                "merged_at": now.isoformat(),
+            },
+        )
 
         # Check if queue is now empty
-        open_count = await col.count_documents({
-            "tenant_id": x_tenant_id,
-            "status": {"$nin": ["merged", "dismissed", "error"]},
-        })
+        open_count = await col.count_documents(
+            {
+                "tenant_id": x_tenant_id,
+                "status": {"$nin": ["merged", "dismissed", "error"]},
+            }
+        )
         if open_count == 0:
             _broadcast(x_tenant_id, "sync:queue_empty", {"tenant_id": x_tenant_id})
 
-        return {"status": "merged", "approved_by": user_email, "merged_at": now.isoformat()}
+        return {
+            "status": "merged",
+            "approved_by": user_email,
+            "merged_at": now.isoformat(),
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         await col.update_one(
             {"_id": ObjectId(sync_request_id)},
-            {"$set": {"status": "error", "error": str(e)[:500], "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    "status": "error",
+                    "error": str(e)[:500],
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
-        _broadcast(x_tenant_id, "sync:request_error", {"sync_request_id": sync_request_id, "error": str(e)[:200]})
+        _broadcast(
+            x_tenant_id,
+            "sync:request_error",
+            {"sync_request_id": sync_request_id, "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)[:200]}")
-
 
 
 class BulkMergeRequest(BaseModel):
     """List of sync_request IDs to merge sequentially on the server."""
-    sync_request_ids: List[str]
+
+    sync_request_ids: list[str]
 
 
 class BulkMergeResult(BaseModel):
     sync_request_id: str
     ok: bool
-    status: Optional[str] = None
-    error: Optional[str] = None
+    status: str | None = None
+    error: str | None = None
 
 
 @sync_request_router.post("/bulk-merge")
 async def bulk_merge_sync_requests(
     body: BulkMergeRequest,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Sequentially merge a batch of sync requests.
 
@@ -2757,11 +3446,14 @@ async def bulk_merge_sync_requests(
     sync_settings = await _get_tenant_sync_settings(x_tenant_id)
     approvers = sync_settings.get("authorized_approvers", [])
     if approvers and user_email not in approvers and user_role != "super_admin":
-        raise HTTPException(status_code=403, detail="You are not in the authorized approvers list for this tenant")
+        raise HTTPException(
+            status_code=403,
+            detail="You are not in the authorized approvers list for this tenant",
+        )
     owner, repo = _parse_repo(sync_settings["github_repo_url"])
     token = sync_settings["github_token"]
 
-    results: List[BulkMergeResult] = []
+    results: list[BulkMergeResult] = []
     merged_count = 0
     failed_count = 0
 
@@ -2782,23 +3474,43 @@ async def bulk_merge_sync_requests(
                 failed_count += 1
                 continue
             if doc["status"] != "ready":
-                results.append(BulkMergeResult(sync_request_id=sid, ok=False, status=doc["status"],
-                                               error=f"Cannot approve — status is '{doc['status']}', expected 'ready'"))
+                results.append(
+                    BulkMergeResult(
+                        sync_request_id=sid,
+                        ok=False,
+                        status=doc["status"],
+                        error=f"Cannot approve — status is '{doc['status']}', expected 'ready'",
+                    )
+                )
                 failed_count += 1
                 continue
 
             update_result = await col.update_one(
                 {"_id": oid, "status": "ready"},
-                {"$set": {"status": "approving", "approved_by": user_email, "updated_at": datetime.utcnow()}},
+                {
+                    "$set": {
+                        "status": "approving",
+                        "approved_by": user_email,
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
             )
             if update_result.modified_count == 0:
-                results.append(BulkMergeResult(sync_request_id=sid, ok=False,
-                                               error="Sync request no longer in 'ready' state"))
+                results.append(
+                    BulkMergeResult(
+                        sync_request_id=sid,
+                        ok=False,
+                        error="Sync request no longer in 'ready' state",
+                    )
+                )
                 failed_count += 1
                 continue
 
-            _broadcast(x_tenant_id, "sync:request_approving",
-                       {"sync_request_id": sid, "approved_by": user_email})
+            _broadcast(
+                x_tenant_id,
+                "sync:request_approving",
+                {"sync_request_id": sid, "approved_by": user_email},
+            )
 
             try:
                 await _merge_pr(owner, repo, token, doc["pr_number"])
@@ -2807,11 +3519,19 @@ async def bulk_merge_sync_requests(
                 # Roll back the status so retries are possible.
                 await col.update_one(
                     {"_id": oid},
-                    {"$set": {"status": "error", "error": str(gh_exc.detail)[:500],
-                              "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "status": "error",
+                            "error": str(gh_exc.detail)[:500],
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
-                _broadcast(x_tenant_id, "sync:request_error",
-                           {"sync_request_id": sid, "error": str(gh_exc.detail)[:200]})
+                _broadcast(
+                    x_tenant_id,
+                    "sync:request_error",
+                    {"sync_request_id": sid, "error": str(gh_exc.detail)[:200]},
+                )
                 results.append(BulkMergeResult(sync_request_id=sid, ok=False, error=str(gh_exc.detail)[:200]))
                 failed_count += 1
                 continue
@@ -2819,28 +3539,45 @@ async def bulk_merge_sync_requests(
             now = datetime.utcnow()
             await col.update_one(
                 {"_id": oid},
-                {"$set": {"status": "merged", "pr_state": "merged",
-                          "merged_at": now, "updated_at": now}},
+                {
+                    "$set": {
+                        "status": "merged",
+                        "pr_state": "merged",
+                        "merged_at": now,
+                        "updated_at": now,
+                    }
+                },
             )
-            _broadcast(x_tenant_id, "sync:request_merged", {
-                "sync_request_id": sid,
-                "approved_by": user_email,
-                "merged_at": now.isoformat(),
-            })
+            _broadcast(
+                x_tenant_id,
+                "sync:request_merged",
+                {
+                    "sync_request_id": sid,
+                    "approved_by": user_email,
+                    "merged_at": now.isoformat(),
+                },
+            )
             results.append(BulkMergeResult(sync_request_id=sid, ok=True, status="merged"))
             merged_count += 1
 
         except Exception as e:
-            logger.error("sync.bulk_merge_unexpected", sync_request_id=sid, error=str(e)[:200], exc_info=True)
+            logger.error(
+                "sync.bulk_merge_unexpected",
+                sync_request_id=sid,
+                error=str(e)[:200],
+                exc_info=True,
+            )
             results.append(BulkMergeResult(sync_request_id=sid, ok=False, error=str(e)[:200]))
             failed_count += 1
 
     # One queue-empty broadcast at the very end (single check instead of per merge).
     try:
-        open_count = await col.count_documents({
-            "tenant_id": x_tenant_id,
-            "status": {"$nin": ["merged", "dismissed", "error"]},
-        })
+        open_count = await col.count_documents(
+            {
+                "tenant_id": x_tenant_id,
+                "status": {"$nin": ["merged", "dismissed", "error"]},
+            }
+        )
         if open_count == 0:
             _broadcast(x_tenant_id, "sync:queue_empty", {"tenant_id": x_tenant_id})
     except Exception:
@@ -2857,8 +3594,8 @@ async def bulk_merge_sync_requests(
 async def hold_sync_request(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Hold the sync queue — blocks new sync requests from being raised.
 
@@ -2895,10 +3632,14 @@ async def hold_sync_request(
             detail=f"Queue is already held by {doc.get('held_by', 'unknown')}",
         )
 
-    _broadcast(x_tenant_id, "sync:queue_held", {
-        "sync_request_id": sync_request_id,
-        "held_by": user_email,
-    })
+    _broadcast(
+        x_tenant_id,
+        "sync:queue_held",
+        {
+            "sync_request_id": sync_request_id,
+            "held_by": user_email,
+        },
+    )
 
     return {"status": "held", "held_by": user_email}
 
@@ -2907,8 +3648,8 @@ async def hold_sync_request(
 async def unhold_sync_request(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Release the hold on the sync queue."""
     user_role = (x_user_role or "viewer").lower()
@@ -2931,10 +3672,14 @@ async def unhold_sync_request(
         {"$set": {"held_by": None, "held_at": None, "updated_at": datetime.utcnow()}},
     )
 
-    _broadcast(x_tenant_id, "sync:queue_unheld", {
-        "sync_request_id": sync_request_id,
-        "unheld_by": user_email,
-    })
+    _broadcast(
+        x_tenant_id,
+        "sync:queue_unheld",
+        {
+            "sync_request_id": sync_request_id,
+            "unheld_by": user_email,
+        },
+    )
 
     return {"status": "unheld"}
 
@@ -2943,7 +3688,7 @@ async def unhold_sync_request(
 async def dismiss_sync_request(
     sync_request_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
 ):
     """Dismiss a sync request without merging. Closes the GitHub PR if one exists."""
     col = _sync_requests_col()
@@ -2965,9 +3710,12 @@ async def dismiss_sync_request(
         except Exception:
             pass  # Non-critical
 
-    _dismiss_set: Dict[str, Any] = {"status": "dismissed", "updated_at": datetime.utcnow()}
+    _dismiss_set: dict[str, Any] = {
+        "status": "dismissed",
+        "updated_at": datetime.utcnow(),
+    }
     if pr_closed:
-        _dismiss_set["pr_state"] = "closed"   # so the card shows "PR closed", not "PR open"
+        _dismiss_set["pr_state"] = "closed"  # so the card shows "PR closed", not "PR open"
     await col.update_one(
         {"_id": ObjectId(sync_request_id)},
         {"$set": _dismiss_set},
@@ -2975,13 +3723,19 @@ async def dismiss_sync_request(
 
     _broadcast(x_tenant_id, "sync:request_dismissed", {"sync_request_id": sync_request_id})
     if pr_closed:
-        _broadcast(x_tenant_id, "sync:pr_state", {"sync_request_id": sync_request_id, "pr_state": "closed"})
+        _broadcast(
+            x_tenant_id,
+            "sync:pr_state",
+            {"sync_request_id": sync_request_id, "pr_state": "closed"},
+        )
 
     # Check if queue is now empty
-    open_count = await col.count_documents({
-        "tenant_id": x_tenant_id,
-        "status": {"$nin": ["merged", "dismissed", "error"]},
-    })
+    open_count = await col.count_documents(
+        {
+            "tenant_id": x_tenant_id,
+            "status": {"$nin": ["merged", "dismissed", "error"]},
+        }
+    )
     if open_count == 0:
         _broadcast(x_tenant_id, "sync:queue_empty", {"tenant_id": x_tenant_id})
 
@@ -2989,6 +3743,7 @@ async def dismiss_sync_request(
 
 
 # ── Sync Settings endpoints ──────────────────────────────────────────────────
+
 
 @sync_request_router.get("/settings/config")
 async def get_sync_settings(
@@ -3007,7 +3762,7 @@ async def get_sync_settings(
 async def update_sync_settings(
     body: SyncSettingsBody,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Update tenant sync configuration."""
     user_role = (x_user_role or "viewer").lower()
@@ -3018,7 +3773,7 @@ async def update_sync_settings(
         raise HTTPException(status_code=403, detail="Insufficient permissions to configure approvers")
 
     col = _sync_settings_col()
-    update_fields: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+    update_fields: dict[str, Any] = {"updated_at": datetime.utcnow()}
 
     if body.github_repo_url is not None:
         update_fields["github_repo_url"] = body.github_repo_url
@@ -3041,11 +3796,12 @@ async def update_sync_settings(
 
 # ── Pull & Reload endpoint (manual trigger from frontend) ───────────────────
 
+
 @sync_request_router.post("/pull-and-reload")
 async def pull_and_reload(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_email: str | None = Header(None, alias="X-User-Email"),
 ):
     """Manually trigger a git pull + connector hot-reload via the gateway API.
 
@@ -3075,7 +3831,7 @@ async def pull_and_reload(
     gateway_url = getattr(settings, "CONNECTOR_GATEWAY_URL", "https://localhost:8003")
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:  # noqa: S501 — internal in-cluster call; harden w/ CA bundle (SOC2 debt)
             resp = await client.post(
                 f"{gateway_url}/internal/pull-and-reload",
                 json={
@@ -3090,18 +3846,23 @@ async def pull_and_reload(
         data = {"error": str(e)[:200]}
 
     # Broadcast to all tenant clients
-    _broadcast(x_tenant_id, "sync:code_pulled", {
-        "tenant_id": x_tenant_id,
-        "branch": target_branch,
-        "triggered_by": x_user_email or "unknown",
-        "git_pull": data.get("git_pull"),
-        "reload": data.get("reload"),
-    })
+    _broadcast(
+        x_tenant_id,
+        "sync:code_pulled",
+        {
+            "tenant_id": x_tenant_id,
+            "branch": target_branch,
+            "triggered_by": x_user_email or "unknown",
+            "git_pull": data.get("git_pull"),
+            "reload": data.get("reload"),
+        },
+    )
 
     return data
 
 
 # ── Webhook management endpoints ────────────────────────────────────────────
+
 
 class WebhookConfigBody(BaseModel):
     webhook_url: str  # The public URL where GitHub should send events
@@ -3133,7 +3894,13 @@ async def _cleanup_stale_webhooks(owner: str, repo: str, token: str, keep_hook_i
             except HTTPException as exc:
                 logger.warning("webhook.stale_delete_failed", hook_id=hid, status=exc.status_code)
     if removed:
-        logger.info("webhook.stale_cleaned", owner=owner, repo=repo, removed=removed, kept=keep_hook_id)
+        logger.info(
+            "webhook.stale_cleaned",
+            owner=owner,
+            repo=repo,
+            removed=removed,
+            kept=keep_hook_id,
+        )
     return removed
 
 
@@ -3141,7 +3908,7 @@ async def _cleanup_stale_webhooks(owner: str, repo: str, token: str, keep_hook_i
 async def register_webhook(
     body: WebhookConfigBody,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Auto-register a GitHub webhook on the repo using the tenant's PAT.
 
@@ -3165,7 +3932,10 @@ async def register_webhook(
     repo_url = sync_settings.get("github_repo_url", "")
 
     if not token or not repo_url:
-        raise HTTPException(status_code=400, detail="GitHub token and repo URL must be configured first.")
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub token and repo URL must be configured first.",
+        )
 
     owner, repo = _parse_repo(repo_url)
 
@@ -3179,27 +3949,34 @@ async def register_webhook(
         if hook_url == body.webhook_url:
             # Already registered — update the secret instead
             hook_id = hook["id"]
-            await _github_request("PATCH", f"/repos/{owner}/{repo}/hooks/{hook_id}", token, {
-                "config": {
-                    "url": body.webhook_url,
-                    "content_type": "json",
-                    "secret": webhook_secret,
-                    "insecure_ssl": "0",
+            await _github_request(
+                "PATCH",
+                f"/repos/{owner}/{repo}/hooks/{hook_id}",
+                token,
+                {
+                    "config": {
+                        "url": body.webhook_url,
+                        "content_type": "json",
+                        "secret": webhook_secret,
+                        "insecure_ssl": "0",
+                    },
+                    "events": ["pull_request", "pull_request_review"],
+                    "active": True,
                 },
-                "events": ["pull_request", "pull_request_review"],
-                "active": True,
-            })
+            )
             # Store webhook config
             col = _sync_settings_col()
             await col.update_one(
                 {"tenant_id": x_tenant_id},
-                {"$set": {
-                    "webhook_url": body.webhook_url,
-                    "webhook_secret": _encrypt_token(webhook_secret),
-                    "webhook_hook_id": hook_id,
-                    "webhook_active": True,
-                    "updated_at": datetime.utcnow(),
-                }},
+                {
+                    "$set": {
+                        "webhook_url": body.webhook_url,
+                        "webhook_secret": _encrypt_token(webhook_secret),
+                        "webhook_hook_id": hook_id,
+                        "webhook_active": True,
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
                 upsert=True,
             )
             # Also update the server config so HMAC verification uses the new secret
@@ -3214,17 +3991,22 @@ async def register_webhook(
             }
 
     # Create new webhook
-    hook_data = await _github_request("POST", f"/repos/{owner}/{repo}/hooks", token, {
-        "name": "web",
-        "config": {
-            "url": body.webhook_url,
-            "content_type": "json",
-            "secret": webhook_secret,
-            "insecure_ssl": "0",
+    hook_data = await _github_request(
+        "POST",
+        f"/repos/{owner}/{repo}/hooks",
+        token,
+        {
+            "name": "web",
+            "config": {
+                "url": body.webhook_url,
+                "content_type": "json",
+                "secret": webhook_secret,
+                "insecure_ssl": "0",
+            },
+            "events": ["pull_request", "pull_request_review"],
+            "active": True,
         },
-        "events": ["pull_request", "pull_request_review"],
-        "active": True,
-    })
+    )
 
     hook_id = hook_data.get("id")
 
@@ -3232,13 +4014,15 @@ async def register_webhook(
     col = _sync_settings_col()
     await col.update_one(
         {"tenant_id": x_tenant_id},
-        {"$set": {
-            "webhook_url": body.webhook_url,
-            "webhook_secret": _encrypt_token(webhook_secret),
-            "webhook_hook_id": hook_id,
-            "webhook_active": True,
-            "updated_at": datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "webhook_url": body.webhook_url,
+                "webhook_secret": _encrypt_token(webhook_secret),
+                "webhook_hook_id": hook_id,
+                "webhook_active": True,
+                "updated_at": datetime.utcnow(),
+            }
+        },
         upsert=True,
     )
     # Update server config for HMAC verification
@@ -3305,7 +4089,13 @@ async def webhook_status(
             col = _sync_settings_col()
             await col.update_one(
                 {"tenant_id": x_tenant_id},
-                {"$set": {"webhook_hook_id": None, "webhook_active": False, "updated_at": datetime.utcnow()}},
+                {
+                    "$set": {
+                        "webhook_hook_id": None,
+                        "webhook_active": False,
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
             )
             return {
                 "configured": False,
@@ -3319,7 +4109,7 @@ async def webhook_status(
 @sync_request_router.delete("/webhook/remove")
 async def remove_webhook(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
 ):
     """Remove the GitHub webhook from the repo and clear local config."""
     user_role = (x_user_role or "viewer").lower()
@@ -3343,14 +4133,19 @@ async def remove_webhook(
     col = _sync_settings_col()
     await col.update_one(
         {"tenant_id": x_tenant_id},
-        {"$set": {
-            "webhook_hook_id": None,
-            "webhook_secret": None,
-            "webhook_active": False,
-            "webhook_url": None,
-            "updated_at": datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "webhook_hook_id": None,
+                "webhook_secret": None,
+                "webhook_active": False,
+                "webhook_url": None,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     settings.GITHUB_WEBHOOK_SECRET = ""
 
-    return {"status": "removed", "message": "Webhook removed from GitHub and local config cleared."}
+    return {
+        "status": "removed",
+        "message": "Webhook removed from GitHub and local config cleared.",
+    }

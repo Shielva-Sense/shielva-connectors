@@ -6,14 +6,16 @@ Port: 8055 (default)
 
 # Load core/.env (MASTER_KEY etc.) into the process env BEFORE any module reads
 # os.getenv at import time. override=False so server.sh-exported vars take priority.
-from dotenv import load_dotenv
 from pathlib import Path as _EnvPath
+
+from dotenv import load_dotenv
+
 # Load core/.env by EXPLICIT path — NOT load_dotenv()'s auto-discovery, which walks
 # up from this file (core/integration/) and stops at core/integration/.env, missing
 # the shared secrets (MASTER_KEY, CONNECTOR_INTERNAL_TOKEN) that live in core/.env.
 _core_dir = _EnvPath(__file__).resolve().parent.parent  # shielva-connectors/core
-load_dotenv(_core_dir / ".env", override=False)                       # shared secrets
-load_dotenv(_core_dir / "integration" / ".env", override=False)       # integration-specific vars
+load_dotenv(_core_dir / ".env", override=False)  # shared secrets
+load_dotenv(_core_dir / "integration" / ".env", override=False)  # integration-specific vars
 
 # Decrypt vault:v1: sealed secrets BEFORE config reads env (VAULT_ENVELOPE_DIRECT
 # → AppRole-login + transit-decrypt against shielva-vault). No-op when unset.
@@ -26,7 +28,7 @@ import logging
 import sys
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import structlog
@@ -40,33 +42,39 @@ from integration.api.catalog_v3_routes import catalog_v3_router
 from integration.api.categories_routes import categories_router
 from integration.api.codegen_routes import codegen_router
 from integration.api.codeview_routes import codeview_router
-from integration.api.history_routes import history_router
-from integration.api.logs_routes import logs_router
-from integration.api.planning_routes import planning_router
-from integration.api.session_routes import session_router
-from integration.api.testing_routes import testing_router
 from integration.api.connector_api_routes import connector_api_router
-from integration.api.guidelines_routes import guidelines_router
-from integration.api.knowledge_routes import knowledge_router
 from integration.api.docs_routes import docs_router
-from integration.api.ws_routes import ws_router
-from integration.api.step_prompts_routes import step_prompts_router
-from integration.api.models_routes import models_router
+from integration.api.guidelines_routes import guidelines_router
+from integration.api.history_routes import history_router
 from integration.api.instructions_routes import instructions_router
-from integration.api.terminal_routes import terminal_router
+from integration.api.knowledge_routes import knowledge_router
+from integration.api.logs_routes import logs_router
+from integration.api.models_routes import models_router
+from integration.api.planning_routes import planning_router
 from integration.api.prompt_steps_routes import prompt_steps_router
+from integration.api.session_routes import session_router
+from integration.api.step_prompts_routes import step_prompts_router
+from integration.api.sync_request_routes import sync_request_router
+from integration.api.sync_webhook_routes import sync_webhook_router
+from integration.api.system_routes import system_router
+from integration.api.terminal_routes import terminal_router
+from integration.api.testing_routes import testing_router
+from integration.api.ws_routes import ws_router
 from integration.core.config import settings
 from integration.db.database import close_db, connect_db
 from integration.services import r2_service
-from integration.services.guidelines_service import seed_default_guidelines, seed_test_case_writing_guidelines
 from integration.services.docs_guidelines_service import seed_default_doc_guidelines
-from integration.services.metadata_guidelines_service import seed_metadata_writing_guidelines
-from integration.services.instructions_guidelines_service import seed_instruction_guidelines
+from integration.services.guidelines_service import (
+    seed_default_guidelines,
+    seed_test_case_writing_guidelines,
+)
+from integration.services.instructions_guidelines_service import (
+    seed_instruction_guidelines,
+)
+from integration.services.metadata_guidelines_service import (
+    seed_metadata_writing_guidelines,
+)
 from integration.services.shared_venv import setup_shared_venv_async
-from integration.api.system_routes import system_router
-from integration.api.sync_request_routes import sync_request_router
-from integration.api.sync_webhook_routes import sync_webhook_router
-
 
 # ── Logging setup ────────────────────────────────────────────────────
 # LOG_LEVEL from config — NEVER "debug"/"trace" in production (SOC 2 CC7.2 / C1.1).
@@ -95,9 +103,7 @@ structlog.configure(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.JSONRenderer(),
     ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        logging.getLevelName(settings.LOG_LEVEL.upper())
-    ),
+    wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(settings.LOG_LEVEL.upper())),
     context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),
 )
@@ -106,6 +112,7 @@ logger = structlog.get_logger(__name__)
 
 
 # ── Request/Response logging middleware ──────────────────────────────
+
 
 class TenantBucketMiddleware(BaseHTTPMiddleware):
     """Sets R2 bucket ContextVars from request headers (or query params for SSE) on every request.
@@ -123,7 +130,7 @@ class TenantBucketMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # Headers (standard API calls)
-        app_id      = request.headers.get("X-App-ID", "").strip()
+        app_id = request.headers.get("X-App-ID", "").strip()
         tenant_name = request.headers.get("X-Tenant-Name", "").strip().lower()
 
         # Query param fallback (SSE / EventSource connections can't send custom headers)
@@ -144,10 +151,8 @@ class TenantBucketMiddleware(BaseHTTPMiddleware):
         finally:
             for t in tokens:
                 # Each ContextVar token has a .var attribute we use to reset
-                try:
+                with suppress(Exception):
                     t.var.reset(t)
-                except Exception:
-                    pass
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -212,6 +217,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 # ── Lifespan ──────────────────────────────────────────────────────────
 
+
 async def _recover_stale_sessions() -> None:
     """On startup, flip any sessions stuck in 'executing' to 'failed'.
 
@@ -220,16 +226,20 @@ async def _recover_stale_sessions() -> None:
     re-attaches to a ghost execution that will never complete.
     """
     from datetime import datetime
+
     from integration.db.database import sessions_collection as _sc
+
     try:
         col = _sc()
         result = await col.update_many(
             {"status": "executing"},
-            {"$set": {
-                "status": "failed",
-                "error": "Server restarted — execution interrupted. Please re-run.",
-                "updated_at": datetime.utcnow(),
-            }},
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": "Server restarted — execution interrupted. Please re-run.",
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
         if result.modified_count:
             logger.warning(
@@ -247,7 +257,9 @@ async def _session_watchdog() -> None:
     Also catches hanging Gemini API calls that exceed the 300 s httpx timeout.
     """
     from datetime import datetime, timedelta
+
     from integration.db.database import sessions_collection as _sc
+
     while True:
         try:
             await asyncio.sleep(300)  # check every 5 minutes
@@ -255,11 +267,13 @@ async def _session_watchdog() -> None:
             col = _sc()
             result = await col.update_many(
                 {"status": "executing", "updated_at": {"$lt": cutoff}},
-                {"$set": {
-                    "status": "failed",
-                    "error": "Execution watchdog: timed out after 45 min with no progress.",
-                    "updated_at": datetime.utcnow(),
-                }},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "error": "Execution watchdog: timed out after 45 min with no progress.",
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
             )
             if result.modified_count:
                 logger.warning(
@@ -281,20 +295,22 @@ async def lifespan(app: FastAPI):
     await setup_shared_venv_async()
     # Recover sessions stuck in 'executing' from a previous crash
     await _recover_stale_sessions()
-    await seed_default_guidelines()               # seeds CODE_EXECUTION_GUIDELINES on first boot
-    await seed_test_case_writing_guidelines()     # seeds TEST_CASE_WRITING_GUIDELINES.md to R2 on first boot
-    await seed_default_doc_guidelines()           # seeds CONNECTOR_DOCUMENTATION_GUIDELINES on first boot
-    await seed_metadata_writing_guidelines()      # seeds METADATA_WRITING_GUIDELINES on first boot
-    await seed_instruction_guidelines()           # seeds INSTRUCTION_SETUP_GUIDELINES on first boot
+    await seed_default_guidelines()  # seeds CODE_EXECUTION_GUIDELINES on first boot
+    await seed_test_case_writing_guidelines()  # seeds TEST_CASE_WRITING_GUIDELINES.md to R2 on first boot
+    await seed_default_doc_guidelines()  # seeds CONNECTOR_DOCUMENTATION_GUIDELINES on first boot
+    await seed_metadata_writing_guidelines()  # seeds METADATA_WRITING_GUIDELINES on first boot
+    await seed_instruction_guidelines()  # seeds INSTRUCTION_SETUP_GUIDELINES on first boot
     # Upload step prompts to R2/local on first boot (skips if already present so manual R2 edits are preserved)
     await r2_service.sync_all_step_prompts_to_r2()
     # Ensure MongoDB indexes for sync request collections
-    from integration.api.sync_request_routes import ensure_sync_indexes, close_gh_client
+    from integration.api.sync_request_routes import close_gh_client, ensure_sync_indexes
+
     await ensure_sync_indexes()
     # Provider category taxonomy + mapping: ensure indexes then seed from
     # connector_catalog.json on first boot. Both ops are idempotent —
     # restarts are cheap, manual edits are never overwritten.
     from integration.services import category_service as _category_service
+
     await _category_service.ensure_indexes()
     await _category_service.seed_categories_from_json()
     # Advanced-connector catalog: seed Mongo from the baked
@@ -303,24 +319,29 @@ async def lifespan(app: FastAPI):
     # connector's metadata/connector.json, consolidated at build time by
     # core/build_artifact.py. Surfaced via /api/v3/catalog/advanced-connectors.
     try:
-        import sys as _sysseed, os as _osseed
+        import os as _osseed
+        import sys as _sysseed
+
         _root = _osseed.path.dirname(_osseed.path.dirname(_osseed.path.abspath(__file__)))
         if _root not in _sysseed.path:
             _sysseed.path.insert(0, _root)
         from services.connector_catalog import seed_catalog_if_needed
+
         await seed_catalog_if_needed()
-    except Exception as _seed_exc:  # noqa: BLE001 — never crash boot
+    except Exception as _seed_exc:
         logger.error("connector_catalog.seed_unhandled", error=str(_seed_exc)[:200])
     # Background watchdog — heals sessions that get stuck mid-execution
     watchdog_task = asyncio.create_task(_session_watchdog())
 
     # Register with the API gateway so proxy routing works
-    import sys as _sys
     import os as _os
+    import sys as _sys
+
     _connectors_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
     if _connectors_root not in _sys.path:
         _sys.path.insert(0, _connectors_root)
     from shielva_common.discovery_client import DiscoveryClient
+
     ssl_up = bool(settings.SSL_CERTFILE and settings.SSL_KEYFILE)
     scheme = "https" if ssl_up else "http"
     app.state.discovery = DiscoveryClient(
@@ -330,15 +351,17 @@ async def lifespan(app: FastAPI):
         scheme=scheme,
     )
     asyncio.create_task(app.state.discovery.start())
-    logger.info("integration_builder.discovery_started", gateway=settings.API_GATEWAY_URL, scheme=scheme)
+    logger.info(
+        "integration_builder.discovery_started",
+        gateway=settings.API_GATEWAY_URL,
+        scheme=scheme,
+    )
 
     yield
 
     watchdog_task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await watchdog_task
-    except asyncio.CancelledError:
-        pass
     if hasattr(app.state, "discovery"):
         await app.state.discovery.stop()
     await close_gh_client()  # Close persistent GitHub API client
@@ -356,12 +379,14 @@ app = FastAPI(
 )
 
 # Global exception handlers — structured JSON error envelope for all error classes.
-from integration.core.error_handlers import install_exception_handlers  # noqa: E402
+from integration.core.error_handlers import install_exception_handlers
+
 install_exception_handlers(app)
 
 # SOP observability — traces + /sop-metrics. Single SDK call wires the
 # Prometheus middleware ahead of the per-request stack below.
 from shielva_common.sop_sdk import setup_sop
+
 setup_sop(app, service_name="shielva-integration-builder")
 
 # Middleware (order matters: first added = outermost)
@@ -378,38 +403,39 @@ app.add_middleware(TenantBucketMiddleware)
 # Routers
 _V3 = "/api/v3"
 
-app.include_router(catalog_router)       # legacy: /catalog/... (keep for backward compat)
-app.include_router(catalog_v3_router)    # /api/v3/catalog/... — registered first so its
-                                         # GET overrides (logo_url injection, etc.) win
-                                         # over the legacy router below.
+app.include_router(catalog_router)  # legacy: /catalog/... (keep for backward compat)
+app.include_router(catalog_v3_router)  # /api/v3/catalog/... — registered first so its
+# GET overrides (logo_url injection, etc.) win
+# over the legacy router below.
 # Also expose catalog_router under /api/v3 so PATCH /api/v3/catalog/providers/{key}
 # and the other write endpoints (POST/DELETE custom-providers, /detail, etc.) are
 # reachable from the same v3 base path the frontends use.
 app.include_router(catalog_router, prefix=_V3)
-app.include_router(categories_router)    # /api/v3/catalog/categories + provider mapping
+app.include_router(categories_router)  # /api/v3/catalog/categories + provider mapping
 
 # All functional routers mounted under /api/v3
-app.include_router(session_router,        prefix=_V3)   # /api/v3/sessions/...
-app.include_router(planning_router,       prefix=_V3)   # /api/v3/sessions/{id}/plan/...
-app.include_router(codegen_router,        prefix=_V3)   # /api/v3/sessions/{id}/execute/...
-app.include_router(codeview_router,       prefix=_V3)   # /api/v3/sessions/{id}/files/...
-app.include_router(testing_router,        prefix=_V3)   # /api/v3/sessions/{id}/test/...
-app.include_router(logs_router,           prefix=_V3)   # /api/v3/logs/...
-app.include_router(connector_api_router,  prefix=_V3)   # /api/v3/connector-api/...
-app.include_router(history_router,        prefix=_V3)   # /api/v3/catalog/{provider}/{service}/history
-app.include_router(models_router,         prefix=_V3)   # /api/v3/models/...
+app.include_router(session_router, prefix=_V3)  # /api/v3/sessions/...
+app.include_router(planning_router, prefix=_V3)  # /api/v3/sessions/{id}/plan/...
+app.include_router(codegen_router, prefix=_V3)  # /api/v3/sessions/{id}/execute/...
+app.include_router(codeview_router, prefix=_V3)  # /api/v3/sessions/{id}/files/...
+app.include_router(testing_router, prefix=_V3)  # /api/v3/sessions/{id}/test/...
+app.include_router(logs_router, prefix=_V3)  # /api/v3/logs/...
+app.include_router(connector_api_router, prefix=_V3)  # /api/v3/connector-api/...
+app.include_router(history_router, prefix=_V3)  # /api/v3/catalog/{provider}/{service}/history
+app.include_router(models_router, prefix=_V3)  # /api/v3/models/...
 from integration.api.entity_routes import entity_router
-app.include_router(entity_router,         prefix=_V3)
-app.include_router(guidelines_router,     prefix=_V3)
-app.include_router(step_prompts_router,   prefix=_V3)
-app.include_router(knowledge_router,      prefix=_V3)
-app.include_router(docs_router,           prefix=_V3)
-app.include_router(instructions_router,   prefix=_V3)
-app.include_router(terminal_router)       # WebSocket — has hardcoded path, skip prefix
-app.include_router(prompt_steps_router,   prefix=_V3)
-app.include_router(system_router,         prefix=_V3)   # /api/v3/system/...
-app.include_router(sync_request_router,   prefix=_V3)   # /api/v3/sync-requests/...
-app.include_router(sync_webhook_router,   prefix=_V3)   # /api/v3/sync-webhooks/...
+
+app.include_router(entity_router, prefix=_V3)
+app.include_router(guidelines_router, prefix=_V3)
+app.include_router(step_prompts_router, prefix=_V3)
+app.include_router(knowledge_router, prefix=_V3)
+app.include_router(docs_router, prefix=_V3)
+app.include_router(instructions_router, prefix=_V3)
+app.include_router(terminal_router)  # WebSocket — has hardcoded path, skip prefix
+app.include_router(prompt_steps_router, prefix=_V3)
+app.include_router(system_router, prefix=_V3)  # /api/v3/system/...
+app.include_router(sync_request_router, prefix=_V3)  # /api/v3/sync-requests/...
+app.include_router(sync_webhook_router, prefix=_V3)  # /api/v3/sync-webhooks/...
 app.include_router(ws_router)
 
 # ── Backward-compat root-level aliases ────────────────────────────────────────
@@ -452,6 +478,7 @@ async def heartbeat(request: Request):
     Frontend subscribes once; connection alive = backend up, connection lost = backend down.
     """
     import json
+
     from fastapi.responses import StreamingResponse
 
     async def _stream():
@@ -487,10 +514,10 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "integration.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # noqa: S104 — container bind
         port=settings.INTEGRATION_PORT,
         reload=True,
-        ws_ping_interval=30,   # Send WS ping every 30s (default: 20)
-        ws_ping_timeout=60,    # Wait 60s for pong before disconnect (default: 20)
+        ws_ping_interval=30,  # Send WS ping every 30s (default: 20)
+        ws_ping_timeout=60,  # Wait 60s for pong before disconnect (default: 20)
         **ssl_kwargs,
     )

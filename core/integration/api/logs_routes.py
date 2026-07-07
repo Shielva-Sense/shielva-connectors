@@ -6,7 +6,6 @@ Provides endpoints to view service logs and per-session execution logs.
 import json
 from collections import deque
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from bson import ObjectId
@@ -24,8 +23,8 @@ logs_router = APIRouter(prefix="/logs", tags=["logs"])
 @logs_router.get("")
 async def get_service_logs(
     lines: int = Query(100, ge=1, le=2000, description="Number of recent log lines to return"),
-    level: Optional[str] = Query(None, description="Filter by log level (info, warning, error)"),
-    search: Optional[str] = Query(None, description="Search term to filter log entries"),
+    level: str | None = Query(None, description="Filter by log level (info, warning, error)"),
+    search: str | None = Query(None, description="Search term to filter log entries"),
 ):
     """Return recent service log entries from the log file.
 
@@ -33,11 +32,16 @@ async def get_service_logs(
     optionally filtered by level or search term.
     """
     if not LOG_FILE.exists():
-        return {"lines": [], "total": 0, "log_file": str(LOG_FILE), "message": "Log file not yet created"}
+        return {
+            "lines": [],
+            "total": 0,
+            "log_file": str(LOG_FILE),
+            "message": "Log file not yet created",
+        }
 
     # Read last N lines efficiently using a deque
     all_lines = deque(maxlen=lines * 3)  # read extra to allow for filtering
-    with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+    with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
         for line in f:
             all_lines.append(line.rstrip())
 
@@ -81,7 +85,7 @@ async def get_service_logs(
 async def get_session_execution_logs(
     session_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    step_index: Optional[int] = Query(None, description="Filter logs for a specific step"),
+    step_index: int | None = Query(None, description="Filter logs for a specific step"),
 ):
     """Return persisted execution logs for a session from MongoDB.
 
@@ -93,7 +97,13 @@ async def get_session_execution_logs(
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"execution_results": 1, "provider": 1, "service": 1, "service_slug": 1, "status": 1},
+        {
+            "execution_results": 1,
+            "provider": 1,
+            "service": 1,
+            "service_slug": 1,
+            "status": 1,
+        },
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -114,6 +124,7 @@ async def get_session_execution_logs(
     # `step_index` is set, all matching otherwise). Pre-Phase-3 rows that
     # still embed `logs` directly are read in place.
     from integration.services import r2_service as _r2
+
     provider = session.get("provider", "")
     service_slug = session.get("service_slug") or session.get("service") or ""
 
@@ -134,14 +145,21 @@ async def get_session_execution_logs(
                 if r2_payload:
                     step_logs = r2_payload.get("logs") or []
             except Exception as exc:
-                logger.warning("logs.r2_hydrate_failed", session_id=session_id, step_index=idx, error=str(exc))
+                logger.warning(
+                    "logs.r2_hydrate_failed",
+                    session_id=session_id,
+                    step_index=idx,
+                    error=str(exc),
+                )
         for log_entry in step_logs:
-            all_logs.append({
-                "step_index": idx,
-                "step_status": result.get("status"),
-                "duration_ms": result.get("duration_ms"),
-                **(log_entry if isinstance(log_entry, dict) else {"message": str(log_entry)}),
-            })
+            all_logs.append(
+                {
+                    "step_index": idx,
+                    "step_status": result.get("status"),
+                    "duration_ms": result.get("duration_ms"),
+                    **(log_entry if isinstance(log_entry, dict) else {"message": str(log_entry)}),
+                }
+            )
 
     logger.info(
         "logs.session_viewed",

@@ -6,27 +6,28 @@ Handles connection provisioning, collection configuration, field mapping, and AI
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, Body, Header, HTTPException
+from bson import ObjectId
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from integration.db.database import sessions_collection
-from bson import ObjectId
 
 logger = structlog.get_logger(__name__)
 
 entity_router = APIRouter(prefix="/entity-builder", tags=["entity-builder"])
 
 
-def _get_tenant(x_tenant_id: Optional[str]) -> str:
+def _get_tenant(x_tenant_id: str | None) -> str:
     if not x_tenant_id:
         raise HTTPException(400, "X-Tenant-ID header required")
     return x_tenant_id
 
 
 # ── Provision / Connection ────────────────────────────────────────────
+
 
 class ProvisionRequest(BaseModel):
     connection_string: str
@@ -37,7 +38,7 @@ class ProvisionRequest(BaseModel):
 async def provision_mongo(
     session_id: str,
     payload: ProvisionRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Save MongoDB connection details to session."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -85,7 +86,7 @@ async def provision_mongo(
 @entity_router.post("/{session_id}/test-connection")
 async def test_connection(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Test MongoDB connection using provisioned credentials stored in the session.
 
@@ -107,7 +108,7 @@ async def test_connection(
 
     provision = doc.get("mongo_provision") or {}
     connection_string = provision.get("connection_string", "")
-    database_name = provision.get("database_name", "")
+    provision.get("database_name", "")
 
     if not connection_string:
         raise HTTPException(422, "No connection string provisioned. Call /provision first.")
@@ -132,11 +133,13 @@ async def test_connection(
         # Mark provision as tested
         await sessions_collection().update_one(
             {"_id": oid, "tenant_id": tenant_id},
-            {"$set": {
-                "mongo_provision.connection_tested": True,
-                "mongo_provision.tested_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }},
+            {
+                "$set": {
+                    "mongo_provision.connection_tested": True,
+                    "mongo_provision.tested_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
 
         logger.info("entity.connection_tested", session_id=session_id, databases=len(db_list))
@@ -153,7 +156,7 @@ async def test_connection(
 @entity_router.get("/{session_id}/databases")
 async def list_databases(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """List databases on provisioned MongoDB instance."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -198,7 +201,7 @@ class CollectionsRequest(BaseModel):
 async def list_collections(
     session_id: str,
     database_name: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """List collections in a specific database."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -237,18 +240,19 @@ async def list_collections(
 
 # ── Entity CRUD ───────────────────────────────────────────────────────
 
+
 class CreateEntityRequest(BaseModel):
     collection_name: str
     database_name: str
     connection_string: str = ""
-    fields: List[Dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
 
 
 @entity_router.post("/{session_id}/entities")
 async def create_entity(
     session_id: str,
     payload: CreateEntityRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Create a new entity configuration."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -284,7 +288,7 @@ async def update_entity(
     session_id: str,
     entity_id: str,
     payload: CreateEntityRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Update an existing entity configuration."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -327,7 +331,7 @@ async def update_entity(
 async def delete_entity(
     session_id: str,
     entity_id: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Delete an entity configuration."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -351,9 +355,10 @@ async def delete_entity(
 
 # ── Field Mapping ─────────────────────────────────────────────────────
 
+
 class FieldMappingRequest(BaseModel):
     method_name: str
-    mappings: List[Dict[str, Any]]
+    mappings: list[dict[str, Any]]
 
 
 @entity_router.post("/{session_id}/entities/{entity_id}/field-mappings")
@@ -361,7 +366,7 @@ async def save_field_mappings(
     session_id: str,
     entity_id: str,
     payload: FieldMappingRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Save field mappings for a method-entity pair."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -386,39 +391,47 @@ async def save_field_mappings(
             break
 
     if not found:
-        identities.append({
-            "method_name": payload.method_name,
-            "identity": "api_response_persistent",
-            "auto_detected": False,
-            "entity_id": entity_id,
-            "field_mappings": payload.mappings,
-            "expected_response_fields": [],
-        })
+        identities.append(
+            {
+                "method_name": payload.method_name,
+                "identity": "api_response_persistent",
+                "auto_detected": False,
+                "entity_id": entity_id,
+                "field_mappings": payload.mappings,
+                "expected_response_fields": [],
+            }
+        )
 
     await sessions_collection().update_one(
         {"_id": oid, "tenant_id": tenant_id},
         {"$set": {"method_identities": identities, "updated_at": datetime.utcnow()}},
     )
 
-    logger.info("entity.mappings_saved", session_id=session_id, entity_id=entity_id, method=payload.method_name)
+    logger.info(
+        "entity.mappings_saved",
+        session_id=session_id,
+        entity_id=entity_id,
+        method=payload.method_name,
+    )
     return {"ok": True, "entity_id": entity_id, "mappings": len(payload.mappings)}
 
 
 # ── Wizard Draft (persist intermediate state between refreshes) ───────
 
+
 class WizardDraftRequest(BaseModel):
-    method_name: Optional[str] = None   # scopes the draft to a specific method
-    collection_name: Optional[str] = None
-    database_name: Optional[str] = None  # persisted so restore works even if mongo_provision is null
-    fields: Optional[List[Dict[str, Any]]] = None
-    mappings: Optional[List[Dict[str, Any]]] = None
+    method_name: str | None = None  # scopes the draft to a specific method
+    collection_name: str | None = None
+    database_name: str | None = None  # persisted so restore works even if mongo_provision is null
+    fields: list[dict[str, Any]] | None = None
+    mappings: list[dict[str, Any]] | None = None
 
 
 @entity_router.patch("/{session_id}/wizard-draft")
 async def save_wizard_draft(
     session_id: str,
     payload: WizardDraftRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Persist intermediate wizard state (collection, fields, mappings) so the user
     doesn't have to re-enter data after a page refresh.
@@ -430,7 +443,7 @@ async def save_wizard_draft(
     # Scope draft key to method name to avoid cross-method bleed
     key_prefix = f"wizard_draft.{payload.method_name}" if payload.method_name else "wizard_draft._default"
 
-    updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+    updates: dict[str, Any] = {"updated_at": datetime.utcnow()}
     if payload.collection_name is not None:
         updates[f"{key_prefix}.collection_name"] = payload.collection_name
     if payload.database_name is not None:
@@ -453,11 +466,12 @@ async def save_wizard_draft(
 
 # ── Wizard State (restore on re-open) ────────────────────────────────
 
+
 @entity_router.get("/{session_id}/wizard-state")
 async def get_wizard_state(
     session_id: str,
-    method_name: Optional[str] = None,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    method_name: str | None = None,
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Return the full saved wizard state for a session+method so the frontend
     can restore all steps without the user re-entering anything."""
@@ -468,7 +482,12 @@ async def get_wizard_state(
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": tenant_id},
-        {"mongo_provision": 1, "entity_configs": 1, "method_identities": 1, "wizard_draft": 1},
+        {
+            "mongo_provision": 1,
+            "entity_configs": 1,
+            "method_identities": 1,
+            "wizard_draft": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -489,12 +508,12 @@ async def get_wizard_state(
     method_identity = None
 
     if method_name:
-        for mi in (doc.get("method_identities") or []):
+        for mi in doc.get("method_identities") or []:
             if mi.get("method_name") == method_name:
                 method_identity = mi
                 break
         if method_identity and method_identity.get("entity_id"):
-            for ec in (doc.get("entity_configs") or []):
+            for ec in doc.get("entity_configs") or []:
                 if ec.get("entity_id") == method_identity["entity_id"]:
                     entity_config = ec
                     break
@@ -547,16 +566,17 @@ async def get_wizard_state(
 
 # ── AI Analysis ───────────────────────────────────────────────────────
 
+
 class AnalyzeRequest(BaseModel):
     method_name: str
-    method_source: Optional[str] = None  # pre-loaded source from Electron client
+    method_source: str | None = None  # pre-loaded source from Electron client
 
 
 @entity_router.post("/{session_id}/analyze-response")
 async def analyze_response(
     session_id: str,
     payload: AnalyzeRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """AI analyzes a method to predict response field structure."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -570,8 +590,9 @@ async def analyze_response(
     # If the caller (Electron app) already sent the method source, use it directly.
     # Otherwise fall back to reading connector.py from disk (CMS server-side flow).
     if not method_source:
-        from integration.api.connector_api_routes import _resolve_connector_dir
         from pathlib import Path as _Path
+
+        from integration.api.connector_api_routes import _resolve_connector_dir
 
         # Try the session's persisted output_dir first (Electron builds on user machine)
         oid_check = ObjectId(session_id)
@@ -591,6 +612,7 @@ async def analyze_response(
             raise HTTPException(404, "connector.py not found — pass method_source in the request body")
 
         import ast as _ast
+
         source = connector_py.read_text(encoding="utf-8")
         tree = _ast.parse(source)
         for node in _ast.walk(tree):
@@ -621,20 +643,32 @@ async def analyze_response(
                 found = True
                 break
         if not found:
-            identities.append({
-                "method_name": payload.method_name,
-                "identity": "api_response_persistent",
-                "auto_detected": False,
-                "expected_response_fields": fields,
-                "field_mappings": [],
-                "entity_id": None,
-            })
+            identities.append(
+                {
+                    "method_name": payload.method_name,
+                    "identity": "api_response_persistent",
+                    "auto_detected": False,
+                    "expected_response_fields": fields,
+                    "field_mappings": [],
+                    "entity_id": None,
+                }
+            )
         await sessions_collection().update_one(
             {"_id": oid, "tenant_id": tenant_id},
-            {"$set": {"method_identities": identities, "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    "method_identities": identities,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
 
-    logger.info("entity.response_analyzed", session_id=session_id, method=payload.method_name, fields=len(fields))
+    logger.info(
+        "entity.response_analyzed",
+        session_id=session_id,
+        method=payload.method_name,
+        fields=len(fields),
+    )
     return {"ok": True, "method_name": payload.method_name, "predicted_fields": fields}
 
 
@@ -642,7 +676,7 @@ async def analyze_response(
 async def apply_persistence_to_connector(
     session_id: str,
     method_name: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Refactors connector.py to use a BaseRepository subclass for MongoDB persistence.
 
@@ -662,8 +696,14 @@ async def apply_persistence_to_connector(
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": tenant_id},
-        {"method_identities": 1, "entity_configs": 1, "mongo_provision": 1,
-         "provider": 1, "service_slug": 1, "connector_name": 1},
+        {
+            "method_identities": 1,
+            "entity_configs": 1,
+            "mongo_provision": 1,
+            "provider": 1,
+            "service_slug": 1,
+            "connector_name": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -724,7 +764,11 @@ async def apply_persistence_to_connector(
             mapping_lines.append(f'            "{entity_field}": {transform},')
         else:
             mapping_lines.append(f'            "{entity_field}": response.get("{resp_path}"),')
-    mappings_str = "\n".join(mapping_lines) if mapping_lines else '            # no explicit mappings — persisting full response\n            **response,'
+    mappings_str = (
+        "\n".join(mapping_lines)
+        if mapping_lines
+        else "            # no explicit mappings — persisting full response\n            **response,"
+    )
 
     repo_code = f'''"""Auto-generated repository for {_clean_slug} connector.
 
@@ -755,11 +799,14 @@ class {_repo_class}(BaseRepository):
     logger.info("entity.repo_generated", session_id=session_id, file=str(repo_file))
 
     # ── Step 2: LLM refactors connector.py to use the repository ──────
-    mapping_desc = "\n".join(
-        f"  - response['{fm.get('response_path','')}'] → '{fm.get('entity_field','')}'"
-        + (f" (transform: {fm.get('transform','')})" if fm.get("transform") else "")
-        for fm in field_mappings
-    ) or "  (no explicit mappings — persist full response dict)"
+    mapping_desc = (
+        "\n".join(
+            f"  - response['{fm.get('response_path', '')}'] → '{fm.get('entity_field', '')}'"
+            + (f" (transform: {fm.get('transform', '')})" if fm.get("transform") else "")
+            for fm in field_mappings
+        )
+        or "  (no explicit mappings — persist full response dict)"
+    )
 
     prompt = f"""You are refactoring a Python connector class to use a repository class for MongoDB persistence.
 
@@ -810,7 +857,8 @@ Return the COMPLETE modified connector.py source. No markdown fences. No explana
     if new_source.startswith("```"):
         lines = new_source.splitlines()
         new_source = "\n".join(
-            line for i, line in enumerate(lines)
+            line
+            for i, line in enumerate(lines)
             if not (i == 0 and line.startswith("```")) and not (i == len(lines) - 1 and line.strip() == "```")
         )
 
@@ -818,13 +866,17 @@ Return the COMPLETE modified connector.py source. No markdown fences. No explana
     try:
         ast.parse(new_source)
     except SyntaxError as exc:
-        raise HTTPException(422, f"LLM produced code with syntax error: {exc}. Retry or check field mappings.")
+        raise HTTPException(
+            422,
+            f"LLM produced code with syntax error: {exc}. Retry or check field mappings.",
+        )
 
     connector_py.write_text(new_source, encoding="utf-8")
 
     # ── Step 3: Persist entity builder config to R2 ────────────────────
     try:
         from integration.services.r2_service import store_entity_builder_config
+
         r2_payload = {
             "method_name": method_name,
             "entity_id": entity_id,
@@ -837,13 +889,24 @@ Return the COMPLETE modified connector.py source. No markdown fences. No explana
             "prompt": prompt,
         }
         await store_entity_builder_config(_provider, _service_slug, method_name, r2_payload)
-        logger.info("entity.r2_config_saved", provider=_provider, service_slug=_service_slug, method=method_name)
+        logger.info(
+            "entity.r2_config_saved",
+            provider=_provider,
+            service_slug=_service_slug,
+            method=method_name,
+        )
     except Exception as _r2_exc:
         logger.warning("entity.r2_config_save_failed", error=str(_r2_exc))
 
-    logger.info("entity.persistence_applied", session_id=session_id, method=method_name,
-                collection=collection_name, database=database_name,
-                repo_class=_repo_class, repo_file=str(repo_file))
+    logger.info(
+        "entity.persistence_applied",
+        session_id=session_id,
+        method=method_name,
+        collection=collection_name,
+        database=database_name,
+        repo_class=_repo_class,
+        repo_file=str(repo_file),
+    )
     return {
         "ok": True,
         "method_name": method_name,
@@ -858,7 +921,7 @@ Return the COMPLETE modified connector.py source. No markdown fences. No explana
 @entity_router.post("/{session_id}/inject-persistence-step")
 async def inject_persistence_step(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """Inject implement_persistence step into the session plan (before write_tests).
 
@@ -866,7 +929,7 @@ async def inject_persistence_step(
     already exists.
     """
     from datetime import datetime as _dt
-    import uuid as _uuid
+
     tenant_id = _get_tenant(x_tenant_id)
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
@@ -926,7 +989,7 @@ class GenerateCodeRequest(BaseModel):
 async def generate_persistence_code(
     session_id: str,
     payload: GenerateCodeRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ):
     """AI generates persistence code for a method + entity pair."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -943,7 +1006,7 @@ async def generate_persistence_code(
 
     # Find entity config
     entity = None
-    for ec in (doc.get("entity_configs") or []):
+    for ec in doc.get("entity_configs") or []:
         if ec.get("entity_id") == payload.entity_id:
             entity = ec
             break
@@ -952,7 +1015,7 @@ async def generate_persistence_code(
 
     # Find method identity + mappings
     method_identity = None
-    for mi in (doc.get("method_identities") or []):
+    for mi in doc.get("method_identities") or []:
         if mi.get("method_name") == payload.method_name:
             method_identity = mi
             break
@@ -960,8 +1023,10 @@ async def generate_persistence_code(
     field_mappings = (method_identity or {}).get("field_mappings", [])
 
     # Import lazily
-    from integration.services.identity_detection_service import generate_persistence_code as _gen_code
     from integration.api.connector_api_routes import _resolve_connector_dir
+    from integration.services.identity_detection_service import (
+        generate_persistence_code as _gen_code,
+    )
 
     out_dir = await _resolve_connector_dir(session_id, tenant_id)
     connector_py = out_dir / "connector.py"
@@ -972,6 +1037,7 @@ async def generate_persistence_code(
 
     # Extract method source
     import ast
+
     tree = ast.parse(source)
     method_source = ""
     for node in ast.walk(tree):

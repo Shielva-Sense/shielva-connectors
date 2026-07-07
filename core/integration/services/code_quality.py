@@ -3,16 +3,18 @@
 import ast
 import re
 import subprocess
-import structlog
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+import structlog
 
 logger = structlog.get_logger(__name__)
 
 
 # ── Non-AI syntax auto-fixer ─────────────────────────────────────────────────
 
-def auto_fix_python_file(path: Path) -> Dict[str, Any]:
+
+def auto_fix_python_file(path: Path) -> dict[str, Any]:
     """Run a chain of non-AI rule-based fixers on a Python file, then verify with ast.parse.
 
     NOTE: test files (test_*.py) are intentionally skipped — autoflake/ruff can remove
@@ -52,8 +54,10 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                     while _i < len(_fixed_lines):
                         _line = _fixed_lines[_i]
                         # Detect `def foo(...):` or `async def foo(...):` or `class Foo:` with no body
-                        if re.match(r'^(\s*)(async\s+)?def\s+\w+.*:\s*$', _line) or re.match(r'^(\s*)class\s+\w+.*:\s*$', _line):
-                            _indent_m = re.match(r'^(\s*)', _line)
+                        if re.match(r"^(\s*)(async\s+)?def\s+\w+.*:\s*$", _line) or re.match(
+                            r"^(\s*)class\s+\w+.*:\s*$", _line
+                        ):
+                            _indent_m = re.match(r"^(\s*)", _line)
                             _base_indent = _indent_m.group(1) if _indent_m else ""
                             _body_indent = _base_indent + "    "
                             # Check if next line exists and is NOT indented more (empty body)
@@ -92,9 +96,19 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                         tree = ast.parse(src)
                         # Continue to class fixture checks below
                 except Exception:
-                    return {"clean": False, "tools_applied": [], "tools_failed": [], "syntax_error": f"line {exc.lineno}: {exc.msg}"}
+                    return {
+                        "clean": False,
+                        "tools_applied": [],
+                        "tools_failed": [],
+                        "syntax_error": f"line {exc.lineno}: {exc.msg}",
+                    }
             else:
-                return {"clean": False, "tools_applied": [], "tools_failed": [], "syntax_error": f"line {exc.lineno}: {exc.msg}"}
+                return {
+                    "clean": False,
+                    "tools_applied": [],
+                    "tools_failed": [],
+                    "syntax_error": f"line {exc.lineno}: {exc.msg}",
+                }
 
         # ── Auto-fix: remove @pytest.fixture applied to a class (test class, not fixture fn) ──
         # Also auto-fix: move @pytest.fixture from inside a class body to module level
@@ -112,9 +126,9 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                 if not isinstance(_cn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
                 _has_fix = any(
-                    (isinstance(_d, ast.Attribute) and _d.attr == "fixture") or
-                    (isinstance(_d, ast.Call) and isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture") or
-                    (isinstance(_d, ast.Name) and _d.id == "fixture")
+                    (isinstance(_d, ast.Attribute) and _d.attr == "fixture")
+                    or (isinstance(_d, ast.Call) and isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
+                    or (isinstance(_d, ast.Name) and _d.id == "fixture")
                     for _d in _cn.decorator_list
                 )
                 if not _has_fix:
@@ -123,8 +137,7 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                 _has_self_param = _fn_args and _fn_args[0].arg == "self"
                 # Also catch: self already removed from params but body still uses self.x = ...
                 _has_self_body = any(
-                    isinstance(_sn, ast.Attribute) and
-                    isinstance(_sn.value, ast.Name) and _sn.value.id == "self"
+                    isinstance(_sn, ast.Attribute) and isinstance(_sn.value, ast.Name) and _sn.value.id == "self"
                     for _sn in ast.walk(_cn)
                 )
                 if _has_self_param or _has_self_body:
@@ -142,12 +155,15 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
             if isinstance(_top, ast.ClassDef):
                 for _dec in _top.decorator_list:
                     if (
-                        (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture") or
-                        (isinstance(_dec, ast.Name) and _dec.id == "fixture") or
-                        (isinstance(_dec, ast.Call) and (
-                            (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture") or
-                            (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
-                        ))
+                        (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture")
+                        or (isinstance(_dec, ast.Name) and _dec.id == "fixture")
+                        or (
+                            isinstance(_dec, ast.Call)
+                            and (
+                                (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture")
+                                or (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
+                            )
+                        )
                     ):
                         _class_deco_lines.add(_dec.lineno - 1)  # 0-indexed
 
@@ -168,12 +184,15 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                 if isinstance(_top, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     for _d in _top.decorator_list:
                         if (
-                            (isinstance(_d, ast.Attribute) and _d.attr == "fixture") or
-                            (isinstance(_d, ast.Name) and _d.id == "fixture") or
-                            (isinstance(_d, ast.Call) and (
-                                (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture") or
-                                (isinstance(_d.func, ast.Name) and _d.func.id == "fixture")
-                            ))
+                            (isinstance(_d, ast.Attribute) and _d.attr == "fixture")
+                            or (isinstance(_d, ast.Name) and _d.id == "fixture")
+                            or (
+                                isinstance(_d, ast.Call)
+                                and (
+                                    (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
+                                    or (isinstance(_d.func, ast.Name) and _d.func.id == "fixture")
+                                )
+                            )
                         ):
                             _existing_mod_fixtures.add(_top.name)
 
@@ -185,32 +204,37 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                         continue
                     for _d in _fn.decorator_list:
                         if (
-                            (isinstance(_d, ast.Attribute) and _d.attr == "fixture") or
-                            (isinstance(_d, ast.Name) and _d.id == "fixture") or
-                            (isinstance(_d, ast.Call) and (
-                                (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture") or
-                                (isinstance(_d.func, ast.Name) and _d.func.id == "fixture")
-                            ))
+                            (isinstance(_d, ast.Attribute) and _d.attr == "fixture")
+                            or (isinstance(_d, ast.Name) and _d.id == "fixture")
+                            or (
+                                isinstance(_d, ast.Call)
+                                and (
+                                    (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
+                                    or (isinstance(_d.func, ast.Name) and _d.func.id == "fixture")
+                                )
+                            )
                         ):
                             _dec_start = _d.lineno - 1
                             _fn_end = getattr(_fn, "end_lineno", _fn.lineno)
-                            _extractions2.append({
-                                "class_lineno_0": _cls.lineno - 1,
-                                "fn_start_0": _dec_start,
-                                "fn_end_0": _fn_end,
-                                "fn_name": _fn.name,
-                            })
+                            _extractions2.append(
+                                {
+                                    "class_lineno_0": _cls.lineno - 1,
+                                    "fn_start_0": _dec_start,
+                                    "fn_end_0": _fn_end,
+                                    "fn_name": _fn.name,
+                                }
+                            )
                             break
 
             if _extractions2:
                 _new_lines2 = list(_lines2)
                 for _ext in sorted(_extractions2, key=lambda x: x["fn_start_0"], reverse=True):
-                    _raw = _new_lines2[_ext["fn_start_0"]:_ext["fn_end_0"]]
+                    _raw = _new_lines2[_ext["fn_start_0"] : _ext["fn_end_0"]]
                     _dedented = [l[4:] if l.startswith("    ") else l for l in _raw]
-                    del _new_lines2[_ext["fn_start_0"]:_ext["fn_end_0"]]
+                    del _new_lines2[_ext["fn_start_0"] : _ext["fn_end_0"]]
                     if _ext["fn_name"] not in _existing_mod_fixtures:
                         _ins = min(_ext["class_lineno_0"], len(_new_lines2))
-                        _new_lines2[_ins:_ins] = _dedented + [""]
+                        _new_lines2[_ins:_ins] = [*_dedented, ""]
                         _existing_mod_fixtures.add(_ext["fn_name"])
                 src = "\n".join(_new_lines2)
                 _changed = True
@@ -221,18 +245,32 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
             try:
                 ast.parse(src)
                 path.write_text(src, encoding="utf-8")
-                return {"clean": True, "tools_applied": ["class-fixture-autofix"], "tools_failed": []}
-            except SyntaxError as exc:
+                return {
+                    "clean": True,
+                    "tools_applied": ["class-fixture-autofix"],
+                    "tools_failed": [],
+                }
+            except SyntaxError:
                 # Revert — auto-fix broke something
                 path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
 
         try:
             ast.parse(path.read_text(encoding="utf-8"))
-            return {"clean": True, "tools_applied": [], "tools_failed": [], "skipped": "test file"}
+            return {
+                "clean": True,
+                "tools_applied": [],
+                "tools_failed": [],
+                "skipped": "test file",
+            }
         except SyntaxError as exc:
-            return {"clean": False, "tools_applied": [], "tools_failed": [], "syntax_error": f"line {exc.lineno}: {exc.msg}"}
+            return {
+                "clean": False,
+                "tools_applied": [],
+                "tools_failed": [],
+                "syntax_error": f"line {exc.lineno}: {exc.msg}",
+            }
 
-    result: Dict[str, Any] = {"clean": False, "tools_applied": [], "tools_failed": []}
+    result: dict[str, Any] = {"clean": False, "tools_applied": [], "tools_failed": []}
     file_str = str(path)
 
     # 1. autoflake — remove unused imports / variables
@@ -266,7 +304,8 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
                 "check",
                 "--fix",
                 "--unsafe-fixes",
-                "--select", "E,F,W,I",   # errors, pyflakes, warnings, isort
+                "--select",
+                "E,F,W,I",  # errors, pyflakes, warnings, isort
                 file_str,
             ],
             capture_output=True,
@@ -303,7 +342,7 @@ def auto_fix_python_file(path: Path) -> Dict[str, Any]:
     return result
 
 
-def analyze_file(path: str) -> Dict[str, Any]:
+def analyze_file(path: str) -> dict[str, Any]:
     """Analyze a Python file and return quality metrics.
 
     Returns:
@@ -339,11 +378,7 @@ def analyze_file(path: str) -> Dict[str, Any]:
     documented = 0
     total_docable = len(functions) + len(classes)
     for node in functions + classes:
-        if (
-            node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-        ):
+        if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant):
             documented += 1
 
     docstring_coverage = (documented / total_docable * 100) if total_docable > 0 else 100
@@ -358,10 +393,10 @@ def analyze_file(path: str) -> Dict[str, Any]:
     # Quality score (weighted)
     score = 0.0
     score += min(docstring_coverage, 100) * 0.30  # 30% docstrings
-    score += min(type_hint_coverage, 100) * 0.20   # 20% type hints
-    score += (20 if line_count > 10 else 5)         # 20% substantive code
-    score += (15 if len(classes) >= 1 else 5)        # 15% has class structure
-    score += (15 if len(functions) >= 3 else 5)      # 15% enough functions
+    score += min(type_hint_coverage, 100) * 0.20  # 20% type hints
+    score += 20 if line_count > 10 else 5  # 20% substantive code
+    score += 15 if len(classes) >= 1 else 5  # 15% has class structure
+    score += 15 if len(functions) >= 3 else 5  # 15% enough functions
 
     return {
         "line_count": line_count,
@@ -377,7 +412,7 @@ def analyze_file(path: str) -> Dict[str, Any]:
     }
 
 
-def analyze_directory(directory: str) -> Dict[str, Any]:
+def analyze_directory(directory: str) -> dict[str, Any]:
     """Analyze all Python files in a directory."""
     root = Path(directory)
     if not root.exists():

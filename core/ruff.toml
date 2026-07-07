@@ -1,0 +1,38 @@
+# Shielva fleet ruff standard (pinned to CI's ruff 0.15.7).
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "BLE", "A", "COM", "DTZ", "ISC", "PIE", "PT", "RET", "SIM", "ARG", "PTH", "PL", "RUF"]
+ignore = [
+    "E501", "COM812", "ISC001", "PLR0913", "PLR2004", "S101", "B008", "PLC0415",
+    "ARG001", "ARG002", "ARG003", "ARG005", "BLE001", "E402", "PLW0603", "PLW0602",
+    "PLW2901", "RUF001", "RUF002", "RUF003", "PLR0915", "PLR0912", "PLR0911",
+    "PLR0914", "PLR0904", "S110", "S112", "SIM105", "DTZ003", "B904",
+    # fleet extensions (style/preference):
+    "PTH",      # pathlib preference — os.path acceptable
+    "UP042",    # StrEnum __str__ semantics
+    # Subprocess is CORE to this connector-generation service: it drives pip,
+    # pytest, venv creation and python codegen. Args are internally constructed
+    # (no untrusted shell), so shell-equals / partial-path / no-check bandit
+    # rules do not apply to the design.
+    "S603", "S607", "PLW1510",
+    # Legacy style families present across this codebase; behaviour-neutral.
+    "RUF006",   # asyncio dangling task (fire-and-forget by design)
+    "RUF013",   # implicit Optional in annotations
+    "E741",     # ambiguous var name (l/I/O) in existing code
+    "SIM102",   # collapsible if
+    "SIM108",   # if-else to ternary (readability preference)
+    "SIM117",   # nested with-statements
+    "B023",     # function uses loop variable (closures used deliberately here)
+    "PT028",    # pytest param with default
+    "UP045",    # Optional[X] annotation style
+    "PLW1508",  # non-str envvar default
+    "B024", "B027",  # ABC without abstractmethod (marker base classes)
+    "RUF012",   # mutable class default
+    "RUF034",   # useless if-else
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311"]
+"scripts/**" = ["S"]

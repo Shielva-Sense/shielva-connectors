@@ -20,12 +20,13 @@ the ACP UI reads (via `/connectors/types`) to render the rich advanced-connector
 catalog (display_name, description, auth_type, oauth_scopes, apis, install_fields,
 …) without per-pod filesystem reads.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -43,8 +44,11 @@ _META_ID = "__catalog_meta__"
 def _snapshot_hash(payload: dict) -> str:
     """Stable content hash over the connector list (order-independent)."""
     items = payload.get("connectors", []) or []
-    body = json.dumps(sorted(items, key=lambda c: c.get("connector_type") or ""),
-                      sort_keys=True, separators=(",", ":"))
+    body = json.dumps(
+        sorted(items, key=lambda c: c.get("connector_type") or ""),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
@@ -89,8 +93,7 @@ async def seed_catalog_if_needed() -> dict:
         # Fast path — marker hash matches the snapshot → catalog already current.
         marker = await coll.find_one({"_id": _META_ID})
         if marker and marker.get("hash") == new_hash:
-            logger.info("connector_catalog.up_to_date",
-                        count=len(connectors), hash=new_hash[:8])
+            logger.info("connector_catalog.up_to_date", count=len(connectors), hash=new_hash[:8])
             return {"seeded": 0, "skipped": "hash_match", "count": len(connectors)}
 
         # Bulk-upsert: _id = connector_type, payload = the raw metadata doc.
@@ -107,15 +110,24 @@ async def seed_catalog_if_needed() -> dict:
 
         await coll.replace_one(
             {"_id": _META_ID},
-            {"_id": _META_ID, "hash": new_hash, "count": len(ops),
-             "snapshot_version": payload.get("version"),
-             "seeded_at": datetime.now(timezone.utc).isoformat()},
+            {
+                "_id": _META_ID,
+                "hash": new_hash,
+                "count": len(ops),
+                "snapshot_version": payload.get("version"),
+                "seeded_at": datetime.now(UTC).isoformat(),
+            },
             upsert=True,
         )
-        logger.info("connector_catalog.seeded", count=len(ops), hash=new_hash[:8],
-                    db=_DB_NAME, collection=_COLL_NAME)
+        logger.info(
+            "connector_catalog.seeded",
+            count=len(ops),
+            hash=new_hash[:8],
+            db=_DB_NAME,
+            collection=_COLL_NAME,
+        )
         return {"seeded": len(ops), "hash": new_hash, "count": len(connectors)}
-    except Exception as exc:  # noqa: BLE001 — seed must never crash boot
+    except Exception as exc:
         logger.error("connector_catalog.seed_failed", error=str(exc)[:300])
         return {"seeded": 0, "skipped": "error", "error": str(exc)[:200]}
     finally:
@@ -139,7 +151,7 @@ async def list_catalog() -> list[dict]:
             d.pop("_id", None)
             out.append(d)
         return out
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("connector_catalog.list_failed", error=str(exc)[:200])
         return []
     finally:

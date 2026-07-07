@@ -26,7 +26,7 @@ Usage inside a connector method:
 
 from abc import ABC
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -47,7 +47,7 @@ class BaseRepository(ABC):
         self,
         tenant_id: str,
         connection_string: str,
-        database_name: Optional[str] = None,
+        database_name: str | None = None,
     ):
         self.tenant_id = tenant_id
         self.connection_string = connection_string
@@ -60,6 +60,7 @@ class BaseRepository(ABC):
     def _motor_client(self):
         if self._client is None:
             from motor.motor_asyncio import AsyncIOMotorClient
+
             self._client = AsyncIOMotorClient(
                 self.connection_string,
                 serverSelectionTimeoutMS=5000,
@@ -80,7 +81,7 @@ class BaseRepository(ABC):
 
     # ── Generic CRUD helpers ──────────────────────────────────────────
 
-    async def insert_one(self, collection_name: str, document: Dict[str, Any]) -> str:
+    async def insert_one(self, collection_name: str, document: dict[str, Any]) -> str:
         """Insert a document, injecting tenant_id + created_at automatically."""
         doc = {
             **document,
@@ -91,41 +92,32 @@ class BaseRepository(ABC):
         logger.info("repo.insert", collection=collection_name, id=str(result.inserted_id))
         return str(result.inserted_id)
 
-    async def find_one(
-        self, collection_name: str, query: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        return await self.collection(collection_name).find_one(
-            {**query, "tenant_id": self.tenant_id}
-        )
+    async def find_one(self, collection_name: str, query: dict[str, Any]) -> dict[str, Any] | None:
+        return await self.collection(collection_name).find_one({**query, "tenant_id": self.tenant_id})
 
     async def find_many(
         self,
         collection_name: str,
-        query: Dict[str, Any],
+        query: dict[str, Any],
         limit: int = 100,
-        sort_by: Optional[str] = None,
+        sort_by: str | None = None,
         descending: bool = True,
-    ) -> List[Dict[str, Any]]:
-        cursor = self.collection(collection_name).find(
-            {**query, "tenant_id": self.tenant_id}
-        )
+    ) -> list[dict[str, Any]]:
+        cursor = self.collection(collection_name).find({**query, "tenant_id": self.tenant_id})
         if sort_by:
             from pymongo import ASCENDING, DESCENDING
+
             cursor = cursor.sort(sort_by, DESCENDING if descending else ASCENDING)
         return await cursor.limit(limit).to_list(length=limit)
 
-    async def update_one(
-        self, collection_name: str, query: Dict[str, Any], updates: Dict[str, Any]
-    ) -> bool:
+    async def update_one(self, collection_name: str, query: dict[str, Any], updates: dict[str, Any]) -> bool:
         result = await self.collection(collection_name).update_one(
             {**query, "tenant_id": self.tenant_id},
             {"$set": {**updates, "updated_at": datetime.utcnow()}},
         )
         return result.modified_count > 0
 
-    async def upsert_one(
-        self, collection_name: str, query: Dict[str, Any], document: Dict[str, Any]
-    ) -> str:
+    async def upsert_one(self, collection_name: str, query: dict[str, Any], document: dict[str, Any]) -> str:
         doc = {
             **document,
             "tenant_id": self.tenant_id,
@@ -139,15 +131,9 @@ class BaseRepository(ABC):
         )
         return str(result.get("_id", ""))
 
-    async def delete_one(
-        self, collection_name: str, query: Dict[str, Any]
-    ) -> bool:
-        result = await self.collection(collection_name).delete_one(
-            {**query, "tenant_id": self.tenant_id}
-        )
+    async def delete_one(self, collection_name: str, query: dict[str, Any]) -> bool:
+        result = await self.collection(collection_name).delete_one({**query, "tenant_id": self.tenant_id})
         return result.deleted_count > 0
 
-    async def count(self, collection_name: str, query: Dict[str, Any]) -> int:
-        return await self.collection(collection_name).count_documents(
-            {**query, "tenant_id": self.tenant_id}
-        )
+    async def count(self, collection_name: str, query: dict[str, Any]) -> int:
+        return await self.collection(collection_name).count_documents({**query, "tenant_id": self.tenant_id})

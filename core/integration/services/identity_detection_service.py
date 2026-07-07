@@ -7,21 +7,21 @@ Provides:
 """
 
 import ast
-from pathlib import Path
-from typing import Any, Dict, List
+import json
+from typing import Any
 
 import structlog
 
 logger = structlog.get_logger(__name__)
 
 
-async def predict_response_fields(method_source: str, method_name: str) -> List[Dict[str, Any]]:
+async def predict_response_fields(method_source: str, method_name: str) -> list[dict[str, Any]]:
     """Analyze a method's source to predict response field structure.
 
     Uses AST analysis first, then falls back to LLM for ambiguous cases.
     Returns a list of {path, inferred_type, description} dicts.
     """
-    fields: List[Dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
     seen_paths: set = set()
 
     def _add_field(path: str, description: str) -> None:
@@ -80,7 +80,6 @@ Return ONLY the JSON array, no other text."""
                 temperature=0.1,
             )
 
-            import json
             content = llm_response.get("content", "")
             # Extract JSON from response
             if "```" in content:
@@ -98,8 +97,8 @@ Return ONLY the JSON array, no other text."""
 
 async def generate_persistence_code(
     method_source: str,
-    entity_config: Dict[str, Any],
-    field_mappings: List[Dict[str, Any]],
+    entity_config: dict[str, Any],
+    field_mappings: list[dict[str, Any]],
 ) -> str:
     """Generate persistence code for a method + entity pair.
 
@@ -121,7 +120,7 @@ async def generate_persistence_code(
         else:
             mapping_lines.append(f'        "{entity_field}": response.get("{resp_path}"),')
 
-    mappings_str = "\n".join(mapping_lines) if mapping_lines else '        # Add field mappings here'
+    mappings_str = "\n".join(mapping_lines) if mapping_lines else "        # Add field mappings here"
 
     code = f'''# ── Auto-generated persistence code ──────────────────────────────────
 # Entity: {collection_name} in {database_name}
@@ -179,7 +178,6 @@ Requirements:
 
 Return ONLY the Python code, no markdown or explanation."""
 
-            import json
             llm_response = await call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 model="gemini-2.0-flash-lite",

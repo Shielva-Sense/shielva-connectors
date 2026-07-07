@@ -2,17 +2,21 @@
 Credential Models
 SQLAlchemy models for credential storage.
 """
-from sqlalchemy import Column, String, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
+
 import uuid
 from datetime import datetime
 
+from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy.ext.declarative import declarative_base
+
 Base = declarative_base()
+
 
 class CredentialModel(Base):
     """
     SQLAlchemy model for storing encrypted credentials.
     """
+
     __tablename__ = "integration_credentials"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))

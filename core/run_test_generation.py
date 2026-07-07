@@ -25,10 +25,10 @@ import time
 from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR   = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 CONNECTOR_DIR = SCRIPT_DIR / "generated_connectors" / "shielva-sense" / "shielva_gmail_connector"
-TESTS_DIR    = CONNECTOR_DIR / "tests"
-TEST_FILE    = TESTS_DIR / "test_connector.py"
+TESTS_DIR = CONNECTOR_DIR / "tests"
+TEST_FILE = TESTS_DIR / "test_connector.py"
 CONNECTOR_PY = CONNECTOR_DIR / "connector.py"
 
 # Add required paths
@@ -38,19 +38,23 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 # ── Load .env (GEMINI_API_KEY etc.) ───────────────────────────────────────────
 from dotenv import load_dotenv
+
 load_dotenv(SCRIPT_DIR / "integration" / ".env")
 
 GEMINI_API_KEY = os.environ.get("INTEGRATION_GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("INTEGRATION_GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("INTEGRATION_GEMINI_MODEL", "gemini-2.0-flash")
 
 if not GEMINI_API_KEY:
     print("ERROR: INTEGRATION_GEMINI_API_KEY not set in integration/.env")
     sys.exit(1)
 
 # ── Gemini API call ────────────────────────────────────────────────────────────
-import httpx, json
+import json
+
+import httpx
 
 FALLBACK_MODEL = "gemini-2.0-flash"
+
 
 async def call_gemini(system: str, user: str, max_tokens: int = 32768, _model: str = None) -> str:
     """Call Gemini streaming endpoint and return full response text.
@@ -78,11 +82,19 @@ async def call_gemini(system: str, user: str, max_tokens: int = 32768, _model: s
             chunks = []
             chars = 0
             async with httpx.AsyncClient(timeout=300.0) as client:
-                async with client.stream("POST", url, headers={"Content-Type": "application/json"}, json=payload) as resp:
+                async with client.stream(
+                    "POST",
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                ) as resp:
                     if resp.status_code == 503:
                         body = await resp.aread()
-                        wait = 2 ** attempt_num
-                        print(f"\n  ⚠️  Gemini 503 (attempt {attempt_num+1}/6) — retrying in {wait}s...", flush=True)
+                        wait = 2**attempt_num
+                        print(
+                            f"\n  ⚠️  Gemini 503 (attempt {attempt_num + 1}/6) — retrying in {wait}s...",
+                            flush=True,
+                        )
                         await asyncio.sleep(wait)
                         continue
                     if resp.status_code != 200:
@@ -104,7 +116,11 @@ async def call_gemini(system: str, user: str, max_tokens: int = 32768, _model: s
                                         chunks.append(txt)
                                         chars += len(txt)
                                         if chars % 500 < len(txt):
-                                            print(f"  ⚡ Gemini [{use_model}] generating... ({chars} chars)", end="\r", flush=True)
+                                            print(
+                                                f"  ⚡ Gemini [{use_model}] generating... ({chars} chars)",
+                                                end="\r",
+                                                flush=True,
+                                            )
                         except Exception:
                             pass
             print()
@@ -114,7 +130,7 @@ async def call_gemini(system: str, user: str, max_tokens: int = 32768, _model: s
         except Exception as exc:
             if attempt_num >= 5:
                 raise
-            wait = 2 ** attempt_num
+            wait = 2**attempt_num
             print(f"\n  ⚠️  Error ({exc}) — retrying in {wait}s...", flush=True)
             await asyncio.sleep(wait)
 
@@ -122,17 +138,27 @@ async def call_gemini(system: str, user: str, max_tokens: int = 32768, _model: s
 
 
 # ── Pytest runner ──────────────────────────────────────────────────────────────
-import sysconfig, site as _site
+import site as _site
+import sysconfig
 
-_SITE_PKGS  = sysconfig.get_paths().get("purelib", "")
-_USER_SITE  = _site.getusersitepackages() if hasattr(_site, "getusersitepackages") else ""
+_SITE_PKGS = sysconfig.get_paths().get("purelib", "")
+_USER_SITE = _site.getusersitepackages() if hasattr(_site, "getusersitepackages") else ""
+
 
 def run_pytest() -> dict:
     """Run pytest on TESTS_DIR and return {returncode, output, passed, failed, errors}."""
-    pythonpath = os.pathsep.join(filter(None, [
-        str(CONNECTOR_DIR), str(CONNECTOR_DIR.parent),
-        _SITE_PKGS, _USER_SITE, str(SCRIPT_DIR),
-    ]))
+    pythonpath = os.pathsep.join(
+        filter(
+            None,
+            [
+                str(CONNECTOR_DIR),
+                str(CONNECTOR_DIR.parent),
+                _SITE_PKGS,
+                _USER_SITE,
+                str(SCRIPT_DIR),
+            ],
+        )
+    )
 
     # Ensure pytest.ini exists with per-test timeout
     pytest_ini = CONNECTOR_DIR / "pytest.ini"
@@ -149,9 +175,19 @@ def run_pytest() -> dict:
         )
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(TESTS_DIR),
-         "-v", "--tb=long", "--no-header", f"--rootdir={CONNECTOR_DIR}"],
-        capture_output=True, text=True, timeout=120,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(TESTS_DIR),
+            "-v",
+            "--tb=long",
+            "--no-header",
+            f"--rootdir={CONNECTOR_DIR}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
         cwd=str(CONNECTOR_DIR),
         env={**os.environ, "PYTHONPATH": pythonpath},
     )
@@ -159,7 +195,13 @@ def run_pytest() -> dict:
     passed = output.count(" PASSED")
     failed = output.count(" FAILED")
     errors = output.count("ERROR collecting") + output.count("ERROR tests/")
-    return {"returncode": result.returncode, "output": output, "passed": passed, "failed": failed, "errors": errors}
+    return {
+        "returncode": result.returncode,
+        "output": output,
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+    }
 
 
 # ── AST helpers ────────────────────────────────────────────────────────────────
@@ -171,12 +213,15 @@ def extract_public_methods(source: str) -> list[str]:
         return []
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            bases = [b.id if isinstance(b, ast.Name) else (b.attr if isinstance(b, ast.Attribute) else "") for b in node.bases]
+            bases = [
+                b.id if isinstance(b, ast.Name) else (b.attr if isinstance(b, ast.Attribute) else "")
+                for b in node.bases
+            ]
             if "BaseConnector" in bases:
                 return [
-                    n.name for n in node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and not n.name.startswith("_")
+                    n.name
+                    for n in node.body
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_")
                 ]
     return []
 
@@ -195,6 +240,7 @@ def strip_markdown_fences(code: str) -> str:
 def get_real_names_from_connector(connector_path: Path) -> set:
     """Collect all exported names from connector.py and sibling .py files."""
     real: set = set()
+
     def _collect(path: Path):
         try:
             src = path.read_text(encoding="utf-8")
@@ -211,6 +257,7 @@ def get_real_names_from_connector(connector_path: Path) -> set:
                         real.add(alias.asname or alias.name)
         except Exception:
             pass
+
     _collect(connector_path)
     for f in connector_path.parent.glob("*.py"):
         if f != connector_path:
@@ -223,7 +270,7 @@ def strip_hallucinated_imports(code: str, real_names: set) -> str:
     lines = code.splitlines()
     out = []
     for line in lines:
-        m = re.match(r'^(from connector import )(.+)$', line.strip())
+        m = re.match(r"^(from connector import )(.+)$", line.strip())
         if m:
             prefix = m.group(1)
             names = [n.strip() for n in m.group(2).split(",")]
@@ -301,7 +348,7 @@ def build_fix_system_prompt(class_name: str) -> str:
 # ── Main loop ─────────────────────────────────────────────────────────────────
 async def main():
     print("=" * 70)
-    print(f"  Shielva Gmail Connector — Gemini Test Generation + Auto-Fix Loop")
+    print("  Shielva Gmail Connector — Gemini Test Generation + Auto-Fix Loop")
     print(f"  Model: {GEMINI_MODEL}")
     print("=" * 70)
 
@@ -323,11 +370,11 @@ async def main():
             pass
 
     # Extract class name and method signatures
-    cls_match = re.search(r'^class\s+(\w+)\s*\(BaseConnector\)', connector_source, re.MULTILINE)
+    cls_match = re.search(r"^class\s+(\w+)\s*\(BaseConnector\)", connector_source, re.MULTILINE)
     class_name = cls_match.group(1) if cls_match else "Connector"
 
-    all_sigs  = re.findall(r'^\s+(async def \w+\s*\([^)]*\)[^:]*:)', connector_source, re.MULTILINE)
-    pub_sigs  = "\n".join("  " + s.strip() for s in all_sigs if not re.search(r"def _", s))
+    all_sigs = re.findall(r"^\s+(async def \w+\s*\([^)]*\)[^:]*:)", connector_source, re.MULTILINE)
+    pub_sigs = "\n".join("  " + s.strip() for s in all_sigs if not re.search(r"def _", s))
     priv_sigs = "\n".join("  " + s.strip() for s in all_sigs if re.search(r"def _", s))
 
     public_methods = extract_public_methods(connector_source)
@@ -388,7 +435,18 @@ async def main():
         # Print relevant output lines
         for line in output.splitlines():
             stripped = line.strip()
-            if any(k in stripped for k in ["PASSED", "FAILED", "ERROR", "ERRORS", "passed", "failed", "error"]):
+            if any(
+                k in stripped
+                for k in [
+                    "PASSED",
+                    "FAILED",
+                    "ERROR",
+                    "ERRORS",
+                    "passed",
+                    "failed",
+                    "error",
+                ]
+            ):
                 print(f"  {stripped}")
 
         if pytest_result["returncode"] == 0:
@@ -433,7 +491,7 @@ async def main():
             print(f"  ⚠️ Gemini produced a syntax error ({e}) — asking for a quick syntax fix...")
             syntax_fix = await call_gemini(
                 "You are fixing a Python syntax error. Output ONLY the corrected Python code.",
-                f"Fix this SyntaxError on line {e.lineno}: {e.msg}\n\n```python\n{fixed_code}\n```"
+                f"Fix this SyntaxError on line {e.lineno}: {e.msg}\n\n```python\n{fixed_code}\n```",
             )
             syntax_fix = strip_markdown_fences(syntax_fix)
             try:

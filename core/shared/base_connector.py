@@ -2,12 +2,14 @@
 Shielva Connectors - Base Connector Abstract Class
 All connectors inherit from this base class.
 """
+
 import os
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -21,6 +23,7 @@ class RefreshError(Exception):
 
 class ConnectorHealth(str, Enum):
     """Connector health status"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     OFFLINE = "offline"
@@ -29,12 +32,13 @@ class ConnectorHealth(str, Enum):
 
 class AuthStatus(str, Enum):
     """Authentication status"""
+
     PENDING = "pending"
     CONNECTED = "connected"
     EXPIRED = "expired"
     FAILED = "failed"
     MISSING_CREDENTIALS = "missing_credentials"
-    TOKEN_EXPIRED = "token_expired"
+    TOKEN_EXPIRED = "token_expired"  # noqa: S105 — OAuth status literal, not a secret
     AUTHENTICATED = "authenticated"
     UNAUTHENTICATED = "unauthenticated"
     INVALID_CREDENTIALS = "invalid_credentials"
@@ -42,6 +46,7 @@ class AuthStatus(str, Enum):
 
 class SyncStatus(str, Enum):
     """Sync job status"""
+
     IDLE = "idle"
     SYNCING = "syncing"
     COMPLETED = "completed"
@@ -52,64 +57,69 @@ class SyncStatus(str, Enum):
 
 class MethodIdentity(str, Enum):
     """Behavioral identity of a connector method."""
-    API_RESPONSE = "api_response"                      # Returns raw API response, no processing
-    VOID = "void"                                       # No return value — side-effect only
-    API_RESPONSE_PROCESSED = "api_response_processed"   # Returns transformed/processed API response
-    API_RESPONSE_PERSISTENT = "api_response_persistent" # Returns API response + persists to entity
+
+    API_RESPONSE = "api_response"  # Returns raw API response, no processing
+    VOID = "void"  # No return value — side-effect only
+    API_RESPONSE_PROCESSED = "api_response_processed"  # Returns transformed/processed API response
+    API_RESPONSE_PERSISTENT = "api_response_persistent"  # Returns API response + persists to entity
 
 
 @dataclass
 class TokenInfo:
     """OAuth token information"""
+
     access_token: str
-    refresh_token: Optional[str] = None
-    expires_at: Optional[datetime] = None
-    token_type: str = "Bearer"
-    scopes: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    raw: Optional[Dict[str, Any]] = None  # raw token response from OAuth provider
+    refresh_token: str | None = None
+    expires_at: datetime | None = None
+    token_type: str = "Bearer"  # noqa: S105 — OAuth token_type field literal, not a secret
+    scopes: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] | None = None  # raw token response from OAuth provider
 
 
 @dataclass
 class ConnectorStatus:
     """Connector status information"""
+
     connector_id: str
     health: ConnectorHealth
     auth_status: AuthStatus
     connector_type: str = ""
-    last_sync: Optional[datetime] = None
+    last_sync: datetime | None = None
     documents_indexed: int = 0
-    error: Optional[str] = None
-    message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class NormalizedDocument:
     """Normalized document from any connector"""
+
     id: str
     source_id: str  # ID in the external system
     title: str
     content: str
     content_type: str = "text"  # text, html, markdown, pdf, etc.
-    source_url: Optional[str] = None
-    url: Optional[str] = None  # alias for source_url
-    author: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    source: Optional[str] = None  # connector type
-    tenant_id: Optional[str] = None
-    connector_id: Optional[str] = None
+    source_url: str | None = None
+    url: str | None = None  # alias for source_url
+    author: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    source: str | None = None  # connector type
+    tenant_id: str | None = None
+    connector_id: str | None = None
 
     # For chunking
-    parent_id: Optional[str] = None
-    chunk_index: Optional[int] = None
+    parent_id: str | None = None
+    chunk_index: int | None = None
 
 
 @dataclass
 class SyncResult:
     """Result of a sync operation"""
+
     status: SyncStatus
     job_id: str = ""
     connector_id: str = ""
@@ -117,9 +127,9 @@ class SyncResult:
     documents_synced: int = 0
     documents_failed: int = 0
     started_at: datetime = field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
-    errors: List[str] = field(default_factory=list)
-    message: Optional[str] = None
+    completed_at: datetime | None = None
+    errors: list[str] = field(default_factory=list)
+    message: str | None = None
 
 
 class BaseConnector(ABC):
@@ -160,19 +170,14 @@ class BaseConnector(ABC):
     #   "none"                      – No authentication required
     AUTH_TYPE: str = "oauth2_code"  # override in subclasses
 
-    REQUIRED_SCOPES: List[str] = []
+    REQUIRED_SCOPES: list[str] = []
 
     @property
-    def SUPPORTED_AUTH_TYPES(self) -> List[str]:
+    def SUPPORTED_AUTH_TYPES(self) -> list[str]:
         """Backward-compatibility alias — prefer AUTH_TYPE class attribute."""
         return [getattr(self.__class__, "AUTH_TYPE", "oauth2_code")]
 
-    def __init__(
-        self,
-        tenant_id: str,
-        connector_id: str,
-        config: Dict[str, Any] = None
-    ):
+    def __init__(self, tenant_id: str, connector_id: str, config: dict[str, Any] = None):
         """
         Initialize connector.
 
@@ -184,8 +189,8 @@ class BaseConnector(ABC):
         self.tenant_id = tenant_id
         self.connector_id = connector_id
         self.config = config or {}
-        self._token_info: Optional[TokenInfo] = None
-        self._metadata: Dict[str, Any] = {}  # in-memory checkpoint store
+        self._token_info: TokenInfo | None = None
+        self._metadata: dict[str, Any] = {}  # in-memory checkpoint store
         self._status = ConnectorStatus(
             connector_id=connector_id,
             health=ConnectorHealth.OFFLINE,
@@ -196,12 +201,12 @@ class BaseConnector(ABC):
         logger.info(
             "Connector initialized",
             connector_type=self.CONNECTOR_TYPE,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         self.ingestion_url = os.getenv("INGESTION_SERVICE_URL", "https://localhost:8007")
 
-    async def save_config(self, config: Dict[str, Any]) -> None:
+    async def save_config(self, config: dict[str, Any]) -> None:
         """Persist connector configuration by merging into self.config.
 
         Generated connectors call this to save install-time settings and
@@ -215,10 +220,11 @@ class BaseConnector(ABC):
     # Default: in-memory dict (sufficient for unit tests and short-lived workers).
     # Production: platform overrides via Redis so values survive process restarts.
 
-    async def get_metadata(self, key: str) -> Optional[Any]:
+    async def get_metadata(self, key: str) -> Any | None:
         """Return checkpoint value for *key*, or None if not set."""
         try:
             from services.connector_store import connector_store
+
             value = await connector_store.get_connector_metadata(self.connector_id, key)
             if value is not None:
                 return value
@@ -231,6 +237,7 @@ class BaseConnector(ABC):
         self._metadata[key] = value
         try:
             from services.connector_store import connector_store
+
             await connector_store.set_connector_metadata(self.connector_id, key, value)
         except Exception:
             pass  # in-memory fallback is enough when Redis is unavailable
@@ -278,25 +285,22 @@ class BaseConnector(ABC):
                     logger.info(
                         "Loaded valid tokens from Redis",
                         connector_id=self.connector_id,
-                        has_refresh_token=bool(self._token_info.refresh_token)
+                        has_refresh_token=bool(self._token_info.refresh_token),
                     )
                 else:
                     self._status.auth_status = AuthStatus.EXPIRED
                     logger.warning(
                         "Loaded expired tokens from Redis",
                         connector_id=self.connector_id,
-                        has_refresh_token=bool(self._token_info.refresh_token)
+                        has_refresh_token=bool(self._token_info.refresh_token),
                     )
             else:
-                logger.info(
-                    "No persisted tokens found in Redis",
-                    connector_id=self.connector_id
-                )
+                logger.info("No persisted tokens found in Redis", connector_id=self.connector_id)
         except Exception as e:
             logger.error(
                 "Failed to load tokens from Redis",
                 connector_id=self.connector_id,
-                error=str(e)
+                error=str(e),
             )
 
     # ===== Lifecycle Methods =====
@@ -336,9 +340,9 @@ class BaseConnector(ABC):
     #   AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
     #   TOKEN_URI = "https://oauth2.googleapis.com/token"
     #   REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-    AUTH_URI: Optional[str] = None
-    TOKEN_URI: Optional[str] = None
-    DEVICE_AUTH_URI: Optional[str] = None  # override in subclasses for device flow
+    AUTH_URI: str | None = None
+    TOKEN_URI: str | None = None
+    DEVICE_AUTH_URI: str | None = None  # override in subclasses for device flow
 
     def get_oauth_url(self, redirect_uri: str, state: str = None, use_pkce: bool = False) -> str:
         """Build a standard OAuth2 Authorization Code URL.
@@ -406,11 +410,11 @@ class BaseConnector(ABC):
         scope_str = " ".join(scopes) if scopes else ""
 
         # ── build base params ─────────────────────────────────────────
-        params: Dict[str, str] = {
-            "client_id":     client_id,
-            "redirect_uri":  redirect_uri or "",
+        params: dict[str, str] = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri or "",
             "response_type": "code",
-            "scope":         scope_str,
+            "scope": scope_str,
         }
         if state:
             params["state"] = state
@@ -422,8 +426,8 @@ class BaseConnector(ABC):
         #     `offline_access` scope. Providers that issue a refresh token by default in
         #     the auth-code flow simply ignore the extra scope.
         if "google" in auth_uri.lower():
-            params["access_type"] = "offline"   # request refresh_token
-            params["prompt"] = "consent"         # always show consent so refresh_token is issued
+            params["access_type"] = "offline"  # request refresh_token
+            params["prompt"] = "consent"  # always show consent so refresh_token is issued
         elif scope_str and "offline_access" not in scope_str.split():
             scope_str = (scope_str + " offline_access").strip()
             params["scope"] = scope_str
@@ -433,17 +437,18 @@ class BaseConnector(ABC):
             import base64
             import hashlib
             import secrets
+
             code_verifier = secrets.token_urlsafe(64)
-            code_challenge = base64.urlsafe_b64encode(
-                hashlib.sha256(code_verifier.encode()).digest()
-            ).rstrip(b"=").decode()
+            code_challenge = (
+                base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).rstrip(b"=").decode()
+            )
             self._pkce_code_verifier = code_verifier  # authorize() must read this
             params["code_challenge"] = code_challenge
             params["code_challenge_method"] = "S256"
 
         return f"{auth_uri}?{urllib.parse.urlencode(params)}"
 
-    async def probe_oauth_credentials(self, redirect_uri: str) -> Dict[str, Any]:
+    async def probe_oauth_credentials(self, redirect_uri: str) -> dict[str, Any]:
         """Pre-flight credential validation for OAuth2 Authorization Code connectors.
 
         Sends a deliberately-invalid authorization_code to the TOKEN_URI.
@@ -476,55 +481,46 @@ class BaseConnector(ABC):
         )
         if not token_uri:
             # No TOKEN_URI — can't probe; let gateway fall through to the OAuth popup
-            return {"valid": True, "error": None, "message": "Token URI not configured — skipping probe.", "raw": None}
+            return {
+                "valid": True,
+                "error": None,
+                "message": "Token URI not configured — skipping probe.",
+                "raw": None,
+            }
 
-        client_id = (
-            self.config.get("client_id")
-            or getattr(self, "client_id", None)
-            or ""
-        )
-        client_secret = (
-            self.config.get("client_secret")
-            or getattr(self, "client_secret", None)
-            or ""
-        )
+        client_id = self.config.get("client_id") or getattr(self, "client_id", None) or ""
+        client_secret = self.config.get("client_secret") or getattr(self, "client_secret", None) or ""
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
 
         payload = {
-            "grant_type":    "authorization_code",
-            "code":          "shielva_probe_invalid_code",   # intentionally fake
-            "client_id":     client_id,
+            "grant_type": "authorization_code",
+            "code": "shielva_probe_invalid_code",  # intentionally fake
+            "client_id": client_id,
             "client_secret": client_secret,
-            "redirect_uri":  redirect_uri,
+            "redirect_uri": redirect_uri,
         }
         if scopes:
             payload["scope"] = " ".join(scopes)
 
         # Human-readable messages for common OAuth error codes
-        _ERROR_MESSAGES: Dict[str, str] = {
-            "invalid_client":
-                "Invalid Client ID or Client Secret. "
-                "Double-check both values in your provider's developer console.",
-            "unauthorized_client":
-                "This OAuth client is not authorized to use this grant type. "
-                "Ensure the client is configured for Authorization Code flow.",
-            "redirect_uri_mismatch":
-                "Redirect URI not registered with this OAuth client. "
-                "Add the redirect URI shown above to your provider's OAuth app settings.",
-            "invalid_scope":
-                "One or more scopes are not recognised by the provider. "
-                "Check the scope names and ensure your app has the required permissions.",
-            "access_denied":
-                "The provider denied access to this OAuth client. "
-                "Verify the client is enabled and has the correct scopes.",
-            "invalid_grant":
-                None,   # expected — means credentials are valid, only the probe code was rejected
+        _ERROR_MESSAGES: dict[str, str] = {
+            "invalid_client": "Invalid Client ID or Client Secret. "
+            "Double-check both values in your provider's developer console.",
+            "unauthorized_client": "This OAuth client is not authorized to use this grant type. "
+            "Ensure the client is configured for Authorization Code flow.",
+            "redirect_uri_mismatch": "Redirect URI not registered with this OAuth client. "
+            "Add the redirect URI shown above to your provider's OAuth app settings.",
+            "invalid_scope": "One or more scopes are not recognised by the provider. "
+            "Check the scope names and ensure your app has the required permissions.",
+            "access_denied": "The provider denied access to this OAuth client. "
+            "Verify the client is enabled and has the correct scopes.",
+            "invalid_grant": None,  # expected — means credentials are valid, only the probe code was rejected
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10, verify=False) as http:
+            async with httpx.AsyncClient(timeout=10, verify=False) as http:  # noqa: S501 — internal in-cluster call; harden w/ CA bundle (SOC2 debt)
                 resp = await http.post(token_uri, data=payload)
                 try:
                     body = resp.json()
@@ -535,16 +531,31 @@ class BaseConnector(ABC):
 
             if not error_code:
                 # Unexpected success with a fake code — treat as valid and move on
-                return {"valid": True, "error": None, "message": "Credential probe passed.", "raw": body}
+                return {
+                    "valid": True,
+                    "error": None,
+                    "message": "Credential probe passed.",
+                    "raw": body,
+                }
 
             if error_code == "invalid_grant":
                 # Expected: provider rejected our fake code, but accepted client credentials
-                return {"valid": True, "error": None, "message": "Credentials verified.", "raw": body}
+                return {
+                    "valid": True,
+                    "error": None,
+                    "message": "Credentials verified.",
+                    "raw": body,
+                }
 
             human_msg = _ERROR_MESSAGES.get(error_code)
             if human_msg is not None:
                 # Known credential / config error — surface this to the user
-                return {"valid": False, "error": error_code, "message": human_msg, "raw": body}
+                return {
+                    "valid": False,
+                    "error": error_code,
+                    "message": human_msg,
+                    "raw": body,
+                }
 
             # Unknown error code — could be provider-specific; don't block the OAuth flow
             logger.info(
@@ -553,15 +564,37 @@ class BaseConnector(ABC):
                 error_code=error_code,
                 body=body,
             )
-            return {"valid": True, "error": error_code,
-                    "message": f"Provider returned '{error_code}' — proceeding to OAuth.", "raw": body}
+            return {
+                "valid": True,
+                "error": error_code,
+                "message": f"Provider returned '{error_code}' — proceeding to OAuth.",
+                "raw": body,
+            }
 
         except httpx.TimeoutException:
-            logger.warning("probe_oauth.timeout", connector_type=self.CONNECTOR_TYPE, token_uri=token_uri)
-            return {"valid": True, "error": "timeout", "message": "Provider did not respond in time — proceeding to OAuth.", "raw": None}
+            logger.warning(
+                "probe_oauth.timeout",
+                connector_type=self.CONNECTOR_TYPE,
+                token_uri=token_uri,
+            )
+            return {
+                "valid": True,
+                "error": "timeout",
+                "message": "Provider did not respond in time — proceeding to OAuth.",
+                "raw": None,
+            }
         except Exception as _probe_err:
-            logger.warning("probe_oauth.error", connector_type=self.CONNECTOR_TYPE, error=str(_probe_err))
-            return {"valid": True, "error": "network_error", "message": "Could not reach provider — proceeding to OAuth.", "raw": None}
+            logger.warning(
+                "probe_oauth.error",
+                connector_type=self.CONNECTOR_TYPE,
+                error=str(_probe_err),
+            )
+            return {
+                "valid": True,
+                "error": "network_error",
+                "message": "Could not reach provider — proceeding to OAuth.",
+                "raw": None,
+            }
 
     async def authorize_client_credentials(self) -> "TokenInfo":
         """Default OAuth2 Client Credentials Grant implementation.
@@ -571,7 +604,7 @@ class BaseConnector(ABC):
         Subclasses can override for provider-specific behavior.
         """
         import sys
-        from datetime import timedelta, timezone
+        from datetime import timedelta
 
         import httpx
 
@@ -614,7 +647,7 @@ class BaseConnector(ABC):
         token_info = TokenInfo(
             access_token=data["access_token"],
             token_type=data.get("token_type", "Bearer"),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
             raw=data,
         )
         await self.set_token(token_info)
@@ -629,7 +662,7 @@ class BaseConnector(ABC):
         Reads TOKEN_URI, client_id, username, password from self.config.
         """
         import sys
-        from datetime import timedelta, timezone
+        from datetime import timedelta
 
         import httpx
 
@@ -664,7 +697,7 @@ class BaseConnector(ABC):
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
             token_type=data.get("token_type", "Bearer"),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=int(expires_in)),
+            expires_at=datetime.now(UTC) + timedelta(seconds=int(expires_in)),
             raw=data,
         )
         await self.set_token(token_info)
@@ -688,7 +721,11 @@ class BaseConnector(ABC):
         device_auth_uri = (
             self.config.get("device_auth_uri")
             or getattr(self.__class__, "DEVICE_AUTH_URI", None)
-            or getattr(sys.modules.get(self.__class__.__module__, None), "DEVICE_AUTH_URI", None)
+            or getattr(
+                sys.modules.get(self.__class__.__module__, None),
+                "DEVICE_AUTH_URI",
+                None,
+            )
         )
         if not device_auth_uri:
             raise ValueError(f"DEVICE_AUTH_URI not set for connector '{self.CONNECTOR_TYPE}'")
@@ -733,7 +770,7 @@ class BaseConnector(ABC):
         Raises ValueError on 'access_denied' or 'expired_token'.
         """
         import sys
-        from datetime import timedelta, timezone
+        from datetime import timedelta
 
         import httpx
 
@@ -773,7 +810,7 @@ class BaseConnector(ABC):
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
             token_type=data.get("token_type", "Bearer"),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=int(expires_in)),
+            expires_at=datetime.now(UTC) + timedelta(seconds=int(expires_in)),
             raw=data,
         )
         await self.set_token(token_info)
@@ -787,7 +824,6 @@ class BaseConnector(ABC):
         Creates a google.oauth2.service_account.Credentials and fetches a token.
         Falls back to a generic JWT assertion flow if google-auth is not installed.
         """
-        from datetime import timezone
 
         sa_json = self.config.get("service_account_json") or self.config.get("service_account_key")
         if not sa_json:
@@ -795,6 +831,7 @@ class BaseConnector(ABC):
 
         if isinstance(sa_json, str):
             import json as _json
+
             try:
                 sa_json = _json.loads(sa_json)
             except Exception:
@@ -816,8 +853,8 @@ class BaseConnector(ABC):
 
             token_info = TokenInfo(
                 access_token=creds.token,
-                token_type="Bearer",
-                expires_at=creds.expiry.replace(tzinfo=timezone.utc) if creds.expiry else None,
+                token_type="Bearer",  # noqa: S106 — OAuth token_type field literal, not a secret
+                expires_at=creds.expiry.replace(tzinfo=UTC) if creds.expiry else None,
                 raw={"access_token": creds.token, "token_type": "Bearer"},
             )
             await self.set_token(token_info)
@@ -835,7 +872,7 @@ class BaseConnector(ABC):
         and directly for connectors with AUTH_TYPE = 'jwt'.
         """
         import sys
-        from datetime import timedelta, timezone
+        from datetime import timedelta
 
         import httpx
 
@@ -854,7 +891,7 @@ class BaseConnector(ABC):
         client_email = key_info.get("client_email") or self.config.get("client_email") or self.config.get("iss")
         audience = key_info.get("token_uri") or token_uri
 
-        now = int(datetime.now(timezone.utc).timestamp())
+        now = int(datetime.now(UTC).timestamp())
         claims = {
             "iss": client_email,
             "sub": client_email,
@@ -878,7 +915,7 @@ class BaseConnector(ABC):
         token_info = TokenInfo(
             access_token=data["access_token"],
             token_type=data.get("token_type", "Bearer"),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=int(expires_in)),
+            expires_at=datetime.now(UTC) + timedelta(seconds=int(expires_in)),
             raw=data,
         )
         await self.set_token(token_info)
@@ -889,14 +926,16 @@ class BaseConnector(ABC):
 
         Priority: class AUTH_TYPE → self.config["auth_type"] → "oauth2_code" (default)
         """
-        return (
-            getattr(self.__class__, "AUTH_TYPE", None)
-            or self.config.get("auth_type")
-            or "oauth2_code"
-        ).lower()
+        return (getattr(self.__class__, "AUTH_TYPE", None) or self.config.get("auth_type") or "oauth2_code").lower()
 
     @abstractmethod
-    async def sync(self, since: datetime = None, full: bool = False, kb_id: str = None, webhook_url: str = None) -> SyncResult:
+    async def sync(
+        self,
+        since: datetime = None,
+        full: bool = False,
+        kb_id: str = None,
+        webhook_url: str = None,
+    ) -> SyncResult:
         """
         Sync data from external system.
 
@@ -919,7 +958,7 @@ class BaseConnector(ABC):
             ConnectorStatus with health info
         """
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self) -> dict[str, Any]:
         """
         Test connection configuration.
         Default implementation checks health if possible or returns success.
@@ -928,18 +967,11 @@ class BaseConnector(ABC):
         # Default: if we can init, we assume config format is okay.
         # But we can try health_check if we have tokens?
         # For a new connection, we usually don't have tokens yet.
-        return {
-            "success": True,
-            "message": "Configuration valid"
-        }
+        return {"success": True, "message": "Configuration valid"}
 
     # ===== Data Methods =====
 
-    async def fetch_documents(
-        self,
-        filters: Dict[str, Any] = None,
-        limit: int = 100
-    ) -> List[NormalizedDocument]:
+    async def fetch_documents(self, filters: dict[str, Any] = None, limit: int = 100) -> list[NormalizedDocument]:
         """
         Fetch specific documents.
 
@@ -952,10 +984,7 @@ class BaseConnector(ABC):
         """
         raise NotImplementedError("Override in subclass")
 
-    async def stream_documents(
-        self,
-        since: datetime = None
-    ) -> AsyncGenerator[NormalizedDocument, None]:
+    async def stream_documents(self, since: datetime = None) -> AsyncGenerator[NormalizedDocument, None]:
         """
         Stream documents as they're fetched.
 
@@ -978,7 +1007,13 @@ class BaseConnector(ABC):
             NormalizedDocument
         """
 
-    async def ingest_batch(self, documents: List[NormalizedDocument], *, kb_id: str = "", webhook_url: str = None) -> bool:
+    async def ingest_batch(
+        self,
+        documents: list[NormalizedDocument],
+        *,
+        kb_id: str = "",
+        webhook_url: str = None,
+    ) -> bool:
         """
         Send a batch of normalized documents to the Ingestion Worker.
         Also publishes progress to Redis.
@@ -988,20 +1023,22 @@ class BaseConnector(ABC):
 
         # Publish Progress to Redis
         try:
-            pass
-
             # Use connector_store's redis client or create new one?
             # Ideally we inject a redis client. For now let's use the one from store if accessible,
             # or rely on the scheduler publishing? No, this runs in the worker process (or thread).
             # We need a Redis client here.
             # Let's import redis and create a quick client for publishing events
-            await self.publish_event(kb_id, "IngestionProgress", {
-                "kb_id": kb_id,
-                "status": "ingesting",
-                "details": f"Ingesting batch of {len(documents)} documents...",
-                "docs_count": len(documents),
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            await self.publish_event(
+                kb_id,
+                "IngestionProgress",
+                {
+                    "kb_id": kb_id,
+                    "status": "ingesting",
+                    "details": f"Ingesting batch of {len(documents)} documents...",
+                    "docs_count": len(documents),
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
         except Exception as e:
             logger.error("Failed to publish progress to Redis", error=str(e))
 
@@ -1015,10 +1052,10 @@ class BaseConnector(ABC):
                     "title": doc.title,
                     "doc_type": doc.content_type,
                     "source_url": doc.source_url,
-                    "metadata": doc.metadata
+                    "metadata": doc.metadata,
                 }
                 for doc in documents
-            ]
+            ],
         }
 
         async with httpx.AsyncClient() as client:
@@ -1027,13 +1064,13 @@ class BaseConnector(ABC):
                     f"{self.ingestion_url}/ingest",
                     json=payload,
                     headers={"X-Tenant-ID": self.tenant_id},
-                    timeout=60.0
+                    timeout=60.0,
                 )
                 if response.status_code != 200:
                     logger.error(
                         "Ingestion failed",
                         status_code=response.status_code,
-                        text=response.text
+                        text=response.text,
                     )
                     return False
                 return True
@@ -1041,7 +1078,7 @@ class BaseConnector(ABC):
                 logger.error("Error sending to ingestion worker", error=str(e))
                 return False
 
-    async def publish_event(self, kb_id: str, event_type: str, payload: Dict[str, Any]):
+    async def publish_event(self, kb_id: str, event_type: str, payload: dict[str, Any]):
         """Publish event to Redis for SSE"""
         if not kb_id:
             return
@@ -1055,26 +1092,34 @@ class BaseConnector(ABC):
             r = redis.from_url(redis_url, decode_responses=True)
 
             channel = f"kb_events:{kb_id}"
-            event = {
-                "type": event_type,
-                "payload": payload
-            }
+            event = {"type": event_type, "payload": payload}
 
             await r.publish(channel, json.dumps(event))
             await r.aclose()
         except Exception as e:
             logger.error("Failed to publish event", kb_id=kb_id, error=str(e))
 
-    async def report_status(self, kb_id: str, status: str, details: str, docs_count: int = 0, webhook_url: str = None):
+    async def report_status(
+        self,
+        kb_id: str,
+        status: str,
+        details: str,
+        docs_count: int = 0,
+        webhook_url: str = None,
+    ):
         """Report status to Redis and Webhook"""
         # 1. Publish to Redis (SSE)
-        await self.publish_event(kb_id, "IngestionProgress" if status == "ingesting" else "SyncCompleted", {
-            "kb_id": kb_id,
-            "status": status,
-            "details": details,
-            "docs_count": docs_count,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        await self.publish_event(
+            kb_id,
+            "IngestionProgress" if status == "ingesting" else "SyncCompleted",
+            {
+                "kb_id": kb_id,
+                "status": status,
+                "details": details,
+                "docs_count": docs_count,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
         # 2. Call Webhook (DB Update)
         if webhook_url:
@@ -1086,24 +1131,24 @@ class BaseConnector(ABC):
                             "status": status,
                             "documents_processed": docs_count,
                             "chunks_created": 0,
-                            "info": details
+                            "info": details,
                         },
                         headers={"X-Tenant-ID": self.tenant_id},
-                        timeout=10.0
+                        timeout=10.0,
                     )
                     if response.status_code != 200:
                         logger.error(
                             "Webhook returned non-200 status",
                             url=webhook_url,
                             status_code=response.status_code,
-                            response_text=response.text[:200]
+                            response_text=response.text[:200],
                         )
                 except Exception as e:
                     logger.error("Failed to connect to webhook", url=webhook_url, error=str(e))
 
     # ===== Event Handlers =====
 
-    async def handle_webhook(self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    async def handle_webhook(self, payload: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:
         """
         Handle incoming webhook / S2S callback from the provider.
 
@@ -1121,11 +1166,11 @@ class BaseConnector(ABC):
         logger.info(
             "Webhook received",
             connector_type=self.CONNECTOR_TYPE,
-            payload_size=len(str(payload))
+            payload_size=len(str(payload)),
         )
         return {"status": "ignored", "message": "No webhook handler implemented"}
 
-    async def process_callback(self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    async def process_callback(self, payload: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:
         """
         Verify and process inbound webhook payload with signature/checksum verification.
 
@@ -1142,7 +1187,7 @@ class BaseConnector(ABC):
         """
         return {"verified": True, "data": payload}
 
-    async def handle_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Process a single event from an event stream or push notification.
 
@@ -1155,9 +1200,13 @@ class BaseConnector(ABC):
         Returns:
             {"event_id": ..., "processed": True, ...}
         """
-        return {"event_id": event.get("id", ""), "processed": False, "message": "No event handler implemented"}
+        return {
+            "event_id": event.get("id", ""),
+            "processed": False,
+            "message": "No event handler implemented",
+        }
 
-    async def batch_processor(self, items: list, **kwargs) -> Dict[str, Any]:
+    async def batch_processor(self, items: list, **kwargs) -> dict[str, Any]:
         """
         Process a batch of queued items from the provider.
 
@@ -1171,7 +1220,11 @@ class BaseConnector(ABC):
         Returns:
             {"processed": N, "failed": N, "errors": [...]}
         """
-        return {"processed": 0, "failed": 0, "errors": [{"message": "No batch processor implemented"}]}
+        return {
+            "processed": 0,
+            "failed": 0,
+            "errors": [{"message": "No batch processor implemented"}],
+        }
 
     async def on_token_refresh(self) -> TokenInfo:
         """
@@ -1188,7 +1241,7 @@ class BaseConnector(ABC):
         """Get current connector status."""
         return self._status
 
-    async def get_token(self) -> Optional[TokenInfo]:
+    async def get_token(self) -> TokenInfo | None:
         """Get current token information."""
         return self._token_info
 
@@ -1204,6 +1257,7 @@ class BaseConnector(ABC):
 
         # Persist tokens to Redis asynchronously
         import asyncio
+
         try:
             from services.connector_store import connector_store
 
@@ -1213,18 +1267,16 @@ class BaseConnector(ABC):
                 "token_type": token_info.token_type,
                 "refresh_token": token_info.refresh_token,
                 "expires_at": token_info.expires_at.isoformat() if token_info.expires_at else None,
-                "scope": " ".join(token_info.scopes) if token_info.scopes else None
+                "scope": " ".join(token_info.scopes) if token_info.scopes else None,
             }
 
             # Save to Redis (fire and forget)
-            asyncio.create_task(
-                connector_store.save_connector_tokens(self.connector_id, token_data)
-            )
+            asyncio.create_task(connector_store.save_connector_tokens(self.connector_id, token_data))
         except Exception as e:
             logger.error(
                 "Failed to persist tokens to Redis",
                 connector_id=self.connector_id,
-                error=str(e)
+                error=str(e),
             )
 
     def is_token_valid(self) -> bool:
@@ -1235,7 +1287,7 @@ class BaseConnector(ABC):
             return False
 
         if self._token_info.expires_at:
-            return datetime.now(timezone.utc) < self._token_info.expires_at
+            return datetime.now(UTC) < self._token_info.expires_at
 
         return True
 
@@ -1255,14 +1307,24 @@ class BaseConnector(ABC):
 
                     # Update and persist new token via set_token which saves to Redis
                     await self.set_token(new_token_info)
-                    logger.info("Token refreshed and persisted to Redis", connector_id=self.connector_id)
+                    logger.info(
+                        "Token refreshed and persisted to Redis",
+                        connector_id=self.connector_id,
+                    )
                     return new_token_info
                 except Exception as e:
-                    logger.error("Token refresh failed", connector_id=self.connector_id, error=str(e))
+                    logger.error(
+                        "Token refresh failed",
+                        connector_id=self.connector_id,
+                        error=str(e),
+                    )
                     self._status.auth_status = AuthStatus.FAILED
                     raise RefreshError("Token refresh failed") from e
             else:
-                logger.error("Token expired and no refresh token available", connector_id=self.connector_id)
+                logger.error(
+                    "Token expired and no refresh token available",
+                    connector_id=self.connector_id,
+                )
                 self._status.auth_status = AuthStatus.EXPIRED
                 raise RefreshError("Token expired and no refresh token available")
 

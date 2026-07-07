@@ -16,6 +16,7 @@ BUCKET = os.getenv("INTEGRATION_R2_BUCKET_NAME", "shielvasense")
 if not all([ACCOUNT_ID, ACCESS_KEY, SECRET_KEY]):
     # Try loading from .env
     from dotenv import load_dotenv
+
     load_dotenv()
     ACCOUNT_ID = os.getenv("INTEGRATION_R2_ACCOUNT_ID", "")
     ACCESS_KEY = os.getenv("INTEGRATION_R2_ACCESS_KEY_ID", "")

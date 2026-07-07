@@ -11,26 +11,31 @@ Messages:
   Client → Server: {"type": "input", "data": "..."} | {"type": "resize", "cols": N, "rows": N}
   Server → Client: {"type": "output", "data": "..."} | {"type": "exit"}
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Optional, Set
+from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+
+if TYPE_CHECKING:
+    import ptyprocess  # type: ignore
 
 logger = structlog.get_logger(__name__)
 
 terminal_router = APIRouter()
 
 _CONNECTORS_ROOT = Path(__file__).resolve().parent.parent.parent
-_GENERATED_ROOT  = _CONNECTORS_ROOT / "generated_connectors"
+_GENERATED_ROOT = _CONNECTORS_ROOT / "generated_connectors"
 
 # How long (seconds) to keep an idle session alive after all clients disconnect
 SESSION_TTL_IDLE = 2 * 60 * 60  # 2 hours
@@ -40,6 +45,7 @@ OUTPUT_BUFFER_BYTES = 512 * 1024  # 512 KB
 
 # ─── Persistent session registry ─────────────────────────────────────────────
 
+
 class TerminalSession:
     """
     A live PTY process that persists across WebSocket reconnects.
@@ -47,20 +53,20 @@ class TerminalSession:
     """
 
     def __init__(self, session_id: str, proc, loop: asyncio.AbstractEventLoop):
-        self.session_id  = session_id
-        self.proc        = proc           # ptyprocess.PtyProcessUnicode
-        self.loop        = loop
-        self.created_at  = time.time()
+        self.session_id = session_id
+        self.proc = proc  # ptyprocess.PtyProcessUnicode
+        self.loop = loop
+        self.created_at = time.time()
         self.last_active = time.time()
 
         # Rolling output buffer for replay on reconnect
-        self._buf_lock  = threading.Lock()
+        self._buf_lock = threading.Lock()
         self._buf: deque[str] = deque()
-        self._buf_size  = 0
+        self._buf_size = 0
 
         # Active WebSocket subscribers
         self._sub_lock: threading.Lock = threading.Lock()
-        self._subscribers: Set[WebSocket] = set()
+        self._subscribers: set[WebSocket] = set()
 
         # Reader thread
         self._stop = threading.Event()
@@ -99,9 +105,7 @@ class TerminalSession:
             subs = set(self._subscribers)
         for ws in subs:
             try:
-                asyncio.run_coroutine_threadsafe(
-                    ws.send_text(msg), self.loop
-                ).result(timeout=3)
+                asyncio.run_coroutine_threadsafe(ws.send_text(msg), self.loop).result(timeout=3)
             except Exception:
                 pass  # subscriber disconnected — will be removed on WS close
 
@@ -132,10 +136,8 @@ class TerminalSession:
 
     def resize(self, rows: int, cols: int) -> None:
         if self.proc.isalive():
-            try:
+            with contextlib.suppress(Exception):
                 self.proc.setwinsize(rows, cols)
-            except Exception:
-                pass
 
     def is_alive(self) -> bool:
         return self.proc.isalive()
@@ -156,7 +158,7 @@ class _SessionRegistry:
         self._lock: threading.Lock = threading.Lock()
         self._store: dict[str, TerminalSession] = {}
 
-    def get(self, session_id: str) -> Optional[TerminalSession]:
+    def get(self, session_id: str) -> TerminalSession | None:
         with self._lock:
             return self._store.get(session_id)
 
@@ -175,10 +177,7 @@ class _SessionRegistry:
         """Remove sessions that have been idle beyond TTL."""
         now = time.time()
         with self._lock:
-            stale = [
-                sid for sid, s in self._store.items()
-                if (now - s.last_active) > SESSION_TTL_IDLE
-            ]
+            stale = [sid for sid, s in self._store.items() if (now - s.last_active) > SESSION_TTL_IDLE]
         for sid in stale:
             logger.info("terminal.session_ttl_expired", session_id=sid)
             self.remove(sid)
@@ -189,6 +188,7 @@ _sessions = _SessionRegistry()
 
 # ── Background reaper ─────────────────────────────────────────────────────────
 
+
 async def _reaper_loop():
     while True:
         await asyncio.sleep(15 * 60)  # check every 15 min
@@ -196,6 +196,7 @@ async def _reaper_loop():
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _get_connector_dir(session_id: str, tenant_id: str, provider: str, service: str) -> Path:
     if tenant_id and provider and service:
@@ -216,16 +217,19 @@ def _get_connector_dir(session_id: str, tenant_id: str, provider: str, service: 
     return _GENERATED_ROOT if _GENERATED_ROOT.exists() else Path.home()
 
 
-def _spawn_pty(cwd: Path) -> "ptyprocess.PtyProcessUnicode":
+def _spawn_pty(cwd: Path) -> ptyprocess.PtyProcessUnicode:
     import ptyprocess  # type: ignore
+
     env = dict(os.environ)
-    env.update({
-        "TERM": "xterm-256color",
-        "COLORTERM": "truecolor",
-        "LANG": "en_US.UTF-8",
-        # Suppress macOS "default shell is now zsh" banner
-        "BASH_SILENCE_DEPRECATION_WARNING": "1",
-    })
+    env.update(
+        {
+            "TERM": "xterm-256color",
+            "COLORTERM": "truecolor",
+            "LANG": "en_US.UTF-8",
+            # Suppress macOS "default shell is now zsh" banner
+            "BASH_SILENCE_DEPRECATION_WARNING": "1",
+        }
+    )
     # Use the user's own shell (zsh on macOS Catalina+, bash elsewhere).
     # No extra flags — ptyprocess opens a real PTY so the shell detects
     # interactivity automatically. Avoids incompatible flag combos on bash 3.2.
@@ -240,22 +244,21 @@ def _spawn_pty(cwd: Path) -> "ptyprocess.PtyProcessUnicode":
 
 # ─── WebSocket endpoint ───────────────────────────────────────────────────────
 
+
 @terminal_router.websocket("/integration/api/v1/terminal/{session_id}")
 async def terminal_ws(
     websocket: WebSocket,
     session_id: str,
     tenant_id: str = Query(default=""),
-    provider:   str = Query(default=""),
-    service:    str = Query(default=""),
+    provider: str = Query(default=""),
+    service: str = Query(default=""),
 ):
     await websocket.accept()
     loop = asyncio.get_event_loop()
 
     # Ensure reaper is running
-    try:
+    with contextlib.suppress(RuntimeError):
         asyncio.ensure_future(_reaper_loop())
-    except RuntimeError:
-        pass
 
     # ── Try to attach to existing session ────────────────────────────────────
     sess = _sessions.get(session_id)
@@ -267,25 +270,25 @@ async def terminal_ws(
         # Replay buffered output so client sees what it missed
         replay = sess.get_replay()
         if replay:
-            reconnect_banner = (
-                f"\r\n\x1b[33m--- Reconnected: {time.strftime('%H:%M:%S')} ---\x1b[0m\r\n"
-            )
-            try:
+            reconnect_banner = f"\r\n\x1b[33m--- Reconnected: {time.strftime('%H:%M:%S')} ---\x1b[0m\r\n"
+            with contextlib.suppress(Exception):
                 await websocket.send_text(json.dumps({"type": "output", "data": reconnect_banner + replay}))
-            except Exception:
-                pass
     else:
         # ── Spawn a new PTY session ───────────────────────────────────────────
         if sess:
             _sessions.remove(session_id)  # clean up dead session
 
         try:
-            import ptyprocess  # type: ignore
+            import ptyprocess  # type: ignore  # noqa: F401 — availability probe; _spawn_pty imports it for real use
         except ImportError:
-            await websocket.send_text(json.dumps({
-                "type": "output",
-                "data": "\r\n\x1b[31mError: ptyprocess not installed. Run: pip install ptyprocess\x1b[0m\r\n",
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "output",
+                        "data": "\r\n\x1b[31mError: ptyprocess not installed. Run: pip install ptyprocess\x1b[0m\r\n",
+                    }
+                )
+            )
             await websocket.close()
             return
 
@@ -304,10 +307,8 @@ async def terminal_ws(
             f"\x1b[90m# Session persists across reconnects\x1b[0m\r\n\r\n"
         )
         sess._buf_append(welcome)
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_text(json.dumps({"type": "output", "data": welcome}))
-        except Exception:
-            pass
 
     # ── Handle incoming messages from this client ─────────────────────────────
     try:
@@ -325,5 +326,8 @@ async def terminal_ws(
     finally:
         # ── CRITICAL: only unsubscribe, NEVER kill the process ───────────────
         sess.unsubscribe(websocket)
-        logger.info("terminal.client_disconnected", session_id=session_id,
-                    proc_alive=sess.is_alive())
+        logger.info(
+            "terminal.client_disconnected",
+            session_id=session_id,
+            proc_alive=sess.is_alive(),
+        )

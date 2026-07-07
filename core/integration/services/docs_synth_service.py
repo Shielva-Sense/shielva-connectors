@@ -19,7 +19,7 @@ Usage:
 from __future__ import annotations
 
 import re
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 import httpx
 import structlog
@@ -37,13 +37,25 @@ _WS_RE = re.compile(r"\n{3,}")
 def _strip_html(html: str) -> str:
     """Best-effort HTML → readable plain text."""
     # Remove script/style blocks entirely
-    html = re.sub(r"<(script|style)[^>]*>.*?</(script|style)>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(
+        r"<(script|style)[^>]*>.*?</(script|style)>",
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     # Replace block elements with newlines
     html = re.sub(r"<(br|p|div|h[1-6]|li|tr)[^>]*>", "\n", html, flags=re.IGNORECASE)
     # Strip remaining tags
     text = _TAG_RE.sub("", html)
     # Decode common HTML entities
-    for ent, ch in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'"), ("&nbsp;", " ")]:
+    for ent, ch in [
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", '"'),
+        ("&#39;", "'"),
+        ("&nbsp;", " "),
+    ]:
         text = text.replace(ent, ch)
     # Collapse excessive blank lines
     text = _WS_RE.sub("\n\n", text)
@@ -98,6 +110,7 @@ Be precise. Use code blocks for exact strings. Do not invent or guess — only e
 async def _synthesize(source_label: str, raw_content: str, provider: str, service: str) -> str:
     """Call the platform LLM to synthesize rules from raw content."""
     from integration.services.llm_client import call_llm
+
     _synth_base = await r2_service.get_step_prompt("SYNTHESIS_PROMPT", _SYNTHESIS_PROMPT)
     prompt = _synth_base.format(
         source_label=source_label,
@@ -119,12 +132,15 @@ async def _synthesize(source_label: str, raw_content: str, provider: str, servic
 
 # ── URL fetcher ───────────────────────────────────────────────────────
 
+
 async def _fetch_url(url: str) -> str:
     """Fetch a URL and return plain text. Returns empty string on failure."""
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; ShielvaBot/1.0)"
-        }) as client:
+        async with httpx.AsyncClient(
+            timeout=20,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ShielvaBot/1.0)"},
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             ct = resp.headers.get("content-type", "")
@@ -138,8 +154,10 @@ async def _fetch_url(url: str) -> str:
 
 # ── Ingestion helper ─────────────────────────────────────────────────
 
+
 async def _ingest(content: str, filename: str, tenant_id: str, provider: str, service: str) -> None:
     from integration.services import knowledge_service
+
     await knowledge_service.ingest_step_output(
         content=content,
         filename=filename,
@@ -152,26 +170,28 @@ async def _ingest(content: str, filename: str, tenant_id: str, provider: str, se
 
 # ── Public API ────────────────────────────────────────────────────────
 
+
 async def synthesize_and_ingest_docs(
     *,
-    docs_urls: List[str],
+    docs_urls: list[str],
     custom_rules_md: str,
     tenant_id: str,
     provider: str,
     service: str,
-    log_cb: Optional[Callable[[str], None]] = None,
+    log_cb: Callable[[str], None] | None = None,
 ) -> dict:
     """Fetch docs URLs + custom rules, synthesize, and ingest into connector KB.
 
     Returns a summary dict: {ingested_urls: [...], custom_rules: bool, errors: [...]}
     """
+
     def _log(msg: str) -> None:
         logger.info("docs_synth.progress", msg=msg)
         if log_cb:
             log_cb(msg)
 
-    ingested_urls: List[str] = []
-    errors: List[str] = []
+    ingested_urls: list[str] = []
+    errors: list[str] = []
 
     # ── 1. Process each URL ───────────────────────────────────────────
     for url in docs_urls:
@@ -247,6 +267,7 @@ Return ONLY the JSON object. No markdown fences, no explanation."""
 async def _extract_structured_fields(synthesized_md: str) -> dict:
     """Run a structured LLM extraction on synthesized docs and return field dict."""
     import json as _json
+
     from integration.services.llm_client import call_llm
 
     _extr_base = await r2_service.get_step_prompt("EXTRACTION_PROMPT", _EXTRACTION_PROMPT)
@@ -272,7 +293,7 @@ async def _extract_structured_fields(synthesized_md: str) -> dict:
 
 async def fetch_and_extract_fields(
     *,
-    docs_urls: List[str],
+    docs_urls: list[str],
     provider: str,
     service: str,
 ) -> dict:
@@ -281,7 +302,7 @@ async def fetch_and_extract_fields(
     Returns a dict with keys: scopes, base_url, auth_url, token_url,
     rate_limit_per_min, pagination_type, api_version (any may be null/absent).
     """
-    combined_synthesis: List[str] = []
+    combined_synthesis: list[str] = []
 
     for url in docs_urls:
         url = url.strip()

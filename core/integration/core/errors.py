@@ -13,6 +13,7 @@ All subclass ShielvaException so a single ``except ShielvaException`` clause
 at the boundary catches everything and the ``install_exception_handlers``
 FastAPI handler converts it to a structured JSON response.
 """
+
 from __future__ import annotations
 
 
@@ -29,10 +30,7 @@ class ShielvaException(Exception):
         self.detail = detail
 
     def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"{type(self).__name__}(message={self.message!r}, "
-            f"error_code={self.error_code!r})"
-        )
+        return f"{type(self).__name__}(message={self.message!r}, error_code={self.error_code!r})"
 
 
 class IntegrationException(ShielvaException):

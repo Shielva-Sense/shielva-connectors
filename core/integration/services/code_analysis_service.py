@@ -11,15 +11,14 @@ and returned to the frontend for rendering in the Code Explorer.
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-import httpx
 import structlog
+from bson import ObjectId
 
 from integration.core.config import settings
 from integration.db.database import sessions_collection
 from integration.services import r2_service
-from bson import ObjectId
 
 logger = structlog.get_logger(__name__)
 
@@ -28,7 +27,16 @@ _R2_KEY_SUFFIX = "code_analysis.json"
 # Warn when connector.py exceeds this size — Gemini may truncate silently
 _SOURCE_WARN_CHARS = 20_000
 # Valid section type values
-_VALID_SECTION_TYPES = {"imports", "config", "auth", "install", "sync", "helper", "error-handling", "class"}
+_VALID_SECTION_TYPES = {
+    "imports",
+    "config",
+    "auth",
+    "install",
+    "sync",
+    "helper",
+    "error-handling",
+    "class",
+}
 
 
 def _analysis_r2_key(tenant_id: str, provider: str, service_slug: str) -> str:
@@ -37,8 +45,9 @@ def _analysis_r2_key(tenant_id: str, provider: str, service_slug: str) -> str:
 
 def _output_dir(tenant_id: str, service_slug: str) -> Path:
     import re as _re
+
     base = Path(settings.GENERATED_CODE_DIR).resolve()
-    clean = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+    clean = _re.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     return base / tenant_id / f"{clean}_connector"
 
 
@@ -86,6 +95,7 @@ Example minimal valid output:
 async def _call_gemini(prompt: str, system: str) -> str:
     """Call Gemini via the shared streaming llm_client — single source of truth."""
     from integration.services.llm_client import _call_gemini as _shared_gemini
+
     return await _shared_gemini(
         [{"role": "user", "content": prompt}],
         system=system,
@@ -172,8 +182,7 @@ def _repair_mermaid(diagram: str, connector_name: str) -> str:
     if not stripped.startswith("sequenceDiagram"):
         stripped = f"sequenceDiagram\n    {stripped}"
     # Replace ->> that are not part of valid arrow
-    stripped = re.sub(r"(?<!-)-(?!>)>(?!>)", "->>", stripped)
-    return stripped
+    return re.sub(r"(?<!-)-(?!>)>(?!>)", "->>", stripped)
 
 
 async def delete_code_analysis(session_id: str, tenant_id: str) -> bool:
@@ -195,12 +204,10 @@ async def delete_code_analysis(session_id: str, tenant_id: str) -> bool:
     if not provider or not service_slug:
         return False
 
-    return await r2_service.delete_connector_docs(
-        tenant_id, provider, f"{service_slug}__code_analysis"
-    )
+    return await r2_service.delete_connector_docs(tenant_id, provider, f"{service_slug}__code_analysis")
 
 
-async def get_code_analysis(session_id: str, tenant_id: str) -> Optional[Dict]:
+async def get_code_analysis(session_id: str, tenant_id: str) -> dict | None:
     """Load stored code analysis from R2, or return None if not generated yet."""
     try:
         oid = ObjectId(session_id)
@@ -222,7 +229,7 @@ async def get_code_analysis(session_id: str, tenant_id: str) -> Optional[Dict]:
     return await r2_service.get_connector_docs(tenant_id, provider, f"{service_slug}__code_analysis")
 
 
-async def generate_code_analysis(session_id: str, tenant_id: str) -> Dict:
+async def generate_code_analysis(session_id: str, tenant_id: str) -> dict:
     """Generate AI code analysis for the connector and persist to R2."""
     try:
         oid = ObjectId(session_id)
@@ -259,13 +266,10 @@ async def generate_code_analysis(session_id: str, tenant_id: str) -> Dict:
         )
         logger.warning("code_analysis.large_source", chars=source_len, session_id=session_id)
 
-    prompt = (
-        f"Analyse this connector for {connector_name} ({provider}).\n\n"
-        f"```python\n{connector_source}\n```"
-    )
+    prompt = f"Analyse this connector for {connector_name} ({provider}).\n\n```python\n{connector_source}\n```"
 
     # ── Retry loop: up to 2 attempts with parse-error correction ──
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     last_error = ""
     for attempt in range(2):
         if attempt > 0:
@@ -286,7 +290,12 @@ async def generate_code_analysis(session_id: str, tenant_id: str) -> Dict:
             break  # success
         except json.JSONDecodeError as e:
             last_error = f"JSONDecodeError at position {e.pos}: {e.msg} (preview: {cleaned[:200]})"
-            logger.warning("code_analysis.json_parse_failed", attempt=attempt, error=last_error, session_id=session_id)
+            logger.warning(
+                "code_analysis.json_parse_failed",
+                attempt=attempt,
+                error=last_error,
+                session_id=session_id,
+            )
             if attempt == 1:
                 raise ValueError(f"Gemini returned invalid JSON after {attempt + 1} attempts: {e}")
 
@@ -303,8 +312,11 @@ async def generate_code_analysis(session_id: str, tenant_id: str) -> Dict:
     if not valid_sections:
         raise ValueError(f"All sections failed validation. Warnings: {section_warnings}")
     if len(valid_sections) < 3:
-        logger.warning("code_analysis.too_few_sections", count=len(valid_sections),
-                       dropped=len(result["sections"]) - len(valid_sections))
+        logger.warning(
+            "code_analysis.too_few_sections",
+            count=len(valid_sections),
+            dropped=len(result["sections"]) - len(valid_sections),
+        )
     if section_warnings:
         logger.warning("code_analysis.section_warnings", warnings=section_warnings)
     result["sections"] = valid_sections

@@ -134,7 +134,7 @@ class BaseConnector(ABC):
 
 # ── Plan generation system prompt ─────────────────────────────────────
 
-PLANNING_SYSTEM_PROMPT = """You are an expert integration architect for the Shielva platform.
+PLANNING_SYSTEM_PROMPT = r"""You are an expert integration architect for the Shielva platform.
 
 ⚠️ CRITICAL OUTPUT RULE: Your ENTIRE response must be ONLY a single raw JSON object.
 - Do NOT write any explanation, preamble, summary, or markdown text outside the JSON.

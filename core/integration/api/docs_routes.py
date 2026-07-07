@@ -7,31 +7,31 @@ connector documentation as structured JSON (rendered by SiteRenderer).
 import asyncio
 import json
 import re as _re
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import structlog
+from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pathlib import Path
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
-from datetime import datetime
-
+from integration.core.config import settings
 from integration.db.database import sessions_collection
+from integration.services import r2_service
 from integration.services.docs_builder_service import (
     export_docs_html,
     generate_docs,
     update_docs_with_prompt,
 )
-from integration.services import r2_service
-from integration.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
 _SHIELVA_DOCS_REL = Path(".shielva") / "docs" / "connector_docs.json"
 
 
-def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> Optional[dict]:
+def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> dict | None:
     """Read connector_docs.json from generated_connectors/ (local fallback when R2 not configured).
 
     Scans all subdirectories under {GENERATED_CODE_DIR}/{tenant_id}/ for a
@@ -54,8 +54,8 @@ def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> O
         # Derive candidate slugs:
         #   - bare canonical service_slug (e.g. "analytics_data")
         #   - provider-prefixed form (e.g. "google_analytics_data" → "google_analytics")
-        bare = _re.sub(r'_[a-f0-9]{6}$', '', service_slug or "")
-        bare = _re.sub(r'_connector$', '', bare).strip("_")
+        bare = _re.sub(r"_[a-f0-9]{6}$", "", service_slug or "")
+        bare = _re.sub(r"_connector$", "", bare).strip("_")
         prov = (provider or "").lower().strip()
         candidates = {bare}
         if prov:
@@ -87,7 +87,7 @@ def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> O
             if meta_path.exists():
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                    ct = (meta.get("connector_type") or meta.get("service") or "")
+                    ct = meta.get("connector_type") or meta.get("service") or ""
                     if ct and _matches(ct):
                         matched = True
                 except Exception:
@@ -95,8 +95,8 @@ def _read_local_docs(tenant_id: str, service_slug: str, provider: str = "") -> O
 
             # Fallback: normalize directory name and compare
             if not matched:
-                dir_slug = _re.sub(r'[^a-z0-9]+', '_', pkg_dir.name.lower()).strip("_")
-                dir_slug = _re.sub(r'_connector$', '', dir_slug)
+                dir_slug = _re.sub(r"[^a-z0-9]+", "_", pkg_dir.name.lower()).strip("_")
+                dir_slug = _re.sub(r"_connector$", "", dir_slug)
                 if dir_slug and _matches(dir_slug):
                     matched = True
 
@@ -117,17 +117,18 @@ docs_router = APIRouter(prefix="/sessions", tags=["docs"])
 
 # ── Request/Response models ──────────────────────────────────────────
 
+
 class GenerateDocsRequest(BaseModel):
-    extra_prompt: Optional[str] = ""
+    extra_prompt: str | None = ""
 
 
 class UpdateDocsRequest(BaseModel):
     prompt: str
-    current_json: Dict[str, Any]
+    current_json: dict[str, Any]
 
 
 class SaveDocsRequest(BaseModel):
-    docs: Dict[str, Any]
+    docs: dict[str, Any]
 
 
 @docs_router.post("/{session_id}/docs/save")
@@ -139,7 +140,10 @@ async def save_session_docs(
     """Persist client-supplied docs JSON to R2 (primary store, no MongoDB)."""
     docs_json = body.docs
     if not isinstance(docs_json, dict) or not docs_json.get("sections"):
-        raise HTTPException(status_code=400, detail="docs must be a JSON object with a non-empty 'sections' array")
+        raise HTTPException(
+            status_code=400,
+            detail="docs must be a JSON object with a non-empty 'sections' array",
+        )
     try:
         oid = ObjectId(session_id)
     except Exception:
@@ -160,7 +164,12 @@ async def save_session_docs(
         docs=docs_json,
     )
 
-    logger.info("docs_routes.saved", session_id=session_id, tenant_id=x_tenant_id, sections=len(docs_json.get("sections", [])))
+    logger.info(
+        "docs_routes.saved",
+        session_id=session_id,
+        tenant_id=x_tenant_id,
+        sections=len(docs_json.get("sections", [])),
+    )
     return {"saved": True, "updated_at": str(now)}
 
 
@@ -168,15 +177,16 @@ class DocsSection(BaseModel):
     id: str
     title: str
     content: str
-    children: Optional[List[Dict[str, Any]]] = None
+    children: list[dict[str, Any]] | None = None
 
 
 class DocsResponse(BaseModel):
     title: str
-    sections: List[Dict[str, Any]]
+    sections: list[dict[str, Any]]
 
 
 # ── Routes ───────────────────────────────────────────────────────────
+
 
 @docs_router.post("/{session_id}/docs/generate")
 async def generate_session_docs(
@@ -210,10 +220,19 @@ async def generate_session_docs(
             )
         return docs_json
     except ValueError as exc:
-        logger.warning("docs_routes.generate_validation_error", session_id=session_id, error=str(exc))
+        logger.warning(
+            "docs_routes.generate_validation_error",
+            session_id=session_id,
+            error=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("docs_routes.generate_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "docs_routes.generate_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=f"Documentation generation failed: {exc}")
 
 
@@ -263,8 +282,11 @@ async def generate_session_docs_stream(
                 break
             yield f"data: {json.dumps(item)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @docs_router.post("/{session_id}/docs/update")
@@ -302,7 +324,12 @@ async def update_session_docs(
         logger.warning("docs_routes.update_validation_error", session_id=session_id, error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("docs_routes.update_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "docs_routes.update_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=f"Documentation update failed: {exc}")
 
 
@@ -343,13 +370,21 @@ async def export_session_docs_html(
     if not docs_json:
         docs_json = _read_local_docs(x_tenant_id, service_slug, provider)
     if not docs_json:
-        raise HTTPException(status_code=404, detail="No documentation found for this session. Generate docs first.")
+        raise HTTPException(
+            status_code=404,
+            detail="No documentation found for this session. Generate docs first.",
+        )
 
     try:
         html = await export_docs_html(docs_json)
         return HTMLResponse(content=html, status_code=200)
     except Exception as exc:
-        logger.error("docs_routes.export_html_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "docs_routes.export_html_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=f"HTML export failed: {exc}")
 
 
@@ -373,8 +408,13 @@ async def get_session_docs(
 
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"docs_generated_at": 1, "docs_updated_at": 1, "doc_prompts": 1,
-         "provider": 1, "service_slug": 1},
+        {
+            "docs_generated_at": 1,
+            "docs_updated_at": 1,
+            "doc_prompts": 1,
+            "provider": 1,
+            "service_slug": 1,
+        },
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -394,7 +434,10 @@ async def get_session_docs(
         docs_json = _read_local_docs(x_tenant_id, service_slug, provider)
 
     if not docs_json:
-        raise HTTPException(status_code=404, detail="No documentation found for this session. Generate docs first.")
+        raise HTTPException(
+            status_code=404,
+            detail="No documentation found for this session. Generate docs first.",
+        )
 
     return {
         "docs": docs_json,
@@ -432,21 +475,31 @@ async def save_doc_prompts(
 
 # ── Code Analysis routes ─────────────────────────────────────────────
 
+
 @docs_router.post("/{session_id}/code-analysis")
 async def generate_session_code_analysis(
     session_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Use Gemini to analyse connector.py and return annotated sections + sequence diagram."""
-    logger.info("docs_routes.code_analysis_generate", session_id=session_id, tenant_id=x_tenant_id)
+    logger.info(
+        "docs_routes.code_analysis_generate",
+        session_id=session_id,
+        tenant_id=x_tenant_id,
+    )
     try:
         from integration.services.code_analysis_service import generate_code_analysis
-        result = await generate_code_analysis(session_id=session_id, tenant_id=x_tenant_id)
-        return result
+
+        return await generate_code_analysis(session_id=session_id, tenant_id=x_tenant_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("docs_routes.code_analysis_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "docs_routes.code_analysis_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=f"Code analysis failed: {exc}")
 
 
@@ -458,6 +511,7 @@ async def get_session_code_analysis(
     """Return previously generated code analysis, or 404 if not generated yet."""
     try:
         from integration.services.code_analysis_service import get_code_analysis
+
         result = await get_code_analysis(session_id=session_id, tenant_id=x_tenant_id)
         if not result:
             raise HTTPException(status_code=404, detail="Code analysis not generated yet")
@@ -481,9 +535,14 @@ async def delete_session_code_analysis(
     logger.info("docs_routes.code_analysis_delete", session_id=session_id, tenant_id=x_tenant_id)
     try:
         from integration.services.code_analysis_service import delete_code_analysis
+
         deleted = await delete_code_analysis(session_id=session_id, tenant_id=x_tenant_id)
         return {"deleted": deleted}
     except Exception as exc:
-        logger.warning("docs_routes.code_analysis_delete_failed", session_id=session_id, error=str(exc))
+        logger.warning(
+            "docs_routes.code_analysis_delete_failed",
+            session_id=session_id,
+            error=str(exc),
+        )
         # Non-fatal — return ok=False rather than 500
         return {"deleted": False, "error": str(exc)}

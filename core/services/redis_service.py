@@ -1,21 +1,21 @@
-
 import os
-import json
-from typing import Optional, Any
+
 import redis.asyncio as redis
 import structlog
 
 logger = structlog.get_logger(__name__)
 
+
 class RedisService:
     """
     Service for interacting with Redis for persistence.
     """
+
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(RedisService, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
             cls._instance.client = None
         return cls._instance
@@ -38,7 +38,7 @@ class RedisService:
             self.client = None
             logger.info("Disconnected from Redis")
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         """Get value from Redis."""
         if not self.client:
             await self.connect()
@@ -59,7 +59,7 @@ class RedisService:
             await self.connect()
         if self.client:
             await self.client.delete(key)
-    
+
     async def keys(self, pattern: str) -> list[str]:
         """Get keys matching pattern."""
         if not self.client:
@@ -80,6 +80,7 @@ class RedisService:
         if self.client:
             return await self.client.publish(channel, message)
         return 0
+
 
 # Singleton instance
 redis_service = RedisService()

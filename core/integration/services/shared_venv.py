@@ -24,7 +24,7 @@ _PYTHON_313 = "/opt/homebrew/bin/python3.13"
 
 # Common dependencies pre-installed at startup — versions with Python 3.13 wheels
 COMMON_DEPS = [
-    "pydantic>=2.10",           # pydantic-core 2.27+ has Python 3.13 wheels
+    "pydantic>=2.10",  # pydantic-core 2.27+ has Python 3.13 wheels
     "httpx>=0.27",
     "structlog>=24",
     "google-api-python-client>=2.140.0",
@@ -46,6 +46,7 @@ def get_venv_python() -> str:
         return str(venv_python)
     # Fallback to system python3.13 or sys.executable
     import shutil as _shutil
+
     py313 = _shutil.which("python3.13") or _PYTHON_313
     if Path(py313).exists():
         return py313
@@ -58,16 +59,14 @@ def _create_venv() -> bool:
         return False  # already exists
 
     import shutil as _shutil
+
     py313 = _shutil.which("python3.13") or _PYTHON_313
     if not Path(py313).exists():
         logger.warning("shared_venv.python313_not_found", fallback=sys.executable)
         py313 = sys.executable
 
     logger.info("shared_venv.creating", path=str(VENV_DIR), python=py313)
-    result = subprocess.run(
-        [py313, "-m", "venv", str(VENV_DIR)],
-        capture_output=True, text=True
-    )
+    result = subprocess.run([py313, "-m", "venv", str(VENV_DIR)], capture_output=True, text=True)
     if result.returncode != 0:
         logger.error("shared_venv.create_failed", stderr=result.stderr[:300])
         return False
@@ -90,8 +89,10 @@ def _install_common_deps() -> None:
 
     logger.info("shared_venv.installing_common_deps", count=len(COMMON_DEPS))
     result = subprocess.run(
-        [str(venv_pip), "install", "--quiet"] + COMMON_DEPS,
-        capture_output=True, text=True, timeout=300
+        [str(venv_pip), "install", "--quiet", *COMMON_DEPS],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         logger.error("shared_venv.common_deps_failed", stderr=result.stderr[:500])
@@ -113,7 +114,9 @@ def setup_shared_venv() -> None:
         if venv_pip.exists() and (sdk_path / "pyproject.toml").exists() and not sdk_marker.exists():
             result = subprocess.run(
                 [str(venv_pip), "install", "--quiet", "-e", str(sdk_path)],
-                capture_output=True, text=True, timeout=120
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode != 0:
                 logger.warning("shared_venv.sdk_install_failed", stderr=result.stderr[:300])

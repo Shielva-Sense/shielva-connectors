@@ -20,17 +20,18 @@ import httpx
 import pytest
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BASE_URL    = "https://localhost:8055"
-SESSION_ID  = "69bf9e284c6f65db898a109c"   # AWS Lambda session
-TENANT_ID   = "shielva-sense"
-HEADERS     = {"X-Tenant-ID": TENANT_ID}
+BASE_URL = "https://localhost:8055"
+SESSION_ID = "69bf9e284c6f65db898a109c"  # AWS Lambda session
+TENANT_ID = "shielva-sense"
+HEADERS = {"X-Tenant-ID": TENANT_ID}
 
 # Timeouts — Gemini can take up to 90 s for a full generation
-GENERATE_TIMEOUT = 180   # seconds for SSE stream
-RUN_TEST_TIMEOUT = 300   # seconds for pytest run
+GENERATE_TIMEOUT = 180  # seconds for SSE stream
+RUN_TEST_TIMEOUT = 300  # seconds for pytest run
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _parse_sse_events(raw: str) -> list[dict]:
     """Parse raw SSE text into a list of event dicts."""
@@ -38,7 +39,7 @@ def _parse_sse_events(raw: str) -> list[dict]:
     for line in raw.splitlines():
         line = line.strip()
         if line.startswith("data:"):
-            payload = line[len("data:"):].strip()
+            payload = line[len("data:") :].strip()
             try:
                 events.append(json.loads(payload))
             except json.JSONDecodeError:
@@ -47,6 +48,7 @@ def _parse_sse_events(raw: str) -> list[dict]:
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
+
 
 class TestGenerateWorkflow:
     """Full end-to-end: connector-methods → generate-unit-tests (Gemini) → run tests."""
@@ -59,7 +61,7 @@ class TestGenerateWorkflow:
             f"{BASE_URL}/sessions/{SESSION_ID}/connector-methods",
             headers=HEADERS,
             timeout=15,
-            verify=False,
+            verify=False,  # noqa: S501 — test client against local dev server
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
@@ -72,8 +74,15 @@ class TestGenerateWorkflow:
         assert len(data["methods"]) > 0, "No methods extracted from connector.py"
 
         # BaseConnector internals must NOT appear (they break tests)
-        forbidden = {"get_token", "set_token", "save_config", "get_config",
-                     "clear_token", "ingest_batch", "save_token"}
+        forbidden = {
+            "get_token",
+            "set_token",
+            "save_config",
+            "get_config",
+            "clear_token",
+            "ingest_batch",
+            "save_token",
+        }
         leaked = forbidden & set(data["methods"])
         assert not leaked, (
             f"BaseConnector internals leaked into method list: {leaked}\n"
@@ -101,7 +110,7 @@ class TestGenerateWorkflow:
             headers={**HEADERS, "Accept": "text/event-stream"},
             json={"methods": methods},
             timeout=GENERATE_TIMEOUT,
-            verify=False,
+            verify=False,  # noqa: S501 — test client against local dev server
         ) as resp:
             assert resp.status_code == 200, f"SSE endpoint returned {resp.status_code}: {resp.text}"
             for chunk in resp.iter_text():
@@ -113,8 +122,12 @@ class TestGenerateWorkflow:
                             ev = json.loads(line[5:].strip())
                             ev_type = ev.get("type", "")
                             msg = ev.get("message", "")
-                            if ev_type in ("generate_started", "generate_progress",
-                                           "generate_complete", "generate_error"):
+                            if ev_type in (
+                                "generate_started",
+                                "generate_progress",
+                                "generate_complete",
+                                "generate_error",
+                            ):
                                 print(f"  [{ev_type}] {msg[:120]}")
                         except Exception:
                             pass
@@ -167,6 +180,7 @@ class TestGenerateWorkflow:
 
         # Check if the generated file has a syntax error
         import ast as _ast
+
         try:
             _ast.parse(generated_code)
             print("\n[Step 2b] Generated code is syntax-clean — skipping fix step")
@@ -187,7 +201,7 @@ class TestGenerateWorkflow:
             headers={**HEADERS, "Accept": "text/event-stream"},
             json={},
             timeout=FIX_TIMEOUT,
-            verify=False,
+            verify=False,  # noqa: S501 — test client against local dev server
         ) as resp:
             assert resp.status_code == 200, f"fix/step returned {resp.status_code}: {resp.text}"
             for chunk in resp.iter_text():
@@ -218,6 +232,7 @@ class TestGenerateWorkflow:
             "/generated_connectors/shielva-sense/gmail_connector/tests/test_connector.py"
         )
         from pathlib import Path as _Path
+
         fixed_code = _Path(test_file).read_text(encoding="utf-8")
         try:
             _ast.parse(fixed_code)
@@ -230,6 +245,7 @@ class TestGenerateWorkflow:
     def test_step3_run_tests_on_generated_file(self):
         """Step 3 — POST /test must run pytest on the Gemini-generated file and pass."""
         from pathlib import Path as _Path
+
         _test_file = _Path(
             "/Users/vivekvarshavaishvik/Documents/Shielva Automation/shielva-connectors"
             "/generated_connectors/shielva-sense/gmail_connector/tests/test_connector.py"
@@ -241,14 +257,14 @@ class TestGenerateWorkflow:
             else:
                 pytest.skip("No generated test file — run steps 1+2 first")
 
-        print(f"\n[Step 3] Running pytest on generated test_connector.py ...")
+        print("\n[Step 3] Running pytest on generated test_connector.py ...")
         t_start = time.time()
 
         resp = httpx.post(
             f"{BASE_URL}/sessions/{SESSION_ID}/test",
             headers=HEADERS,
             timeout=RUN_TEST_TIMEOUT,
-            verify=False,
+            verify=False,  # noqa: S501 — test client against local dev server
         )
         elapsed = time.time() - t_start
         print(f"[Step 3] Test run finished in {elapsed:.1f}s — HTTP {resp.status_code}")
@@ -257,9 +273,9 @@ class TestGenerateWorkflow:
 
         result = resp.json()
         pytest_result = result.get("pytest", {})
-        passed  = pytest_result.get("passed", 0)
-        failed  = pytest_result.get("failed", 0)
-        errors  = pytest_result.get("errors", 0)
+        passed = pytest_result.get("passed", 0)
+        failed = pytest_result.get("failed", 0)
+        errors = pytest_result.get("errors", 0)
         overall = result.get("overall_pass", False)
 
         print(f"[Step 3] passed={passed}  failed={failed}  errors={errors}  overall_pass={overall}")
@@ -286,21 +302,19 @@ class TestGenerateWorkflow:
             # Include ERRORS section (collection errors — e.g. class fixtures not supported)
             err_section_idx = raw_pytest_out.find("= ERRORS =")
             if err_section_idx >= 0:
-                failure_details.append(raw_pytest_out[err_section_idx:err_section_idx + 3000])
+                failure_details.append(raw_pytest_out[err_section_idx : err_section_idx + 3000])
 
             # Include individual test longrepr for failed/errored tests
             for item in pytest_result.get("test_results", []):
                 if item.get("outcome") != "passed":
-                    failure_details.append(
-                        f"{item.get('nodeid', '')}: {item.get('longrepr', '')[:400]}"
-                    )
+                    failure_details.append(f"{item.get('nodeid', '')}: {item.get('longrepr', '')[:400]}")
 
             # Fallback: include the raw pytest output tail if still empty
             if not failure_details and raw_pytest_out:
                 failure_details.append(raw_pytest_out[-3000:])
 
             TestGenerateWorkflow._step3_failure_details = "\n\n".join(failure_details[:5])
-            print(f"\n[Step 3] ⚠ Tests have failures — Step 3b will trigger fix/step/5")
+            print("\n[Step 3] ⚠ Tests have failures — Step 3b will trigger fix/step/5")
         else:
             TestGenerateWorkflow._step3_failure_details = ""
             assert passed > 0, "No tests were collected/run"
@@ -320,9 +334,9 @@ class TestGenerateWorkflow:
         if overall is None:
             pytest.skip("Step 3 did not run")
 
-        passed  = TestGenerateWorkflow._step3_passed
-        failed  = TestGenerateWorkflow._step3_failed
-        errors  = TestGenerateWorkflow._step3_errors
+        passed = TestGenerateWorkflow._step3_passed
+        failed = TestGenerateWorkflow._step3_failed
+        errors = TestGenerateWorkflow._step3_errors
         error_details = getattr(TestGenerateWorkflow, "_step3_failure_details", "")
 
         print(f"\n[Step 3b] Step 3 had passed={passed} failed={failed} errors={errors}")
@@ -353,7 +367,7 @@ class TestGenerateWorkflow:
                 headers={**HEADERS, "Accept": "text/event-stream"},
                 json={"error_details": error_details},
                 timeout=FIX_TIMEOUT,
-                verify=False,
+                verify=False,  # noqa: S501 — test client against local dev server
             ) as resp:
                 assert resp.status_code == 200, f"fix/step returned {resp.status_code}: {resp.text}"
                 for chunk in resp.iter_text():
@@ -371,12 +385,16 @@ class TestGenerateWorkflow:
 
             events = _parse_sse_events(raw_sse)
             event_types = [e.get("type") for e in events]
-            print(f"[Step 3b] Attempt {attempt} fix events summary: fix_complete={('fix_complete' in event_types)} fix_error={('fix_error' in event_types)}")
+            print(
+                f"[Step 3b] Attempt {attempt} fix events summary: fix_complete={('fix_complete' in event_types)} fix_error={('fix_error' in event_types)}"
+            )
 
             assert "fix_error" not in event_types, (
                 f"fix_error on attempt {attempt}: {next((e.get('message') for e in events if e.get('type') == 'fix_error'), '')}"
             )
-            assert "fix_complete" in event_types, f"fix_complete not received on attempt {attempt}. Events: {event_types}"
+            assert "fix_complete" in event_types, (
+                f"fix_complete not received on attempt {attempt}. Events: {event_types}"
+            )
 
             # Re-run tests after fix
             print(f"[Step 3b] Re-running tests after attempt {attempt}...")
@@ -384,12 +402,16 @@ class TestGenerateWorkflow:
                 f"{BASE_URL}/sessions/{SESSION_ID}/test",
                 headers=HEADERS,
                 timeout=300,
-                verify=False,
+                verify=False,  # noqa: S501 — test client against local dev server
             )
             assert resp2.status_code == 200
             result2 = resp2.json()
             pytest2 = result2.get("pytest", {})
-            p2, f2, e2 = pytest2.get("passed", 0), pytest2.get("failed", 0), pytest2.get("errors", 0)
+            p2, f2, e2 = (
+                pytest2.get("passed", 0),
+                pytest2.get("failed", 0),
+                pytest2.get("errors", 0),
+            )
             overall2 = result2.get("overall_pass", False)
             print(f"[Step 3b] Attempt {attempt} result: passed={p2}  failed={f2}  errors={e2}  overall_pass={overall2}")
 
@@ -402,9 +424,7 @@ class TestGenerateWorkflow:
                 fresh_details = []
                 for item in pytest2.get("test_results", []):
                     if item.get("outcome") != "passed":
-                        fresh_details.append(
-                            f"{item.get('nodeid', '')}: {item.get('longrepr', '')[:400]}"
-                        )
+                        fresh_details.append(f"{item.get('nodeid', '')}: {item.get('longrepr', '')[:400]}")
                         print(f"  STILL FAIL: {item.get('nodeid')} — {item.get('longrepr', '')[:200]}")
                 # Also extract ERRORS section from pytest output when test_results is empty
                 # (happens when collection errors prevent pytest from even running tests)
@@ -414,7 +434,7 @@ class TestGenerateWorkflow:
                     if err_section_idx < 0:
                         err_section_idx = raw_pytest_out.find("ERRORS")
                     if err_section_idx >= 0:
-                        fresh_details.append(raw_pytest_out[err_section_idx:err_section_idx + 2000])
+                        fresh_details.append(raw_pytest_out[err_section_idx : err_section_idx + 2000])
                     elif raw_pytest_out:
                         fresh_details.append(raw_pytest_out[-2000:])
                 error_details = "\n\n".join(fresh_details[:10]) if fresh_details else error_details

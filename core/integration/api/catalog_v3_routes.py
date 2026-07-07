@@ -20,13 +20,14 @@ Brand colors and descriptions come from connector_catalog.json when available.
 import asyncio
 import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import Response
+
 import structlog
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import Response
+
 from integration.data.catalog import get_all_providers, get_provider_services
 from integration.db.database import custom_providers_collection
-from integration.services import r2_service
-from integration.services import category_service
+from integration.services import category_service, r2_service
 
 logger = structlog.get_logger(__name__)
 
@@ -34,6 +35,7 @@ catalog_v3_router = APIRouter(prefix="/api/v3/catalog", tags=["catalog-v3"])
 
 # ── Load connector_catalog.json once at module level ───────────────────────
 _CATALOG_JSON_PATH = Path(__file__).parent.parent / "data" / "connector_catalog.json"
+
 
 def _load_connector_catalog() -> dict:
     """Load connector_catalog.json keyed by provider key."""
@@ -45,6 +47,7 @@ def _load_connector_catalog() -> dict:
     except Exception as exc:
         logger.warning("catalog_v3.connector_catalog_load_failed", error=str(exc))
         return {}
+
 
 _CONNECTOR_CATALOG: dict = _load_connector_catalog()
 
@@ -69,17 +72,14 @@ def _generate_svg_logo(display_name: str, brand_color: str) -> str:
     color = brand_color.lstrip("#")
     # Pick 1-2 letter abbreviation
     words = display_name.split()
-    if len(words) >= 2:
-        label = (words[0][0] + words[1][0]).upper()
-    else:
-        label = display_name[:2].upper()
+    label = (words[0][0] + words[1][0]).upper() if len(words) >= 2 else display_name[:2].upper()
     font_size = 20 if len(label) == 1 else 16
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">'
         f'<rect width="48" height="48" rx="10" fill="#{color}"/>'
         f'<text x="24" y="{24 + font_size // 3}" text-anchor="middle" dominant-baseline="middle" '
         f'font-size="{font_size}" font-weight="800" font-family="system-ui,sans-serif" fill="white">{label}</text>'
-        f'</svg>'
+        f"</svg>"
     )
 
 
@@ -177,18 +177,20 @@ async def v3_list_providers():
             "category": category,
             "logo_url": _logo_cdn_url(key),
         }
-        result.append({
-            "key": key,
-            "provider": key,
-            "display_name": display_name,
-            "description": meta.get("description", ""),
-            "brand_color": meta.get("brand_color", "#14B8A6"),
-            "category": category,
-            "service_count": 1,
-            "logo_url": _logo_cdn_url(key),
-            "is_custom": False,
-            "services": [single_service],
-        })
+        result.append(
+            {
+                "key": key,
+                "provider": key,
+                "display_name": display_name,
+                "description": meta.get("description", ""),
+                "brand_color": meta.get("brand_color", "#14B8A6"),
+                "category": category,
+                "service_count": 1,
+                "logo_url": _logo_cdn_url(key),
+                "is_custom": False,
+                "services": [single_service],
+            }
+        )
         seen_keys.add(key)
 
     # 3. Custom providers from MongoDB — embed their services inline
@@ -264,14 +266,17 @@ async def v3_list_advanced_connectors():
     ACP `/connectors/advanced` proxies this through the gateway, so the
     advanced-connectors page renders full cards without any extra wiring.
     """
-    import sys as _sysep, os as _osep
+    import os as _osep
+    import sys as _sysep
+
     _root = _osep.path.dirname(_osep.path.dirname(_osep.path.dirname(_osep.path.abspath(__file__))))
     if _root not in _sysep.path:
         _sysep.path.insert(0, _root)
     try:
         from services.connector_catalog import list_catalog
+
         items = await list_catalog()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("catalog_v3.advanced_connectors_failed", error=str(exc)[:200])
         items = []
     # Normalise the response shape so the FE can render directly.
@@ -280,21 +285,23 @@ async def v3_list_advanced_connectors():
         ctype = c.get("connector_type") or c.get("type")
         if not ctype:
             continue
-        out.append({
-            "type": ctype,
-            "name": c.get("display_name") or c.get("name") or ctype,
-            "display_name": c.get("display_name") or c.get("name") or ctype,
-            "description": c.get("description") or "",
-            "auth_type": c.get("auth_type") or "oauth2",
-            "category": (c.get("categories") or [None])[0] if c.get("categories") else c.get("category"),
-            "provider": c.get("provider"),
-            "service": c.get("service"),
-            "version": c.get("version"),
-            "oauth_scopes": c.get("oauth_scopes"),
-            "install_fields": c.get("install_fields"),
-            "features": c.get("features"),
-            "apis": c.get("apis"),
-        })
+        out.append(
+            {
+                "type": ctype,
+                "name": c.get("display_name") or c.get("name") or ctype,
+                "display_name": c.get("display_name") or c.get("name") or ctype,
+                "description": c.get("description") or "",
+                "auth_type": c.get("auth_type") or "oauth2",
+                "category": (c.get("categories") or [None])[0] if c.get("categories") else c.get("category"),
+                "provider": c.get("provider"),
+                "service": c.get("service"),
+                "version": c.get("version"),
+                "oauth_scopes": c.get("oauth_scopes"),
+                "install_fields": c.get("install_fields"),
+                "features": c.get("features"),
+                "apis": c.get("apis"),
+            }
+        )
     logger.info("catalog_v3.advanced_connectors", count=len(out))
     return {"connectors": out, "count": len(out)}
 
@@ -329,7 +336,12 @@ async def v3_list_services(provider: str):
             if "key" not in s:
                 s["key"] = s.get("service", s.get("service_key", ""))
         _apply_unified_category(services)
-        logger.info("catalog_v3.list_services", provider=provider, count=len(services), source="static")
+        logger.info(
+            "catalog_v3.list_services",
+            provider=provider,
+            count=len(services),
+            source="static",
+        )
         return {"services": services, "provider": provider}
 
     # 2. Custom MongoDB provider
@@ -338,18 +350,25 @@ async def v3_list_services(provider: str):
         if doc:
             result = []
             for svc in doc.get("services", []):
-                result.append({
-                    "key": svc.get("service_key", ""),
-                    "service": svc.get("service_key", ""),
-                    "display_name": svc.get("display_name", ""),
-                    "description": svc.get("description", ""),
-                    "auth_type": svc.get("auth_type", "api_key"),
-                    "category": svc.get("category", "general"),
-                    "logo_url": svc.get("logo_url", ""),
-                    "is_custom": True,
-                })
+                result.append(
+                    {
+                        "key": svc.get("service_key", ""),
+                        "service": svc.get("service_key", ""),
+                        "display_name": svc.get("display_name", ""),
+                        "description": svc.get("description", ""),
+                        "auth_type": svc.get("auth_type", "api_key"),
+                        "category": svc.get("category", "general"),
+                        "logo_url": svc.get("logo_url", ""),
+                        "is_custom": True,
+                    }
+                )
             _apply_unified_category(result)
-            logger.info("catalog_v3.list_services", provider=provider, count=len(result), source="custom")
+            logger.info(
+                "catalog_v3.list_services",
+                provider=provider,
+                count=len(result),
+                source="custom",
+            )
             return {"services": result, "provider": provider}
     except Exception as exc:
         logger.warning("catalog_v3.custom_service_fetch_failed", provider=provider, error=str(exc))
@@ -369,7 +388,12 @@ async def v3_list_services(provider: str):
             "logo_url": _logo_cdn_url(provider),
         }
         _apply_unified_category([service])
-        logger.info("catalog_v3.list_services", provider=provider, count=1, source="catalog_json")
+        logger.info(
+            "catalog_v3.list_services",
+            provider=provider,
+            count=1,
+            source="catalog_json",
+        )
         return {"services": [service], "provider": provider}
 
     raise HTTPException(404, f"Provider '{provider}' not found")
@@ -403,7 +427,7 @@ async def v3_get_logo(filename: str):
         # Try the exact requested extension first, then any other known
         # extension for this key (lets the gateway-injected `.svg` URL still
         # find a `.png` upload the user did manually).
-        candidates = [ext] + [e for e in _EXT_MIME.keys() if e != ext]
+        candidates = [ext] + [e for e in _EXT_MIME if e != ext]
         for cand in candidates:
             try:
                 resp = client.get_object(
@@ -466,7 +490,7 @@ async def v3_seed_logos():
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(
                 None,
-                lambda: r2_service._sync_write(client, _LOGO_R2_BUCKET, _r2_logo_key(key), svg, "image/svg+xml")
+                lambda: r2_service._sync_write(client, _LOGO_R2_BUCKET, _r2_logo_key(key), svg, "image/svg+xml"),
             )
             uploaded += 1
         except Exception as exc:
@@ -477,7 +501,7 @@ async def v3_seed_logos():
     keys = list(all_providers.keys())
     batch_size = 20
     for i in range(0, len(keys), batch_size):
-        batch = keys[i:i + batch_size]
+        batch = keys[i : i + batch_size]
         await asyncio.gather(*[_upload_one(k, all_providers[k]) for k in batch])
 
     logger.info("catalog_v3.logos_seeded", uploaded=uploaded, failed=failed, total=len(keys))

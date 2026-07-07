@@ -16,14 +16,15 @@ When R2 is NOT configured, falls back to local filesystem at ./plan_cache/.
 """
 
 import asyncio
+import contextlib
 import csv
 import io
 import json
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -35,7 +36,7 @@ from integration.core.config import settings
 #   2. _app_bucket_ctx         — set from X-App-ID header: "shielva-agentic-app-{app_id}"
 #   3. _tenant_bucket_ctx      — set from X-Tenant-Name header (legacy / post-login)
 _tenant_bucket_ctx: ContextVar[str] = ContextVar("tenant_bucket", default="")
-_app_bucket_ctx:    ContextVar[str] = ContextVar("app_bucket",    default="")
+_app_bucket_ctx: ContextVar[str] = ContextVar("app_bucket", default="")
 
 
 def app_id_to_bucket(app_id: str) -> str:
@@ -75,6 +76,7 @@ def _get_bucket() -> str:
     """
     return settings.R2_BUCKET_NAME or _app_bucket_ctx.get() or _tenant_bucket_ctx.get()
 
+
 logger = structlog.get_logger(__name__)
 
 # ── Local cache directory (used when R2 is not configured) ───────────
@@ -86,40 +88,41 @@ _LOCAL_CACHE_DIR = Path(settings.GENERATED_CODE_DIR).resolve() / "plan_cache"
 # ── Step type display labels ──────────────────────────────────────────
 
 _STEP_TYPE_ICONS = {
-    "install_deps":    "📦",
-    "configure_auth":  "🔑",
-    "scaffold_code":   "🏗",
+    "install_deps": "📦",
+    "configure_auth": "🔑",
+    "scaffold_code": "🏗",
     "write_connector": "⚙",
-    "write_tests":     "🧪",
-    "run_tests":       "▶",
+    "write_tests": "🧪",
+    "run_tests": "▶",
 }
 
 _STEP_TYPE_LABELS = {
-    "install_deps":    "Install Dependencies",
-    "configure_auth":  "Configure Authentication",
-    "scaffold_code":   "Scaffold Code Structure",
+    "install_deps": "Install Dependencies",
+    "configure_auth": "Configure Authentication",
+    "scaffold_code": "Scaffold Code Structure",
     "write_connector": "Write Connector",
-    "write_tests":     "Write Tests",
-    "run_tests":       "Run Tests",
+    "write_tests": "Write Tests",
+    "run_tests": "Run Tests",
 }
 
 
 # ── Markdown generator ────────────────────────────────────────────────
 
+
 def _build_plan_markdown(
     provider: str,
     service: str,
     prompt: str,
-    plan_data: Dict[str, Any],
+    plan_data: dict[str, Any],
     generated_at: str,
 ) -> str:
     """Convert a plan_data dict into a full human-readable markdown document."""
-    steps: List[Dict[str, Any]] = plan_data.get("steps", [])
+    steps: list[dict[str, Any]] = plan_data.get("steps", [])
     version: int = plan_data.get("version", 1)
-    package_structure: Optional[Dict[str, Any]] = plan_data.get("package_structure")
-    recommended_features: List[Dict[str, Any]] = plan_data.get("recommended_features", [])
+    package_structure: dict[str, Any] | None = plan_data.get("package_structure")
+    recommended_features: list[dict[str, Any]] = plan_data.get("recommended_features", [])
 
-    lines: List[str] = []
+    lines: list[str] = []
 
     # ── Title ──
     lines += [
@@ -199,7 +202,7 @@ def _build_plan_markdown(
     # ── Package Structure ──
     if package_structure:
         root = package_structure.get("root", "")
-        pkg_files: List[Dict[str, Any]] = package_structure.get("files", [])
+        pkg_files: list[dict[str, Any]] = package_structure.get("files", [])
         lines += [
             f"## Package Structure ({len(pkg_files)} files)",
             "",
@@ -220,7 +223,7 @@ def _build_plan_markdown(
             "",
         ]
         # Group by category
-        by_cat: Dict[str, List[Dict]] = {}
+        by_cat: dict[str, list[dict]] = {}
         for feat in recommended_features:
             cat = feat.get("category", "other")
             by_cat.setdefault(cat, []).append(feat)
@@ -242,6 +245,7 @@ def _build_plan_markdown(
 
 # ── Storage mode detection ───────────────────────────────────────────
 
+
 def is_configured() -> bool:
     """Return True if R2 credentials are present.
 
@@ -249,11 +253,7 @@ def is_configured() -> bool:
     We intentionally do NOT require _get_bucket() here — the bucket is always
     resolvable at request time even when R2_BUCKET_NAME is left empty in .env.
     """
-    return bool(
-        settings.R2_ACCOUNT_ID
-        and settings.R2_ACCESS_KEY_ID
-        and settings.R2_SECRET_ACCESS_KEY
-    )
+    return bool(settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID and settings.R2_SECRET_ACCESS_KEY)
 
 
 def _use_local() -> bool:
@@ -271,6 +271,7 @@ def _use_local() -> bool:
 
 # ── Local filesystem helpers ─────────────────────────────────────────
 
+
 def _local_path(key: str) -> Path:
     """Convert an R2-style key to a local filesystem path."""
     return _LOCAL_CACHE_DIR / key
@@ -283,7 +284,7 @@ def _local_path(key: str) -> Path:
 # local disk only polluted the repo (it created generated_connectors/plan_cache/...
 # via mkdir). So when R2 is not configured we persist nothing to disk — reads return
 # None and callers fall back to Mongo.
-def _local_read(key: str) -> Optional[str]:
+def _local_read(key: str) -> str | None:
     return None
 
 
@@ -296,6 +297,7 @@ def _local_delete(key: str) -> bool:
 
 
 # ── R2 helpers ────────────────────────────────────────────────────────
+
 
 def _get_client():
     """Create a boto3 S3 client pointed at Cloudflare R2."""
@@ -360,7 +362,7 @@ def _progress_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
     return _k(_coll(), provider, service_slug, "progress.json")
 
 
-def _sync_read(client, bucket: str, key: str) -> Optional[str]:
+def _sync_read(client, bucket: str, key: str) -> str | None:
     """Read an object from R2 and return its body as a UTF-8 string.
 
     Transparent decompression: if the stored object was uploaded with
@@ -369,14 +371,16 @@ def _sync_read(client, bucket: str, key: str) -> Optional[str]:
     Older objects without the header come back as plain UTF-8 — no behavior
     change for them.
     """
-    from botocore.exceptions import ClientError
     import gzip as _gzip
+
+    from botocore.exceptions import ClientError
 
     try:
         resp = client.get_object(Bucket=bucket, Key=key)
         raw = resp["Body"].read()
         if resp.get("ContentEncoding") == "gzip":
-            try: raw = _gzip.decompress(raw)
+            try:
+                raw = _gzip.decompress(raw)
             except Exception:  # corrupted gzip stream — surface raw instead of crashing
                 pass
         return raw.decode("utf-8")
@@ -395,9 +399,7 @@ def _sync_read(client, bucket: str, key: str) -> Optional[str]:
 _GZIP_MIN_BYTES = 1024
 
 
-def _sync_write(
-    client, bucket: str, key: str, content: str, content_type: str = "text/plain"
-) -> None:
+def _sync_write(client, bucket: str, key: str, content: str, content_type: str = "text/plain") -> None:
     """Write a string to R2, gzip-compressed when the body is large enough.
 
     Compression ratio for our payloads (plan JSON, docs JSON, step logs,
@@ -444,7 +446,10 @@ def ensure_bucket() -> None:
     client = _get_client()
     bucket = _get_bucket()
     if not bucket:
-        logger.warning("r2.ensure_bucket_skipped", reason="no bucket resolved — no request context?")
+        logger.warning(
+            "r2.ensure_bucket_skipped",
+            reason="no bucket resolved — no request context?",
+        )
         return
 
     coll = settings.R2_COLLECTION_PREFIX
@@ -472,14 +477,18 @@ def ensure_bucket() -> None:
                     )
                     raise
         else:
-            logger.warning("r2.bucket_check_failed", bucket=bucket, collection=coll, error_code=code)
+            logger.warning(
+                "r2.bucket_check_failed",
+                bucket=bucket,
+                collection=coll,
+                error_code=code,
+            )
 
 
 # ── Public async API ──────────────────────────────────────────────────
 
-async def get_history(
-    provider: str, service_slug: str, tenant_id: str
-) -> Optional[Dict[str, Any]]:
+
+async def get_history(provider: str, service_slug: str, tenant_id: str) -> dict[str, Any] | None:
     """Check progress.json first — if plan_generated is True, return full cached plan.
 
     progress.json is the authoritative source of truth. If it says plan_generated=false
@@ -500,24 +509,64 @@ async def get_history(
     try:
         # ── 1. Read progress.json — the primary truth ──────────────────
         progress_raw = await loop.run_in_executor(
-            None, partial(_sync_read, client, bucket, _progress_key(provider, service_slug, tenant_id))
+            None,
+            partial(
+                _sync_read,
+                client,
+                bucket,
+                _progress_key(provider, service_slug, tenant_id),
+            ),
         )
 
         if not progress_raw:
-            logger.info("r2.no_progress", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+            logger.info(
+                "r2.no_progress",
+                provider=provider,
+                service_slug=service_slug,
+                tenant_id=tenant_id,
+            )
             return None
 
         progress = json.loads(progress_raw)
 
         if not progress.get("plan_generated", False):
-            logger.info("r2.plan_not_generated", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+            logger.info(
+                "r2.plan_not_generated",
+                provider=provider,
+                service_slug=service_slug,
+                tenant_id=tenant_id,
+            )
             return None
 
         # ── 2. plan_generated=true — fetch plan.json, plan.md, prompts.csv in parallel ──
         plan_raw, md_raw, csv_raw = await asyncio.gather(
-            loop.run_in_executor(None, partial(_sync_read, client, bucket, _plan_json_key(provider, service_slug, tenant_id))),
-            loop.run_in_executor(None, partial(_sync_read, client, bucket, _plan_md_key(provider, service_slug, tenant_id))),
-            loop.run_in_executor(None, partial(_sync_read, client, bucket, _csv_key(provider, service_slug, tenant_id))),
+            loop.run_in_executor(
+                None,
+                partial(
+                    _sync_read,
+                    client,
+                    bucket,
+                    _plan_json_key(provider, service_slug, tenant_id),
+                ),
+            ),
+            loop.run_in_executor(
+                None,
+                partial(
+                    _sync_read,
+                    client,
+                    bucket,
+                    _plan_md_key(provider, service_slug, tenant_id),
+                ),
+            ),
+            loop.run_in_executor(
+                None,
+                partial(
+                    _sync_read,
+                    client,
+                    bucket,
+                    _csv_key(provider, service_slug, tenant_id),
+                ),
+            ),
         )
 
         plan = json.loads(plan_raw) if plan_raw else None
@@ -562,19 +611,26 @@ async def get_history(
         return None
 
 
-def _local_get_history(
-    provider: str, service_slug: str, tenant_id: str
-) -> Optional[Dict[str, Any]]:
+def _local_get_history(provider: str, service_slug: str, tenant_id: str) -> dict[str, Any] | None:
     """Local filesystem version of get_history."""
     try:
         progress_raw = _local_read(_progress_key(provider, service_slug, tenant_id))
         if not progress_raw:
-            logger.info("cache.local_no_progress", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+            logger.info(
+                "cache.local_no_progress",
+                provider=provider,
+                service_slug=service_slug,
+                tenant_id=tenant_id,
+            )
             return None
 
         progress = json.loads(progress_raw)
         if not progress.get("plan_generated", False):
-            logger.info("cache.local_plan_not_generated", provider=provider, service_slug=service_slug)
+            logger.info(
+                "cache.local_plan_not_generated",
+                provider=provider,
+                service_slug=service_slug,
+            )
             return None
 
         plan_raw = _local_read(_plan_json_key(provider, service_slug, tenant_id))
@@ -612,11 +668,16 @@ def _local_get_history(
         }
 
     except Exception as exc:
-        logger.warning("cache.local_get_history_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "cache.local_get_history_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
-async def get_plan_markdown(provider: str, service_slug: str, tenant_id: str) -> Optional[str]:
+async def get_plan_markdown(provider: str, service_slug: str, tenant_id: str) -> str | None:
     """Fetch only the plan.md. Works with R2 or local filesystem."""
     if _use_local():
         return _local_read(_plan_md_key(provider, service_slug, tenant_id))
@@ -627,10 +688,21 @@ async def get_plan_markdown(provider: str, service_slug: str, tenant_id: str) ->
 
     try:
         return await loop.run_in_executor(
-            None, partial(_sync_read, client, bucket, _plan_md_key(provider, service_slug, tenant_id))
+            None,
+            partial(
+                _sync_read,
+                client,
+                bucket,
+                _plan_md_key(provider, service_slug, tenant_id),
+            ),
         )
     except Exception as exc:
-        logger.warning("r2.get_md_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "r2.get_md_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
@@ -639,8 +711,8 @@ async def save_prompt_and_plan(
     service_slug: str,
     tenant_id: str,
     prompt: str,
-    plan_data: Dict[str, Any],
-    guidelines_version: Optional[str] = None,
+    plan_data: dict[str, Any],
+    guidelines_version: str | None = None,
 ) -> None:
     """Save plan: overwrites prompts.csv, plan.json, plan.md, and progress.json.
 
@@ -648,7 +720,7 @@ async def save_prompt_and_plan(
     Ensures the bucket/directory exists before writing.
     Raises on write failure so the caller can emit accurate logs to the UI.
     """
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     # ── 1. Build prompts.csv content ──
     csv_output = io.StringIO()
@@ -717,22 +789,47 @@ async def save_prompt_and_plan(
         await asyncio.gather(
             loop.run_in_executor(
                 None,
-                partial(_sync_write, client, bucket, _csv_key(provider, service_slug, tenant_id), csv_content, "text/csv"),
+                partial(
+                    _sync_write,
+                    client,
+                    bucket,
+                    _csv_key(provider, service_slug, tenant_id),
+                    csv_content,
+                    "text/csv",
+                ),
             ),
             loop.run_in_executor(
                 None,
-                partial(_sync_write, client, bucket,
-                        _plan_json_key(provider, service_slug, tenant_id), plan_json, "application/json"),
+                partial(
+                    _sync_write,
+                    client,
+                    bucket,
+                    _plan_json_key(provider, service_slug, tenant_id),
+                    plan_json,
+                    "application/json",
+                ),
             ),
             loop.run_in_executor(
                 None,
-                partial(_sync_write, client, bucket,
-                        _plan_md_key(provider, service_slug, tenant_id), md, "text/markdown"),
+                partial(
+                    _sync_write,
+                    client,
+                    bucket,
+                    _plan_md_key(provider, service_slug, tenant_id),
+                    md,
+                    "text/markdown",
+                ),
             ),
             loop.run_in_executor(
                 None,
-                partial(_sync_write, client, bucket,
-                        _progress_key(provider, service_slug, tenant_id), progress_json, "application/json"),
+                partial(
+                    _sync_write,
+                    client,
+                    bucket,
+                    _progress_key(provider, service_slug, tenant_id),
+                    progress_json,
+                    "application/json",
+                ),
             ),
         )
     except Exception as exc:
@@ -766,7 +863,7 @@ def _local_save_prompt_and_plan(
     plan_json: str,
     md: str,
     generated_at: str,
-    guidelines_version: Optional[str] = None,
+    guidelines_version: str | None = None,
 ) -> None:
     """Local filesystem version of save_prompt_and_plan."""
     # Read existing progress to preserve approval_made
@@ -804,9 +901,8 @@ def _local_save_prompt_and_plan(
 
 # ── Guidelines staleness helpers ──────────────────────────────────────
 
-async def get_cached_guidelines_version(
-    provider: str, service_slug: str, tenant_id: str
-) -> Optional[str]:
+
+async def get_cached_guidelines_version(provider: str, service_slug: str, tenant_id: str) -> str | None:
     """Return the guidelines_version stored in progress.json, or None if not found."""
     if _use_local():
         raw = _local_read(_progress_key(provider, service_slug, tenant_id))
@@ -820,7 +916,13 @@ async def get_cached_guidelines_version(
     bucket = _get_bucket()
     try:
         raw = await loop.run_in_executor(
-            None, partial(_sync_read, client, bucket, _progress_key(provider, service_slug, tenant_id))
+            None,
+            partial(
+                _sync_read,
+                client,
+                bucket,
+                _progress_key(provider, service_slug, tenant_id),
+            ),
         )
         if not raw:
             return None
@@ -829,9 +931,7 @@ async def get_cached_guidelines_version(
         return None
 
 
-async def invalidate_stale_plan(
-    provider: str, service_slug: str, tenant_id: str
-) -> None:
+async def invalidate_stale_plan(provider: str, service_slug: str, tenant_id: str) -> None:
     """Reset plan_generated=False in progress.json so the next call forces LLM regeneration.
 
     Used when guidelines have been updated after the plan was cached.
@@ -850,7 +950,12 @@ async def invalidate_stale_plan(
     # ── Write to disk FIRST ──
     try:
         _local_write(key, updated_json)
-        logger.info("cache.disk_plan_invalidated", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+        logger.info(
+            "cache.disk_plan_invalidated",
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+        )
     except Exception as exc:
         logger.warning("cache.disk_plan_invalidate_failed", error=str(exc))
 
@@ -863,23 +968,28 @@ async def invalidate_stale_plan(
     bucket = _get_bucket()
     try:
         await loop.run_in_executor(
-            None, partial(_sync_write, client, bucket, key, updated_json, "application/json")
+            None,
+            partial(_sync_write, client, bucket, key, updated_json, "application/json"),
         )
-        logger.info("r2.plan_invalidated", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+        logger.info(
+            "r2.plan_invalidated",
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+        )
     except Exception as exc:
         logger.warning("r2.plan_invalidate_failed", error=str(exc))
 
 
 # ── Execution state ───────────────────────────────────────────────────
 
+
 def _execution_state_key(provider: str, service_slug: str, tenant_id: str = "") -> str:
     # tenant_id removed — bucket is already tenant-scoped
     return _k(_coll(), provider, service_slug, "execution_state.json")
 
 
-async def get_execution_state(
-    provider: str, service_slug: str, tenant_id: str
-) -> Optional[Dict[str, Any]]:
+async def get_execution_state(provider: str, service_slug: str, tenant_id: str) -> dict[str, Any] | None:
     """Read execution_state.json. Works with R2 or local filesystem."""
     if _use_local():
         raw = _local_read(_execution_state_key(provider, service_slug, tenant_id))
@@ -889,12 +999,22 @@ async def get_execution_state(
     client = _get_client()
     try:
         raw = await loop.run_in_executor(
-            None, partial(_sync_read, client, _get_bucket(),
-                          _execution_state_key(provider, service_slug, tenant_id))
+            None,
+            partial(
+                _sync_read,
+                client,
+                _get_bucket(),
+                _execution_state_key(provider, service_slug, tenant_id),
+            ),
         )
         return json.loads(raw) if raw else None
     except Exception as exc:
-        logger.warning("r2.get_execution_state_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "r2.get_execution_state_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
@@ -902,7 +1022,7 @@ async def save_execution_state(
     provider: str,
     service_slug: str,
     tenant_id: str,
-    completed_steps: List[str],
+    completed_steps: list[str],
     session_id: str,
 ) -> None:
     """Write execution_state.json. Works with R2 or local filesystem."""
@@ -912,7 +1032,7 @@ async def save_execution_state(
         "service_slug": service_slug,
         "completed_steps": completed_steps,
         "last_session_id": session_id,
-        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "last_updated": datetime.now(UTC).isoformat(),
     }
     state_json = json.dumps(state, indent=2)
 
@@ -921,10 +1041,19 @@ async def save_execution_state(
     # Write to disk FIRST — source of truth
     try:
         _local_write(key, state_json)
-        logger.info("cache.disk_execution_state_saved", provider=provider, service_slug=service_slug,
-                    completed=completed_steps)
+        logger.info(
+            "cache.disk_execution_state_saved",
+            provider=provider,
+            service_slug=service_slug,
+            completed=completed_steps,
+        )
     except Exception as exc:
-        logger.warning("cache.disk_save_execution_state_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "cache.disk_save_execution_state_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
     # Also write to R2 if configured
     if _use_local():
@@ -935,12 +1064,21 @@ async def save_execution_state(
     try:
         await loop.run_in_executor(
             None,
-            partial(_sync_write, client, _get_bucket(), key, state_json, "application/json")
+            partial(_sync_write, client, _get_bucket(), key, state_json, "application/json"),
         )
-        logger.info("r2.execution_state_saved", provider=provider, service_slug=service_slug,
-                    completed=completed_steps)
+        logger.info(
+            "r2.execution_state_saved",
+            provider=provider,
+            service_slug=service_slug,
+            completed=completed_steps,
+        )
     except Exception as exc:
-        logger.warning("r2.save_execution_state_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "r2.save_execution_state_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
 
 async def get_stepper_max_step(
@@ -967,9 +1105,7 @@ async def get_stepper_max_step(
     client = _get_client()
     bucket = _get_bucket()
     try:
-        raw = await loop.run_in_executor(
-            None, partial(_sync_read, client, bucket, key)
-        )
+        raw = await loop.run_in_executor(None, partial(_sync_read, client, bucket, key))
         if raw:
             progress = json.loads(raw)
             val = progress.get("stepper_max_step", 0)
@@ -1001,13 +1137,24 @@ async def update_stepper_max_step(
             # Nothing to update on disk — R2 also already has a higher or equal value
             return
         progress["stepper_max_step"] = step_index
-        progress["last_updated"] = datetime.now(timezone.utc).isoformat()
+        progress["last_updated"] = datetime.now(UTC).isoformat()
         updated_json = json.dumps(progress, indent=2)
         _local_write(key, updated_json)
-        logger.info("cache.disk_stepper_max_step_updated", provider=provider, service_slug=service_slug, step_index=step_index)
+        logger.info(
+            "cache.disk_stepper_max_step_updated",
+            provider=provider,
+            service_slug=service_slug,
+            step_index=step_index,
+        )
     except Exception as exc:
         logger.warning("cache.disk_stepper_max_step_update_failed", error=str(exc))
-        updated_json = json.dumps({"stepper_max_step": step_index, "last_updated": datetime.now(timezone.utc).isoformat()}, indent=2)
+        updated_json = json.dumps(
+            {
+                "stepper_max_step": step_index,
+                "last_updated": datetime.now(UTC).isoformat(),
+            },
+            indent=2,
+        )
 
     # ── Also write to R2 if configured ──────────────────────────────────
     if _use_local():
@@ -1021,7 +1168,12 @@ async def update_stepper_max_step(
             None,
             partial(_sync_write, client, bucket, key, updated_json, "application/json"),
         )
-        logger.info("r2.stepper_max_step_updated", provider=provider, service_slug=service_slug, step_index=step_index)
+        logger.info(
+            "r2.stepper_max_step_updated",
+            provider=provider,
+            service_slug=service_slug,
+            step_index=step_index,
+        )
     except Exception as exc:
         logger.warning("r2.stepper_max_step_update_failed", error=str(exc))
 
@@ -1040,13 +1192,25 @@ async def update_approval_status(
         existing_raw = _local_read(key)
         progress = json.loads(existing_raw) if existing_raw else {}
         progress["approval_made"] = status
-        progress["last_updated"] = datetime.now(timezone.utc).isoformat()
+        progress["last_updated"] = datetime.now(UTC).isoformat()
         updated_json = json.dumps(progress, indent=2)
         _local_write(key, updated_json)
-        logger.info("cache.disk_approval_updated", provider=provider, service_slug=service_slug, tenant_id=tenant_id, status=status)
+        logger.info(
+            "cache.disk_approval_updated",
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+            status=status,
+        )
     except Exception as exc:
         logger.warning("cache.disk_approval_update_failed", error=str(exc))
-        updated_json = json.dumps({"approval_made": status, "last_updated": datetime.now(timezone.utc).isoformat()}, indent=2)
+        updated_json = json.dumps(
+            {
+                "approval_made": status,
+                "last_updated": datetime.now(UTC).isoformat(),
+            },
+            indent=2,
+        )
 
     # ── Also write to R2 if configured ──
     if _use_local():
@@ -1060,12 +1224,19 @@ async def update_approval_status(
             None,
             partial(_sync_write, client, bucket, key, updated_json, "application/json"),
         )
-        logger.info("r2.approval_updated", provider=provider, service_slug=service_slug, tenant_id=tenant_id, status=status)
+        logger.info(
+            "r2.approval_updated",
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+            status=status,
+        )
     except Exception as exc:
         logger.warning("r2.approval_update_failed", error=str(exc))
 
 
 # ── Cache purge (called on session delete) ────────────────────────────
+
 
 async def clear_execution_state(provider: str, service_slug: str, tenant_id: str) -> None:
     """Delete only execution_state.json — preserves plan.json, progress.json, plan.md.
@@ -1125,14 +1296,20 @@ async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
         failures_dir = _local_path(_k(_coll(), provider, service_slug, "failures"))
         if failures_dir.exists() and failures_dir.is_dir():
             import shutil
+
             try:
                 shutil.rmtree(str(failures_dir))
                 removed.append(f"{provider}/{service_slug}/failures/")
             except Exception as exc:
                 logger.warning("cache.local_failures_clear_failed", error=str(exc))
 
-        logger.info("cache.local_cleared", provider=provider, service_slug=service_slug,
-                    tenant_id=tenant_id, removed=removed)
+        logger.info(
+            "cache.local_cleared",
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+            removed=removed,
+        )
         return
 
     # R2 path
@@ -1142,9 +1319,7 @@ async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
 
     async def _delete_key(key: str) -> None:
         try:
-            await loop.run_in_executor(
-                None, partial(client.delete_object, Bucket=bucket, Key=key)
-            )
+            await loop.run_in_executor(None, partial(client.delete_object, Bucket=bucket, Key=key))
         except Exception as exc:
             logger.warning("r2.clear_key_failed", key=key, error=str(exc))
 
@@ -1164,7 +1339,12 @@ async def clear_cache(provider: str, service_slug: str, tenant_id: str) -> None:
     except Exception as exc:
         logger.warning("r2.clear_failures_list_failed", error=str(exc))
 
-    logger.info("r2.cache_cleared", provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+    logger.info(
+        "r2.cache_cleared",
+        provider=provider,
+        service_slug=service_slug,
+        tenant_id=tenant_id,
+    )
 
 
 # ── Step Prompts — R2-backed versioned LLM prompt storage ────────────────────
@@ -1189,7 +1369,7 @@ _LOCAL_STEP_PROMPTS_DIR = _LOCAL_CACHE_DIR / _STEP_PROMPTS_PREFIX
 # In-process cache so we only hit R2/disk once per process lifetime per prompt.
 # Cleared on service restart — that's intentional so a prompt update takes effect
 # after a rolling restart without code changes.
-_step_prompt_cache: Dict[str, str] = {}
+_step_prompt_cache: dict[str, str] = {}
 
 
 def _step_prompt_key(prompt_name: str) -> str:
@@ -1218,9 +1398,7 @@ async def _load_raw_step_prompt(prompt_name: str, local_fallback: str) -> str:
             # Step prompts live in the shared bucket (shielvasense-integration-plans),
             # NOT in the per-app bucket — they are global admin-managed resources.
             bucket = _get_shared_bucket()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, bucket, key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, bucket, key))
             if raw:
                 logger.debug("step_prompt.loaded_r2", prompt=prompt_name, bucket=bucket)
                 return raw
@@ -1237,7 +1415,7 @@ async def get_step_prompt(
     prompt_name: str,
     local_fallback: str,
     *,
-    auth_type: Optional[str] = None,
+    auth_type: str | None = None,
 ) -> str:
     """Return the live step prompt from R2 (or local cache), falling back to local_fallback.
 
@@ -1274,11 +1452,7 @@ async def get_step_prompt(
     addendum = await _load_raw_step_prompt(addendum_name, "")
 
     if addendum:
-        composed = (
-            f"{base}\n\n"
-            f"## Auth-Type Specific Rules — {auth_type}\n\n"
-            f"{addendum}"
-        )
+        composed = f"{base}\n\n## Auth-Type Specific Rules — {auth_type}\n\n{addendum}"
         logger.debug("step_prompt.auth_overlay_applied", prompt=prompt_name, auth_type=auth_type)
     else:
         composed = base
@@ -1317,7 +1491,7 @@ async def save_step_prompt(prompt_name: str, content: str) -> None:
     logger.info("step_prompt.saved_r2", prompt=prompt_name, bucket=bucket, chars=len(content))
 
 
-async def sync_all_step_prompts_to_r2() -> Dict[str, str]:
+async def sync_all_step_prompts_to_r2() -> dict[str, str]:
     """Upload all hardcoded prompts from codegen_prompt.py to R2 (or local cache).
 
     Writes a prompt when:
@@ -1332,31 +1506,44 @@ async def sync_all_step_prompts_to_r2() -> Dict[str, str]:
     """
     from integration.prompts.codegen_prompt import (
         CONNECTOR_SYSTEM_PROMPT,
-        TEST_SYSTEM_PROMPT,
-        INTEGRATION_TEST_SYSTEM_PROMPT,
         FIX_CODE_PROMPT,
-        FIX_TESTS_PROMPT,
         FIX_CONNECTOR_FOR_TESTS_PROMPT,
-        TEST_RULES_GENERATION_PROMPT,
+        FIX_TESTS_PROMPT,
+        INTEGRATION_TEST_SYSTEM_PROMPT,
         MODULE_FILE_SYSTEM_PROMPT,
         TEST_MODULE_SYSTEM_PROMPT,
+        TEST_RULES_GENERATION_PROMPT,
+        TEST_SYSTEM_PROMPT,
         USER_MODIFY_PROMPT,
         USER_RESTRUCTURE_PROMPT,
     )
-    from integration.services.step_executor import _METADATA_SYSTEM_PROMPT, _SETUP_INSTRUCTIONS_SYSTEM, _TEST_GUIDELINES_SYSTEM
+    from integration.prompts.docs_prompt import (
+        DOCS_GENERATION_PROMPT,
+        DOCS_UPDATE_PROMPT,
+    )
+    from integration.prompts.planning_prompt import (
+        PLANNING_SYSTEM_PROMPT,
+        REPLAN_SYSTEM_PROMPT,
+    )
     from integration.services.agentic_fix import (
+        _AUTH_TYPE_ADDENDA,
+        _CONNECTOR_FIX_SYSTEM,
         _CONNECTOR_GEN_SYSTEM,
-        _METADATA_GEN_SYSTEM,
         _DOCS_GEN_SYSTEM,
         _FIX_SYSTEM,
-        _AUTH_TYPE_ADDENDA,
+        _METADATA_GEN_SYSTEM,
         _TEST_GEN_SYSTEM,
-        _CONNECTOR_FIX_SYSTEM,
     )
-    from integration.prompts.planning_prompt import PLANNING_SYSTEM_PROMPT, REPLAN_SYSTEM_PROMPT
-    from integration.prompts.docs_prompt import DOCS_GENERATION_PROMPT, DOCS_UPDATE_PROMPT
     from integration.services.code_analysis_service import _ANALYSIS_SYSTEM
-    from integration.services.docs_synth_service import _SYNTHESIS_PROMPT, _EXTRACTION_PROMPT
+    from integration.services.docs_synth_service import (
+        _EXTRACTION_PROMPT,
+        _SYNTHESIS_PROMPT,
+    )
+    from integration.services.step_executor import (
+        _METADATA_SYSTEM_PROMPT,
+        _SETUP_INSTRUCTIONS_SYSTEM,
+        _TEST_GUIDELINES_SYSTEM,
+    )
 
     prompts = {
         "CONNECTOR_SYSTEM_PROMPT": CONNECTOR_SYSTEM_PROMPT,
@@ -1424,7 +1611,7 @@ Limit to 4–8 packages. Prefer widely-used, well-maintained packages.""",
     for auth_type, addendum in _AUTH_TYPE_ADDENDA.items():
         prompts[f"CONNECTOR_GEN_SYSTEM_{auth_type}"] = addendum
 
-    results: Dict[str, str] = {}
+    results: dict[str, str] = {}
 
     for name, content in prompts.items():
         key = _step_prompt_key(name)
@@ -1438,9 +1625,7 @@ Limit to 4–8 packages. Prefer widely-used, well-maintained packages.""",
                 loop = asyncio.get_event_loop()
                 client = _get_client()
                 # Read from shared bucket — step prompts are global admin resources
-                existing = await loop.run_in_executor(
-                    None, partial(_sync_read, client, _get_shared_bucket(), key)
-                )
+                existing = await loop.run_in_executor(None, partial(_sync_read, client, _get_shared_bucket(), key))
 
             if existing and existing.strip() == content.strip():
                 results[name] = "skipped"
@@ -1448,8 +1633,11 @@ Limit to 4–8 packages. Prefer widely-used, well-maintained packages.""",
             else:
                 # Upload if new OR if content has changed since last sync
                 if existing:
-                    logger.info("step_prompt.sync_updated", prompt=name,
-                                reason="content changed — overwriting stale R2 version")
+                    logger.info(
+                        "step_prompt.sync_updated",
+                        prompt=name,
+                        reason="content changed — overwriting stale R2 version",
+                    )
                 await save_step_prompt(name, content)
                 results[name] = "uploaded" if not existing else "updated"
         except Exception as exc:
@@ -1474,9 +1662,7 @@ def _docs_key(tenant_id: str, provider: str, service_slug: str) -> str:
     return _k(_coll(), _DOCS_PREFIX, provider, service_slug, "docs.json")
 
 
-async def get_connector_docs(
-    tenant_id: str, provider: str, service_slug: str
-) -> Optional[dict]:
+async def get_connector_docs(tenant_id: str, provider: str, service_slug: str) -> dict | None:
     """Load connector docs JSON from R2 (or local). Returns None if not found."""
     key = _docs_key(tenant_id, provider, service_slug)
     loop = asyncio.get_event_loop()
@@ -1485,9 +1671,7 @@ async def get_connector_docs(
             raw = await loop.run_in_executor(None, _local_read, key)
         else:
             client = _get_client()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, _get_bucket(), key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         if raw:
             return json.loads(raw)
     except Exception as exc:
@@ -1495,9 +1679,7 @@ async def get_connector_docs(
     return None
 
 
-async def save_connector_docs(
-    tenant_id: str, provider: str, service_slug: str, docs: dict
-) -> None:
+async def save_connector_docs(tenant_id: str, provider: str, service_slug: str, docs: dict) -> None:
     """Persist connector docs JSON to R2 (or local). Overwrites any existing docs."""
     key = _docs_key(tenant_id, provider, service_slug)
     content = json.dumps(docs, ensure_ascii=False, indent=2)
@@ -1510,11 +1692,20 @@ async def save_connector_docs(
             await loop.run_in_executor(
                 None,
                 partial(
-                    _sync_write, client, _get_bucket(), key, content,
+                    _sync_write,
+                    client,
+                    _get_bucket(),
+                    key,
+                    content,
                     "application/json",
                 ),
             )
-        logger.info("connector_docs.saved", tenant_id=tenant_id, provider=provider, service_slug=service_slug)
+        logger.info(
+            "connector_docs.saved",
+            tenant_id=tenant_id,
+            provider=provider,
+            service_slug=service_slug,
+        )
     except Exception as exc:
         logger.warning("connector_docs.save_failed", key=key, error=str(exc))
 
@@ -1529,7 +1720,7 @@ def _implementation_plan_key(provider: str, service_slug: str) -> str:
     return _k(_coll(), provider, service_slug, "implementation_plan.md")
 
 
-async def get_implementation_plan(provider: str, service_slug: str) -> Optional[str]:
+async def get_implementation_plan(provider: str, service_slug: str) -> str | None:
     """Fetch connector-specific implementation plan — disk first, then R2 as fallback."""
     key = _implementation_plan_key(provider, service_slug)
     # Always try disk first — source of truth
@@ -1542,18 +1733,19 @@ async def get_implementation_plan(provider: str, service_slug: str) -> Optional[
     loop = asyncio.get_event_loop()
     try:
         client = _get_client()
-        content = await loop.run_in_executor(
-            None, partial(_sync_read, client, _get_bucket(), key)
-        )
+        content = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         # Seed disk from R2 for future reads
         if content:
-            try:
+            with contextlib.suppress(Exception):
                 _local_write(key, content)
-            except Exception:
-                pass
         return content
     except Exception as exc:
-        logger.warning("implementation_plan.get_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "implementation_plan.get_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
@@ -1564,7 +1756,12 @@ async def store_implementation_plan(provider: str, service_slug: str, content: s
 
     # Write to disk FIRST — source of truth
     await loop.run_in_executor(None, partial(_local_write, key, content))
-    logger.info("implementation_plan.saved_disk", provider=provider, service_slug=service_slug, chars=len(content))
+    logger.info(
+        "implementation_plan.saved_disk",
+        provider=provider,
+        service_slug=service_slug,
+        chars=len(content),
+    )
 
     # Also write to R2 if configured
     if _use_local():
@@ -1575,9 +1772,19 @@ async def store_implementation_plan(provider: str, service_slug: str, content: s
             None,
             partial(_sync_write, client, _get_bucket(), key, content, "text/markdown"),
         )
-        logger.info("implementation_plan.saved_r2", provider=provider, service_slug=service_slug, chars=len(content))
+        logger.info(
+            "implementation_plan.saved_r2",
+            provider=provider,
+            service_slug=service_slug,
+            chars=len(content),
+        )
     except Exception as exc:
-        logger.warning("implementation_plan.save_r2_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "implementation_plan.save_r2_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         raise
 
 
@@ -1586,7 +1793,7 @@ def _test_guidelines_key(provider: str, service_slug: str) -> str:
     return _k(_coll(), provider, service_slug, "test_guidelines.md")
 
 
-async def get_test_guidelines(provider: str, service_slug: str) -> Optional[str]:
+async def get_test_guidelines(provider: str, service_slug: str) -> str | None:
     """Fetch connector-specific test guidelines — disk first, then R2 as fallback."""
     key = _test_guidelines_key(provider, service_slug)
     # Always try disk first — source of truth
@@ -1599,18 +1806,19 @@ async def get_test_guidelines(provider: str, service_slug: str) -> Optional[str]
     loop = asyncio.get_event_loop()
     try:
         client = _get_client()
-        content = await loop.run_in_executor(
-            None, partial(_sync_read, client, _get_bucket(), key)
-        )
+        content = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         # Seed disk from R2 for future reads
         if content:
-            try:
+            with contextlib.suppress(Exception):
                 _local_write(key, content)
-            except Exception:
-                pass
         return content
     except Exception as exc:
-        logger.warning("test_guidelines.get_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "test_guidelines.get_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
@@ -1621,7 +1829,12 @@ async def store_test_guidelines(provider: str, service_slug: str, content: str) 
 
     # Write to disk FIRST — source of truth
     await loop.run_in_executor(None, partial(_local_write, key, content))
-    logger.info("test_guidelines.saved_disk", provider=provider, service_slug=service_slug, chars=len(content))
+    logger.info(
+        "test_guidelines.saved_disk",
+        provider=provider,
+        service_slug=service_slug,
+        chars=len(content),
+    )
 
     # Also write to R2 if configured
     if _use_local():
@@ -1632,9 +1845,19 @@ async def store_test_guidelines(provider: str, service_slug: str, content: str) 
             None,
             partial(_sync_write, client, _get_bucket(), key, content, "text/markdown"),
         )
-        logger.info("test_guidelines.saved_r2", provider=provider, service_slug=service_slug, chars=len(content))
+        logger.info(
+            "test_guidelines.saved_r2",
+            provider=provider,
+            service_slug=service_slug,
+            chars=len(content),
+        )
     except Exception as exc:
-        logger.warning("test_guidelines.save_r2_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "test_guidelines.save_r2_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         raise
 
 
@@ -1643,7 +1866,7 @@ def _setup_instructions_key(provider: str, service_slug: str) -> str:
     return _k(_coll(), provider, service_slug, "setup_instructions.md")
 
 
-async def get_setup_instructions(provider: str, service_slug: str) -> Optional[str]:
+async def get_setup_instructions(provider: str, service_slug: str) -> str | None:
     """Fetch connector-specific setup instructions — disk first, then R2 as fallback."""
     key = _setup_instructions_key(provider, service_slug)
     # Always try disk first
@@ -1656,18 +1879,19 @@ async def get_setup_instructions(provider: str, service_slug: str) -> Optional[s
     loop = asyncio.get_event_loop()
     try:
         client = _get_client()
-        content = await loop.run_in_executor(
-            None, partial(_sync_read, client, _get_bucket(), key)
-        )
+        content = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         # Seed disk from R2 for future reads
         if content:
-            try:
+            with contextlib.suppress(Exception):
                 _local_write(key, content)
-            except Exception:
-                pass
         return content
     except Exception as exc:
-        logger.warning("setup_instructions.get_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "setup_instructions.get_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         return None
 
 
@@ -1679,9 +1903,19 @@ async def store_setup_instructions(provider: str, service_slug: str, content: st
     # Write to disk FIRST — source of truth
     try:
         await loop.run_in_executor(None, partial(_local_write, key, content))
-        logger.info("setup_instructions.saved_disk", provider=provider, service_slug=service_slug, chars=len(content))
+        logger.info(
+            "setup_instructions.saved_disk",
+            provider=provider,
+            service_slug=service_slug,
+            chars=len(content),
+        )
     except Exception as exc:
-        logger.warning("setup_instructions.disk_save_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "setup_instructions.disk_save_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
     # Also write to R2 if configured
     if _use_local():
@@ -1692,9 +1926,19 @@ async def store_setup_instructions(provider: str, service_slug: str, content: st
             None,
             partial(_sync_write, client, _get_bucket(), key, content, "text/markdown"),
         )
-        logger.info("setup_instructions.saved_r2", provider=provider, service_slug=service_slug, chars=len(content))
+        logger.info(
+            "setup_instructions.saved_r2",
+            provider=provider,
+            service_slug=service_slug,
+            chars=len(content),
+        )
     except Exception as exc:
-        logger.warning("setup_instructions.save_r2_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "setup_instructions.save_r2_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
 
 def _entity_builder_key(provider: str, service_slug: str, method_name: str) -> str:
@@ -1702,11 +1946,10 @@ def _entity_builder_key(provider: str, service_slug: str, method_name: str) -> s
     return _k(_coll(), provider, service_slug, f"entity_builder_{method_name}.json")
 
 
-async def store_entity_builder_config(
-    provider: str, service_slug: str, method_name: str, config: dict
-) -> None:
+async def store_entity_builder_config(provider: str, service_slug: str, method_name: str, config: dict) -> None:
     """Persist entity builder config (entity + mappings + method) to R2 for use in implement_persistence step."""
     import json as _json
+
     key = _entity_builder_key(provider, service_slug, method_name)
     content = _json.dumps(config, indent=2, default=str)
     loop = asyncio.get_event_loop()
@@ -1714,7 +1957,12 @@ async def store_entity_builder_config(
     # ── Write to disk FIRST — source of truth ──
     try:
         await loop.run_in_executor(None, partial(_local_write, key, content))
-        logger.info("entity_builder.saved_disk", provider=provider, service_slug=service_slug, method=method_name)
+        logger.info(
+            "entity_builder.saved_disk",
+            provider=provider,
+            service_slug=service_slug,
+            method=method_name,
+        )
     except Exception as exc:
         logger.warning("entity_builder.disk_save_failed", error=str(exc))
 
@@ -1724,19 +1972,24 @@ async def store_entity_builder_config(
     try:
         client = _get_client()
         await loop.run_in_executor(
-            None, partial(_sync_write, client, _get_bucket(), key, content, "application/json")
+            None,
+            partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
         )
-        logger.info("entity_builder.saved_r2", provider=provider, service_slug=service_slug, method=method_name)
+        logger.info(
+            "entity_builder.saved_r2",
+            provider=provider,
+            service_slug=service_slug,
+            method=method_name,
+        )
     except Exception as exc:
         logger.warning("entity_builder.save_r2_failed", error=str(exc))
         raise
 
 
-async def get_entity_builder_config(
-    provider: str, service_slug: str, method_name: str
-) -> Optional[dict]:
+async def get_entity_builder_config(provider: str, service_slug: str, method_name: str) -> dict | None:
     """Fetch entity builder config from R2. Returns None if not found."""
     import json as _json
+
     key = _entity_builder_key(provider, service_slug, method_name)
     loop = asyncio.get_event_loop()
     if _use_local():
@@ -1747,13 +2000,17 @@ async def get_entity_builder_config(
         raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         return _json.loads(raw) if raw else None
     except Exception as exc:
-        logger.warning("entity_builder.get_failed", provider=provider, service_slug=service_slug, method=method_name, error=str(exc))
+        logger.warning(
+            "entity_builder.get_failed",
+            provider=provider,
+            service_slug=service_slug,
+            method=method_name,
+            error=str(exc),
+        )
         return None
 
 
-async def delete_connector_session_files(
-    tenant_id: str, service_slug: str, session_id: str
-) -> int:
+async def delete_connector_session_files(tenant_id: str, service_slug: str, session_id: str) -> int:
     """Delete all connector code files for a session from R2 (or local cache).
 
     Called on session delete so generated connector code doesn't accumulate in R2.
@@ -1768,11 +2025,16 @@ async def delete_connector_session_files(
             return 0
         count = 0
         import shutil as _shutil
+
         try:
             _shutil.rmtree(str(local_root))
             count = 1  # treat the whole dir as one deletion unit
-            logger.info("connector_code.local_session_deleted", tenant_id=tenant_id,
-                        service_slug=service_slug, session_id=session_id)
+            logger.info(
+                "connector_code.local_session_deleted",
+                tenant_id=tenant_id,
+                service_slug=service_slug,
+                session_id=session_id,
+            )
         except Exception as exc:
             logger.warning("connector_code.local_session_delete_failed", error=str(exc))
         return count
@@ -1796,19 +2058,26 @@ async def delete_connector_session_files(
             return len(keys)
 
         deleted = await loop.run_in_executor(None, _list_and_delete)
-        logger.info("connector_code.r2_session_deleted", tenant_id=tenant_id,
-                    service_slug=service_slug, session_id=session_id, count=deleted)
+        logger.info(
+            "connector_code.r2_session_deleted",
+            tenant_id=tenant_id,
+            service_slug=service_slug,
+            session_id=session_id,
+            count=deleted,
+        )
         return deleted
     except Exception as exc:
-        logger.warning("connector_code.r2_session_delete_failed",
-                       tenant_id=tenant_id, service_slug=service_slug,
-                       session_id=session_id, error=str(exc))
+        logger.warning(
+            "connector_code.r2_session_delete_failed",
+            tenant_id=tenant_id,
+            service_slug=service_slug,
+            session_id=session_id,
+            error=str(exc),
+        )
         return 0
 
 
-async def delete_connector_docs(
-    tenant_id: str, provider: str, service_slug: str
-) -> bool:
+async def delete_connector_docs(tenant_id: str, provider: str, service_slug: str) -> bool:
     """Delete connector docs JSON from R2 (or local). Returns True if deleted, False if not found."""
     key = _docs_key(tenant_id, provider, service_slug)
     loop = asyncio.get_event_loop()
@@ -1822,7 +2091,12 @@ async def delete_connector_docs(
                 partial(client.delete_object, Bucket=_get_bucket(), Key=key),
             )
             deleted = True
-        logger.info("connector_docs.deleted", tenant_id=tenant_id, provider=provider, service_slug=service_slug)
+        logger.info(
+            "connector_docs.deleted",
+            tenant_id=tenant_id,
+            provider=provider,
+            service_slug=service_slug,
+        )
         return deleted
     except Exception as exc:
         logger.warning("connector_docs.delete_failed", key=key, error=str(exc))
@@ -1838,7 +2112,15 @@ async def delete_connector_docs(
 # When R2 is not configured the same paths are mirrored under _LOCAL_CACHE_DIR so
 # the local-dev and production code paths are identical.
 
-_SKIP_DIRS_UPLOAD = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", "node_modules", "dist", "build"}
+_SKIP_DIRS_UPLOAD = {
+    "__pycache__",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    "node_modules",
+    "dist",
+    "build",
+}
 
 
 def _connector_draft_key(tenant_id: str, service_slug: str, session_id: str, rel_path: str) -> str:
@@ -1873,9 +2155,7 @@ def _content_type_for(rel_path: str) -> str:
     }.get(ext, "text/plain")
 
 
-async def upload_connector_dir(
-    tenant_id: str, service_slug: str, session_id: str, out_dir: "Path"
-) -> int:
+async def upload_connector_dir(tenant_id: str, service_slug: str, session_id: str, out_dir: "Path") -> int:
     """Upload every file in *out_dir* to R2 (or local cache).
 
     Skips __pycache__, .pyc files, and other build artifacts.
@@ -1912,8 +2192,10 @@ async def upload_connector_dir(
             await loop.run_in_executor(None, partial(_local_write, key, content))
         logger.info(
             "connector_code.local_upload_done",
-            tenant_id=tenant_id, service_slug=service_slug,
-            session_id=session_id, count=len(files_to_upload),
+            tenant_id=tenant_id,
+            service_slug=service_slug,
+            session_id=session_id,
+            count=len(files_to_upload),
         )
         return len(files_to_upload)
 
@@ -1924,9 +2206,7 @@ async def upload_connector_dir(
     async def _upload_one(rel: str, content: str) -> None:
         key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
         ct = _content_type_for(rel)
-        await loop.run_in_executor(
-            None, partial(_sync_write, client, bucket, key, content, ct)
-        )
+        await loop.run_in_executor(None, partial(_sync_write, client, bucket, key, content, ct))
 
     # Chunk into batches to avoid overwhelming the event loop
     BATCH = 10
@@ -1938,15 +2218,15 @@ async def upload_connector_dir(
 
     logger.info(
         "connector_code.r2_upload_done",
-        tenant_id=tenant_id, service_slug=service_slug,
-        session_id=session_id, count=uploaded,
+        tenant_id=tenant_id,
+        service_slug=service_slug,
+        session_id=session_id,
+        count=uploaded,
     )
     return uploaded
 
 
-async def list_connector_files(
-    tenant_id: str, service_slug: str, session_id: str
-) -> list[str]:
+async def list_connector_files(tenant_id: str, service_slug: str, session_id: str) -> list[str]:
     """Return sorted list of relative file paths stored in R2 for this session.
 
     Returns empty list if no files found or R2 not configured.
@@ -1970,18 +2250,21 @@ async def list_connector_files(
             for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
                 for obj in page.get("Contents", []):
                     # Strip the prefix to get the relative path
-                    keys.append(obj["Key"][len(prefix):])
+                    keys.append(obj["Key"][len(prefix) :])
             return sorted(keys)
 
         return await loop.run_in_executor(None, _list_objects)
     except Exception as exc:
-        logger.warning("connector_code.list_failed", tenant_id=tenant_id, session_id=session_id, error=str(exc))
+        logger.warning(
+            "connector_code.list_failed",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            error=str(exc),
+        )
         return []
 
 
-async def get_connector_file(
-    tenant_id: str, service_slug: str, session_id: str, rel_path: str
-) -> Optional[str]:
+async def get_connector_file(tenant_id: str, service_slug: str, session_id: str, rel_path: str) -> str | None:
     """Fetch a single connector file from R2 (or local cache). Returns None if not found."""
     key = _connector_draft_key(tenant_id, service_slug, session_id, rel_path)
     loop = asyncio.get_event_loop()
@@ -1997,9 +2280,7 @@ async def get_connector_file(
         return None
 
 
-async def get_connector_r2_checksums(
-    tenant_id: str, service_slug: str, session_id: str
-) -> dict:
+async def get_connector_r2_checksums(tenant_id: str, service_slug: str, session_id: str) -> dict:
     """Return {rel_path: md5_hex} for all files currently stored in R2 (or local cache)
     for this connector session.  For real R2, the ETag is the MD5 (no quotes).
     """
@@ -2018,7 +2299,7 @@ async def get_connector_r2_checksums(
                 rel = str(f.relative_to(local_root))
                 try:
                     content = f.read_text(encoding="utf-8")
-                    result[rel] = _hashlib.md5(content.encode("utf-8")).hexdigest()
+                    result[rel] = _hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
                 except Exception:
                     pass
         return result
@@ -2032,7 +2313,7 @@ async def get_connector_r2_checksums(
             paginator = client.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
                 for obj in page.get("Contents", []):
-                    rel = obj["Key"][len(prefix):]
+                    rel = obj["Key"][len(prefix) :]
                     if rel:
                         # ETag comes wrapped in quotes — strip them
                         etag = obj.get("ETag", "").strip('"').strip("'").lower()
@@ -2043,7 +2324,9 @@ async def get_connector_r2_checksums(
     except Exception as exc:
         logger.warning(
             "connector_code.r2_checksums_failed",
-            tenant_id=tenant_id, session_id=session_id, error=str(exc)
+            tenant_id=tenant_id,
+            session_id=session_id,
+            error=str(exc),
         )
         return {}
 
@@ -2086,21 +2369,19 @@ async def upload_connector_files_selective(
     async def _upload_one(rel: str, content: str) -> None:
         key = _connector_draft_key(tenant_id, service_slug, session_id, rel)
         ct = _content_type_for(rel)
-        await loop.run_in_executor(
-            None, partial(_sync_write, client, bucket, key, content, ct)
-        )
+        await loop.run_in_executor(None, partial(_sync_write, client, bucket, key, content, ct))
 
     await asyncio.gather(*[_upload_one(rel, content) for rel, content in files_to_upload])
     logger.info(
         "connector_code.selective_upload_done",
-        tenant_id=tenant_id, session_id=session_id, count=len(files_to_upload),
+        tenant_id=tenant_id,
+        session_id=session_id,
+        count=len(files_to_upload),
     )
     return len(files_to_upload)
 
 
-async def delete_connector_r2_files(
-    tenant_id: str, service_slug: str, session_id: str, rel_paths: list
-) -> int:
+async def delete_connector_r2_files(tenant_id: str, service_slug: str, session_id: str, rel_paths: list) -> int:
     """Delete specific files from R2 (or local cache) by relative path.
     Returns count deleted.
     """
@@ -2121,10 +2402,7 @@ async def delete_connector_r2_files(
     bucket = _get_bucket()
 
     # Build full R2 keys
-    r2_keys = [
-        _connector_draft_key(tenant_id, service_slug, session_id, rel)
-        for rel in rel_paths
-    ]
+    r2_keys = [_connector_draft_key(tenant_id, service_slug, session_id, rel) for rel in rel_paths]
 
     def _delete_batch(keys_batch: list) -> int:
         objects = [{"Key": k} for k in keys_batch]
@@ -2140,7 +2418,9 @@ async def delete_connector_r2_files(
 
     logger.info(
         "connector_code.r2_delete_done",
-        tenant_id=tenant_id, session_id=session_id, count=deleted,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        count=deleted,
     )
     return deleted
 
@@ -2149,11 +2429,12 @@ async def delete_connector_r2_files(
 # Persisted at service level (shared across sessions for the same provider/service):
 #   {coll}/{provider}/{service_slug}/connector_analysis.json
 
+
 def _analysis_key(provider: str, service_slug: str) -> str:
     return _k(_coll(), provider, service_slug, "connector_analysis.json")
 
 
-async def get_connector_analysis(provider: str, service_slug: str) -> Optional[Dict[str, Any]]:
+async def get_connector_analysis(provider: str, service_slug: str) -> dict[str, Any] | None:
     """Fetch cached AI analysis for a connector. Returns None if not yet generated."""
     key = _analysis_key(provider, service_slug)
     loop = asyncio.get_event_loop()
@@ -2169,21 +2450,35 @@ async def get_connector_analysis(provider: str, service_slug: str) -> Optional[D
             return json.loads(raw)
         # R2 returned empty — fall through to local fallback
     except Exception as exc:
-        logger.warning("analysis.get_failed_r2", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "analysis.get_failed_r2",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
     # Fall back to local filesystem (written there when R2 save failed or no R2 configured)
     try:
         local_raw = await loop.run_in_executor(None, partial(_local_read, key))
         if local_raw:
-            logger.info("analysis.loaded_from_local", provider=provider, service_slug=service_slug)
+            logger.info(
+                "analysis.loaded_from_local",
+                provider=provider,
+                service_slug=service_slug,
+            )
             return json.loads(local_raw)
     except Exception as exc:
-        logger.warning("analysis.get_failed_local", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "analysis.get_failed_local",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
 
     return None
 
 
-async def save_connector_analysis(provider: str, service_slug: str, analysis: Dict[str, Any]) -> None:
+async def save_connector_analysis(provider: str, service_slug: str, analysis: dict[str, Any]) -> None:
     """Persist AI analysis for a connector to R2 (or local cache)."""
     key = _analysis_key(provider, service_slug)
     content = json.dumps(analysis, ensure_ascii=False, indent=2)
@@ -2196,11 +2491,17 @@ async def save_connector_analysis(provider: str, service_slug: str, analysis: Di
     try:
         client = _get_client()
         await loop.run_in_executor(
-            None, partial(_sync_write, client, _get_bucket(), key, content, "application/json")
+            None,
+            partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
         )
         logger.info("analysis.saved", provider=provider, service_slug=service_slug)
     except Exception as exc:
-        logger.warning("analysis.save_failed", provider=provider, service_slug=service_slug, error=str(exc))
+        logger.warning(
+            "analysis.save_failed",
+            provider=provider,
+            service_slug=service_slug,
+            error=str(exc),
+        )
         # Fall back to local
         await loop.run_in_executor(None, partial(_local_write, key, content))
 
@@ -2215,8 +2516,16 @@ async def save_connector_analysis(provider: str, service_slug: str, analysis: Di
 # started_at, finished_at}; the heavyweight bytes live in R2 and are pulled
 # on demand by the Logs tab in the Builder.
 
+
 def _step_output_key(provider: str, service_slug: str, session_id: str, step_index: int) -> str:
-    return _k(_coll(), provider, service_slug, session_id, "step_outputs", f"{step_index}.json")
+    return _k(
+        _coll(),
+        provider,
+        service_slug,
+        session_id,
+        "step_outputs",
+        f"{step_index}.json",
+    )
 
 
 async def save_step_output(
@@ -2224,7 +2533,7 @@ async def save_step_output(
     service_slug: str,
     session_id: str,
     step_index: int,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
 ) -> None:
     """Persist a step's stdout/stderr + logs to R2.
 
@@ -2251,8 +2560,14 @@ async def save_step_output(
                 None,
                 partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
             )
-        logger.info("step_output.saved", provider=provider, service_slug=service_slug,
-                    session_id=session_id, step_index=step_index, bytes=len(content))
+        logger.info(
+            "step_output.saved",
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            step_index=step_index,
+            bytes=len(content),
+        )
     except Exception as exc:
         logger.warning("step_output.save_failed", key=key, error=str(exc))
 
@@ -2262,7 +2577,7 @@ async def get_step_output(
     service_slug: str,
     session_id: str,
     step_index: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Fetch a step's R2-stored output payload. Returns None when absent."""
     if not provider or not service_slug or not session_id:
         return None
@@ -2273,9 +2588,7 @@ async def get_step_output(
             raw = await loop.run_in_executor(None, partial(_local_read, key))
         else:
             client = _get_client()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, _get_bucket(), key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         if raw:
             return json.loads(raw)
     except Exception as exc:
@@ -2292,6 +2605,7 @@ async def get_step_output(
 # fields, methods, etc.) lives here in R2 — written once on plan generation
 # (or replan), read on demand when the Builder opens a session.
 
+
 def _plan_full_key(provider: str, service_slug: str, session_id: str) -> str:
     return _k(_coll(), provider, service_slug, session_id, "plan_full.json")
 
@@ -2300,7 +2614,7 @@ async def save_plan_full(
     provider: str,
     service_slug: str,
     session_id: str,
-    plan: Dict[str, Any],
+    plan: dict[str, Any],
 ) -> None:
     """Persist the full PlanDocument (as a dict) to R2.
 
@@ -2323,8 +2637,13 @@ async def save_plan_full(
                 None,
                 partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
             )
-        logger.info("plan_full.saved", provider=provider, service_slug=service_slug,
-                    session_id=session_id, bytes=len(content))
+        logger.info(
+            "plan_full.saved",
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            bytes=len(content),
+        )
     except Exception as exc:
         logger.warning("plan_full.save_failed", key=key, error=str(exc))
 
@@ -2333,7 +2652,7 @@ async def get_plan_full(
     provider: str,
     service_slug: str,
     session_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Fetch the full PlanDocument dict from R2. Returns None when absent."""
     if not provider or not service_slug or not session_id:
         return None
@@ -2344,9 +2663,7 @@ async def get_plan_full(
             raw = await loop.run_in_executor(None, partial(_local_read, key))
         else:
             client = _get_client()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, _get_bucket(), key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         if raw:
             return json.loads(raw)
     except Exception as exc:
@@ -2365,6 +2682,7 @@ async def get_plan_full(
 # Mongo keeps a tiny pointer ({r2_offloaded:True, turn_count:N,
 # last_turn_at:ts}); the array itself lives here, gzipped.
 
+
 def _conversation_history_key(provider: str, service_slug: str, session_id: str) -> str:
     return _k(_coll(), provider, service_slug, session_id, "conversation_history.json")
 
@@ -2373,7 +2691,7 @@ async def save_conversation_history(
     provider: str,
     service_slug: str,
     session_id: str,
-    history: List[Dict[str, Any]],
+    history: list[dict[str, Any]],
 ) -> None:
     """Persist a session's full conversation history (list of {role,content}) to R2.
 
@@ -2394,8 +2712,14 @@ async def save_conversation_history(
                 None,
                 partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
             )
-        logger.info("conversation_history.saved", provider=provider, service_slug=service_slug,
-                    session_id=session_id, turns=len(history or []), bytes=len(content))
+        logger.info(
+            "conversation_history.saved",
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            turns=len(history or []),
+            bytes=len(content),
+        )
     except Exception as exc:
         logger.warning("conversation_history.save_failed", key=key, error=str(exc))
 
@@ -2404,7 +2728,7 @@ async def get_conversation_history(
     provider: str,
     service_slug: str,
     session_id: str,
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Fetch the conversation history list from R2. Returns None when absent."""
     if not provider or not service_slug or not session_id:
         return None
@@ -2415,9 +2739,7 @@ async def get_conversation_history(
             raw = await loop.run_in_executor(None, partial(_local_read, key))
         else:
             client = _get_client()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, _get_bucket(), key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         if raw:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
@@ -2437,6 +2759,7 @@ async def get_conversation_history(
 # keep only metadata in Mongo. Read paths fetch the R2 blob in one call when
 # the detail panel opens.
 
+
 def _sync_request_blob_key(tenant_id: str, sync_request_id: str) -> str:
     return _k("SYNC_REQUESTS", tenant_id, f"{sync_request_id}.json")
 
@@ -2444,7 +2767,7 @@ def _sync_request_blob_key(tenant_id: str, sync_request_id: str) -> str:
 async def save_sync_request_blob(
     tenant_id: str,
     sync_request_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
 ) -> None:
     """Persist a sync_request's heavy fields (files + ci_results.details) to R2.
 
@@ -2469,8 +2792,12 @@ async def save_sync_request_blob(
                 None,
                 partial(_sync_write, client, _get_bucket(), key, content, "application/json"),
             )
-        logger.info("sync_request_blob.saved", tenant_id=tenant_id,
-                    sync_request_id=sync_request_id, bytes=len(content))
+        logger.info(
+            "sync_request_blob.saved",
+            tenant_id=tenant_id,
+            sync_request_id=sync_request_id,
+            bytes=len(content),
+        )
     except Exception as exc:
         logger.warning("sync_request_blob.save_failed", key=key, error=str(exc))
 
@@ -2478,7 +2805,7 @@ async def save_sync_request_blob(
 async def get_sync_request_blob(
     tenant_id: str,
     sync_request_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Fetch a sync_request's offloaded blob from R2. Returns None when absent."""
     if not tenant_id or not sync_request_id:
         return None
@@ -2489,9 +2816,7 @@ async def get_sync_request_blob(
             raw = await loop.run_in_executor(None, partial(_local_read, key))
         else:
             client = _get_client()
-            raw = await loop.run_in_executor(
-                None, partial(_sync_read, client, _get_bucket(), key)
-            )
+            raw = await loop.run_in_executor(None, partial(_sync_read, client, _get_bucket(), key))
         if raw:
             return json.loads(raw)
     except Exception as exc:

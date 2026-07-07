@@ -1,6 +1,7 @@
 """Integration Builder — Session CRUD routes."""
 
 import asyncio
+import contextlib
 import hashlib
 import hmac as hmaclib
 import json
@@ -10,25 +11,23 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Header, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from integration.core.config import settings
 from integration.api.ws_routes import ws_manager
+from integration.core.config import settings
 from integration.db.database import sessions_collection
-from integration.services import r2_service
-from integration.services import knowledge_service
-from integration.services.code_analysis_service import delete_code_analysis
-from integration.services import execution_manager
 from integration.schemas.models import (
     CreateSessionRequest,
     IntegrationSession,
     SessionStatus,
 )
+from integration.services import execution_manager, knowledge_service, r2_service
+from integration.services.code_analysis_service import delete_code_analysis
 
 logger = structlog.get_logger(__name__)
 
@@ -70,14 +69,14 @@ async def get_session_cred_hmac(session_id: str):
 # ── Shared install-credential vault (so ACP can pre-fill what SAD captured) ───
 class StoreSessionCredsBody(BaseModel):
     connector_type: str
-    values: Dict[str, Any]
+    values: dict[str, Any]
 
 
 @session_router.post("/{session_id}/credentials")
 async def store_session_credentials_endpoint(
     session_id: str,
     body: StoreSessionCredsBody,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """SAD publishes the install credentials it captured. Stored encrypted at rest
     via the single-owner credential_manager (AES-256-GCM, per-tenant DEK) so the
@@ -89,12 +88,18 @@ async def store_session_credentials_endpoint(
     slot — no split-brain, last-write-wins."""
     tenant_id = _get_tenant(x_tenant_id)
     from services import credential_manager
+
     clean = {k: v for k, v in (body.values or {}).items() if v not in (None, "")}
     if not clean:
         return {"ok": True, "stored": 0}
     connector_type = await _canonical_connector_type(session_id, tenant_id, body.connector_type)
     await credential_manager.store_credentials(tenant_id, connector_type, clean)
-    logger.info("session.credentials_stored", session_id=session_id, connector_type=connector_type, fields=len(clean))
+    logger.info(
+        "session.credentials_stored",
+        session_id=session_id,
+        connector_type=connector_type,
+        fields=len(clean),
+    )
     return {"ok": True, "stored": len(clean)}
 
 
@@ -105,8 +110,10 @@ async def _canonical_connector_type(session_id: str, tenant_id: str, fallback: s
     Guarantees the credential storage key matches what the install form reads.
     """
     try:
-        from integration.api.codeview_routes import _resolve_output_dir
         import json as _json
+
+        from integration.api.codeview_routes import _resolve_output_dir
+
         meta_path = (await _resolve_output_dir(session_id, tenant_id)) / "metadata" / "connector.json"
         if meta_path.exists():
             ct = _json.loads(meta_path.read_text(encoding="utf-8")).get("connector_type")
@@ -118,11 +125,11 @@ async def _canonical_connector_type(session_id: str, tenant_id: str, fallback: s
 
 
 class AutofillCredentialsRequest(BaseModel):
-    fields: List[Dict[str, str]]          # [{key, label, description, type}]
-    connector_py: str = ""                 # content of connector.py (sent from frontend)
-    connector_json: str = ""               # content of metadata/connector.json
-    service: str = ""                      # e.g. "gmail"
-    provider: str = ""                     # e.g. "google"
+    fields: list[dict[str, str]]  # [{key, label, description, type}]
+    connector_py: str = ""  # content of connector.py (sent from frontend)
+    connector_json: str = ""  # content of metadata/connector.json
+    service: str = ""  # e.g. "gmail"
+    provider: str = ""  # e.g. "google"
     tenant_id: str = ""
 
 
@@ -140,7 +147,7 @@ async def autofill_credentials(session_id: str, body: AutofillCredentialsRequest
 
     # Build field descriptions for the prompt
     field_lines = "\n".join(
-        f'  - {f.get("key", "")}: {f.get("label", "")} ({f.get("description", "")} | type: {f.get("type", "string")})'
+        f"  - {f.get('key', '')}: {f.get('label', '')} ({f.get('description', '')} | type: {f.get('type', 'string')})"
         for f in body.fields
     )
 
@@ -154,8 +161,9 @@ async def autofill_credentials(session_id: str, body: AutofillCredentialsRequest
         # that actually cover them (e.g. send/create needs write scopes, not just
         # read-only). The first-80-lines snippet is class constants, not methods.
         import re as _re_methods
+
         method_sigs = _re_methods.findall(
-            r'^\s*(?:async\s+)?def\s+([a-zA-Z_]\w*)\s*\(',
+            r"^\s*(?:async\s+)?def\s+([a-zA-Z_]\w*)\s*\(",
             body.connector_py,
             _re_methods.MULTILINE,
         )
@@ -168,7 +176,7 @@ async def autofill_credentials(session_id: str, body: AutofillCredentialsRequest
     if body.connector_json:
         try:
             cj = json.loads(body.connector_json)
-            connector_context += f"\n\nconnector.json metadata:\n{json.dumps({k: cj[k] for k in ('name','service','auth_type','base_url') if k in cj}, indent=2)}"
+            connector_context += f"\n\nconnector.json metadata:\n{json.dumps({k: cj[k] for k in ('name', 'service', 'auth_type', 'base_url') if k in cj}, indent=2)}"
         except Exception:
             pass
 
@@ -201,15 +209,16 @@ Output format (values shown are placeholders — fill with the REAL values for {
             system="You are a technical API documentation expert. Return only valid JSON, no markdown.",
             expect_code=False,
             max_tokens=1024,
-            tenant_id=body.tenant_id or None,   # required for mcp mode
+            tenant_id=body.tenant_id or None,  # required for mcp mode
         )
         # Extract JSON from response — handle ```json ... ``` fences too
         import re as _re
+
         json_match = (
-            _re.search(r'```json\s*(\{.*?\})\s*```', raw, _re.DOTALL)
-            or _re.search(r'```\s*(\{.*?\})\s*```', raw, _re.DOTALL)
-            or _re.search(r'(\{[^{}]+\})', raw, _re.DOTALL)
-            or _re.search(r'(\{.*\})', raw, _re.DOTALL)
+            _re.search(r"```json\s*(\{.*?\})\s*```", raw, _re.DOTALL)
+            or _re.search(r"```\s*(\{.*?\})\s*```", raw, _re.DOTALL)
+            or _re.search(r"(\{[^{}]+\})", raw, _re.DOTALL)
+            or _re.search(r"(\{.*\})", raw, _re.DOTALL)
         )
         if not json_match:
             raise ValueError(f"No JSON found in LLM response: {raw[:200]}")
@@ -246,26 +255,26 @@ def _canon_key(s: str) -> str:
     prefixed service values, never mixed case.
     """
     import re as _re_canon
+
     if not s:
         return s
     s = s.lower().strip()
     s = s.replace(" ", "_").replace("-", "_").replace(".", "_")
     s = _re_canon.sub(r"[^a-z0-9_]", "", s)
-    s = _re_canon.sub(r"_+", "_", s).strip("_")
-    return s
+    return _re_canon.sub(r"_+", "_", s).strip("_")
 
 
-def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> Optional[str]:
+def _get_tenant(x_tenant_id: str | None = Header(None)) -> str | None:
     """Return tenant_id from header (optional — may be None pre-login)."""
     return x_tenant_id or None
 
 
-def _get_app_id(x_app_id: Optional[str] = Header(None)) -> Optional[str]:
+def _get_app_id(x_app_id: str | None = Header(None)) -> str | None:
     """Return the stable per-install app_id from X-App-ID header."""
     return x_app_id or None
 
 
-def _session_filter(oid, app_id: Optional[str], tenant_id: Optional[str]) -> dict:
+def _session_filter(oid, app_id: str | None, tenant_id: str | None) -> dict:
     """Build the MongoDB filter for a single session lookup.
 
     Priority: app_id (new sessions) → tenant_id (legacy sessions without app_id).
@@ -281,12 +290,13 @@ def _session_filter(oid, app_id: Optional[str], tenant_id: Optional[str]) -> dic
 
 # ── App identity / tenant linking ─────────────────────────────────────────────
 
+
 @session_router.post("/app/link-tenant")
 async def link_app_to_tenant(
     body: dict,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    x_tenant_name: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_tenant_name: str | None = Header(None),
 ):
     """Map a stable app_id to an authenticated tenant after login.
 
@@ -295,8 +305,8 @@ async def link_app_to_tenant(
     making pre-login sessions visible to the authenticated user.
     No R2 file movement required — the bucket is already app-scoped.
     """
-    app_id      = x_app_id or body.get("app_id") or None
-    tenant_id   = x_tenant_id or body.get("tenant_id") or None
+    app_id = x_app_id or body.get("app_id") or None
+    tenant_id = x_tenant_id or body.get("tenant_id") or None
     tenant_name = (x_tenant_name or body.get("tenant_name") or "").strip().lower()
 
     if not app_id:
@@ -306,11 +316,13 @@ async def link_app_to_tenant(
 
     result = await sessions_collection().update_many(
         {"app_id": app_id},
-        {"$set": {
-            "tenant_id":   tenant_id,
-            "tenant_name": tenant_name,
-            "updated_at":  __import__("datetime").datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "tenant_id": tenant_id,
+                "tenant_name": tenant_name,
+                "updated_at": __import__("datetime").datetime.utcnow(),
+            }
+        },
     )
     logger.info(
         "app.link_tenant",
@@ -324,6 +336,7 @@ async def link_app_to_tenant(
 
 # ── Slug helper ───────────────────────────────────────────────────────
 
+
 def _compute_unique_slug(session_id_str: str, connector_name: str, service: str, seed: str) -> str:
     """Derive a per-session service_slug: {base_slug}_{6-char-hash}  e.g. gmail_a3f9c1.
 
@@ -331,26 +344,28 @@ def _compute_unique_slug(session_id_str: str, connector_name: str, service: str,
     trailing 'connector' word stripped; the 6-char suffix is md5(session_id + seed)
     so every session — build OR enhance — gets its own isolated workspace + R2 scratch.
     """
-    import re as _slug_re, hashlib as _slug_hash
+    import hashlib as _slug_hash
+    import re as _slug_re
 
     _cn = (connector_name or "").strip().lower()
-    _cn = _slug_re.sub(r'[\s_]+connector\s*$', '', _cn)
-    _cn = _slug_re.sub(r'[\s\-]+', '_', _cn)
-    _cn = _slug_re.sub(r'[^\w]', '', _cn)
-    _cn = _slug_re.sub(r'_connector$', '', _cn)
+    _cn = _slug_re.sub(r"[\s_]+connector\s*$", "", _cn)
+    _cn = _slug_re.sub(r"[\s\-]+", "_", _cn)
+    _cn = _slug_re.sub(r"[^\w]", "", _cn)
+    _cn = _slug_re.sub(r"_connector$", "", _cn)
     _base_slug = _cn or service.replace("-", "_").lower()
-    _suffix = _slug_hash.md5(f"{session_id_str}{seed}".encode()).hexdigest()[:6]
+    _suffix = _slug_hash.md5(f"{session_id_str}{seed}".encode(), usedforsecurity=False).hexdigest()[:6]
     return f"{_base_slug}_{_suffix}"
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────
 
+
 @session_router.post("/{session_id}/enhance-run")
 async def create_enhance_run(
     session_id: str,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    x_tenant_name: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_tenant_name: str | None = Header(None),
 ):
     """Start a NEW enhancement run against an existing connector.
 
@@ -364,7 +379,8 @@ async def create_enhance_run(
     the new run's local workspace from the parent connector's files.
     """
     from bson import ObjectId
-    app_id    = x_app_id or None
+
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
     tenant_name = (x_tenant_name or "").strip().lower()
 
@@ -383,9 +399,7 @@ async def create_enhance_run(
     # list here — so a new connector-config field is inherited automatically. Without
     # this, an enhance run regenerates with empty config and regresses the connector
     # (e.g. auth_type→api_key dropped AUTH_URI and broke OAuth).
-    inherited = {
-        f: parent[f] for f in IntegrationSession.enhance_inherited_fields() if f in parent
-    }
+    inherited = {f: parent[f] for f in IntegrationSession.enhance_inherited_fields() if f in parent}
     # Request headers win only as a fallback when the parent value is absent.
     inherited["app_id"] = parent.get("app_id") or app_id
     inherited["tenant_id"] = parent.get("tenant_id") or tenant_id
@@ -403,7 +417,9 @@ async def create_enhance_run(
     child_id = str(result.inserted_id)
 
     unique_slug = _compute_unique_slug(
-        child_id, parent.get("connector_name", ""), parent["service"],
+        child_id,
+        parent.get("connector_name", ""),
+        parent["service"],
         (parent.get("app_id") or parent.get("tenant_id") or child_id),
     )
     await sessions_collection().update_one(
@@ -413,8 +429,10 @@ async def create_enhance_run(
 
     logger.info(
         "session.enhance_run_created",
-        run_id=child_id, parent_id=session_id,
-        tenant_id=child.tenant_id, service_slug=unique_slug,
+        run_id=child_id,
+        parent_id=session_id,
+        tenant_id=child.tenant_id,
+        service_slug=unique_slug,
     )
     return {
         "id": child_id,
@@ -429,24 +447,24 @@ async def create_enhance_run(
 
 
 class ImportConnectorSpec(BaseModel):
-    service_slug: str            # the dir slug, e.g. "google_gmail_168e0e"
+    service_slug: str  # the dir slug, e.g. "google_gmail_168e0e"
     provider: str
     service: str
     connector_name: str = ""
-    version: str = ""            # metadata_version to display
-    run_kind: str = "build"      # "build" | "enhance"
-    output_dir: str = ""         # local path to the connector directory (optional)
+    version: str = ""  # metadata_version to display
+    run_kind: str = "build"  # "build" | "enhance"
+    output_dir: str = ""  # local path to the connector directory (optional)
 
 
 class ImportExistingBody(BaseModel):
-    connectors: List[ImportConnectorSpec]
+    connectors: list[ImportConnectorSpec]
 
 
 @session_router.post("/restore-from-r2")
 async def restore_sessions_from_r2(
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    x_tenant_name: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_tenant_name: str | None = Header(None),
 ):
     """Rebuild any session that exists in R2 but is missing from Mongo.
 
@@ -458,9 +476,11 @@ async def restore_sessions_from_r2(
     """
     import json as _json
     import re as _re
+
     from bson import ObjectId as _OID
+
+    from integration.schemas.models import StepStatus, StepType
     from integration.services import r2_service
-    from integration.schemas.models import StepType, StepStatus
 
     app_id = x_app_id or None
     tenant_id = x_tenant_id or None
@@ -493,8 +513,8 @@ async def restore_sessions_from_r2(
     type_map = {"write_integration_tests": "run_integration_tests"}
 
     col = sessions_collection()
-    restored: List[str] = []
-    skipped: List[str] = []
+    restored: list[str] = []
+    skipped: list[str] = []
     # Track slugs whose connector already exists (by id OR by connector_name match) so
     # we never restore a second session for the same connector when two R2 entries exist.
     # Key: (tenant_id_or_empty, slug) → True when already present in Mongo.
@@ -542,11 +562,22 @@ async def restore_sessions_from_r2(
             st = (s.get("status") or "").lower()
             if st not in valid_status:
                 st = "completed"
-            steps.append({"index": s.get("index", len(steps)), "type": t, "title": s.get("title", ""),
-                          "description": s.get("title", ""), "estimated_duration_s": 30, "config": {}, "status": st})
+            steps.append(
+                {
+                    "index": s.get("index", len(steps)),
+                    "type": t,
+                    "title": s.get("title", ""),
+                    "description": s.get("title", ""),
+                    "estimated_duration_s": 30,
+                    "config": {},
+                    "status": st,
+                }
+            )
 
         session = IntegrationSession(
-            app_id=app_id, tenant_id=tenant_id, tenant_name=tenant_name,
+            app_id=app_id,
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
             provider=cj.get("provider", ""),
             service=cj.get("service", slug),
             connector_name=cj.get("connector_name") or cj.get("display_name") or slug,
@@ -565,6 +596,7 @@ async def restore_sessions_from_r2(
         # freshly-planned ones so the Mongo doc stays tiny.
         _full_plan = {"steps": steps, "version": 1}
         from integration.services.planning_service import persist_plan as _persist_plan
+
         doc["plan"] = await _persist_plan(
             session_id=str(oid),
             provider=cj.get("provider", ""),
@@ -583,9 +615,9 @@ async def restore_sessions_from_r2(
 @session_router.post("/import-existing")
 async def import_existing_sessions(
     body: ImportExistingBody,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    x_tenant_name: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_tenant_name: str | None = Header(None),
 ):
     """Recreate session rows for connectors that already exist on disk.
 
@@ -601,7 +633,8 @@ async def import_existing_sessions(
         raise HTTPException(400, "Either X-App-ID or X-Tenant-ID header is required")
 
     import json as _json
-    from integration.schemas.models import StepType, StepStatus
+
+    from integration.schemas.models import StepStatus, StepType
 
     _valid_types = {e.value for e in StepType}
     _type_map = {"write_integration_tests": "run_integration_tests"}
@@ -622,10 +655,8 @@ async def import_existing_sessions(
         for meta_rel in ("metadata/connector.json", "connector.json"):
             mp = Path(output_dir) / meta_rel
             if mp.exists():
-                try:
+                with contextlib.suppress(Exception):
                     meta = _json.loads(mp.read_text())
-                except Exception:
-                    pass
                 break
         install_fields = meta.get("install_fields", [])
         api_methods = [a.get("name", "") for a in meta.get("apis", [])]
@@ -644,40 +675,58 @@ async def import_existing_sessions(
                 cfg = {
                     "methods": api_methods,
                     "install_fields": install_fields,
-                    "features": ["retry", "pagination", "circuit_breaker", "normalizer", "rate_limiting"],
+                    "features": [
+                        "retry",
+                        "pagination",
+                        "circuit_breaker",
+                        "normalizer",
+                        "rate_limiting",
+                    ],
                 }
             elif t == "generate_metadata":
                 cfg = {"install_fields": install_fields, "api_count": len(api_methods)}
             elif t in ("write_tests", "run_integration_tests"):
                 cfg = {"methods": api_methods, "test_type": "both"}
-            steps.append({
-                "index": i,
-                "type": t,
-                "title": s.get("title", ""),
-                "description": s.get("description", s.get("title", "")),
-                "estimated_duration_s": s.get("estimated_duration_s", 30),
-                "config": s.get("config", cfg) or cfg,
-                "status": st,
-            })
+            steps.append(
+                {
+                    "index": i,
+                    "type": t,
+                    "title": s.get("title", ""),
+                    "description": s.get("description", s.get("title", "")),
+                    "estimated_duration_s": s.get("estimated_duration_s", 30),
+                    "config": s.get("config", cfg) or cfg,
+                    "status": st,
+                }
+            )
 
         # Always append terminal steps if missing
         _step_types = {s["type"] for s in steps}
         _next = len(steps)
         if "setup_instructions" not in _step_types:
-            steps.append({
-                "index": _next, "type": "setup_instructions",
-                "title": "Generate Setup Instructions",
-                "description": "Research and generate connector-specific configuration guide — shows users exactly where to find credentials in the provider portal.",
-                "estimated_duration_s": 45, "config": {}, "status": "completed",
-            })
+            steps.append(
+                {
+                    "index": _next,
+                    "type": "setup_instructions",
+                    "title": "Generate Setup Instructions",
+                    "description": "Research and generate connector-specific configuration guide — shows users exactly where to find credentials in the provider portal.",
+                    "estimated_duration_s": 45,
+                    "config": {},
+                    "status": "completed",
+                }
+            )
             _next += 1
         if "version_upgrade" not in _step_types:
-            steps.append({
-                "index": _next, "type": "version_upgrade",
-                "title": "Version Upgrade",
-                "description": "Review changes and set the release version for this connector. Select patch, minor, or major version bump.",
-                "estimated_duration_s": 30, "config": {"auto_suggest": True}, "status": "completed",
-            })
+            steps.append(
+                {
+                    "index": _next,
+                    "type": "version_upgrade",
+                    "title": "Version Upgrade",
+                    "description": "Review changes and set the release version for this connector. Select patch, minor, or major version bump.",
+                    "estimated_duration_s": 30,
+                    "config": {"auto_suggest": True},
+                    "status": "completed",
+                }
+            )
         return steps
 
     def _load_connector_meta(output_dir: str) -> dict:
@@ -694,8 +743,8 @@ async def import_existing_sessions(
         return {}
 
     col = sessions_collection()
-    created: List[str] = []
-    skipped: List[str] = []
+    created: list[str] = []
+    skipped: list[str] = []
     for spec in body.connectors:
         owner = {"app_id": app_id} if app_id else {"tenant_id": tenant_id}
         if await col.find_one({**owner, "service_slug": spec.service_slug}):
@@ -732,6 +781,7 @@ async def import_existing_sessions(
         pkg_files: list = []
         if spec.output_dir:
             import os as _os
+
             for walk_root, dirs, filenames in _os.walk(spec.output_dir):
                 dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".shielva")]
                 for fname in filenames:
@@ -756,10 +806,16 @@ async def import_existing_sessions(
         )
         doc = session.model_dump()
         doc["service_slug"] = spec.service_slug
-        doc["stepper_max_step"] = 7                 # completed → all steps reachable
+        doc["stepper_max_step"] = 7  # completed → all steps reachable
         doc["metadata_version"] = spec.version or None
-        doc["imported_from_disk"] = True            # provenance marker
-        doc["selected_features"] = feature_ids or ["retry", "pagination", "circuit_breaker", "normalizer", "rate_limiting"]
+        doc["imported_from_disk"] = True  # provenance marker
+        doc["selected_features"] = feature_ids or [
+            "retry",
+            "pagination",
+            "circuit_breaker",
+            "normalizer",
+            "rate_limiting",
+        ]
         doc["package_structure"] = package_structure
         doc["recommended_features"] = recommended_features
         doc["default_config_fields"] = default_config_fields
@@ -771,8 +827,12 @@ async def import_existing_sessions(
             # plan to R2 (keyed by session_id) before the insert. Mongo then
             # gets the slim summary only.
             from bson import ObjectId as _OID
+
             doc["_id"] = _OID()
-            from integration.services.planning_service import persist_plan as _persist_plan
+            from integration.services.planning_service import (
+                persist_plan as _persist_plan,
+            )
+
             doc["plan"] = await _persist_plan(
                 session_id=str(doc["_id"]),
                 provider=spec.provider,
@@ -781,8 +841,15 @@ async def import_existing_sessions(
             )
         res = await col.insert_one(doc)
         created.append(str(res.inserted_id))
-        logger.info("session.imported_from_disk", service_slug=spec.service_slug, session_id=str(res.inserted_id),
-                    steps=len(steps), auth_type=auth_type, test_type=test_type, config_keys=selected_config_keys)
+        logger.info(
+            "session.imported_from_disk",
+            service_slug=spec.service_slug,
+            session_id=str(res.inserted_id),
+            steps=len(steps),
+            auth_type=auth_type,
+            test_type=test_type,
+            config_keys=selected_config_keys,
+        )
 
     return {"created": created, "skipped": skipped, "imported": len(created)}
 
@@ -790,16 +857,16 @@ async def import_existing_sessions(
 @session_router.post("")
 async def create_session(
     body: CreateSessionRequest,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    x_tenant_name: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_tenant_name: str | None = Header(None),
 ):
     """Create a new integration session.
 
     Pre-login: only app_id is set; tenant fields are None.
     Post-login: app_id + tenant_id + tenant_name are all set.
     """
-    app_id    = x_app_id or None
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
     tenant_name = (x_tenant_name or "").strip().lower()
 
@@ -810,10 +877,10 @@ async def create_session(
     canon_service = _canon_key(body.service)
     # Strip duplicated provider prefix from service (e.g. "google_drive" → "drive")
     if canon_provider and canon_service.startswith(canon_provider + "_"):
-        canon_service = canon_service[len(canon_provider) + 1:]
+        canon_service = canon_service[len(canon_provider) + 1 :]
     # Strip "_connector" suffix
     if canon_service.endswith("_connector"):
-        canon_service = canon_service[:-len("_connector")]
+        canon_service = canon_service[: -len("_connector")]
 
     session = IntegrationSession(
         app_id=app_id,
@@ -836,7 +903,10 @@ async def create_session(
     # Each session gets its own isolated output directory even when the same
     # connector name is used multiple times (build run + every enhance run).
     _unique_slug = _compute_unique_slug(
-        session_id_str, body.connector_name, canon_service, app_id or tenant_id or session_id_str
+        session_id_str,
+        body.connector_name,
+        canon_service,
+        app_id or tenant_id or session_id_str,
     )
 
     await sessions_collection().update_one(
@@ -864,14 +934,37 @@ async def create_session(
 async def patch_session(
     session_id: str,
     body: dict,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Partial update of a session (docs_urls, custom_rules_md, etc.)."""
     from bson import ObjectId
-    app_id    = x_app_id or None
+
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
-    allowed = {"docs_urls", "custom_rules_md", "default_config", "selected_features", "plan_modified", "method_identifiers", "entity_configs", "mongo_provision", "stepper_max_step", "test_type", "selected_config_keys", "user_prompt", "method_identities", "synthesized_prompt", "output_dir", "auth_type", "package_structure", "recommended_features", "default_config_fields", "alias_name", "status"}
+    allowed = {
+        "docs_urls",
+        "custom_rules_md",
+        "default_config",
+        "selected_features",
+        "plan_modified",
+        "method_identifiers",
+        "entity_configs",
+        "mongo_provision",
+        "stepper_max_step",
+        "test_type",
+        "selected_config_keys",
+        "user_prompt",
+        "method_identities",
+        "synthesized_prompt",
+        "output_dir",
+        "auth_type",
+        "package_structure",
+        "recommended_features",
+        "default_config_fields",
+        "alias_name",
+        "status",
+    }
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         return {"ok": True}
@@ -886,11 +979,11 @@ async def patch_session(
 @session_router.get("/{session_id}/stepper-progress")
 async def get_stepper_progress(
     session_id: str,
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Return the highest stepper tab reached for this session from R2/disk progress.json."""
-    app_id    = x_app_id or None
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one(_session_filter(oid, app_id, tenant_id))
@@ -914,7 +1007,7 @@ class StepperProgressBody(BaseModel):
 async def patch_stepper_progress(
     session_id: str,
     body: StepperProgressBody,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Update stepper_max_step in both R2/disk progress.json and MongoDB (best-effort)."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -934,13 +1027,16 @@ async def patch_stepper_progress(
     # Also update MongoDB for quick restore
     await sessions_collection().update_one(
         _session_filter(oid, app_id, tenant_id),
-        {"$max": {"stepper_max_step": step_index}, "$set": {"updated_at": __import__("datetime").datetime.utcnow()}},
+        {
+            "$max": {"stepper_max_step": step_index},
+            "$set": {"updated_at": __import__("datetime").datetime.utcnow()},
+        },
     )
     return {"ok": True, "stepper_max_step": step_index}
 
 
 @session_router.post("/{session_id}/analyze-docs")
-async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def analyze_session_docs(session_id: str, x_tenant_id: str | None = Header(None)):
     """Fetch docs_urls from the session, synthesize, and return structured extracted fields.
 
     Returns {fields: {scopes, base_url, auth_url, token_url, rate_limit_per_min, pagination_type, api_version}}
@@ -953,7 +1049,7 @@ async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Hea
     if not session:
         raise HTTPException(404, "Session not found")
 
-    docs_urls: List[str] = [u for u in (session.get("docs_urls") or []) if u.strip()]
+    docs_urls: list[str] = [u for u in (session.get("docs_urls") or []) if u.strip()]
     if not docs_urls:
         return {"fields": {}}
 
@@ -961,6 +1057,7 @@ async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Hea
     service = session["service"]
 
     from integration.services.docs_synth_service import fetch_and_extract_fields
+
     extracted = await fetch_and_extract_fields(
         docs_urls=docs_urls,
         provider=provider,
@@ -971,11 +1068,11 @@ async def analyze_session_docs(session_id: str, x_tenant_id: Optional[str] = Hea
 
 @session_router.get("")
 async def list_sessions(
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
-    status: Optional[str] = None,
-    provider: Optional[str] = None,
-    service: Optional[str] = None,
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
+    status: str | None = None,
+    provider: str | None = None,
+    service: str | None = None,
     include_inactive: bool = False,
     skip: int = 0,
     limit: int = 50,
@@ -987,7 +1084,7 @@ async def list_sessions(
       1. app_id (X-App-ID header) — covers both pre-login and post-login sessions for this device.
       2. tenant_id only (legacy: sessions created before app_id was introduced).
     """
-    app_id    = x_app_id or None
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
 
     if app_id:
@@ -1018,15 +1115,29 @@ async def list_sessions(
     # never has to read the steps subdocument).
     if summary:
         projection = {
-            "_id": 1, "app_id": 1, "tenant_id": 1, "tenant_name": 1,
-            "provider": 1, "service": 1, "service_slug": 1,
-            "connector_name": 1, "alias_name": 1, "connector_type": 1,
-            "auth_type": 1, "status": 1,
-            "version": 1, "metadata_version": 1, "run_kind": 1,
-            "parent_session_id": 1, "output_dir": 1,
-            "created_at": 1, "updated_at": 1,
-            "version_upgrade_pending": 1, "version_upgraded_from": 1,
-            "gateway_connector_id": 1, "imported_from_disk": 1,
+            "_id": 1,
+            "app_id": 1,
+            "tenant_id": 1,
+            "tenant_name": 1,
+            "provider": 1,
+            "service": 1,
+            "service_slug": 1,
+            "connector_name": 1,
+            "alias_name": 1,
+            "connector_type": 1,
+            "auth_type": 1,
+            "status": 1,
+            "version": 1,
+            "metadata_version": 1,
+            "run_kind": 1,
+            "parent_session_id": 1,
+            "output_dir": 1,
+            "created_at": 1,
+            "updated_at": 1,
+            "version_upgrade_pending": 1,
+            "version_upgraded_from": 1,
+            "gateway_connector_id": 1,
+            "imported_from_disk": 1,
             "stepper_max_step": 1,
         }
         cursor = sessions_collection().find(query, projection).sort("created_at", -1).skip(skip).limit(limit)
@@ -1042,7 +1153,10 @@ async def list_sessions(
             doc["connector_name"] = svc.replace("_", " ").replace("-", " ").title()
         if not doc.get("output_dir"):
             try:
-                from integration.services.step_executor import _output_dir as _compute_out
+                from integration.services.step_executor import (
+                    _output_dir as _compute_out,
+                )
+
                 _svc = doc.get("service") or ""
                 _tid = doc.get("tenant_id") or tenant_id or ""
                 if _svc and _tid:
@@ -1055,7 +1169,7 @@ async def list_sessions(
 
 
 @session_router.get("/{session_id}")
-async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_session(session_id: str, x_tenant_id: str | None = Header(None)):
     """Get a single session by ID."""
     tenant_id = _get_tenant(x_tenant_id)
     app_id = None  # TODO: add x_app_id header to this endpoint
@@ -1073,11 +1187,9 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
     # (server restart, process crash, or the execution genuinely finished),
     # reset those steps to "pending" so the UI stops showing "Running..." forever.
     from integration.services.execution_manager import is_running as _is_running
+
     _steps = doc.get("plan", {}).get("steps", []) or []
-    _executing_indices = [
-        idx for idx, s in enumerate(_steps)
-        if isinstance(s, dict) and s.get("status") == "executing"
-    ]
+    _executing_indices = [idx for idx, s in enumerate(_steps) if isinstance(s, dict) and s.get("status") == "executing"]
     if _executing_indices and not _is_running(session_id):
         _reset = {"updated_at": datetime.utcnow()}
         for _idx in _executing_indices:
@@ -1109,6 +1221,7 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
     if not doc.get("output_dir"):
         try:
             from integration.services.step_executor import _output_dir as _compute_out
+
             _svc = doc.get("service") or ""
             if _svc and tenant_id:
                 doc["output_dir"] = str(_compute_out(tenant_id, _svc))
@@ -1120,7 +1233,7 @@ async def get_session(session_id: str, x_tenant_id: Optional[str] = Header(None)
 
 
 @session_router.get("/{session_id}/heavy")
-async def get_session_heavy(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_session_heavy(session_id: str, x_tenant_id: str | None = Header(None)):
     """Return the per-session heavy subdocuments from R2.
 
     Backfilled by `backfill_sessions_heavy_to_r2.py` into a single gzipped JSON
@@ -1146,7 +1259,11 @@ async def get_session_heavy(session_id: str, x_tenant_id: Optional[str] = Header
     doc = await sessions_collection().find_one(
         _session_filter(oid, None, tenant_id),
         # Only the marker fields — we never need the rest of the row to fetch R2.
-        {"heavy_fields_r2_bucket": 1, "heavy_fields_r2_key": 1, "heavy_fields_in_r2": 1},
+        {
+            "heavy_fields_r2_bucket": 1,
+            "heavy_fields_r2_key": 1,
+            "heavy_fields_in_r2": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -1159,7 +1276,9 @@ async def get_session_heavy(session_id: str, x_tenant_id: Optional[str] = Header
 
     import gzip as _gzip
     import json as _json
+
     from integration.services import r2_service as _r2
+
     try:
         s3 = _r2._get_client()
         body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
@@ -1176,22 +1295,22 @@ class SelectVersionRequest(BaseModel):
     # Optional fallback fields used when the manual "Run" button populates the picker
     # without going through the WebSocket execution flow (so version_upgrade_pending
     # may not yet be saved in MongoDB).
-    step_index: Optional[int] = None
-    current_version: Optional[str] = None
+    step_index: int | None = None
+    current_version: str | None = None
 
 
 class CustomStepUpsert(BaseModel):
     id: str
     prompt: str
-    status: str              # pending | processing | completed | failed
-    timestamp: int           # unix ms
-    created_at: Optional[str] = None
+    status: str  # pending | processing | completed | failed
+    timestamp: int  # unix ms
+    created_at: str | None = None
 
 
 @session_router.delete("/{session_id}/custom-steps")
 async def clear_custom_steps(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Clear all persisted custom steps for a session (called on re-execute)."""
     # Validate header present but don't use tenant in mutation filter —
@@ -1202,7 +1321,7 @@ async def clear_custom_steps(
         raise HTTPException(400, "Invalid session ID")
     oid = ObjectId(session_id)
     result = await sessions_collection().update_one(
-        {"_id": oid},   # session_id alone is the security control — ObjectID is unguessable
+        {"_id": oid},  # session_id alone is the security control — ObjectID is unguessable
         {"$set": {"custom_steps": [], "updated_at": datetime.utcnow()}},
     )
     if result.matched_count == 0:
@@ -1215,7 +1334,7 @@ async def clear_custom_steps(
 async def remove_custom_step(
     session_id: str,
     step_id: str,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Remove a single custom step by id from the session's custom_steps array."""
     _get_tenant(x_tenant_id)
@@ -1223,7 +1342,7 @@ async def remove_custom_step(
         raise HTTPException(400, "Invalid session ID")
     oid = ObjectId(session_id)
     result = await sessions_collection().update_one(
-        {"_id": oid},   # session_id alone — avoids silent no-op from tenant mismatch
+        {"_id": oid},  # session_id alone — avoids silent no-op from tenant mismatch
         {
             "$pull": {"custom_steps": {"id": step_id}},
             "$set": {"updated_at": datetime.utcnow()},
@@ -1239,7 +1358,7 @@ async def remove_custom_step(
 async def upsert_custom_step(
     session_id: str,
     body: CustomStepUpsert,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Upsert a custom step into the session's custom_steps array.
 
@@ -1247,8 +1366,7 @@ async def upsert_custom_step(
     Otherwise the step is appended.  This keeps custom prompts persisted across
     page refreshes and re-logins.
     """
-    tenant_id = _get_tenant(x_tenant_id)
-    app_id = None  # TODO: add x_app_id header to this endpoint
+    _get_tenant(x_tenant_id)
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -1272,15 +1390,20 @@ async def upsert_custom_step(
     if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
 
-    logger.info("session.custom_step_upserted", session_id=session_id, step_id=body.id, status=body.status)
+    logger.info(
+        "session.custom_step_upserted",
+        session_id=session_id,
+        step_id=body.id,
+        status=body.status,
+    )
     return {"ok": True}
 
 
 @session_router.delete("/{session_id}/generated-files")
 async def cleanup_generated_files(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
-    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+    x_tenant_id: str | None = Header(None),
+    x_app_id: str | None = Header(None, alias="X-App-ID"),
 ):
     """Delete the generated connector directory for a session.
 
@@ -1305,13 +1428,14 @@ async def cleanup_generated_files(
 
     service_slug = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_sr
+
     # Same normalisation as _output_dir and sync-to-r2: strip _connector in both forms
-    _clean_sr = _re_sr.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+    _clean_sr = _re_sr.sub(r"_connector(_[a-f0-9]{6}$|$)", r"\1", service_slug)
     # Flat path first (correct), then legacy tenant-subdir paths for old builds
     _base_sr = Path(settings.GENERATED_CODE_DIR)
     _candidates_sr = [
-        _base_sr / f"{_clean_sr}_connector",             # correct flat path
-        _base_sr / tenant_id / f"{_clean_sr}_connector", # legacy: tenant subdir
+        _base_sr / f"{_clean_sr}_connector",  # correct flat path
+        _base_sr / tenant_id / f"{_clean_sr}_connector",  # legacy: tenant subdir
     ]
     out_dir = next((p for p in _candidates_sr if p.exists()), _candidates_sr[0])
 
@@ -1320,7 +1444,11 @@ async def cleanup_generated_files(
         try:
             shutil.rmtree(str(out_dir))
             removed = True
-            logger.info("session.generated_files_cleaned", session_id=session_id, path=str(out_dir))
+            logger.info(
+                "session.generated_files_cleaned",
+                session_id=session_id,
+                path=str(out_dir),
+            )
         except Exception as exc:
             logger.error("session.cleanup_failed", session_id=session_id, error=str(exc))
             raise HTTPException(500, f"Failed to remove directory: {exc}")
@@ -1337,9 +1465,7 @@ async def cleanup_generated_files(
     # `steps` field as None at the plan level). Skip non-dict entries instead
     # of crashing with `TypeError: 'NoneType' object is not a mapping`.
     reset_steps = [
-        {**step, "status": "pending", "output": None, "error": None}
-        for step in steps
-        if isinstance(step, dict)
+        {**step, "status": "pending", "output": None, "error": None} for step in steps if isinstance(step, dict)
     ]
 
     update: dict = {
@@ -1373,7 +1499,9 @@ async def cleanup_generated_files(
     if provider and service_name:
         try:
             deleted_rag = await knowledge_service.cleanup_connector_knowledge(
-                tenant_id, provider, service_name,
+                tenant_id,
+                provider,
+                service_name,
             )
             logger.info("session.rag_cleaned", session_id=session_id, deleted_rag=deleted_rag)
         except Exception as rag_err:
@@ -1393,7 +1521,11 @@ async def cleanup_generated_files(
             await r2_service.clear_execution_state(doc.get("provider", ""), service_slug, tenant_id)
             logger.info("session.r2_execution_state_cleared", session_id=session_id)
         except Exception as exc:
-            logger.warning("session.r2_execution_state_clear_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.r2_execution_state_clear_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
     # Delete regular connector docs from R2 (stale docs from previous execution)
     if doc.get("provider") and service_slug:
@@ -1406,9 +1538,17 @@ async def cleanup_generated_files(
     # Delete generated connector code files from R2 (stale from previous execution)
     try:
         deleted_files = await r2_service.delete_connector_session_files(tenant_id, service_slug, session_id)
-        logger.info("session.r2_connector_code_cleared", session_id=session_id, files=deleted_files)
+        logger.info(
+            "session.r2_connector_code_cleared",
+            session_id=session_id,
+            files=deleted_files,
+        )
     except Exception as exc:
-        logger.warning("session.r2_connector_code_clear_failed", session_id=session_id, error=str(exc))
+        logger.warning(
+            "session.r2_connector_code_clear_failed",
+            session_id=session_id,
+            error=str(exc),
+        )
 
     return {"ok": True, "removed": removed, "path": str(out_dir)}
 
@@ -1416,8 +1556,8 @@ async def cleanup_generated_files(
 @session_router.post("/{session_id}/cleanup-stream")
 async def cleanup_generated_files_stream(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
-    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+    x_tenant_id: str | None = Header(None),
+    x_app_id: str | None = Header(None, alias="X-App-ID"),
 ):
     """SSE streaming cleanup — yields a progress log event for each backend operation.
 
@@ -1449,6 +1589,7 @@ async def cleanup_generated_files_stream(
         raise HTTPException(404, "Session not found")
 
     import re as _re_cls
+
     service_slug = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     _clean = _re_cls.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     out_dir = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean}_connector"
@@ -1500,7 +1641,10 @@ async def cleanup_generated_files_stream(
             _session_filter(oid, app_id, tenant_id),
             {"$set": update},
         )
-        yield _evt(f"✓  Session reset — {len(reset_steps)} step{'' if len(reset_steps) == 1 else 's'} invalidated, method identities cleared", "success")
+        yield _evt(
+            f"✓  Session reset — {len(reset_steps)} step{'' if len(reset_steps) == 1 else 's'} invalidated, method identities cleared",
+            "success",
+        )
 
         # ── 3. Clear in-memory execution event buffer ────────────────────────
         execution_manager.cleanup(session_id)
@@ -1523,7 +1667,9 @@ async def cleanup_generated_files_stream(
             yield _evt("Cleaning up RAG knowledge vectors…")
             try:
                 deleted_rag = await knowledge_service.cleanup_connector_knowledge(
-                    tenant_id, provider, service_name,
+                    tenant_id,
+                    provider,
+                    service_name,
                 )
                 yield _evt(f"✓  RAG vectors removed ({deleted_rag} chunks deleted)", "success")
             except Exception as rag_err:
@@ -1549,10 +1695,11 @@ async def cleanup_generated_files_stream(
         # ── 8. Delete R2 connector code files (stale from previous execution) ──
         yield _evt("Removing generated connector code from R2…")
         try:
-            deleted_files = await r2_service.delete_connector_session_files(
-                tenant_id, service_slug, session_id
+            deleted_files = await r2_service.delete_connector_session_files(tenant_id, service_slug, session_id)
+            yield _evt(
+                f"✓  R2 connector code removed ({deleted_files} file{'s' if deleted_files != 1 else ''})",
+                "success",
             )
-            yield _evt(f"✓  R2 connector code removed ({deleted_files} file{'s' if deleted_files != 1 else ''})", "success")
         except Exception as exc:
             yield _evt(f"⚠  R2 connector code removal failed: {exc}", "warn")
 
@@ -1572,8 +1719,8 @@ async def cleanup_generated_files_stream(
 @session_router.get("/{session_id}/version-info")
 async def get_version_info(
     session_id: str,
-    step_index: Optional[int] = None,
-    x_tenant_id: Optional[str] = Header(None),
+    step_index: int | None = None,
+    x_tenant_id: str | None = Header(None),
 ):
     """Return the current connector version and patch/minor/major suggestions.
 
@@ -1581,6 +1728,7 @@ async def get_version_info(
     can show the version picker without triggering a full pipeline execution.
     """
     from integration.services.codegen_service import _compute_version_suggestions
+
     tenant_id = _get_tenant(x_tenant_id)
     app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
@@ -1589,7 +1737,13 @@ async def get_version_info(
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         _session_filter(oid, app_id, tenant_id),
-        {"service_slug": 1, "service": 1, "provider": 1, "metadata_version": 1, "plan": 1},
+        {
+            "service_slug": 1,
+            "service": 1,
+            "provider": 1,
+            "metadata_version": 1,
+            "plan": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -1599,8 +1753,13 @@ async def get_version_info(
     if not current_version:
         service_slug = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
         import re as _re_ver
-        _clean_ver = _re_ver.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
-        meta_path = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean_ver}_connector" / "metadata" / "connector.json"
+
+        _clean_ver = (
+            _re_ver.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
+        )
+        meta_path = (
+            Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean_ver}_connector" / "metadata" / "connector.json"
+        )
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -1634,7 +1793,7 @@ async def get_version_info(
 async def select_version(
     session_id: str,
     body: SelectVersionRequest,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """User selects the version for the version_upgrade step.
 
@@ -1651,13 +1810,23 @@ async def select_version(
 
     new_version = body.version.strip().lstrip("v")
     import re as _re
+
     if not _re.match(r"^\d+\.\d+\.\d+$", new_version):
-        raise HTTPException(422, f"Invalid version format '{new_version}'. Use semantic versioning: MAJOR.MINOR.PATCH")
+        raise HTTPException(
+            422,
+            f"Invalid version format '{new_version}'. Use semantic versioning: MAJOR.MINOR.PATCH",
+        )
 
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         _session_filter(oid, app_id, tenant_id),
-        {"service_slug": 1, "service": 1, "provider": 1, "version_upgrade_pending": 1, "plan": 1},
+        {
+            "service_slug": 1,
+            "service": 1,
+            "provider": 1,
+            "version_upgrade_pending": 1,
+            "plan": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -1676,11 +1845,15 @@ async def select_version(
             step_index = body.step_index
         else:
             plan_steps = doc.get("plan", {}).get("steps", [])
-            step_index = next((idx for idx, s in enumerate(plan_steps) if s.get("type") == "version_upgrade"), -1)
+            step_index = next(
+                (idx for idx, s in enumerate(plan_steps) if s.get("type") == "version_upgrade"),
+                -1,
+            )
 
     # Update connector.json on disk
     import re as _re_ver
-    _clean_ver = _re_ver.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+
+    _clean_ver = _re_ver.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     out_dir = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean_ver}_connector"
     meta_path = out_dir / "metadata" / "connector.json"
     if meta_path.exists():
@@ -1724,9 +1897,14 @@ async def select_version(
     if next_index < len(plan_steps):
         # There are more steps — resume automatically
         from integration.services import execution_manager as _em
+
         await _em.start_execution(session_id, tenant_id, from_step_index=next_index)
-        logger.info("session.version_set_resuming", session_id=session_id,
-                    version=new_version, next_step=next_index)
+        logger.info(
+            "session.version_set_resuming",
+            session_id=session_id,
+            version=new_version,
+            next_step=next_index,
+        )
     else:
         # version_upgrade was the last step — finalize
         await sessions_collection().update_one(
@@ -1734,17 +1912,26 @@ async def select_version(
             {"$set": {"status": "completed", "updated_at": datetime.utcnow()}},
         )
 
-    logger.info("session.version_selected", session_id=session_id,
-                old_version=old_version, new_version=new_version)
+    logger.info(
+        "session.version_selected",
+        session_id=session_id,
+        old_version=old_version,
+        new_version=new_version,
+    )
 
-    return {"ok": True, "version": new_version, "previous_version": old_version, "resumed": next_index < len(plan_steps)}
+    return {
+        "ok": True,
+        "version": new_version,
+        "previous_version": old_version,
+        "resumed": next_index < len(plan_steps),
+    }
 
 
 @session_router.patch("/{session_id}/gateway-connector")
 async def save_gateway_connector_id(
     session_id: str,
     payload: dict,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Persist the gateway connector_id (e.g. google_gmail_abc123_a1b2c3d4) into the session.
 
@@ -1762,7 +1949,12 @@ async def save_gateway_connector_id(
 
     result = await sessions_collection().update_one(
         _session_filter(ObjectId(session_id), app_id, tenant_id),
-        {"$set": {"gateway_connector_id": connector_id, "updated_at": datetime.utcnow()}},
+        {
+            "$set": {
+                "gateway_connector_id": connector_id,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
@@ -1775,8 +1967,8 @@ async def update_step_status(
     session_id: str,
     step_index: int,
     payload: dict,
-    x_tenant_id: Optional[str] = Header(None),
-    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_app_id: str | None = Header(None),
 ):
     """Update the status of a single plan step in MongoDB (e.g. mark write_tests as completed)."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -1791,7 +1983,12 @@ async def update_step_status(
     oid = ObjectId(session_id)
     result = await sessions_collection().update_one(
         _session_filter(oid, app_id, tenant_id),
-        {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
+        {
+            "$set": {
+                f"plan.steps.{step_index}.status": status,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     if result.matched_count == 0:
         # Tenant filter mismatch (e.g. app_id-only sessions created by Electron before
@@ -1800,13 +1997,23 @@ async def update_step_status(
         # and step statuses are never persisted to MongoDB.
         result = await sessions_collection().update_one(
             {"_id": oid},
-            {"$set": {f"plan.steps.{step_index}.status": status, "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    f"plan.steps.{step_index}.status": status,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
     if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
 
-    logger.info("session.step_status_updated", session_id=session_id,
-                step_index=step_index, status=status, tenant_id=tenant_id)
+    logger.info(
+        "session.step_status_updated",
+        session_id=session_id,
+        step_index=step_index,
+        status=status,
+        tenant_id=tenant_id,
+    )
 
     # Broadcast to any CMS WebSocket clients watching this session so they
     # receive real-time step updates from the Electron app's local execution.
@@ -1827,7 +2034,7 @@ async def update_step_status(
 async def validate_step_output_endpoint(
     session_id: str,
     step_index: int,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Validate that a step's expected output files actually exist on disk (or R2 for guidelines).
 
@@ -1835,9 +2042,10 @@ async def validate_step_output_endpoint(
     and non-empty.  If valid, updates MongoDB step status to 'completed'.
     Returns {ok, valid, reason, step_type, updated_status}.
     """
-    from integration.services.step_executor import _output_dir, validate_step_output
-    from integration.services import r2_service
     import re as _re
+
+    from integration.services import r2_service
+    from integration.services.step_executor import _output_dir, validate_step_output
 
     tenant_id = _get_tenant(x_tenant_id)
     app_id = None  # TODO: add x_app_id header to this endpoint
@@ -1868,11 +2076,11 @@ async def validate_step_output_endpoint(
     else:
         _connector_name = session.get("connector_name", "")
         if _connector_name:
-            service_slug = _re.sub(r'[^a-z0-9]+', '_', _connector_name.lower()).strip('_')
+            service_slug = _re.sub(r"[^a-z0-9]+", "_", _connector_name.lower()).strip("_")
         else:
             service_slug = f"{provider}_{service}".lower().replace("-", "_").replace(" ", "_") if provider else service
     # Strip trailing _connector suffix to avoid double-suffix in output dir
-    service_slug = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+    service_slug = _re.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
 
     # Prefer the persisted output_dir (set when Electron app fetches the Claude prompt,
     # which may point to the user's local machine directory). Fall back to server default.
@@ -1908,10 +2116,21 @@ async def validate_step_output_endpoint(
         _auto_reason = f"built by local Claude agent — output on user machine ({_persisted_out})"
         await sessions_collection().update_one(
             _session_filter(oid, app_id, tenant_id),
-            {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    f"plan.steps.{step_index}.status": "completed",
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
-        return {"ok": True, "step_type": step_type, "step_index": step_index,
-                "valid": True, "reason": _auto_reason, "updated_status": "completed"}
+        return {
+            "ok": True,
+            "step_type": step_type,
+            "step_index": step_index,
+            "valid": True,
+            "reason": _auto_reason,
+            "updated_status": "completed",
+        }
 
     # Path accessible locally → synthesise result-based checks from on-disk artefacts.
     if _persisted_path_local and not step_result:
@@ -1934,10 +2153,21 @@ async def validate_step_output_endpoint(
             )
             await sessions_collection().update_one(
                 _session_filter(oid, app_id, tenant_id),
-                {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
+                {
+                    "$set": {
+                        f"plan.steps.{step_index}.status": "completed",
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
             )
-            return {"ok": True, "step_type": step_type, "step_index": step_index,
-                    "valid": True, "reason": _auto_reason, "updated_status": "completed"}
+            return {
+                "ok": True,
+                "step_type": step_type,
+                "step_index": step_index,
+                "valid": True,
+                "reason": _auto_reason,
+                "updated_status": "completed",
+            }
 
     # ── generate_test_guidelines: check R2 directly (live check, not stale result) ──
     if step_type == "generate_test_guidelines":
@@ -1951,9 +2181,15 @@ async def validate_step_output_endpoint(
         if local_ok:
             validation = {"valid": True, "reason": "test_guidelines.md found on disk"}
         elif r2_content and len(r2_content.strip()) > 10:
-            validation = {"valid": True, "reason": f"test_guidelines found in R2 ({len(r2_content)} chars)"}
+            validation = {
+                "valid": True,
+                "reason": f"test_guidelines found in R2 ({len(r2_content)} chars)",
+            }
         else:
-            validation = {"valid": False, "reason": "test_guidelines.md not found on disk or in R2"}
+            validation = {
+                "valid": False,
+                "reason": "test_guidelines.md not found on disk or in R2",
+            }
     else:
         validation = validate_step_output(step_type, out_dir, step_result)
 
@@ -1961,14 +2197,29 @@ async def validate_step_output_endpoint(
     if validation["valid"]:
         await sessions_collection().update_one(
             _session_filter(oid, app_id, tenant_id),
-            {"$set": {f"plan.steps.{step_index}.status": "completed", "updated_at": datetime.utcnow()}},
+            {
+                "$set": {
+                    f"plan.steps.{step_index}.status": "completed",
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
         updated_status = "completed"
-        logger.info("session.step_validate_passed", session_id=session_id,
-                    step_index=step_index, step_type=step_type, reason=validation["reason"])
+        logger.info(
+            "session.step_validate_passed",
+            session_id=session_id,
+            step_index=step_index,
+            step_type=step_type,
+            reason=validation["reason"],
+        )
     else:
-        logger.info("session.step_validate_failed", session_id=session_id,
-                    step_index=step_index, step_type=step_type, reason=validation["reason"])
+        logger.info(
+            "session.step_validate_failed",
+            session_id=session_id,
+            step_index=step_index,
+            step_type=step_type,
+            reason=validation["reason"],
+        )
 
     return {
         "ok": True,
@@ -1983,8 +2234,8 @@ async def validate_step_output_endpoint(
 @session_router.get("/{session_id}/implementation-plan")
 async def get_implementation_plan(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
-    x_app_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
+    x_app_id: str | None = Header(None),
 ):
     """Return the connector-specific implementation plan (local file → R2 fallback).
 
@@ -1995,8 +2246,8 @@ async def get_implementation_plan(
     3. Legacy shared R2 path: {collection}/{provider}/{service_slug}/implementation_plan.md
        (written by the backend step executor during generate_implementation_plan)
     """
-    from integration.services.step_executor import _output_dir
     from integration.services import r2_service
+    from integration.services.step_executor import _output_dir
 
     tenant_id = _get_tenant(x_tenant_id)
     if not ObjectId.is_valid(session_id):
@@ -2004,7 +2255,14 @@ async def get_implementation_plan(
 
     doc = await sessions_collection().find_one(
         {"_id": ObjectId(session_id)},
-        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1, "app_id": 1},
+        {
+            "provider": 1,
+            "service_slug": 1,
+            "service": 1,
+            "tenant_id": 1,
+            "tenant_name": 1,
+            "app_id": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -2029,7 +2287,9 @@ async def get_implementation_plan(
     # 2. Session-scoped R2 path (written by Electron sync-to-r2)
     try:
         r2_tenant = _app_id or _local_tenant
-        content = await r2_service.get_connector_file(r2_tenant, service_slug, session_id, "implementation_plan.md") or ""
+        content = (
+            await r2_service.get_connector_file(r2_tenant, service_slug, session_id, "implementation_plan.md") or ""
+        )
         if content.strip():
             return {"content": content, "source": "r2_session", "chars": len(content)}
     except Exception:
@@ -2047,22 +2307,27 @@ async def get_implementation_plan(
 
 
 @session_router.get("/{session_id}/test-guidelines")
-async def get_test_guidelines(session_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def get_test_guidelines(session_id: str, x_tenant_id: str | None = Header(None)):
     """Return the connector-specific test guidelines doc (from local file → R2 fallback).
 
     Used by the generate_test_guidelines accordion in the UI to render the doc.
     """
-    from integration.services.step_executor import _output_dir
     from integration.services import r2_service
+    from integration.services.step_executor import _output_dir
 
     tenant_id = _get_tenant(x_tenant_id)
-    app_id = None  # TODO: add x_app_id header to this endpoint
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
     doc = await sessions_collection().find_one(
         {"_id": ObjectId(session_id)},
-        {"provider": 1, "service_slug": 1, "service": 1, "tenant_id": 1, "tenant_name": 1},
+        {
+            "provider": 1,
+            "service_slug": 1,
+            "service": 1,
+            "tenant_id": 1,
+            "tenant_name": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -2095,49 +2360,65 @@ async def _cascade_delete_acp_connector(gateway_connector_id: str, tenant_id: st
     (not via the JWT-gated public gateway). Never raises — a sync failure must not break the
     primary session delete; it's logged for follow-up."""
     import httpx as _httpx
+
     base = (settings.ACP_INTERNAL_URL or "https://localhost:8020").rstrip("/")
     try:
         try:
             from shielva_common.tls import internal_ca_verify
+
             verify = internal_ca_verify()
-        except Exception:  # noqa: BLE001 — shielva_common not present in this service; trust internal CA bundle
+        except Exception:
             verify = True
         async with _httpx.AsyncClient(verify=verify, timeout=8.0) as client:
             r = await client.delete(
                 f"{base}/internal/connectors/by-connector-id/{gateway_connector_id}",
-                headers={"X-Internal-Token": settings.ACP_INTERNAL_TOKEN, "X-Tenant-ID": tenant_id},
+                headers={
+                    "X-Internal-Token": settings.ACP_INTERNAL_TOKEN,
+                    "X-Tenant-ID": tenant_id,
+                },
             )
-        logger.info("session.cascade_acp_connector_delete", connector_id=gateway_connector_id,
-                    status=r.status_code, tenant_id=tenant_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("session.cascade_acp_connector_delete_failed",
-                       connector_id=gateway_connector_id, error=str(exc))
+        logger.info(
+            "session.cascade_acp_connector_delete",
+            connector_id=gateway_connector_id,
+            status=r.status_code,
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "session.cascade_acp_connector_delete_failed",
+            connector_id=gateway_connector_id,
+            error=str(exc),
+        )
 
 
 @session_router.delete("/by-connector/{gateway_connector_id}")
 async def delete_sessions_by_connector(
     gateway_connector_id: str,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Cascade target: delete the builder session(s) linked to an ACP connector (joined by
     gateway_connector_id), so the integration grid stops counting it. Called by ACP core when
     a connector is deleted. Performs NO back-cascade (ACP already deleted the connector), so
     there's no loop. Tenant-scoped; idempotent."""
     tenant_id = _get_tenant(x_tenant_id)
-    q: Dict[str, Any] = {"gateway_connector_id": gateway_connector_id}
+    q: dict[str, Any] = {"gateway_connector_id": gateway_connector_id}
     if tenant_id:
         q["tenant_id"] = tenant_id
     res = await sessions_collection().delete_many(q)
-    logger.info("session.cascade_delete_by_connector", connector_id=gateway_connector_id,
-                tenant_id=tenant_id, deleted=res.deleted_count)
+    logger.info(
+        "session.cascade_delete_by_connector",
+        connector_id=gateway_connector_id,
+        tenant_id=tenant_id,
+        deleted=res.deleted_count,
+    )
     return {"deleted": res.deleted_count}
 
 
 @session_router.delete("/{session_id}")
 async def delete_session(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
-    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+    x_tenant_id: str | None = Header(None),
+    x_app_id: str | None = Header(None, alias="X-App-ID"),
 ):
     """Delete a session and purge its R2/local plan cache."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -2154,7 +2435,13 @@ async def delete_session(
     # Fetch full session data before deleting so we can clean up all associated storage
     doc = await sessions_collection().find_one(
         _session_filter(oid, app_id, tenant_id),
-        {"provider": 1, "service": 1, "service_slug": 1, "gateway_connector_id": 1, "entity_configs": 1},
+        {
+            "provider": 1,
+            "service": 1,
+            "service_slug": 1,
+            "gateway_connector_id": 1,
+            "entity_configs": 1,
+        },
     )
     if not doc:
         logger.warning("session.delete_not_found", session_id=session_id, tenant_id=tenant_id)
@@ -2171,7 +2458,8 @@ async def delete_session(
     # Delete generated connector directory from disk (flat layout: GENERATED_CODE_DIR/{slug}_connector/)
     if service_slug:
         import re as _re_del
-        _clean_del = _re_del.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+
+        _clean_del = _re_del.sub(r"_connector(_[a-f0-9]{6}$|$)", r"\1", service_slug)
         _base_del = Path(settings.GENERATED_CODE_DIR)
         # Check flat path first, then legacy tenant-subdir for old builds
         for _del_cand in [
@@ -2181,9 +2469,17 @@ async def delete_session(
             if _del_cand.exists():
                 try:
                     shutil.rmtree(str(_del_cand))
-                    logger.info("session.generated_files_deleted", session_id=session_id, path=str(_del_cand))
+                    logger.info(
+                        "session.generated_files_deleted",
+                        session_id=session_id,
+                        path=str(_del_cand),
+                    )
                 except Exception as exc:
-                    logger.warning("session.generated_files_delete_failed", session_id=session_id, error=str(exc))
+                    logger.warning(
+                        "session.generated_files_delete_failed",
+                        session_id=session_id,
+                        error=str(exc),
+                    )
 
     # Purge R2/local plan cache for this provider/service_slug/tenant
     if provider and service_slug:
@@ -2199,16 +2495,26 @@ async def delete_session(
             await r2_service.delete_connector_docs(tenant_id, provider, service_slug)
             logger.info("session.r2_connector_docs_deleted", session_id=session_id)
         except Exception as exc:
-            logger.warning("session.r2_connector_docs_delete_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.r2_connector_docs_delete_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
         # Delete generated connector code files from R2 (uploaded during execution)
         try:
-            deleted_files = await r2_service.delete_connector_session_files(
-                tenant_id, service_slug, session_id
+            deleted_files = await r2_service.delete_connector_session_files(tenant_id, service_slug, session_id)
+            logger.info(
+                "session.r2_connector_code_deleted",
+                session_id=session_id,
+                files=deleted_files,
             )
-            logger.info("session.r2_connector_code_deleted", session_id=session_id, files=deleted_files)
         except Exception as exc:
-            logger.warning("session.r2_connector_code_delete_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.r2_connector_code_delete_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
         # Clean up per-connector RAG vectors
         try:
@@ -2221,28 +2527,46 @@ async def delete_session(
             await delete_code_analysis(session_id=session_id, tenant_id=tenant_id)
             logger.info("session.code_analysis_deleted_on_session_delete", session_id=session_id)
         except Exception as exc:
-            logger.warning("session.code_analysis_delete_on_delete_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.code_analysis_delete_on_delete_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
     # Delete Redis connector tokens + config (keyed by gateway_connector_id if deployed)
     gateway_connector_id = doc.get("gateway_connector_id", "")
     if gateway_connector_id:
         try:
             from services.connector_store import ConnectorStore as _CS
+
             _cs = _CS()
             await _cs.delete_connector(gateway_connector_id)
-            logger.info("session.redis_connector_deleted", session_id=session_id, connector_id=gateway_connector_id)
+            logger.info(
+                "session.redis_connector_deleted",
+                session_id=session_id,
+                connector_id=gateway_connector_id,
+            )
         except Exception as exc:
-            logger.warning("session.redis_connector_delete_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.redis_connector_delete_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
     # Delete Redis credentials keyed by tenant + connector_type (service slug)
     if service_slug:
         try:
             from services.redis_service import redis_service as _redis
+
             cred_key = f"connectors:credentials:{tenant_id}:{service_slug}"
             await _redis.delete(cred_key)
             logger.info("session.redis_credentials_deleted", session_id=session_id, key=cred_key)
         except Exception as exc:
-            logger.warning("session.redis_credentials_delete_failed", session_id=session_id, error=str(exc))
+            logger.warning(
+                "session.redis_credentials_delete_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
 
     # Clear execution event buffer
     execution_manager.cleanup(session_id)
@@ -2253,18 +2577,26 @@ async def delete_session(
     if gateway_connector_id and tenant_id:
         await _cascade_delete_acp_connector(gateway_connector_id, tenant_id)
 
-    logger.info("session.deleted", session_id=session_id, tenant_id=tenant_id,
-                provider=provider, service=service)
+    logger.info(
+        "session.deleted",
+        session_id=session_id,
+        tenant_id=tenant_id,
+        provider=provider,
+        service=service,
+    )
     return {"deleted": True}
 
 
 @session_router.get("/{session_id}/claude-prompt")
 async def get_session_claude_prompt(
     session_id: str,
-    working_dir: Optional[str] = Query(None, description="Absolute path where Claude should write connector files"),
-    from_step: Optional[int] = Query(None, description="Resume build from this step index (0-based). Previous steps are assumed complete."),
-    x_app_id: Optional[str] = Header(None),
-    x_tenant_id: Optional[str] = Header(None),
+    working_dir: str | None = Query(None, description="Absolute path where Claude should write connector files"),
+    from_step: int | None = Query(
+        None,
+        description="Resume build from this step index (0-based). Previous steps are assumed complete.",
+    ),
+    x_app_id: str | None = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Return the assembled Claude CLI prompt for building this connector.
 
@@ -2272,7 +2604,7 @@ async def get_session_claude_prompt(
     merged with session context: provider, service, auth_type, user_prompt, docs_urls.
     The Electron desktop app passes this prompt to the native `claude` CLI via PTY.
     """
-    app_id    = x_app_id or None
+    app_id = x_app_id or None
     tenant_id = x_tenant_id or None
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
@@ -2291,18 +2623,22 @@ async def get_session_claude_prompt(
     if not auth_type:
         try:
             from integration.data.catalog import get_service_detail as _get_svc
+
             svc_detail = _get_svc(provider, service)
             auth_type = (svc_detail.get("auth_type") if isinstance(svc_detail, dict) else None) or "api_key"
         except Exception:
             auth_type = "api_key"
     raw_user_prompt = doc.get("user_prompt", "")
-    docs_urls: List[str] = [u for u in (doc.get("docs_urls") or []) if u.strip()]
+    docs_urls: list[str] = [u for u in (doc.get("docs_urls") or []) if u.strip()]
     custom_rules = (doc.get("custom_rules_md") or "").strip()
 
     # ── Reconstruct user prompt: expand informal requirements into a structured spec ──
     # Claude takes the raw free-text (e.g. "list emails, send emails, delete emails")
     # and expands it into explicit method names, SOC/OCP constraints, data model needs.
-    from integration.services.planning_service import reconstruct_user_prompt as _reconstruct
+    from integration.services.planning_service import (
+        reconstruct_user_prompt as _reconstruct,
+    )
+
     user_prompt = await _reconstruct(
         raw_prompt=raw_user_prompt,
         provider=provider,
@@ -2338,22 +2674,17 @@ async def get_session_claude_prompt(
         system_prompt = local_base
 
     # ── Assemble user task message ─────────────────────────────────────────────
-    docs_text = (
-        "\n".join(f"  - {u}" for u in docs_urls)
-        if docs_urls else "  No documentation URLs provided."
-    )
+    docs_text = "\n".join(f"  - {u}" for u in docs_urls) if docs_urls else "  No documentation URLs provided."
 
     # ── Read user's feature + config selections from the plan (saved at approve time) ──
     plan_doc = doc.get("plan") or {}
-    selected_features: List[dict] = plan_doc.get("recommended_features") or []
-    selected_config_fields: List[dict] = plan_doc.get("default_config_fields") or []
-    plan_steps_list: List[dict] = plan_doc.get("steps") or []
+    selected_features: list[dict] = plan_doc.get("recommended_features") or []
+    selected_config_fields: list[dict] = plan_doc.get("default_config_fields") or []
+    plan_steps_list: list[dict] = plan_doc.get("steps") or []
 
     # Extract user-requested methods from write_connector step config
-    write_connector_step = next(
-        (s for s in plan_steps_list if s.get("type") == "write_connector"), None
-    )
-    user_methods: List[str] = []
+    write_connector_step = next((s for s in plan_steps_list if s.get("type") == "write_connector"), None)
+    user_methods: list[str] = []
     if write_connector_step:
         step_cfg = write_connector_step.get("config") or {}
         user_methods = step_cfg.get("methods") or []
@@ -2395,18 +2726,26 @@ async def get_session_claude_prompt(
 
     # ── Inject user-requested methods ─────────────────────────────────────────────
     if user_methods:
-        base_methods = {"install", "authorize", "sync", "health_check", "handle_webhook",
-                        "process_callback", "handle_event", "batch_processor"}
+        base_methods = {
+            "install",
+            "authorize",
+            "sync",
+            "health_check",
+            "handle_webhook",
+            "process_callback",
+            "handle_event",
+            "batch_processor",
+        }
         custom_methods = [m for m in user_methods if m not in base_methods]
         all_methods_str = ", ".join(f"`{m}()`" for m in user_methods)
         user_message_parts += [
             "",
-            f"## Required Methods — connector.py MUST implement ALL of these as public async methods:",
+            "## Required Methods — connector.py MUST implement ALL of these as public async methods:",
             f"  {all_methods_str}",
         ]
         if custom_methods:
             user_message_parts += [
-                f"  Custom operations (NOT in BaseConnector — add as new public async methods): "
+                "  Custom operations (NOT in BaseConnector — add as new public async methods): "
                 + ", ".join(f"`{m}()`" for m in custom_methods),
             ]
 
@@ -2433,16 +2772,21 @@ async def get_session_claude_prompt(
         steps_list = doc.get("plan", {}).get("steps", [])
         completed_titles = [
             f"  - Step {s['index'] + 1}: {s.get('title', s.get('type', ''))}"
-            for s in steps_list if s.get("index", 999) < from_step
+            for s in steps_list
+            if s.get("index", 999) < from_step
         ]
-        resume_note = [
-            "",
-            f"**RESUMING FROM STEP {from_step + 1}** — previous steps are already complete:",
-        ] + (completed_titles or [f"  - Steps 1–{from_step} (already done)"]) + [
-            "",
-            "The connector directory already has partial output. Review existing files with `list_files()` first,",
-            "then continue from where the build left off — do NOT overwrite already-correct files.",
-        ]
+        resume_note = (
+            [
+                "",
+                f"**RESUMING FROM STEP {from_step + 1}** — previous steps are already complete:",
+            ]
+            + (completed_titles or [f"  - Steps 1–{from_step} (already done)"])
+            + [
+                "",
+                "The connector directory already has partial output. Review existing files with `list_files()` first,",
+                "then continue from where the build left off — do NOT overwrite already-correct files.",
+            ]
+        )
         user_message_parts += resume_note
 
     user_message = "\n".join(user_message_parts)
@@ -2465,14 +2809,16 @@ async def get_session_claude_prompt(
     # The backend already knows the tenant from the session; there is no need to encode it in
     # the local path.  Tenant subdirectories are only used for the server-side default location.
     # Otherwise fall back to the server default: {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector
-    from integration.services.step_executor import _output_dir as _compute_output_dir
     import re as _re
+
+    from integration.services.step_executor import _output_dir as _compute_output_dir
+
     _tenant_name = (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "").strip().lower()
     # Prefer the stored service_slug (includes unique hash from session creation).
     # Fall back to computing from service name only if session predates the hash feature.
     _raw_slug = doc.get("service_slug") or service.replace("-", "_").lower()
     # Strip trailing _connector to avoid double-suffix (e.g. google_gmail_f54cdf_connector → google_gmail_f54cdf)
-    _service_slug = _re.sub(r'_connector$', '', _raw_slug) if _raw_slug.endswith('_connector') else _raw_slug
+    _service_slug = _re.sub(r"_connector$", "", _raw_slug) if _raw_slug.endswith("_connector") else _raw_slug
     _custom_base = (working_dir or "").strip()
     if _custom_base:
         # Custom project directory from the Electron app settings — flat layout, no tenant subdir
@@ -2484,8 +2830,12 @@ async def get_session_claude_prompt(
         out.mkdir(parents=True, exist_ok=True)
         for sub in ("client", "helpers", "metadata", "tests"):
             (out / sub).mkdir(exist_ok=True)
-        for init_file in (out / "client" / "__init__.py", out / "helpers" / "__init__.py",
-                           out / "tests" / "__init__.py", out / "__init__.py"):
+        for init_file in (
+            out / "client" / "__init__.py",
+            out / "helpers" / "__init__.py",
+            out / "tests" / "__init__.py",
+            out / "__init__.py",
+        ):
             init_file.touch()
         pytest_ini = out / "pytest.ini"
         if not pytest_ini.exists():
@@ -2538,10 +2888,8 @@ async def get_session_claude_prompt(
                 if _s.get("index", _arr_i) >= from_step:
                     _fail_updates2[f"plan.steps.{_arr_i}.status"] = "failed"
             if len(_fail_updates2) > 1:
-                try:
+                with contextlib.suppress(Exception):
                     await sessions_collection().update_one({"_id": oid}, {"$set": _fail_updates2})
-                except Exception:
-                    pass
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -2618,7 +2966,7 @@ async def get_session_claude_prompt(
 async def get_step_claude_prompt(
     session_id: str,
     step_index: int,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Return a Claude CLI prompt focused on re-running a single LLM step locally.
 
@@ -2649,6 +2997,7 @@ async def get_step_claude_prompt(
     # Re-use the same system prompt as the full build
     from integration.api.step_prompts_routes import _get_fallback
     from integration.services import r2_service as _r2
+
     auth_type = doc.get("auth_type") or ""
     local_base = _get_fallback("CONNECTOR_GEN_SYSTEM")
     try:
@@ -2663,17 +3012,19 @@ async def get_step_claude_prompt(
     service_name = doc.get("connector_name") or service.replace("_", " ").title()
 
     # Build a focused task for just this step
-    focus_message = "\n".join([
-        f"You are re-running a single step for: **{service_name}** (provider: `{provider}`)",
-        "",
-        f"**Step {step_index + 1}: {step_title}**",
-        f"{step_desc}" if step_desc else "",
-        "",
-        "The connector directory already exists. Look at what's already there and:",
-        f"- Only regenerate/fix the output required for this step: `{step_type}`",
-        "- Do NOT delete or overwrite files from other steps unless they are broken",
-        "- Follow ALL rules in the system prompt exactly",
-    ])
+    focus_message = "\n".join(
+        [
+            f"You are re-running a single step for: **{service_name}** (provider: `{provider}`)",
+            "",
+            f"**Step {step_index + 1}: {step_title}**",
+            f"{step_desc}" if step_desc else "",
+            "",
+            "The connector directory already exists. Look at what's already there and:",
+            f"- Only regenerate/fix the output required for this step: `{step_type}`",
+            "- Do NOT delete or overwrite files from other steps unless they are broken",
+            "- Follow ALL rules in the system prompt exactly",
+        ]
+    )
 
     # Cache system prompt to tmp — same pattern as the full build endpoint
     if system_prompt:
@@ -2687,11 +3038,13 @@ async def get_step_claude_prompt(
         full_prompt = focus_message
 
     # Compute output directory (same as full build — must use stored service_slug with hash)
-    from integration.services.step_executor import _output_dir as _compute_output_dir
     import re as _re
+
+    from integration.services.step_executor import _output_dir as _compute_output_dir
+
     _tenant_name = (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "").strip().lower()
     _raw_slug2 = doc.get("service_slug") or service.replace("-", "_").lower()
-    _service_slug = _re.sub(r'_connector$', '', _raw_slug2) if _raw_slug2.endswith('_connector') else _raw_slug2
+    _service_slug = _re.sub(r"_connector$", "", _raw_slug2) if _raw_slug2.endswith("_connector") else _raw_slug2
     out = _compute_output_dir(_tenant_name, _service_slug)
     output_dir = str(out.resolve()) if out.exists() else ""
 
@@ -2703,8 +3056,8 @@ async def get_step_claude_prompt(
         _has_impl_step = any(s.get("type") == "generate_implementation_plan" for s in steps)
         if _has_impl_step and not _impl_plan.exists():
             _impl_step_num = next(
-                (s.get("index", i) + 1 for i, s in enumerate(steps)
-                 if s.get("type") == "generate_implementation_plan"), 1,
+                (s.get("index", i) + 1 for i, s in enumerate(steps) if s.get("type") == "generate_implementation_plan"),
+                1,
             )
             raise HTTPException(
                 status_code=422,
@@ -2723,6 +3076,7 @@ async def get_step_claude_prompt(
 
 # ── Vulnerability scan endpoints ──────────────────────────────────────
 
+
 @session_router.post("/{session_id}/vulnerability-scan")
 async def trigger_vulnerability_scan(session_id: str, request: Request):
     """Trigger a vulnerability scan for a connector session.
@@ -2736,6 +3090,7 @@ async def trigger_vulnerability_scan(session_id: str, request: Request):
     tenant_id = request.headers.get("X-Tenant-ID", "")
     if not tenant_id:
         raise HTTPException(400, "X-Tenant-ID header is required")
+    app_id = request.headers.get("X-App-ID") or None
 
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
@@ -2754,6 +3109,7 @@ async def trigger_vulnerability_scan(session_id: str, request: Request):
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
 
     import re as _vs_re
+
     service_slug = (
         _vs_re.sub(r"_connector$", "", service_slug_raw)
         if service_slug_raw.endswith("_connector")
@@ -2765,12 +3121,11 @@ async def trigger_vulnerability_scan(session_id: str, request: Request):
     # Fall back to the server-side GENERATED_CODE_DIR only when the session has no output_dir set.
     output_dir = (doc.get("output_dir") or "").strip()
     if not output_dir:
-        from integration.services.step_executor import _output_dir as _compute_output_dir
-        _tenant_name = (
-            (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "")
-            .strip()
-            .lower()
+        from integration.services.step_executor import (
+            _output_dir as _compute_output_dir,
         )
+
+        _tenant_name = (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "").strip().lower()
         out = _compute_output_dir(_tenant_name, service_slug)
         output_dir = str(out.resolve()) if out.exists() else str(out)
 
@@ -2783,15 +3138,13 @@ async def trigger_vulnerability_scan(session_id: str, request: Request):
         output_dir=output_dir,
     )
 
-    result = await vuln_scan_service.run_vulnerability_scan(
+    return await vuln_scan_service.run_vulnerability_scan(
         output_dir=output_dir,
         provider=provider,
         service_slug=service_slug,
         tenant_id=tenant_id,
         session_id=session_id,
     )
-
-    return result
 
 
 @session_router.get("/{session_id}/vulnerability-scan")
@@ -2805,6 +3158,7 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
     tenant_id = request.headers.get("X-Tenant-ID", "")
     if not tenant_id:
         raise HTTPException(400, "X-Tenant-ID header is required")
+    app_id = request.headers.get("X-App-ID") or None
 
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
@@ -2823,6 +3177,7 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
 
     import re as _vsg_re
+
     service_slug = (
         _vsg_re.sub(r"_connector$", "", service_slug_raw)
         if service_slug_raw.endswith("_connector")
@@ -2835,12 +3190,11 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
     if _stored_output_dir:
         out = Path(_stored_output_dir)
     else:
-        from integration.services.step_executor import _output_dir as _compute_output_dir
-        _tenant_name = (
-            (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "")
-            .strip()
-            .lower()
+        from integration.services.step_executor import (
+            _output_dir as _compute_output_dir,
         )
+
+        _tenant_name = (doc.get("tenant_name") or doc.get("tenant_id") or tenant_id or "").strip().lower()
         out = _compute_output_dir(_tenant_name, service_slug)
     local_json = out / ".shielva" / "vuln" / "vulnerability_scan.json"
 
@@ -2861,9 +3215,7 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
             )
 
     # ── 2. Fall back to R2 ──
-    r2_key = (
-        f"{r2_service._coll()}/{provider}/{service_slug}/vuln/vulnerability_scan.json"
-    )
+    r2_key = f"{r2_service._coll()}/{provider}/{service_slug}/vuln/vulnerability_scan.json"
     try:
         loop = asyncio.get_event_loop()
         if r2_service._use_local():
@@ -2899,7 +3251,15 @@ async def get_vulnerability_scan_results(session_id: str, request: Request):
 # ── Connector sync-to-R2 (disk → R2 draft) ───────────────────────────────────
 
 # Directories to skip when walking the connector tree (mirrors r2_service._SKIP_DIRS_UPLOAD)
-_SYNC_SKIP_DIRS = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", "node_modules", "dist", "build"}
+_SYNC_SKIP_DIRS = {
+    "__pycache__",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    "node_modules",
+    "dist",
+    "build",
+}
 
 
 def _resolve_sync_dir(
@@ -2907,7 +3267,7 @@ def _resolve_sync_dir(
     r2_tenant: str,
     tenant_id: str,
     client_dir: str,
-) -> Optional[Path]:
+) -> Path | None:
     """Resolve the on-disk connector directory for sync operations.
     Priority: client_dir > server GENERATED_CODE_DIR fallbacks.
     """
@@ -2927,9 +3287,9 @@ def _resolve_sync_dir(
     return None
 
 
-def _compute_disk_checksums(out_dir: Path) -> Dict[str, str]:
+def _compute_disk_checksums(out_dir: Path) -> dict[str, str]:
     """Walk out_dir and return {rel_path: md5_hex} skipping build artifacts."""
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     for f in sorted(out_dir.rglob("*")):
         if not f.is_file():
             continue
@@ -2940,7 +3300,7 @@ def _compute_disk_checksums(out_dir: Path) -> Dict[str, str]:
         try:
             content = f.read_text(encoding="utf-8")
             rel = str(f.relative_to(out_dir))
-            result[rel] = hashlib.md5(content.encode("utf-8")).hexdigest()
+            result[rel] = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
         except (UnicodeDecodeError, PermissionError):
             continue
     return result
@@ -2950,7 +3310,7 @@ def _compute_disk_checksums(out_dir: Path) -> Dict[str, str]:
 async def get_r2_checksums(
     session_id: str,
     request: Request,
-    working_dir: Optional[str] = Query(None),
+    working_dir: str | None = Query(None),
 ):
     """Compute checksum diff between local disk files and R2 for this connector session.
 
@@ -2973,8 +3333,9 @@ async def get_r2_checksums(
         raise HTTPException(404, "Session not found")
 
     import re as _re_cs
+
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
-    service_slug = _re_cs.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug_raw)
+    service_slug = _re_cs.sub(r"_connector(_[a-f0-9]{6}$|$)", r"\1", service_slug_raw)
     r2_tenant = doc.get("tenant_id") or tenant_id
 
     # Set R2 bucket context from session
@@ -2991,18 +3352,13 @@ async def get_r2_checksums(
     # ── Disk checksums ────────────────────────────────────────────────────────
     client_dir = (working_dir or "").strip()
     out_dir = _resolve_sync_dir(service_slug, r2_tenant, tenant_id, client_dir)
-    disk_md5s: Dict[str, str] = {}
+    disk_md5s: dict[str, str] = {}
     if out_dir:
         disk_md5s = _compute_disk_checksums(out_dir)
 
     # ── Diff ──────────────────────────────────────────────────────────────────
-    to_upload: List[str] = [
-        rel for rel, md5 in disk_md5s.items()
-        if r2_checksums.get(rel, "") != md5
-    ]
-    to_delete: List[str] = [
-        rel for rel in r2_checksums if rel not in disk_md5s
-    ]
+    to_upload: list[str] = [rel for rel, md5 in disk_md5s.items() if r2_checksums.get(rel, "") != md5]
+    to_delete: list[str] = [rel for rel in r2_checksums if rel not in disk_md5s]
 
     logger.info(
         "r2_checksums.diff",
@@ -3022,9 +3378,9 @@ async def get_r2_checksums(
 
 
 class SyncToR2Body(BaseModel):
-    working_dir: Optional[str] = None       # Absolute path to the connector dir on the client machine
-    files: Optional[List[str]] = None        # Specific relative file paths to upload (None = all)
-    deleted_paths: Optional[List[str]] = None  # Relative paths to delete from R2
+    working_dir: str | None = None  # Absolute path to the connector dir on the client machine
+    files: list[str] | None = None  # Specific relative file paths to upload (None = all)
+    deleted_paths: list[str] | None = None  # Relative paths to delete from R2
 
 
 @session_router.post("/{session_id}/sync-to-r2")
@@ -3049,17 +3405,24 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         {"_id": oid},
-        {"service": 1, "service_slug": 1, "connector_name": 1, "tenant_id": 1, "app_id": 1},
+        {
+            "service": 1,
+            "service_slug": 1,
+            "connector_name": 1,
+            "tenant_id": 1,
+            "app_id": 1,
+        },
     )
     if not doc:
         raise HTTPException(404, "Session not found")
 
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_sync
+
     # Strip _connector suffix in both forms so we append exactly one _connector below:
     #   shielva_gmail_connector        → shielva_gmail
     #   shielva_gmail_connector_cb03d1 → shielva_gmail_cb03d1  (legacy sessions)
-    service_slug = _re_sync.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug_raw)
+    service_slug = _re_sync.sub(r"_connector(_[a-f0-9]{6}$|$)", r"\1", service_slug_raw)
     # connector_name holds the display name written by codegen (e.g. "Google Gmail", "Rippling")
     _connector_display_name = (doc.get("connector_name") or "").strip()
     r2_tenant = doc.get("tenant_id") or tenant_id
@@ -3089,9 +3452,9 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
     if out_dir is None:
         _base = Path(settings.GENERATED_CODE_DIR)
         _candidates = [
-            _base / f"{service_slug}_connector",                    # slug (legacy)
-            _base / r2_tenant / f"{service_slug}_connector",        # legacy: tenant subdir
-            _base / tenant_id / f"{service_slug}_connector",        # legacy: tenant subdir
+            _base / f"{service_slug}_connector",  # slug (legacy)
+            _base / r2_tenant / f"{service_slug}_connector",  # legacy: tenant subdir
+            _base / tenant_id / f"{service_slug}_connector",  # legacy: tenant subdir
         ]
         # Add display-name candidates (the actual generated dir name).
         if _connector_display_name:
@@ -3104,9 +3467,19 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
                 break
 
     if out_dir is None and not (body and body.deleted_paths):
-        logger.info("sync_to_r2.no_disk_dir", session_id=session_id, service_slug=service_slug,
-                    client_dir=_client_dir or "not provided")
-        return {"ok": True, "uploaded": 0, "deleted": 0, "r2_prefix": "", "message": "No local files found — nothing to upload"}
+        logger.info(
+            "sync_to_r2.no_disk_dir",
+            session_id=session_id,
+            service_slug=service_slug,
+            client_dir=_client_dir or "not provided",
+        )
+        return {
+            "ok": True,
+            "uploaded": 0,
+            "deleted": 0,
+            "r2_prefix": "",
+            "message": "No local files found — nothing to upload",
+        }
 
     r2_prefix = r2_service.connector_session_r2_prefix(r2_tenant, service_slug, session_id)
     uploaded = 0
@@ -3126,17 +3499,27 @@ async def sync_connector_to_r2(session_id: str, request: Request, body: SyncToR2
     # ── Delete: files removed from disk since last sync ───────────────────────
     paths_to_delete = (body.deleted_paths or []) if body else []
     if paths_to_delete:
-        deleted = await r2_service.delete_connector_r2_files(
-            r2_tenant, service_slug, session_id, paths_to_delete
-        )
+        deleted = await r2_service.delete_connector_r2_files(r2_tenant, service_slug, session_id, paths_to_delete)
 
-    logger.info("sync_to_r2.done", session_id=session_id, uploaded=uploaded, deleted=deleted,
-                r2_prefix=r2_prefix, source="client_dir" if _client_dir else "server_dir",
-                selective=bool(specific_files))
-    return {"ok": True, "uploaded": uploaded, "deleted": deleted, "r2_prefix": r2_prefix}
+    logger.info(
+        "sync_to_r2.done",
+        session_id=session_id,
+        uploaded=uploaded,
+        deleted=deleted,
+        r2_prefix=r2_prefix,
+        source="client_dir" if _client_dir else "server_dir",
+        selective=bool(specific_files),
+    )
+    return {
+        "ok": True,
+        "uploaded": uploaded,
+        "deleted": deleted,
+        "r2_prefix": r2_prefix,
+    }
 
 
 # ── Connector Analysis ─────────────────────────────────────────────────────────
+
 
 @session_router.get("/{session_id}/connector-analysis")
 async def get_connector_analysis(
@@ -3169,7 +3552,12 @@ async def get_connector_analysis(
     provider = doc.get("provider", "")
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_an
-    service_slug = _re_an.sub(r'_connector$', '', service_slug_raw) if service_slug_raw.endswith('_connector') else service_slug_raw
+
+    service_slug = (
+        _re_an.sub(r"_connector$", "", service_slug_raw)
+        if service_slug_raw.endswith("_connector")
+        else service_slug_raw
+    )
 
     analysis = await r2_service.get_connector_analysis(provider, service_slug)
     return {"analysis": analysis}
@@ -3246,7 +3634,12 @@ async def generate_connector_analysis(
     provider = doc.get("provider", "")
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_an2
-    service_slug = _re_an2.sub(r'_connector$', '', service_slug_raw) if service_slug_raw.endswith('_connector') else service_slug_raw
+
+    service_slug = (
+        _re_an2.sub(r"_connector$", "", service_slug_raw)
+        if service_slug_raw.endswith("_connector")
+        else service_slug_raw
+    )
     service_name = doc.get("connector_name") or service_slug.replace("_", " ").title()
 
     # Check if a fresh analysis already exists
@@ -3296,12 +3689,18 @@ Return ONLY this JSON — no preamble, no explanation:
 
     # Parse JSON from LLM response
     import re as _re_json
+
     # Strip markdown fences if present
-    clean = _re_json.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=_re_json.MULTILINE).strip()
+    clean = _re_json.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=_re_json.MULTILINE).strip()
     try:
         data = json.loads(clean)
     except json.JSONDecodeError as exc:
-        logger.error("connector_analysis.parse_failed", session_id=session_id, raw=raw[:500], error=str(exc))
+        logger.error(
+            "connector_analysis.parse_failed",
+            session_id=session_id,
+            raw=raw[:500],
+            error=str(exc),
+        )
         raise HTTPException(500, "Failed to parse LLM analysis response as JSON")
 
     analysis = {
@@ -3330,6 +3729,7 @@ Return ONLY this JSON — no preamble, no explanation:
 
 # ── Prompt Synthesizer ─────────────────────────────────────────────────────────
 
+
 class SynthesizePromptRequest(BaseModel):
     prompt: str
 
@@ -3346,6 +3746,7 @@ async def synthesize_prompt(
     that will produce high-quality connector code.
     """
     tenant_id = request.headers.get("X-Tenant-ID", "")
+    app_id = request.headers.get("X-App-ID") or None
     if not ObjectId.is_valid(session_id):
         raise HTTPException(400, "Invalid session ID")
 
@@ -3356,12 +3757,24 @@ async def synthesize_prompt(
     oid = ObjectId(session_id)
     doc = await sessions_collection().find_one(
         _session_filter(oid, app_id, tenant_id),
-        {"provider": 1, "service_slug": 1, "service": 1, "connector_name": 1, "auth_type": 1},
+        {
+            "provider": 1,
+            "service_slug": 1,
+            "service": 1,
+            "connector_name": 1,
+            "auth_type": 1,
+        },
     )
     if not doc:
         doc = await sessions_collection().find_one(
             {"_id": oid},
-            {"provider": 1, "service_slug": 1, "service": 1, "connector_name": 1, "auth_type": 1},
+            {
+                "provider": 1,
+                "service_slug": 1,
+                "service": 1,
+                "connector_name": 1,
+                "auth_type": 1,
+            },
         )
     if not doc:
         raise HTTPException(404, "Session not found")
@@ -3369,7 +3782,12 @@ async def synthesize_prompt(
     provider = doc.get("provider", "")
     service_slug_raw = doc.get("service_slug") or doc.get("service", "").replace("-", "_").lower()
     import re as _re_syn
-    service_slug = _re_syn.sub(r'_connector$', '', service_slug_raw) if service_slug_raw.endswith('_connector') else service_slug_raw
+
+    service_slug = (
+        _re_syn.sub(r"_connector$", "", service_slug_raw)
+        if service_slug_raw.endswith("_connector")
+        else service_slug_raw
+    )
     service_name = doc.get("connector_name") or service_slug.replace("_", " ").title()
     auth_type = doc.get("auth_type", "api_key")
 

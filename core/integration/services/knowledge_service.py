@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import structlog
@@ -30,7 +30,7 @@ _GLOBAL_KB_ID = "codegen-guidelines-{tenant_id}"
 _CONNECTOR_KB_ID = "codegen-docs-{tenant_id}-{provider}-{service}"
 
 
-def _mcp_headers(tenant_id: str) -> Dict[str, str]:
+def _mcp_headers(tenant_id: str) -> dict[str, str]:
     """Canonical internal service-to-service headers for MCP calls.
 
     Per the platform contract (docs/architecture/MCP_LLM_BROKER.md → "Auth
@@ -58,12 +58,15 @@ def _mcp_headers(tenant_id: str) -> Dict[str, str]:
 
 # ── MongoDB helpers ──────────────────────────────────────────────────
 
+
 def _knowledge_collection():
     from integration.db.database import get_db
+
     return get_db()["connector_knowledge_docs"]
 
 
 # ── KB ID builders ───────────────────────────────────────────────────
+
 
 def _global_kb_id(tenant_id: str) -> str:
     return _GLOBAL_KB_ID.format(tenant_id=tenant_id)
@@ -71,8 +74,8 @@ def _global_kb_id(tenant_id: str) -> str:
 
 def _connector_kb_id(tenant_id: str, provider: str, service: str) -> str:
     # Sanitize: lowercase, replace non-alphanumeric with underscore (collision-safe)
-    safe_provider = re.sub(r'[^a-z0-9]+', '_', provider.lower().strip()).strip('_')
-    safe_service = re.sub(r'[^a-z0-9]+', '_', service.lower().strip()).strip('_')
+    safe_provider = re.sub(r"[^a-z0-9]+", "_", provider.lower().strip()).strip("_")
+    safe_service = re.sub(r"[^a-z0-9]+", "_", service.lower().strip()).strip("_")
     return _CONNECTOR_KB_ID.format(
         tenant_id=tenant_id,
         provider=safe_provider,
@@ -82,12 +85,13 @@ def _connector_kb_id(tenant_id: str, provider: str, service: str) -> str:
 
 # ── Ingest via MCP ingestion worker ─────────────────────────────────
 
+
 async def _ingest_to_mcp(
     content: str,
     title: str,
     kb_id: str,
     tenant_id: str,
-    doc_id: Optional[str] = None,
+    doc_id: str | None = None,
 ) -> str:
     """Send a markdown document to MCP's ingestion worker for RAG indexing.
 
@@ -102,7 +106,7 @@ async def _ingest_to_mcp(
             {
                 "id": doc_id,
                 "content": content,
-                "title": title,          # required top-level field by IngestDocumentRequest
+                "title": title,  # required top-level field by IngestDocumentRequest
                 "doc_type": "text",
                 "metadata": {
                     "source": "integration-builder-upload",
@@ -127,7 +131,12 @@ async def _ingest_to_mcp(
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
-            logger.info("knowledge.ingested", kb_id=kb_id, doc_id=doc_id, status=resp.status_code)
+            logger.info(
+                "knowledge.ingested",
+                kb_id=kb_id,
+                doc_id=doc_id,
+                status=resp.status_code,
+            )
     except httpx.HTTPStatusError as exc:
         # Don't crash — log the error and continue. The document metadata
         # is still stored in MongoDB so it can be retried later.
@@ -138,8 +147,11 @@ async def _ingest_to_mcp(
             kb_id=kb_id,
             doc_id=doc_id,
         )
-        logger.info("knowledge.stored_without_rag", doc_id=doc_id,
-                     reason=f"HTTP {exc.response.status_code}")
+        logger.info(
+            "knowledge.stored_without_rag",
+            doc_id=doc_id,
+            reason=f"HTTP {exc.response.status_code}",
+        )
     except httpx.RequestError as exc:
         # MCP ingestion worker unreachable — degrade gracefully
         logger.warning(
@@ -147,19 +159,19 @@ async def _ingest_to_mcp(
             error=str(exc),
             url=url,
         )
-        logger.info("knowledge.stored_without_rag", doc_id=doc_id,
-                     reason="connection_error")
+        logger.info("knowledge.stored_without_rag", doc_id=doc_id, reason="connection_error")
 
     return doc_id
 
 
 # ── Public API ───────────────────────────────────────────────────────
 
+
 async def ingest_global_guidelines(
     content: str,
     title: str,
     tenant_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Upload global code guidelines/standards shared across all connectors.
 
     Returns metadata dict.
@@ -172,7 +184,7 @@ async def ingest_global_guidelines(
 
     # Store metadata in MongoDB
     col = _knowledge_collection()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     doc = {
         "doc_id": doc_id,
         "kb_id": kb_id,
@@ -196,8 +208,8 @@ async def ingest_connector_docs(
     tenant_id: str,
     provider: str,
     service: str,
-    session_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    session_id: str | None = None,
+) -> dict[str, Any]:
     """Upload SDK docs or API specs specific to one connector.
 
     Returns metadata dict.
@@ -208,7 +220,7 @@ async def ingest_connector_docs(
     await _ingest_to_mcp(content, title, kb_id, tenant_id, doc_id)
 
     col = _knowledge_collection()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     doc = {
         "doc_id": doc_id,
         "kb_id": kb_id,
@@ -230,7 +242,12 @@ async def ingest_connector_docs(
         provider=provider,
         service=service,
     )
-    return {"doc_id": doc_id, "title": title, "scope": "connector", "created_at": str(now)}
+    return {
+        "doc_id": doc_id,
+        "title": title,
+        "scope": "connector",
+        "created_at": str(now),
+    }
 
 
 async def query_knowledge(
@@ -247,8 +264,8 @@ async def query_knowledge(
     Returns formatted string to inject into LLM prompts.
     """
     kb_ids = [
-        "codegen-guidelines-global",        # shared code + doc guidelines (ingested on startup)
-        _global_kb_id(tenant_id),            # tenant-uploaded global guidelines
+        "codegen-guidelines-global",  # shared code + doc guidelines (ingested on startup)
+        _global_kb_id(tenant_id),  # tenant-uploaded global guidelines
     ]
     if provider and service:
         kb_ids.append(_connector_kb_id(tenant_id, provider, service))
@@ -300,9 +317,7 @@ async def query_knowledge(
             source = r.get("source", "Knowledge Base")
             score = r.get("score", 0.0)
             chunks.append(
-                f"<knowledge_chunk_{i} source=\"{source}\" relevance=\"{score:.2f}\">\n"
-                f"{content}\n"
-                f"</knowledge_chunk_{i}>"
+                f'<knowledge_chunk_{i} source="{source}" relevance="{score:.2f}">\n{content}\n</knowledge_chunk_{i}>'
             )
 
         return "\n\n".join(chunks)
@@ -317,13 +332,13 @@ async def list_uploaded_docs(
     scope: str = "all",
     provider: str = "",
     service: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List all uploaded knowledge documents for a tenant.
 
     scope: "global" | "connector" | "all"
     """
     col = _knowledge_collection()
-    query_filter: Dict[str, Any] = {"tenant_id": tenant_id}
+    query_filter: dict[str, Any] = {"tenant_id": tenant_id}
 
     if scope == "global":
         query_filter["scope"] = "global"
@@ -370,6 +385,7 @@ async def delete_doc(doc_id: str, tenant_id: str) -> bool:
 
 # ── Per-connector RAG lifecycle ──────────────────────────────────────
 
+
 async def ingest_step_output(
     content: str,
     filename: str,
@@ -377,7 +393,7 @@ async def ingest_step_output(
     provider: str,
     service: str,
     step_type: str,
-) -> Optional[str]:
+) -> str | None:
     """Ingest a generated file into the per-connector RAG KB.
 
     Called after each execution step completes. This builds up the connector's
@@ -399,16 +415,14 @@ async def ingest_step_output(
     title = f"{step_type}: {filename}"
 
     # P3: Build enhanced payload for .py files — extract AST structure
-    extra_metadata: Dict[str, Any] = {}
+    extra_metadata: dict[str, Any] = {}
     if filename.endswith(".py"):
         import ast as _ast
+
         try:
             tree = _ast.parse(content)
             classes = [n.name for n in _ast.walk(tree) if isinstance(n, _ast.ClassDef)]
-            functions = [
-                n.name for n in _ast.walk(tree)
-                if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-            ]
+            functions = [n.name for n in _ast.walk(tree) if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))]
             extra_metadata["classes"] = classes
             extra_metadata["functions"] = functions
             logger.debug(
@@ -424,9 +438,7 @@ async def ingest_step_output(
     # If the ingestion worker supports rich metadata, this is where you'd extend _ingest_to_mcp.
     # For now we encode a short hint in the title so vector search benefits from it.
     if extra_metadata.get("classes") or extra_metadata.get("functions"):
-        symbols = ", ".join(
-            (extra_metadata.get("classes") or []) + (extra_metadata.get("functions") or [])
-        )
+        symbols = ", ".join((extra_metadata.get("classes") or []) + (extra_metadata.get("functions") or []))
         title = f"{title} [{symbols}]"
 
     try:
@@ -452,24 +464,27 @@ async def ingest_step_output(
     # Use doc_id as the unique key — re-ingesting the same file updates the record.
     try:
         col = _knowledge_collection()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await col.update_one(
             {"doc_id": doc_id, "tenant_id": tenant_id},
-            {"$set": {
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "title": title,
-                "scope": "connector",
-                "tenant_id": tenant_id,
-                "provider": provider,
-                "service": service,
-                "step_type": step_type,
-                "filename": filename,
-                "content_preview": content[:300],
-                "content_length": len(content),
-                "updated_at": now,
-                **extra_metadata,
-            }, "$setOnInsert": {"created_at": now}},
+            {
+                "$set": {
+                    "doc_id": doc_id,
+                    "kb_id": kb_id,
+                    "title": title,
+                    "scope": "connector",
+                    "tenant_id": tenant_id,
+                    "provider": provider,
+                    "service": service,
+                    "step_type": step_type,
+                    "filename": filename,
+                    "content_preview": content[:300],
+                    "content_length": len(content),
+                    "updated_at": now,
+                    **extra_metadata,
+                },
+                "$setOnInsert": {"created_at": now},
+            },
             upsert=True,
         )
     except Exception as exc:
@@ -497,10 +512,12 @@ async def cleanup_connector_knowledge(
     deleted_count = 0
     col = _knowledge_collection()
     try:
-        result = await col.delete_many({
-            "tenant_id": tenant_id,
-            "kb_id": kb_id,
-        })
+        result = await col.delete_many(
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+            }
+        )
         deleted_count = result.deleted_count
     except Exception as mongo_err:
         logger.warning("knowledge.kb_delete_mongo_failed", kb_id=kb_id, error=str(mongo_err))
@@ -536,7 +553,7 @@ async def get_connector_vector_count(
     tenant_id: str,
     provider: str,
     service: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get the count of RAG vectors for a specific connector.
 
     Returns: {"kb_id": "...", "vector_count": N, "doc_count": N}
@@ -563,7 +580,7 @@ async def get_connector_vector_count(
     return {"kb_id": kb_id, "vector_count": vector_count, "doc_count": doc_count}
 
 
-async def get_global_vector_count(tenant_id: str) -> Dict[str, Any]:
+async def get_global_vector_count(tenant_id: str) -> dict[str, Any]:
     """Get the count of RAG vectors for global guidelines KB."""
     kb_id = _global_kb_id(tenant_id)
     col = _knowledge_collection()
