@@ -1,0 +1,12 @@
+# Trivy ignore file for shielva-connectors (core).
+# Mirrors the .shielva-ci.yml audit accepts, plus false-positive secret matches.
+
+# ── Vulnerabilities (mirror .shielva-ci.yml audit.ignore) ──────────────────────
+# ecdsa Minerva timing side-channel; no upstream fix; non-exploitable here.
+PYSEC-2026-1325
+
+# ── Secret false positives ─────────────────────────────────────────────────────
+# shielva_connectors.json contains connector credential-FORM definitions whose
+# `placeholder` fields show example token shapes (e.g. "hf_xxxx...xxxx"). These are
+# UI placeholders, not real secrets — trivy's provider regexes flag them.
+hugging-face-access-token
