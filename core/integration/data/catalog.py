@@ -3,16 +3,15 @@
 Provider → Service mapping with metadata needed for AI-assisted connector building.
 """
 
-from typing import Any, Dict, List
-
+from typing import Any
 
 # ── Catalog entry type hint ───────────────────────────────────────────
 
-CatalogEntry = Dict[str, Any]
+CatalogEntry = dict[str, Any]
 
 # ── Master catalog ────────────────────────────────────────────────────
 
-SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
+SERVICE_CATALOG: dict[str, dict[str, CatalogEntry]] = {
     # ══════════════════════════════════════════════════════════════════
     # GOOGLE — Workspace APIs (OAuth Playground + google-api-python-client)
     # ══════════════════════════════════════════════════════════════════
@@ -64,7 +63,10 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "google-api-python-client google-auth google-auth-oauthlib",
             "docs_url": "https://developers.google.com/forms/api/reference/rest",
-            "default_scopes": ["https://www.googleapis.com/auth/forms.body.readonly", "https://www.googleapis.com/auth/forms.responses.readonly"],
+            "default_scopes": [
+                "https://www.googleapis.com/auth/forms.body.readonly",
+                "https://www.googleapis.com/auth/forms.responses.readonly",
+            ],
             "category": "productivity",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/google.png",
         },
@@ -115,7 +117,10 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "google-api-python-client google-auth google-auth-oauthlib",
             "docs_url": "https://developers.google.com/chat/api/reference/rest",
-            "default_scopes": ["https://www.googleapis.com/auth/chat.messages.readonly", "https://www.googleapis.com/auth/chat.spaces.readonly"],
+            "default_scopes": [
+                "https://www.googleapis.com/auth/chat.messages.readonly",
+                "https://www.googleapis.com/auth/chat.spaces.readonly",
+            ],
             "category": "communication",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/google.png",
         },
@@ -500,7 +505,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/google.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # MICROSOFT — 365 / Graph + Azure SDK services
     # ══════════════════════════════════════════════════════════════════
@@ -979,7 +983,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/microsoft.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # ATLASSIAN
     # ══════════════════════════════════════════════════════════════════
@@ -1025,7 +1028,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/atlassian__trello.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # SLACK
     # ══════════════════════════════════════════════════════════════════
@@ -1111,7 +1113,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/slack.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # META
     # ══════════════════════════════════════════════════════════════════
@@ -1144,7 +1145,11 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "httpx",
             "docs_url": "https://developers.facebook.com/docs/instagram-api",
-            "default_scopes": ["instagram_basic", "instagram_manage_insights", "instagram_content_publish"],
+            "default_scopes": [
+                "instagram_basic",
+                "instagram_manage_insights",
+                "instagram_content_publish",
+            ],
             "category": "social",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/meta__instagram.png",
         },
@@ -1154,7 +1159,11 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "httpx",
             "docs_url": "https://developers.facebook.com/docs/pages-api",
-            "default_scopes": ["pages_manage_posts", "pages_read_engagement", "pages_show_list"],
+            "default_scopes": [
+                "pages_manage_posts",
+                "pages_read_engagement",
+                "pages_show_list",
+            ],
             "category": "social",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/meta__facebook_pages.png",
         },
@@ -1222,7 +1231,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/meta.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # SALESFORCE
     # ══════════════════════════════════════════════════════════════════
@@ -1355,7 +1363,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/salesforce.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # AWS
     # ══════════════════════════════════════════════════════════════════
@@ -1994,7 +2001,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/aws.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # OTHERS
     # ══════════════════════════════════════════════════════════════════
@@ -2162,7 +2168,10 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "hubspot-api-client",
             "docs_url": "https://developers.hubspot.com/docs/api/crm/contacts",
-            "default_scopes": ["crm.objects.contacts.read", "crm.objects.contacts.write"],
+            "default_scopes": [
+                "crm.objects.contacts.read",
+                "crm.objects.contacts.write",
+            ],
             "category": "crm",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/hubspot.png",
         },
@@ -2172,7 +2181,10 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "oauth2",
             "sdk_package": "hubspot-api-client",
             "docs_url": "https://developers.hubspot.com/docs/api/crm/companies",
-            "default_scopes": ["crm.objects.companies.read", "crm.objects.companies.write"],
+            "default_scopes": [
+                "crm.objects.companies.read",
+                "crm.objects.companies.write",
+            ],
             "category": "crm",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/hubspot.png",
         },
@@ -3051,7 +3063,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/apple.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # SENDGRID — Email delivery & marketing (sendgrid SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3146,7 +3157,10 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "api_key",
             "sdk_package": "sendgrid",
             "docs_url": "https://docs.sendgrid.com/api-reference/sender-verification",
-            "default_scopes": ["sender_verification.read", "sender_verification.create"],
+            "default_scopes": [
+                "sender_verification.read",
+                "sender_verification.create",
+            ],
             "category": "communication",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/sendgrid.png",
         },
@@ -3167,12 +3181,14 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "auth_type": "api_key",
             "sdk_package": "sendgrid",
             "docs_url": "https://docs.sendgrid.com/api-reference/webhooks",
-            "default_scopes": ["user.webhooks.event.settings.read", "user.webhooks.event.settings.update"],
+            "default_scopes": [
+                "user.webhooks.event.settings.read",
+                "user.webhooks.event.settings.update",
+            ],
             "category": "devops",
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/sendgrid.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # RAZORPAY — Indian payments (razorpay SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3308,7 +3324,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/razorpay.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # CASHFREE — Indian payments (cashfree-pg / cashfree-payout SDKs)
     # ══════════════════════════════════════════════════════════════════
@@ -3394,7 +3409,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/cashfree.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # PHONEPE — Indian payments (phonepe_sdk)
     # ══════════════════════════════════════════════════════════════════
@@ -3440,7 +3454,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/phonepe.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # PAYTM — Indian payments (paytm-pg SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3448,13 +3461,57 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
         # Shared Paytm required config fields — injected into the planning prompt so the
         # LLM always generates the complete set of install fields for Paytm connectors.
         "_required_config_fields": [
-            {"key": "merchant_id",     "label": "Paytm Merchant ID",   "type": "text",     "bind": False, "help": "Your Paytm Merchant ID from the merchant dashboard"},
-            {"key": "merchant_key",    "label": "Paytm Merchant Key",  "type": "password", "bind": False, "help": "Your Paytm Merchant Key for checksum generation"},
-            {"key": "industry_type_id","label": "Industry Type ID",    "type": "text",     "bind": False, "help": "Paytm industry type (e.g. Retail, Education) — from merchant dashboard"},
-            {"key": "website",         "label": "Website Name",        "type": "text",     "bind": False, "help": "Paytm website identifier (e.g. WEBSTAGING, DEFAULT) — from merchant dashboard"},
-            {"key": "channel_id",      "label": "Channel ID",          "type": "text",     "bind": True,  "default": "WEB",        "help": "Paytm channel identifier: WEB, WAP, or APP"},
-            {"key": "callback_url",    "label": "Callback URL",        "type": "url",      "bind": False, "help": "URL for Paytm S2S callback notifications"},
-            {"key": "paytm_env",       "label": "Paytm Environment",   "type": "text",     "bind": True,  "default": "PRODUCTION", "help": "PRODUCTION or STAGING"},
+            {
+                "key": "merchant_id",
+                "label": "Paytm Merchant ID",
+                "type": "text",
+                "bind": False,
+                "help": "Your Paytm Merchant ID from the merchant dashboard",
+            },
+            {
+                "key": "merchant_key",
+                "label": "Paytm Merchant Key",
+                "type": "password",
+                "bind": False,
+                "help": "Your Paytm Merchant Key for checksum generation",
+            },
+            {
+                "key": "industry_type_id",
+                "label": "Industry Type ID",
+                "type": "text",
+                "bind": False,
+                "help": "Paytm industry type (e.g. Retail, Education) — from merchant dashboard",
+            },
+            {
+                "key": "website",
+                "label": "Website Name",
+                "type": "text",
+                "bind": False,
+                "help": "Paytm website identifier (e.g. WEBSTAGING, DEFAULT) — from merchant dashboard",
+            },
+            {
+                "key": "channel_id",
+                "label": "Channel ID",
+                "type": "text",
+                "bind": True,
+                "default": "WEB",
+                "help": "Paytm channel identifier: WEB, WAP, or APP",
+            },
+            {
+                "key": "callback_url",
+                "label": "Callback URL",
+                "type": "url",
+                "bind": False,
+                "help": "URL for Paytm S2S callback notifications",
+            },
+            {
+                "key": "paytm_env",
+                "label": "Paytm Environment",
+                "type": "text",
+                "bind": True,
+                "default": "PRODUCTION",
+                "help": "PRODUCTION or STAGING",
+            },
         ],
         "upi": {
             "display_name": "Paytm UPI",
@@ -3497,7 +3554,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/paytm.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # JUSPAY — Indian payment orchestration (juspay SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3533,7 +3589,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/juspay.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # ADYEN — International payments (Adyen SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3609,7 +3664,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/adyen.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # SQUARE — International payments & commerce (squareup SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3695,7 +3749,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/square.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # BRAINTREE — International payments (braintree SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3741,7 +3794,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/braintree.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # MOLLIE — European payments (mollie-api-python SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3797,7 +3849,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/mollie.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # CHECKOUT_COM — International payments (checkout-sdk)
     # ══════════════════════════════════════════════════════════════════
@@ -3843,7 +3894,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/checkout_com.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # GOCARDLESS — Direct debit & open banking (gocardless-pro SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3889,7 +3939,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/gocardless.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # PLAID — Open banking & financial data (plaid-python SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -3965,7 +4014,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/plaid.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # RECURLY — Subscription billing (recurly SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -4011,7 +4059,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/recurly.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # CHARGEBEE — Subscription billing (chargebee SDK)
     # ══════════════════════════════════════════════════════════════════
@@ -4082,11 +4129,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/shopify.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # CRM PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "pipedrive": {
         "crm": {
             "display_name": "Pipedrive CRM",
@@ -4109,7 +4154,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/pipedrive.png",
         },
     },
-
     "zoho": {
         "crm": {
             "display_name": "Zoho CRM",
@@ -4142,7 +4186,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zoho.png",
         },
     },
-
     "monday": {
         "boards": {
             "display_name": "Monday.com Boards",
@@ -4155,7 +4198,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/monday.png",
         },
     },
-
     "freshsales": {
         "crm": {
             "display_name": "Freshsales CRM",
@@ -4168,7 +4210,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshsales.png",
         },
     },
-
     "copper": {
         "crm": {
             "display_name": "Copper CRM",
@@ -4181,7 +4222,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/copper.png",
         },
     },
-
     "keap": {
         "crm": {
             "display_name": "Keap (Infusionsoft) CRM",
@@ -4194,7 +4234,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/keap.png",
         },
     },
-
     "insightly": {
         "crm": {
             "display_name": "Insightly CRM",
@@ -4207,7 +4246,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/insightly.png",
         },
     },
-
     "nocrm": {
         "crm": {
             "display_name": "noCRM.io",
@@ -4220,7 +4258,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nocrm.png",
         },
     },
-
     "kommo": {
         "crm": {
             "display_name": "Kommo (amoCRM)",
@@ -4233,7 +4270,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/kommo.png",
         },
     },
-
     "activecampaign": {
         "crm": {
             "display_name": "ActiveCampaign CRM",
@@ -4256,7 +4292,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/activecampaign.png",
         },
     },
-
     "nutshell": {
         "crm": {
             "display_name": "Nutshell CRM",
@@ -4269,7 +4304,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nutshell.png",
         },
     },
-
     "sugarcrm": {
         "crm": {
             "display_name": "SugarCRM",
@@ -4282,7 +4316,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/sugarcrm.png",
         },
     },
-
     "bitrix24": {
         "crm": {
             "display_name": "Bitrix24 CRM",
@@ -4295,7 +4328,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/bitrix24.png",
         },
     },
-
     "attio": {
         "crm": {
             "display_name": "Attio CRM",
@@ -4308,7 +4340,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/attio.png",
         },
     },
-
     "outreach": {
         "crm": {
             "display_name": "Outreach Sales Engagement",
@@ -4321,7 +4352,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/outreach.png",
         },
     },
-
     "nimble": {
         "crm": {
             "display_name": "Nimble CRM",
@@ -4334,7 +4364,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/nimble.png",
         },
     },
-
     "close": {
         "crm": {
             "display_name": "Close CRM",
@@ -4347,7 +4376,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/close.png",
         },
     },
-
     "kustomer": {
         "crm": {
             "display_name": "Kustomer CRM",
@@ -4360,7 +4388,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/kustomer.png",
         },
     },
-
     "agile_crm": {
         "crm": {
             "display_name": "Agile CRM",
@@ -4373,7 +4400,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/agile_crm.png",
         },
     },
-
     "vtiger": {
         "crm": {
             "display_name": "Vtiger CRM",
@@ -4386,7 +4412,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/vtiger.png",
         },
     },
-
     "capsule": {
         "crm": {
             "display_name": "Capsule CRM",
@@ -4399,11 +4424,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/capsule.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # HELPDESK PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "freshdesk": {
         "tickets": {
             "display_name": "Freshdesk Tickets",
@@ -4426,7 +4449,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshdesk.png",
         },
     },
-
     "helpscout": {
         "mailbox": {
             "display_name": "Help Scout Mailbox",
@@ -4439,7 +4461,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/helpscout.png",
         },
     },
-
     "front": {
         "inbox": {
             "display_name": "Front Inbox",
@@ -4452,7 +4473,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/front.png",
         },
     },
-
     "intercom": {
         "messenger": {
             "display_name": "Intercom Messenger",
@@ -4465,7 +4485,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/intercom.png",
         },
     },
-
     "gorgias": {
         "helpdesk": {
             "display_name": "Gorgias Helpdesk",
@@ -4478,7 +4497,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/gorgias.png",
         },
     },
-
     "reamaze": {
         "helpdesk": {
             "display_name": "Re:amaze Support",
@@ -4491,7 +4509,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/reamaze.png",
         },
     },
-
     "groove": {
         "helpdesk": {
             "display_name": "Groove Helpdesk",
@@ -4504,7 +4521,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/groove.png",
         },
     },
-
     "freshservice": {
         "itsm": {
             "display_name": "Freshservice ITSM",
@@ -4517,7 +4533,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/freshservice.png",
         },
     },
-
     "happyfox": {
         "helpdesk": {
             "display_name": "HappyFox Helpdesk",
@@ -4530,11 +4545,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/happyfox.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # PRODUCTIVITY PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "airtable": {
         "bases": {
             "display_name": "Airtable Bases",
@@ -4547,7 +4560,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/airtable.png",
         },
     },
-
     "asana": {
         "projects": {
             "display_name": "Asana Projects",
@@ -4560,7 +4572,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/asana.png",
         },
     },
-
     "calendly": {
         "scheduling": {
             "display_name": "Calendly Scheduling",
@@ -4573,7 +4584,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/calendly.png",
         },
     },
-
     "trello": {
         "boards": {
             "display_name": "Trello Boards",
@@ -4586,11 +4596,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/trello.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # E-COMMERCE PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "bigcommerce": {
         "store": {
             "display_name": "BigCommerce Store",
@@ -4603,7 +4611,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/bigcommerce.png",
         },
     },
-
     "magento": {
         "store": {
             "display_name": "Magento 2 Store",
@@ -4616,7 +4623,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/magento.png",
         },
     },
-
     "woocommerce": {
         "store": {
             "display_name": "WooCommerce Store",
@@ -4629,11 +4635,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/woocommerce.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # MARKETING PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "mailchimp": {
         "campaigns": {
             "display_name": "Mailchimp Campaigns",
@@ -4646,7 +4650,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/mailchimp.png",
         },
     },
-
     "klaviyo": {
         "marketing": {
             "display_name": "Klaviyo Marketing",
@@ -4659,7 +4662,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/klaviyo.png",
         },
     },
-
     "constant_contact": {
         "email": {
             "display_name": "Constant Contact Email",
@@ -4672,7 +4674,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/constant_contact.png",
         },
     },
-
     "marketo": {
         "automation": {
             "display_name": "Marketo Marketing Automation",
@@ -4685,11 +4686,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/marketo.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # ANALYTICS PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "gong": {
         "calls": {
             "display_name": "Gong Call Analytics",
@@ -4702,7 +4701,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/gong.png",
         },
     },
-
     "chorus": {
         "calls": {
             "display_name": "Chorus.ai Conversation Intelligence",
@@ -4715,11 +4713,9 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/chorus.png",
         },
     },
-
     # ══════════════════════════════════════════════════════════════════
     # INTEGRATION PLATFORM PROVIDERS
     # ══════════════════════════════════════════════════════════════════
-
     "zapier": {
         "webhooks": {
             "display_name": "Zapier Webhooks",
@@ -4742,7 +4738,6 @@ SERVICE_CATALOG: Dict[str, Dict[str, CatalogEntry]] = {
             "logo_url": "/cdn/download/shielvasense/shielvasense-platform-int/connectors/logos/zapier.png",
         },
     },
-
     "make": {
         "scenarios": {
             "display_name": "Make (Integromat) Scenarios",
@@ -4770,7 +4765,7 @@ def _logo(name: str) -> str:
     return f"{_LOGO_BASE}/{name}.png"
 
 
-_CATALOG_EXTRA: Dict[str, Dict[str, CatalogEntry]] = {
+_CATALOG_EXTRA: dict[str, dict[str, CatalogEntry]] = {
     "15five": {
         "15five": {
             "display_name": "15Five",
@@ -5533,7 +5528,7 @@ _CATALOG_EXTRA: Dict[str, Dict[str, CatalogEntry]] = {
 # Add-on services for providers already in SERVICE_CATALOG.
 # Same shape as a provider entry; merged service-by-service to avoid
 # clobbering existing keys.
-_CATALOG_EXTRA_SERVICES: Dict[str, Dict[str, CatalogEntry]] = {
+_CATALOG_EXTRA_SERVICES: dict[str, dict[str, CatalogEntry]] = {
     "google": {
         "looker": {
             "display_name": "Looker",
@@ -5577,7 +5572,8 @@ for _prov, _services in _CATALOG_EXTRA_SERVICES.items():
 
 # ── Helper functions ──────────────────────────────────────────────────
 
-def get_all_providers() -> List[Dict[str, Any]]:
+
+def get_all_providers() -> list[dict[str, Any]]:
     """Return a flat list of providers with metadata."""
     providers = []
     for provider_key, services in SERVICE_CATALOG.items():
@@ -5586,29 +5582,33 @@ def get_all_providers() -> List[Dict[str, Any]]:
         if not service_entries:
             continue
         first_service = next(iter(service_entries.values()))
-        providers.append({
-            "provider": provider_key,
-            "display_name": provider_key.replace("_", " ").title(),
-            "service_count": len(service_entries),
-            "categories": list({s.get("category", "") for s in service_entries.values()}),
-            "logo_url": first_service.get("logo_url", ""),
-        })
+        providers.append(
+            {
+                "provider": provider_key,
+                "display_name": provider_key.replace("_", " ").title(),
+                "service_count": len(service_entries),
+                "categories": list({s.get("category", "") for s in service_entries.values()}),
+                "logo_url": first_service.get("logo_url", ""),
+            }
+        )
     return sorted(providers, key=lambda p: p["display_name"])
 
 
-def get_provider_services(provider: str) -> List[Dict[str, Any]]:
+def get_provider_services(provider: str) -> list[dict[str, Any]]:
     """Return services for a given provider."""
     services = SERVICE_CATALOG.get(provider, {})
     result = []
     for service_key, meta in services.items():
         if not isinstance(meta, dict):
             continue
-        result.append({
-            "provider": provider,
-            "service": service_key,
-            "service_key": service_key,
-            **meta,
-        })
+        result.append(
+            {
+                "provider": provider,
+                "service": service_key,
+                "service_key": service_key,
+                **meta,
+            }
+        )
     return sorted(result, key=lambda s: s["display_name"])
 
 

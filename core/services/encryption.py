@@ -11,10 +11,11 @@ Wire format: ``"{dek_version}:{base64(nonce[12] ‖ ciphertext ‖ tag[16])}"``
 Fail-CLOSED: with no master key configured, encrypt()/decrypt() raise rather than
 silently passing plaintext through.
 """
-import os
+
 import base64
+import os
+
 import structlog
-from typing import Optional, Tuple
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .key_manager import KeyManager, KeyManagerMisconfigured
@@ -44,7 +45,7 @@ class EncryptionService:
         ciphertext = AESGCM(dek).encrypt(nonce, plaintext.encode(), None)
         return f"{version}:{base64.b64encode(nonce + ciphertext).decode()}"
 
-    async def decrypt(self, envelope: str, tenant_id: str) -> Optional[str]:
+    async def decrypt(self, envelope: str, tenant_id: str) -> str | None:
         """Decrypt a version-tagged envelope under the DEK version it names."""
         version, blob = self._split_envelope(envelope)
         if version is None:
@@ -65,7 +66,7 @@ class EncryptionService:
         return version
 
     @staticmethod
-    def _split_envelope(envelope: str) -> Tuple[Optional[int], str]:
+    def _split_envelope(envelope: str) -> tuple[int | None, str]:
         """Parse ``"{version}:{blob}"``; returns (None, "") for legacy/invalid input."""
         if not isinstance(envelope, str) or ":" not in envelope:
             return None, ""

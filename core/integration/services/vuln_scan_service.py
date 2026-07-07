@@ -7,13 +7,11 @@ fix suggestions, and persists all artefacts locally and to R2.
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
-from datetime import datetime, timezone
-from functools import partial
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -26,13 +24,14 @@ from integration.services.llm_client import call_llm
 # integration is silently skipped and only local scanners run.
 try:
     from shielva_security import (
-        ShielvaSecurityClient,
         AuthError,
         PaymentRequiredError,
         ScanFailedError,
         ScanTimeoutError,
         ShielvaError,
+        ShielvaSecurityClient,
     )
+
     _SDK_AVAILABLE = True
 except ImportError:
     _SDK_AVAILABLE = False
@@ -48,19 +47,21 @@ SEVERITY_LOW = "LOW"
 SEVERITY_NONE = "NONE"
 
 _SEVERITY_COLORS = {
-    SEVERITY_CRITICAL: "#dc2626",   # red-600
-    SEVERITY_HIGH:     "#ea580c",   # orange-600
-    SEVERITY_MEDIUM:   "#ca8a04",   # yellow-600
-    SEVERITY_LOW:      "#2563eb",   # blue-600
-    SEVERITY_NONE:     "#16a34a",   # green-600
+    SEVERITY_CRITICAL: "#dc2626",  # red-600
+    SEVERITY_HIGH: "#ea580c",  # orange-600
+    SEVERITY_MEDIUM: "#ca8a04",  # yellow-600
+    SEVERITY_LOW: "#2563eb",  # blue-600
+    SEVERITY_NONE: "#16a34a",  # green-600
 }
 
 
 # ── Severity mapping from CVSS scores ────────────────────────────────
 
-def _score_from_aliases(aliases: List[str]) -> Optional[float]:
+
+def _score_from_aliases(aliases: list[str]) -> float | None:
     """Attempt to extract a CVSS score from aliases (e.g. 'CVSS:3.1/AV:N/.../7.5')."""
     import re
+
     for alias in aliases:
         # Look for a trailing numeric score pattern used by some advisory databases
         m = re.search(r"(\d+\.\d+)\s*$", alias)
@@ -72,11 +73,11 @@ def _score_from_aliases(aliases: List[str]) -> Optional[float]:
     return None
 
 
-def _classify_severity(vuln: Dict[str, Any]) -> str:
+def _classify_severity(vuln: dict[str, Any]) -> str:
     """Map a pip-audit vulnerability dict to a CRITICAL/HIGH/MEDIUM/LOW severity string."""
     description = (vuln.get("description") or "").upper()
     fix_notes = " ".join(str(v) for v in (vuln.get("fix_versions") or []))
-    aliases: List[str] = vuln.get("aliases") or []
+    aliases: list[str] = vuln.get("aliases") or []
 
     # Explicit keyword match in description or fix notes
     if "CRITICAL" in description or "CRITICAL" in fix_notes.upper():
@@ -101,7 +102,8 @@ def _classify_severity(vuln: Dict[str, Any]) -> str:
 
 # ── Semgrep code scanner ──────────────────────────────────────────────
 
-async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
+
+async def _run_semgrep(source_dir: str) -> dict[str, Any]:
     """Run Semgrep against source_dir with python-security + secrets rulesets.
 
     Returns:
@@ -111,14 +113,19 @@ async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
     """
     loop = asyncio.get_event_loop()
 
-    def _exec() -> Dict[str, Any]:
+    def _exec() -> dict[str, Any]:
         try:
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "semgrep",
-                    "--config", "p/python",
-                    "--config", "p/owasp-top-ten",
-                    "--config", "p/secrets",
+                    sys.executable,
+                    "-m",
+                    "semgrep",
+                    "--config",
+                    "p/python",
+                    "--config",
+                    "p/owasp-top-ten",
+                    "--config",
+                    "p/secrets",
                     "--json",
                     "--quiet",
                     "--no-git-ignore",
@@ -150,7 +157,7 @@ async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
             err_msgs = [e.get("message", "") for e in semgrep_errors if e.get("level") == "error"]
             scan_warning = "; ".join(err_msgs[:3]) if err_msgs else None
 
-            issues: List[Dict[str, Any]] = []
+            issues: list[dict[str, Any]] = []
             for finding in data.get("results") or []:
                 sev_raw = (
                     finding.get("extra", {}).get("severity")
@@ -159,12 +166,12 @@ async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
                 ).upper()
                 # Normalise to our severity constants
                 sev_map = {
-                    "ERROR":   SEVERITY_HIGH,
+                    "ERROR": SEVERITY_HIGH,
                     "WARNING": SEVERITY_MEDIUM,
-                    "INFO":    SEVERITY_LOW,
-                    "HIGH":    SEVERITY_HIGH,
-                    "MEDIUM":  SEVERITY_MEDIUM,
-                    "LOW":     SEVERITY_LOW,
+                    "INFO": SEVERITY_LOW,
+                    "HIGH": SEVERITY_HIGH,
+                    "MEDIUM": SEVERITY_MEDIUM,
+                    "LOW": SEVERITY_LOW,
                     "CRITICAL": SEVERITY_CRITICAL,
                 }
                 severity = sev_map.get(sev_raw, SEVERITY_MEDIUM)
@@ -187,35 +194,45 @@ async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
 
                 # CWE / OWASP from metadata
                 meta = finding.get("extra", {}).get("metadata", {})
-                cwe: List[str] = meta.get("cwe") or []
+                cwe: list[str] = meta.get("cwe") or []
                 if isinstance(cwe, str):
                     cwe = [cwe]
-                owasp: List[str] = meta.get("owasp") or []
+                owasp: list[str] = meta.get("owasp") or []
                 if isinstance(owasp, str):
                     owasp = [owasp]
 
                 fix_guidance = meta.get("fix") or meta.get("remediation") or ""
 
-                issues.append({
-                    "severity":     severity,
-                    "file":         rel,
-                    "line_start":   line_start,
-                    "line_end":     line_end,
-                    "rule_id":      check_id,
-                    "rule_name":    rule_name,
-                    "message":      message,
-                    "snippet":      snippet,
-                    "cwe":          cwe,
-                    "owasp":        owasp,
-                    "fix_guidance": fix_guidance,
-                })
+                issues.append(
+                    {
+                        "severity": severity,
+                        "file": rel,
+                        "line_start": line_start,
+                        "line_end": line_end,
+                        "rule_id": check_id,
+                        "rule_name": rule_name,
+                        "message": message,
+                        "snippet": snippet,
+                        "cwe": cwe,
+                        "owasp": owasp,
+                        "fix_guidance": fix_guidance,
+                    }
+                )
 
             return {"ok": True, "issues": issues, "error": scan_warning}
 
         except subprocess.TimeoutExpired:
-            return {"ok": False, "issues": [], "error": "Semgrep timed out after 120 seconds"}
+            return {
+                "ok": False,
+                "issues": [],
+                "error": "Semgrep timed out after 120 seconds",
+            }
         except FileNotFoundError:
-            return {"ok": False, "issues": [], "error": "semgrep not found — install it with: pip install semgrep"}
+            return {
+                "ok": False,
+                "issues": [],
+                "error": "semgrep not found — install it with: pip install semgrep",
+            }
         except Exception as exc:
             return {"ok": False, "issues": [], "error": f"Semgrep failed: {exc}"}
 
@@ -224,7 +241,8 @@ async def _run_semgrep(source_dir: str) -> Dict[str, Any]:
 
 # ── pip-audit runner ──────────────────────────────────────────────────
 
-async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
+
+async def _run_pip_audit(requirements_txt_path: str) -> dict[str, Any]:
     """Run pip-audit against requirements.txt and return parsed JSON output.
 
     Returns a dict with keys:
@@ -235,12 +253,24 @@ async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
     """
     loop = asyncio.get_event_loop()
 
-    def _exec() -> Dict[str, Any]:
+    def _exec() -> dict[str, Any]:
         try:
             # Use `python -m pip_audit` so we always run the pip-audit installed
             # in the same virtualenv as the service, regardless of PATH.
             result = subprocess.run(
-                [sys.executable, "-m", "pip_audit", "--format", "json", "--no-deps", "--skip-editable", "--progress-spinner", "off", "-r", requirements_txt_path],
+                [
+                    sys.executable,
+                    "-m",
+                    "pip_audit",
+                    "--format",
+                    "json",
+                    "--no-deps",
+                    "--skip-editable",
+                    "--progress-spinner",
+                    "off",
+                    "-r",
+                    requirements_txt_path,
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -256,7 +286,7 @@ async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
 
             # pip-audit 2.x sometimes writes JSON to stderr; try stdout first,
             # then stderr, then combined so we're version-agnostic.
-            def _try_parse(text: str) -> Optional[Any]:
+            def _try_parse(text: str) -> Any | None:
                 text = text.strip()
                 if not text:
                     return None
@@ -283,7 +313,12 @@ async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
             if parsed is None:
                 # Empty stdout with a clean exit code means 0 packages (empty requirements.txt)
                 if result.returncode in (0, 1) and not result.stdout.strip():
-                    return {"ok": True, "raw": combined, "parsed": {"dependencies": [], "fixes": []}, "error": None}
+                    return {
+                        "ok": True,
+                        "raw": combined,
+                        "parsed": {"dependencies": [], "fixes": []},
+                        "error": None,
+                    }
                 exc_msg = combined[:200] if combined.strip() else "Expecting value: line 1 column 1 (char 0)"
                 return {
                     "ok": False,
@@ -297,9 +332,7 @@ async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
                 "ok": False,
                 "raw": "",
                 "parsed": None,
-                "error": (
-                    "pip-audit not found. Install it with: pip install pip-audit"
-                ),
+                "error": ("pip-audit not found. Install it with: pip install pip-audit"),
             }
         except Exception as exc:
             return {
@@ -314,7 +347,8 @@ async def _run_pip_audit(requirements_txt_path: str) -> Dict[str, Any]:
 
 # ── Result normaliser ─────────────────────────────────────────────────
 
-def _normalise_results(audit_json: Any) -> Dict[str, Any]:
+
+def _normalise_results(audit_json: Any) -> dict[str, Any]:
     """Convert pip-audit JSON output into structured vulnerability + safe-package lists.
 
     Handles both pip-audit output formats:
@@ -323,12 +357,12 @@ def _normalise_results(audit_json: Any) -> Dict[str, Any]:
     """
     if isinstance(audit_json, list):
         # pip-audit 2.x: bare list of {name, version, vulns}
-        dependencies: List[Dict[str, Any]] = audit_json
+        dependencies: list[dict[str, Any]] = audit_json
     else:
         dependencies = (audit_json or {}).get("dependencies") or []
 
-    vulnerabilities: List[Dict[str, Any]] = []
-    safe_packages: List[Dict[str, str]] = []
+    vulnerabilities: list[dict[str, Any]] = []
+    safe_packages: list[dict[str, str]] = []
 
     summary = {
         "total_packages": len(dependencies),
@@ -342,7 +376,7 @@ def _normalise_results(audit_json: Any) -> Dict[str, Any]:
     for dep in dependencies:
         pkg_name = dep.get("name", "unknown")
         pkg_version = dep.get("version", "unknown")
-        vulns: List[Dict[str, Any]] = dep.get("vulns") or []
+        vulns: list[dict[str, Any]] = dep.get("vulns") or []
 
         if not vulns:
             safe_packages.append({"name": pkg_name, "version": pkg_version})
@@ -377,13 +411,14 @@ def _normalise_results(audit_json: Any) -> Dict[str, Any]:
 
 # ── HTML report generator ─────────────────────────────────────────────
 
+
 def _build_html_report(
     provider: str,
     service_slug: str,
     scanned_at: str,
-    summary: Dict[str, Any],
-    vulnerabilities: List[Dict[str, Any]],
-    safe_packages: List[Dict[str, str]],
+    summary: dict[str, Any],
+    vulnerabilities: list[dict[str, Any]],
+    safe_packages: list[dict[str, str]],
 ) -> str:
     """Generate a self-contained HTML vulnerability report (inline CSS only)."""
 
@@ -391,7 +426,7 @@ def _build_html_report(
         color = _SEVERITY_COLORS.get(severity, "#6b7280")
         return (
             f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
-            f'background:{color};color:#fff;font-size:12px;font-weight:700;'
+            f"background:{color};color:#fff;font-size:12px;font-weight:700;"
             f'letter-spacing:0.5px;">{severity}</span>'
         )
 
@@ -399,8 +434,7 @@ def _build_html_report(
     for v in vulnerabilities:
         aliases_html = (
             ", ".join(
-                f'<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;'
-                f'font-size:12px;">{a}</code>'
+                f'<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:12px;">{a}</code>'
                 for a in v["aliases"]
             )
             if v["aliases"]
@@ -408,8 +442,7 @@ def _build_html_report(
         )
         fix_html = (
             ", ".join(
-                f'<code style="background:#d1fae5;padding:1px 5px;border-radius:3px;'
-                f'font-size:12px;">{fv}</code>'
+                f'<code style="background:#d1fae5;padding:1px 5px;border-radius:3px;font-size:12px;">{fv}</code>'
                 for fv in v["fix_versions"]
             )
             if v["fix_versions"]
@@ -422,12 +455,12 @@ def _build_html_report(
                     background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.06);">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
             <strong style="font-size:15px;color:#111827;">
-              {v['package']}
+              {v["package"]}
             </strong>
             <code style="background:#f3f4f6;padding:2px 7px;border-radius:4px;
-                         font-size:12px;color:#374151;">v{v['version']}</code>
-            {_sev_badge(v['severity'])}
-            <span style="color:#6b7280;font-size:12px;margin-left:auto;">{v['vuln_id']}</span>
+                         font-size:12px;color:#374151;">v{v["version"]}</code>
+            {_sev_badge(v["severity"])}
+            <span style="color:#6b7280;font-size:12px;margin-left:auto;">{v["vuln_id"]}</span>
           </div>
           <div style="margin-bottom:8px;">
             <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;
@@ -438,7 +471,7 @@ def _build_html_report(
             <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;
                          letter-spacing:0.5px;">Description</span>
             <p style="margin:4px 0 0;color:#374151;font-size:14px;line-height:1.5;">
-              {v['description'] or 'No description available.'}
+              {v["description"] or "No description available."}
             </p>
           </div>
           <div>
@@ -470,19 +503,17 @@ def _build_html_report(
     summary_cards = f"""
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;
                 margin-bottom:32px;">
-      {_card("Total Packages", summary['total_packages'])}
-      {_card("Vulnerable", summary['vulnerable_packages'], "#dc2626")}
-      {_card("Critical", summary.get('critical', 0), _SEVERITY_COLORS[SEVERITY_CRITICAL])}
-      {_card("High", summary.get('high', 0), _SEVERITY_COLORS[SEVERITY_HIGH])}
-      {_card("Medium", summary.get('medium', 0), _SEVERITY_COLORS[SEVERITY_MEDIUM])}
-      {_card("Low", summary.get('low', 0), _SEVERITY_COLORS[SEVERITY_LOW])}
+      {_card("Total Packages", summary["total_packages"])}
+      {_card("Vulnerable", summary["vulnerable_packages"], "#dc2626")}
+      {_card("Critical", summary.get("critical", 0), _SEVERITY_COLORS[SEVERITY_CRITICAL])}
+      {_card("High", summary.get("high", 0), _SEVERITY_COLORS[SEVERITY_HIGH])}
+      {_card("Medium", summary.get("medium", 0), _SEVERITY_COLORS[SEVERITY_MEDIUM])}
+      {_card("Low", summary.get("low", 0), _SEVERITY_COLORS[SEVERITY_LOW])}
     </div>
     """
 
-    vuln_section = (
-        f'<h2 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 16px;">Vulnerabilities</h2>'
-        + (vuln_cards if vuln_cards else
-           '<p style="color:#16a34a;font-weight:600;">No vulnerabilities found.</p>')
+    vuln_section = '<h2 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 16px;">Vulnerabilities</h2>' + (
+        vuln_cards if vuln_cards else '<p style="color:#16a34a;font-weight:600;">No vulnerabilities found.</p>'
     )
 
     safe_section = ""
@@ -546,29 +577,28 @@ def _build_html_report(
 
 # ── Excel report generator ────────────────────────────────────────────
 
+
 def _build_excel_report(
-    summary: Dict[str, Any],
-    vulnerabilities: List[Dict[str, Any]],
-    safe_packages: List[Dict[str, str]],
+    summary: dict[str, Any],
+    vulnerabilities: list[dict[str, Any]],
+    safe_packages: list[dict[str, str]],
     output_path: str,
 ) -> None:
     """Write a three-sheet Excel workbook using openpyxl."""
     try:
         import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     except ImportError as exc:
-        raise RuntimeError(
-            "openpyxl is not installed. Install it with: pip install openpyxl"
-        ) from exc
+        raise RuntimeError("openpyxl is not installed. Install it with: pip install openpyxl") from exc
 
     wb = openpyxl.Workbook()
 
     _SEV_FILLS = {
         SEVERITY_CRITICAL: PatternFill("solid", fgColor="DC2626"),
-        SEVERITY_HIGH:     PatternFill("solid", fgColor="EA580C"),
-        SEVERITY_MEDIUM:   PatternFill("solid", fgColor="CA8A04"),
-        SEVERITY_LOW:      PatternFill("solid", fgColor="2563EB"),
-        SEVERITY_NONE:     PatternFill("solid", fgColor="16A34A"),
+        SEVERITY_HIGH: PatternFill("solid", fgColor="EA580C"),
+        SEVERITY_MEDIUM: PatternFill("solid", fgColor="CA8A04"),
+        SEVERITY_LOW: PatternFill("solid", fgColor="2563EB"),
+        SEVERITY_NONE: PatternFill("solid", fgColor="16A34A"),
     }
 
     _HEADER_FILL = PatternFill("solid", fgColor="1E293B")
@@ -592,12 +622,12 @@ def _build_excel_report(
     ws_sum.column_dimensions["A"].width = 28
     ws_sum.column_dimensions["B"].width = 18
     rows = [
-        ("Total Packages",      summary["total_packages"]),
+        ("Total Packages", summary["total_packages"]),
         ("Vulnerable Packages", summary["vulnerable_packages"]),
-        ("Critical",            summary.get("critical", 0)),
-        ("High",                summary.get("high", 0)),
-        ("Medium",              summary.get("medium", 0)),
-        ("Low",                 summary.get("low", 0)),
+        ("Critical", summary.get("critical", 0)),
+        ("High", summary.get("high", 0)),
+        ("Medium", summary.get("medium", 0)),
+        ("Low", summary.get("low", 0)),
     ]
     for i, (label, val) in enumerate(rows, start=2):
         ws_sum.cell(row=i, column=1, value=label).font = _BOLD
@@ -605,7 +635,18 @@ def _build_excel_report(
 
     # ── Sheet 2: Vulnerabilities ──
     ws_vuln = wb.create_sheet("Vulnerabilities")
-    _header_row(ws_vuln, ["Package", "Version", "Vuln ID", "CVE / Aliases", "Severity", "Description", "Fix Versions"])
+    _header_row(
+        ws_vuln,
+        [
+            "Package",
+            "Version",
+            "Vuln ID",
+            "CVE / Aliases",
+            "Severity",
+            "Description",
+            "Fix Versions",
+        ],
+    )
     ws_vuln.column_dimensions["A"].width = 22
     ws_vuln.column_dimensions["B"].width = 12
     ws_vuln.column_dimensions["C"].width = 22
@@ -648,8 +689,9 @@ def _build_excel_report(
 
 # ── AI suggestions ────────────────────────────────────────────────────
 
+
 async def _generate_ai_suggestions(
-    vulnerabilities: List[Dict[str, Any]],
+    vulnerabilities: list[dict[str, Any]],
     tenant_id: str,
 ) -> str:
     """Ask the LLM for fix suggestions and return Markdown text."""
@@ -715,6 +757,7 @@ async def _generate_ai_suggestions(
 
 # ── R2 upload helpers ─────────────────────────────────────────────────
 
+
 async def _upload_to_r2(
     provider: str,
     service_slug: str,
@@ -752,12 +795,13 @@ async def _upload_to_r2(
 
 # ── Main entry point ─────────────────────────────────────────────────
 
+
 async def _run_shielva_security_scan(
     target: str,
     tenant_id: str,
     session_id: str,
     scan_type: str = "full",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run a scan via the Shielva Security platform SDK.
 
     Returns a dict with keys:
@@ -774,11 +818,21 @@ async def _run_shielva_security_scan(
     log = logger.bind(session_id=session_id, tenant_id=tenant_id, target=target)
 
     if not _SDK_AVAILABLE:
-        return {"ok": False, "error": "shielva_security SDK not installed", "findings": [], "summary": {}}
+        return {
+            "ok": False,
+            "error": "shielva_security SDK not installed",
+            "findings": [],
+            "summary": {},
+        }
 
     api_key = settings.SHIELVA_SECURITY_API_KEY
     if not api_key:
-        return {"ok": False, "error": "SHIELVA_SECURITY_API_KEY not configured", "findings": [], "summary": {}}
+        return {
+            "ok": False,
+            "error": "SHIELVA_SECURITY_API_KEY not configured",
+            "findings": [],
+            "summary": {},
+        }
 
     log.info("shielva_security.scan_start", scan_type=scan_type)
     try:
@@ -798,7 +852,7 @@ async def _run_shielva_security_scan(
 
         # R2 key set by security API after report generation
         # e.g. "Shielvasense-platform-int/{scan_id}/report.html"  in bucket: shielvasense
-        report_r2_key: Optional[str] = scan.report_r2_url
+        report_r2_key: str | None = scan.report_r2_url
 
         summary = {}
         if scan.summary:
@@ -811,19 +865,19 @@ async def _run_shielva_security_scan(
 
         findings = [
             {
-                "severity":    f.severity,
-                "title":       f.title,
-                "scanner":     f.scanner,
-                "file":        f.file_path or "",
-                "line_start":  f.line_number or 0,
-                "rule_id":     f.rule_id or "",
-                "message":     f.description,
-                "cwe":         [f.cwe] if f.cwe else [],
-                "owasp":       [f.owasp] if f.owasp else [],
+                "severity": f.severity,
+                "title": f.title,
+                "scanner": f.scanner,
+                "file": f.file_path or "",
+                "line_start": f.line_number or 0,
+                "rule_id": f.rule_id or "",
+                "message": f.description,
+                "cwe": [f.cwe] if f.cwe else [],
+                "owasp": [f.owasp] if f.owasp else [],
                 "fix_guidance": f.remediation or "",
-                "package":     f.package_name or "",
+                "package": f.package_name or "",
                 "fix_version": f.fix_version or "",
-                "source":      "shielva-security",
+                "source": "shielva-security",
             }
             for f in findings_raw
         ]
@@ -848,10 +902,20 @@ async def _run_shielva_security_scan(
 
     except AuthError as e:
         log.warning("shielva_security.auth_error", error=str(e))
-        return {"ok": False, "error": f"API key invalid or revoked: {e}", "findings": [], "summary": {}}
+        return {
+            "ok": False,
+            "error": f"API key invalid or revoked: {e}",
+            "findings": [],
+            "summary": {},
+        }
     except PaymentRequiredError as e:
         log.warning("shielva_security.payment_required", error=str(e))
-        return {"ok": False, "error": f"Subscription required: {e}", "findings": [], "summary": {}}
+        return {
+            "ok": False,
+            "error": f"Subscription required: {e}",
+            "findings": [],
+            "summary": {},
+        }
     except ScanTimeoutError as e:
         log.warning("shielva_security.scan_timeout", error=str(e))
         return {"ok": False, "error": str(e), "findings": [], "summary": {}}
@@ -863,7 +927,12 @@ async def _run_shielva_security_scan(
         return {"ok": False, "error": str(e), "findings": [], "summary": {}}
     except Exception as e:
         log.warning("shielva_security.unexpected_error", error=str(e))
-        return {"ok": False, "error": f"Unexpected error: {e}", "findings": [], "summary": {}}
+        return {
+            "ok": False,
+            "error": f"Unexpected error: {e}",
+            "findings": [],
+            "summary": {},
+        }
 
 
 async def run_vulnerability_scan(
@@ -872,8 +941,8 @@ async def run_vulnerability_scan(
     service_slug: str,
     tenant_id: str,
     session_id: str,
-    repo_url: Optional[str] = None,
-) -> Dict[str, Any]:
+    repo_url: str | None = None,
+) -> dict[str, Any]:
     """Run a full vulnerability scan for a connector.
 
     Steps:
@@ -885,7 +954,7 @@ async def run_vulnerability_scan(
 
     Returns a structured result dict (see module docstring for schema).
     """
-    scanned_at = datetime.now(timezone.utc).isoformat()
+    scanned_at = datetime.now(UTC).isoformat()
     log = logger.bind(
         session_id=session_id,
         provider=provider,
@@ -902,13 +971,24 @@ async def run_vulnerability_scan(
         # Try to auto-generate requirements.txt using pipreqs
         try:
             gen_result = subprocess.run(
-                [sys.executable, "-m", "pipreqs", str(output_dir), "--force", "--savepath", str(requirements_txt)],
+                [
+                    sys.executable,
+                    "-m",
+                    "pipreqs",
+                    str(output_dir),
+                    "--force",
+                    "--savepath",
+                    str(requirements_txt),
+                ],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
             if gen_result.returncode == 0 and requirements_txt.exists():
-                log.info("vuln_scan.requirements_generated_by_pipreqs", path=str(requirements_txt))
+                log.info(
+                    "vuln_scan.requirements_generated_by_pipreqs",
+                    path=str(requirements_txt),
+                )
             else:
                 raise RuntimeError(f"pipreqs failed: {gen_result.stderr[:200]}")
         except Exception as pipreqs_exc:
@@ -953,8 +1033,14 @@ async def run_vulnerability_scan(
         return {
             "status": "error",
             "scanned_at": scanned_at,
-            "summary": {"total_packages": 0, "vulnerable_packages": 0,
-                        "critical": 0, "high": 0, "medium": 0, "low": 0},
+            "summary": {
+                "total_packages": 0,
+                "vulnerable_packages": 0,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+            },
             "vulnerabilities": [],
             "safe_packages": [],
             "code_issues": semgrep_result.get("issues", []),
@@ -966,18 +1052,18 @@ async def run_vulnerability_scan(
         }
 
     # ── Semgrep results ──
-    code_issues: List[Dict[str, Any]] = semgrep_result.get("issues", [])
-    code_scan_error: Optional[str] = semgrep_result.get("error")
+    code_issues: list[dict[str, Any]] = semgrep_result.get("issues", [])
+    code_scan_error: str | None = semgrep_result.get("error")
     if not semgrep_result["ok"]:
         log.warning("vuln_scan.semgrep_error", error=code_scan_error)
     else:
         log.info("vuln_scan.semgrep_complete", code_issues=len(code_issues))
 
     # ── Shielva Security platform results ──
-    shielva_findings: List[Dict[str, Any]] = shielva_result.get("findings", [])
-    shielva_scan_id: Optional[str] = shielva_result.get("scan_id")
-    shielva_report_r2_key: Optional[str] = shielva_result.get("report_r2_key")
-    shielva_error: Optional[str] = shielva_result.get("error")
+    shielva_findings: list[dict[str, Any]] = shielva_result.get("findings", [])
+    shielva_scan_id: str | None = shielva_result.get("scan_id")
+    shielva_report_r2_key: str | None = shielva_result.get("report_r2_key")
+    shielva_error: str | None = shielva_result.get("error")
     if not shielva_result["ok"]:
         log.warning("vuln_scan.shielva_security_skipped", reason=shielva_error)
     else:
@@ -993,8 +1079,8 @@ async def run_vulnerability_scan(
     parsed = audit_result["parsed"] or {"dependencies": []}
     normalised = _normalise_results(parsed)
     summary = normalised["summary"]
-    vulnerabilities: List[Dict[str, Any]] = normalised["vulnerabilities"]
-    safe_packages: List[Dict[str, str]] = normalised["safe_packages"]
+    vulnerabilities: list[dict[str, Any]] = normalised["vulnerabilities"]
+    safe_packages: list[dict[str, str]] = normalised["safe_packages"]
 
     log.info(
         "vuln_scan.results_normalised",
@@ -1044,7 +1130,7 @@ async def run_vulnerability_scan(
         ai_path = ""
 
     # ── 8. Persist JSON result to disk ──
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "status": "ok",
         "scanned_at": scanned_at,
         "summary": summary,
@@ -1064,7 +1150,9 @@ async def run_vulnerability_scan(
             "report_r2_key": shielva_report_r2_key,
             "error": shielva_error,
             "summary": shielva_result.get("summary"),
-        } if shielva_result["ok"] else None,
+        }
+        if shielva_result["ok"]
+        else None,
     }
     try:
         Path(json_path).write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -1077,7 +1165,8 @@ async def run_vulnerability_scan(
     if html_path and Path(html_path).exists():
         upload_tasks.append(
             _upload_to_r2(
-                provider, service_slug,
+                provider,
+                service_slug,
                 "vulnerability_scan.html",
                 Path(html_path).read_bytes(),
                 "text/html",
@@ -1087,7 +1176,8 @@ async def run_vulnerability_scan(
     if excel_path and Path(excel_path).exists():
         upload_tasks.append(
             _upload_to_r2(
-                provider, service_slug,
+                provider,
+                service_slug,
                 "vulnerability_scan.xlsx",
                 Path(excel_path).read_bytes(),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1097,7 +1187,8 @@ async def run_vulnerability_scan(
     if ai_path and Path(ai_path).exists():
         upload_tasks.append(
             _upload_to_r2(
-                provider, service_slug,
+                provider,
+                service_slug,
                 "ai_fix_suggestions.md",
                 Path(ai_path).read_bytes(),
                 "text/markdown",
@@ -1106,7 +1197,8 @@ async def run_vulnerability_scan(
 
     upload_tasks.append(
         _upload_to_r2(
-            provider, service_slug,
+            provider,
+            service_slug,
             "vulnerability_scan.json",
             json.dumps(result, indent=2).encode("utf-8"),
             "application/json",

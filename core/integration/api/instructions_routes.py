@@ -3,8 +3,6 @@
 Endpoints for reading, regenerating, and chatting with connector setup instructions.
 """
 
-from typing import Any, Dict, List, Optional
-
 import structlog
 from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException
@@ -20,7 +18,7 @@ logger = structlog.get_logger(__name__)
 instructions_router = APIRouter(prefix="/sessions", tags=["instructions"])
 
 
-def _get_tenant(x_tenant_id: Optional[str]) -> str:
+def _get_tenant(x_tenant_id: str | None) -> str:
     if not x_tenant_id:
         raise HTTPException(400, "X-Tenant-ID header is required")
     return x_tenant_id
@@ -29,16 +27,18 @@ def _get_tenant(x_tenant_id: Optional[str]) -> str:
 def _output_dir(tenant_id: str, service_slug: str):
     import re as _re
     from pathlib import Path
+
     base = Path(settings.GENERATED_CODE_DIR).resolve()
-    clean = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+    clean = _re.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     return base / tenant_id / f"{clean}_connector"
 
 
 # ── Request / Response models ─────────────────────────────────────────
 
+
 class InstructionsChatRequest(BaseModel):
     message: str
-    history: List[Dict[str, str]] = []  # [{role, content}]
+    history: list[dict[str, str]] = []  # [{role, content}]
 
 
 class InstructionsGenerateRequest(BaseModel):
@@ -47,10 +47,11 @@ class InstructionsGenerateRequest(BaseModel):
 
 # ── GET instructions content ──────────────────────────────────────────
 
+
 @instructions_router.get("/{session_id}/instructions")
 async def get_instructions(
     session_id: str,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Return the content of instructions/setup.md for this session's connector."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -83,18 +84,27 @@ async def get_instructions(
     # Fallback: load from disk-first cache (R2 secondary)
     cached = await r2_service.get_setup_instructions(provider, service_slug)
     if cached:
-        return {"content": cached, "exists": True, "path": f"cache:{provider}/{service_slug}/setup_instructions.md"}
+        return {
+            "content": cached,
+            "exists": True,
+            "path": f"cache:{provider}/{service_slug}/setup_instructions.md",
+        }
 
-    return {"content": "", "exists": False, "path": str(out_dir / "instructions" / "setup.md")}
+    return {
+        "content": "",
+        "exists": False,
+        "path": str(out_dir / "instructions" / "setup.md"),
+    }
 
 
 # ── POST chat (RAG Q&A) ───────────────────────────────────────────────
+
 
 @instructions_router.post("/{session_id}/instructions/chat")
 async def chat_instructions(
     session_id: str,
     body: InstructionsChatRequest,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Answer a user question about setup instructions using RAG + LLM."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -133,11 +143,15 @@ async def chat_instructions(
         "You have access to the connector's setup instructions and knowledge base.\n"
         "Answer the user's question clearly and concisely, referencing specific steps from the instructions.\n"
         "If the answer is not in the instructions, say so and provide a best-effort answer.\n\n"
-        + (f"## Setup Instructions\n```markdown\n{instructions_content[:6000]}\n```\n\n" if instructions_content else "")
+        + (
+            f"## Setup Instructions\n```markdown\n{instructions_content[:6000]}\n```\n\n"
+            if instructions_content
+            else ""
+        )
         + (f"## Additional Knowledge\n{rag_context}\n" if rag_context else "")
     )
 
-    messages: List[Dict[str, str]] = []
+    messages: list[dict[str, str]] = []
     for h in body.history[-6:]:  # last 6 turns
         messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
     messages.append({"role": "user", "content": body.message})
@@ -152,11 +166,12 @@ async def chat_instructions(
 
 # ── POST generate/update instructions with prompt ─────────────────────
 
+
 @instructions_router.post("/{session_id}/instructions/generate")
 async def generate_instructions(
     session_id: str,
     body: InstructionsGenerateRequest,
-    x_tenant_id: Optional[str] = Header(None),
+    x_tenant_id: str | None = Header(None),
 ):
     """Regenerate or update setup instructions based on a user prompt."""
     tenant_id = _get_tenant(x_tenant_id)
@@ -216,7 +231,7 @@ async def generate_instructions(
         updated = updated.strip()
         # Strip accidental code fences
         if updated.startswith("```markdown"):
-            updated = updated[len("```markdown"):].strip()
+            updated = updated[len("```markdown") :].strip()
         if updated.startswith("```"):
             updated = updated[3:].strip()
         if updated.endswith("```"):

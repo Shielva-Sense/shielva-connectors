@@ -5,38 +5,47 @@ Run: python create_r2_bucket.py
 
 import os
 
-import boto3
-from botocore.exceptions import ClientError
 
-ACCOUNT_ID = os.getenv("INTEGRATION_R2_ACCOUNT_ID", "")
-ACCESS_KEY = os.getenv("INTEGRATION_R2_ACCESS_KEY_ID", "")
-SECRET_KEY = os.getenv("INTEGRATION_R2_SECRET_ACCESS_KEY", "")
-BUCKET = os.getenv("INTEGRATION_R2_BUCKET_NAME", "shielvasense")
+def main() -> None:
+    # Lazy imports — boto3/botocore are ops-only deps, not part of the service
+    # runtime, so importing this module must not require them.
+    import boto3
+    from botocore.exceptions import ClientError
 
-if not all([ACCOUNT_ID, ACCESS_KEY, SECRET_KEY]):
-    # Try loading from .env
-    from dotenv import load_dotenv
-    load_dotenv()
-    ACCOUNT_ID = os.getenv("INTEGRATION_R2_ACCOUNT_ID", "")
-    ACCESS_KEY = os.getenv("INTEGRATION_R2_ACCESS_KEY_ID", "")
-    SECRET_KEY = os.getenv("INTEGRATION_R2_SECRET_ACCESS_KEY", "")
-    BUCKET = os.getenv("INTEGRATION_R2_BUCKET_NAME", "shielvasense")
+    account_id = os.getenv("INTEGRATION_R2_ACCOUNT_ID", "")
+    access_key = os.getenv("INTEGRATION_R2_ACCESS_KEY_ID", "")
+    secret_key = os.getenv("INTEGRATION_R2_SECRET_ACCESS_KEY", "")
+    bucket = os.getenv("INTEGRATION_R2_BUCKET_NAME", "shielvasense")
 
-client = boto3.client(
-    "s3",
-    endpoint_url=f"https://{ACCOUNT_ID}.r2.cloudflarestorage.com",
-    aws_access_key_id=ACCESS_KEY,
-    aws_secret_access_key=SECRET_KEY,
-    region_name="auto",
-)
+    if not all([account_id, access_key, secret_key]):
+        # Try loading from .env
+        from dotenv import load_dotenv
 
-try:
-    client.create_bucket(Bucket=BUCKET)
-    print(f"Bucket '{BUCKET}' created successfully.")
-except ClientError as e:
-    code = e.response.get("Error", {}).get("Code", "")
-    if code == "BucketAlreadyOwnedByYou":
-        print(f"Bucket '{BUCKET}' already exists — OK.")
-    else:
-        print(f"Error creating bucket: {e}")
-        raise
+        load_dotenv()
+        account_id = os.getenv("INTEGRATION_R2_ACCOUNT_ID", "")
+        access_key = os.getenv("INTEGRATION_R2_ACCESS_KEY_ID", "")
+        secret_key = os.getenv("INTEGRATION_R2_SECRET_ACCESS_KEY", "")
+        bucket = os.getenv("INTEGRATION_R2_BUCKET_NAME", "shielvasense")
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+
+    try:
+        client.create_bucket(Bucket=bucket)
+        print(f"Bucket '{bucket}' created successfully.")
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code == "BucketAlreadyOwnedByYou":
+            print(f"Bucket '{bucket}' already exists — OK.")
+        else:
+            print(f"Error creating bucket: {e}")
+            raise
+
+
+if __name__ == "__main__":
+    main()

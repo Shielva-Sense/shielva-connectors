@@ -5,7 +5,7 @@ Used by the Builder Advanced frontend to populate the model selector dynamically
 """
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from integration.core.config import settings
 
@@ -22,10 +22,10 @@ async def list_claude_models():
     Anthropic API call fails, so the frontend always gets a usable response.
     """
     _FALLBACK = [
-        {"id": "claude-opus-4-5",   "display_name": "Claude Opus 4.5"},
+        {"id": "claude-opus-4-5", "display_name": "Claude Opus 4.5"},
         {"id": "claude-sonnet-4-5", "display_name": "Claude Sonnet 4.5"},
-        {"id": "claude-haiku-3-5",  "display_name": "Claude Haiku 3.5"},
-        {"id": "claude-opus-4-0",   "display_name": "Claude Opus 4"},
+        {"id": "claude-haiku-3-5", "display_name": "Claude Haiku 3.5"},
+        {"id": "claude-opus-4-0", "display_name": "Claude Opus 4"},
         {"id": "claude-sonnet-3-7", "display_name": "Claude Sonnet 3.7"},
     ]
 
@@ -35,6 +35,7 @@ async def list_claude_models():
 
     try:
         from anthropic import AsyncAnthropic
+
         client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = await client.models.list()
 

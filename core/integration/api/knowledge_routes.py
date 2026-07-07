@@ -5,12 +5,10 @@ that are ingested into MCP's RAG pipeline for context-aware code generation.
 """
 
 import structlog
-from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
-from typing import Optional
 
-from integration.services import knowledge_service
-from integration.services import docs_guidelines_service
+from integration.services import docs_guidelines_service, knowledge_service
 
 logger = structlog.get_logger(__name__)
 
@@ -19,22 +17,23 @@ knowledge_router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 # ── Request/Response models ──────────────────────────────────────────
 
+
 class UploadKnowledgeRequest(BaseModel):
     content: str
     title: str
     scope: str = "global"  # "global" | "connector"
-    provider: Optional[str] = None
-    service: Optional[str] = None
-    session_id: Optional[str] = None
+    provider: str | None = None
+    service: str | None = None
+    session_id: str | None = None
 
 
 class UploadPathRequest(BaseModel):
     file_path: str
-    title: Optional[str] = None
+    title: str | None = None
     scope: str = "global"
-    provider: Optional[str] = None
-    service: Optional[str] = None
-    session_id: Optional[str] = None
+    provider: str | None = None
+    service: str | None = None
+    session_id: str | None = None
 
 
 class KnowledgeDocResponse(BaseModel):
@@ -46,10 +45,11 @@ class KnowledgeDocResponse(BaseModel):
 
 class UpdateDocGuidelinesRequest(BaseModel):
     prompt: str
-    current_content: Optional[str] = None
+    current_content: str | None = None
 
 
 # ── Upload routes ────────────────────────────────────────────────────
+
 
 @knowledge_router.post("/upload", response_model=KnowledgeDocResponse)
 async def upload_knowledge(
@@ -100,10 +100,10 @@ async def upload_knowledge(
 async def upload_knowledge_file(
     file: UploadFile = File(...),
     scope: str = Form("global"),
-    title: Optional[str] = Form(None),
-    provider: Optional[str] = Form(None),
-    service: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None),
+    title: str | None = Form(None),
+    provider: str | None = Form(None),
+    service: str | None = Form(None),
+    session_id: str | None = Form(None),
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Upload a .md file for RAG ingestion."""
@@ -165,11 +165,12 @@ async def upload_knowledge_path(
 
 # ── List, vector counts, and delete ──────────────────────────────────
 
+
 @knowledge_router.get("/vector-count")
 async def get_vector_count(
     scope: str = "connector",
-    provider: Optional[str] = None,
-    service: Optional[str] = None,
+    provider: str | None = None,
+    service: str | None = None,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Get the RAG vector count for a connector or global guidelines KB.
@@ -178,17 +179,16 @@ async def get_vector_count(
     """
     if scope == "global":
         return await knowledge_service.get_global_vector_count(x_tenant_id)
-    elif provider and service:
+    if provider and service:
         return await knowledge_service.get_connector_vector_count(x_tenant_id, provider, service)
-    else:
-        raise HTTPException(400, "provider and service are required for scope='connector'")
+    raise HTTPException(400, "provider and service are required for scope='connector'")
 
 
 @knowledge_router.get("/list")
 async def list_knowledge(
     scope: str = "all",
-    provider: Optional[str] = None,
-    service: Optional[str] = None,
+    provider: str | None = None,
+    service: str | None = None,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """List uploaded knowledge documents for the tenant."""
@@ -215,11 +215,11 @@ async def delete_knowledge(
 
 # ── Documentation guidelines (R2 fallback) ───────────────────────────
 
+
 @knowledge_router.get("/doc-guidelines")
 async def get_doc_guidelines():
     """Get the active connector documentation guidelines (R2 fallback template)."""
-    result = await docs_guidelines_service.get_active_doc_guidelines()
-    return result
+    return await docs_guidelines_service.get_active_doc_guidelines()
 
 
 @knowledge_router.post("/doc-guidelines/update")
@@ -237,28 +237,31 @@ async def update_doc_guidelines(
 
     system_prompt = (
         "You are updating the Shielva Connector Documentation Standard.\n\n"
-        "## Current Document\n```markdown\n{current}\n```\n\n"
-        "## User Instruction\n{prompt}\n\n"
+        f"## Current Document\n```markdown\n{current}\n```\n\n"
+        f"## User Instruction\n{body.prompt}\n\n"
         "## Rules\n"
         "1. Return ONLY the complete updated markdown document\n"
         "2. Do NOT include markdown code fences around the entire document\n"
         "3. Preserve all sections unless the user explicitly asks to change them\n"
         "4. Keep the same heading structure (# ## ###)\n"
         "5. Return the complete document, ready to save"
-    ).format(current=current, prompt=body.prompt)
+    )
 
     try:
         updated_content = await call_llm(
-            messages=[{"role": "user", "content": "Output the complete updated connector documentation guidelines."}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Output the complete updated connector documentation guidelines.",
+                }
+            ],
             system=system_prompt,
             expect_code=False,
         )
         updated_content = updated_content.strip()
         if updated_content.startswith("```"):
             lines = updated_content.split("\n")
-            updated_content = "\n".join(
-                lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
-            )
+            updated_content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         saved = await docs_guidelines_service.save_doc_guidelines(
             content=updated_content,

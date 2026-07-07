@@ -9,19 +9,18 @@ Allows users to:
 
 import ast
 import asyncio
-import json
-import textwrap
+import contextlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, Body, Header, HTTPException
+from bson import ObjectId
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from integration.core.config import settings
 from integration.db.database import sessions_collection
-from bson import ObjectId
 
 logger = structlog.get_logger(__name__)
 
@@ -31,7 +30,7 @@ connector_api_router = APIRouter(prefix="/connector-api", tags=["connector-api"]
 async def _resolve_connector_dir(
     session_id: str,
     tenant_id: str,
-    working_dir: Optional[str] = None,
+    working_dir: str | None = None,
 ) -> Path:
     """Find the generated connector directory for a session.
 
@@ -42,10 +41,7 @@ async def _resolve_connector_dir(
     if working_dir and working_dir.strip():
         out_dir = Path(working_dir.strip())
         if not out_dir.exists():
-            raise HTTPException(
-                404,
-                f"connector.py not found in generated files (looked in: {out_dir})"
-            )
+            raise HTTPException(404, f"connector.py not found in generated files (looked in: {out_dir})")
         return out_dir
 
     # ── Fallback: derive from MongoDB session + GENERATED_CODE_DIR ─────────────
@@ -63,24 +59,43 @@ async def _resolve_connector_dir(
 
     service_slug = session.get("service_slug") or session.get("service", "").replace("-", "_").lower()
     import re as _re
-    _clean = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+
+    _clean = _re.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     out_dir = Path(settings.GENERATED_CODE_DIR) / tenant_id / f"{_clean}_connector"
 
     if not out_dir.exists():
-        raise HTTPException(404, f"connector.py not found in generated files")
+        raise HTTPException(404, "connector.py not found in generated files")
 
     return out_dir
 
 
 # ── Identity detection heuristics ─────────────────────────────────────
 
-_VOID_NAME_PATTERNS = {"set_", "update_", "delete_", "remove_", "configure_", "handle_", "process_", "initialize_", "on_"}
-_DB_PATTERNS = {"collection.", "insert", "save_to", "persist", "store", "upsert", "bulk_write"}
+_VOID_NAME_PATTERNS = {
+    "set_",
+    "update_",
+    "delete_",
+    "remove_",
+    "configure_",
+    "handle_",
+    "process_",
+    "initialize_",
+    "on_",
+}
+_DB_PATTERNS = {
+    "collection.",
+    "insert",
+    "save_to",
+    "persist",
+    "store",
+    "upsert",
+    "bulk_write",
+}
 
 
 def _detect_identity(func_node: ast.AST) -> str:
     """Detect the behavioral identity of a method from its AST node."""
-    source_lines = ast.dump(func_node)
+    ast.dump(func_node)
     name = getattr(func_node, "name", "")
 
     # Check return annotation
@@ -100,10 +115,8 @@ def _detect_identity(func_node: ast.AST) -> str:
         # Check for API calls (self.client.*, httpx.*, requests.*)
         if isinstance(node, ast.Attribute):
             attr_str = ""
-            try:
+            with contextlib.suppress(Exception):
                 attr_str = ast.unparse(node)
-            except Exception:
-                pass
             if any(p in attr_str for p in ["self.client.", "httpx.", "self._api_request"]):
                 has_api_call = True
             if any(p in attr_str.lower() for p in _DB_PATTERNS):
@@ -152,7 +165,7 @@ def _detect_identity(func_node: ast.AST) -> str:
     return "api_response"
 
 
-def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
+def _parse_methods(connector_py: Path) -> list[dict[str, Any]]:
     """Parse connector.py with AST to extract public method info + auto-detected identity."""
     source = connector_py.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -176,7 +189,7 @@ def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
             for i, arg in enumerate(args.args):
                 if arg.arg == "self":
                     continue
-                param: Dict[str, Any] = {"name": arg.arg}
+                param: dict[str, Any] = {"name": arg.arg}
                 # Type annotation
                 if arg.annotation:
                     param["type"] = ast.unparse(arg.annotation)
@@ -190,9 +203,9 @@ def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
                 params.append(param)
 
             # Keyword-only args
-            kw_defaults_map = dict(zip(args.kwonlyargs, args.kw_defaults))
+            kw_defaults_map = dict(zip(args.kwonlyargs, args.kw_defaults, strict=False))
             for kw_arg in args.kwonlyargs:
-                param_info: Dict[str, Any] = {"name": kw_arg.arg}
+                param_info: dict[str, Any] = {"name": kw_arg.arg}
                 if kw_arg.annotation:
                     param_info["type"] = ast.unparse(kw_arg.annotation)
                 default_node = kw_defaults_map.get(kw_arg)
@@ -226,7 +239,19 @@ def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
 
             # HTTP method hint based on name
             http_method = "GET"
-            if any(kw in name.lower() for kw in ["create", "post", "send", "install", "authorize", "store", "write", "add"]):
+            if any(
+                kw in name.lower()
+                for kw in [
+                    "create",
+                    "post",
+                    "send",
+                    "install",
+                    "authorize",
+                    "store",
+                    "write",
+                    "add",
+                ]
+            ):
                 http_method = "POST"
             elif any(kw in name.lower() for kw in ["update", "edit", "modify"]):
                 http_method = "PUT"
@@ -236,18 +261,20 @@ def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
             # Auto-detect behavioral identity
             auto_identity = _detect_identity(item)
 
-            methods.append({
-                "name": name,
-                "is_async": is_async,
-                "parameters": params,
-                "return_type": return_type,
-                "docstring": docstring,
-                "category": category,
-                "http_method": http_method,
-                "line_number": item.lineno,
-                "auto_detected_identity": auto_identity,
-                "source": ast.get_source_segment(source, item) or "",
-            })
+            methods.append(
+                {
+                    "name": name,
+                    "is_async": is_async,
+                    "parameters": params,
+                    "return_type": return_type,
+                    "docstring": docstring,
+                    "category": category,
+                    "http_method": http_method,
+                    "line_number": item.lineno,
+                    "auto_detected_identity": auto_identity,
+                    "source": ast.get_source_segment(source, item) or "",
+                }
+            )
 
     return methods
 
@@ -256,7 +283,7 @@ def _parse_methods(connector_py: Path) -> List[Dict[str, Any]]:
 async def list_connector_methods(
     session_id: str,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    working_dir: Optional[str] = None,
+    working_dir: str | None = None,
 ):
     """List all public methods of the generated connector.
 
@@ -315,6 +342,7 @@ async def list_connector_methods(
 
 # ── Method Identity CRUD ──────────────────────────────────────────────
 
+
 @connector_api_router.get("/{session_id}/method-identities")
 async def get_method_identities(
     session_id: str,
@@ -336,7 +364,7 @@ async def get_method_identities(
 
 
 class BulkIdentityRequest(BaseModel):
-    identities: List[Dict[str, Any]]
+    identities: list[dict[str, Any]]
 
 
 @connector_api_router.post("/{session_id}/method-identities")
@@ -352,22 +380,28 @@ async def save_method_identities(
     oid = ObjectId(session_id)
     result = await sessions_collection().update_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"$set": {
-            "method_identities": payload.identities,
-            "updated_at": datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "method_identities": payload.identities,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
     if result.matched_count == 0:
         raise HTTPException(404, "Session not found")
 
-    logger.info("connector_api.save_identities", session_id=session_id, count=len(payload.identities))
+    logger.info(
+        "connector_api.save_identities",
+        session_id=session_id,
+        count=len(payload.identities),
+    )
     return {"ok": True, "saved": len(payload.identities)}
 
 
 class SingleIdentityRequest(BaseModel):
     identity: str
-    entity_id: Optional[str] = None
-    field_mappings: List[Dict[str, Any]] = []
+    entity_id: str | None = None
+    field_mappings: list[dict[str, Any]] = []
 
 
 @connector_api_router.put("/{session_id}/method-identities/{method_name}")
@@ -401,24 +435,33 @@ async def update_method_identity(
             break
 
     if not found:
-        identities.append({
-            "method_name": method_name,
-            "identity": payload.identity,
-            "auto_detected": False,
-            "entity_id": payload.entity_id,
-            "field_mappings": payload.field_mappings,
-            "expected_response_fields": [],
-        })
+        identities.append(
+            {
+                "method_name": method_name,
+                "identity": payload.identity,
+                "auto_detected": False,
+                "entity_id": payload.entity_id,
+                "field_mappings": payload.field_mappings,
+                "expected_response_fields": [],
+            }
+        )
 
     await sessions_collection().update_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"$set": {
-            "method_identities": identities,
-            "updated_at": datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "method_identities": identities,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
 
-    logger.info("connector_api.update_identity", session_id=session_id, method=method_name, identity=payload.identity)
+    logger.info(
+        "connector_api.update_identity",
+        session_id=session_id,
+        method=method_name,
+        identity=payload.identity,
+    )
     return {"ok": True, "method_name": method_name, "identity": payload.identity}
 
 
@@ -449,10 +492,12 @@ async def remove_method_entity(
 
     await sessions_collection().update_one(
         {"_id": oid, "tenant_id": x_tenant_id},
-        {"$set": {
-            "method_identities": identities,
-            "updated_at": datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "method_identities": identities,
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
 
     logger.info("connector_api.remove_entity", session_id=session_id, method=method_name)
@@ -460,6 +505,7 @@ async def remove_method_entity(
 
 
 # ── Source / Config routes ────────────────────────────────────────────
+
 
 @connector_api_router.get("/{session_id}/source")
 async def get_connector_source(
@@ -483,7 +529,7 @@ async def get_connector_source(
 
 class ExecuteMethodRequest(BaseModel):
     method_name: str
-    parameters: Dict[str, Any] = {}
+    parameters: dict[str, Any] = {}
 
 
 @connector_api_router.get("/{session_id}/config")
@@ -506,7 +552,7 @@ async def get_connector_config(
         if isinstance(node, ast.ClassDef):
             for item in node.body:
                 if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
-                    field: Dict[str, Any] = {
+                    field: dict[str, Any] = {
                         "name": item.target.id,
                         "type": ast.unparse(item.annotation) if item.annotation else "str",
                     }

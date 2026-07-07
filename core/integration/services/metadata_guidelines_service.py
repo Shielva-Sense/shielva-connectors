@@ -10,9 +10,9 @@ can retrieve it during the generate_metadata step via RAG.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
@@ -21,10 +21,10 @@ from integration.core.config import settings
 logger = structlog.get_logger(__name__)
 
 # ── R2 / Redis keys ──────────────────────────────────────────────────
-_R2_PREFIX       = "METADATA_WRITING_GUIDELINES"
-_STANDARD_KEY    = "metadata_writing_guideline.md"
-_VERSIONED_KEY   = "metadata_writing_guideline_v_{version}.md"
-_REDIS_KEY_TPL   = "metadata_writing_guidelines:v{version}"
+_R2_PREFIX = "METADATA_WRITING_GUIDELINES"
+_STANDARD_KEY = "metadata_writing_guideline.md"
+_VERSIONED_KEY = "metadata_writing_guideline_v_{version}.md"
+_REDIS_KEY_TPL = "metadata_writing_guidelines:v{version}"
 
 # Sentinel — if missing from the active record, auto-upgrade on next boot
 _SENTINEL = "name: ALWAYS Shielva {service_name} Connector"
@@ -711,18 +711,25 @@ Return ONLY a valid JSON object.
 
 # ── Helpers (mirrored from guidelines_service.py) ────────────────────
 
+
 def _get_r2():
     from integration.services import r2_service
+
     return r2_service
+
 
 async def _get_redis():
     import redis.asyncio as aioredis
+
     url = settings.REDIS_URL
     return await aioredis.from_url(url, encoding="utf-8", decode_responses=True)
 
+
 def _metadata_collection():
     from integration.db.database import get_db
+
     return get_db()["metadata_writing_guidelines"]
+
 
 async def _r2_put_text(r2, key: str, content: str) -> None:
     try:
@@ -735,15 +742,18 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
             client = r2._get_client()
             bucket = settings.R2_SHARED_BUCKET  # guidelines live in the shared admin bucket
             await loop.run_in_executor(
-                None, partial(r2._sync_write, client, bucket, key, content, "text/plain")
+                None,
+                partial(r2._sync_write, client, bucket, key, content, "text/plain"),
             )
     except Exception as exc:
         logger.warning("metadata_guidelines.r2_write_failed", key=key, error=str(exc))
+
 
 async def _ingest_to_rag(content: str, title: str) -> None:
     """Ingest metadata writing guideline into MCP RAG (global KB)."""
     try:
         from integration.services import knowledge_service
+
         await knowledge_service._ingest_to_mcp(
             content=content,
             title=title,
@@ -755,7 +765,9 @@ async def _ingest_to_rag(content: str, title: str) -> None:
     except Exception as exc:
         logger.warning("metadata_guidelines.rag_ingest_failed", error=str(exc))
 
+
 # ── Public API ────────────────────────────────────────────────────────
+
 
 async def seed_metadata_writing_guidelines() -> None:
     """Seed / upgrade metadata_writing_guideline.md on startup.
@@ -770,32 +782,45 @@ async def seed_metadata_writing_guidelines() -> None:
 
         if active:
             if _SENTINEL in active.get("content", ""):
-                logger.info("metadata_guidelines.seed_skipped",
-                            reason="already_up_to_date", version=active.get("version"))
+                logger.info(
+                    "metadata_guidelines.seed_skipped",
+                    reason="already_up_to_date",
+                    version=active.get("version"),
+                )
                 return
             # Auto-upgrade — missing sentinel means stale version
-            logger.info("metadata_guidelines.seed_upgrading",
-                        from_version=active.get("version"),
-                        reason="missing name/redirect_uri/method-verb sentinel")
-            await _save(DEFAULT_METADATA_WRITING_MD,
-                        change_description="Auto-upgrade: added 'name' field (Shielva X Connector convention), "
-                                           "fixed 'method' to HTTP verb, added redirect_uri exclusion rule")
+            logger.info(
+                "metadata_guidelines.seed_upgrading",
+                from_version=active.get("version"),
+                reason="missing name/redirect_uri/method-verb sentinel",
+            )
+            await _save(
+                DEFAULT_METADATA_WRITING_MD,
+                change_description="Auto-upgrade: added 'name' field (Shielva X Connector convention), "
+                "fixed 'method' to HTTP verb, added redirect_uri exclusion rule",
+            )
             return
 
         # First boot
-        now = datetime.now(timezone.utc)
-        await col.insert_one({
-            "version": "1.0.0",
-            "content": DEFAULT_METADATA_WRITING_MD,
-            "change_description": "Initial default — OAuth2 credentials, install_fields, painter rules",
-            "created_at": now,
-            "is_active": True,
-        })
+        now = datetime.now(UTC)
+        await col.insert_one(
+            {
+                "version": "1.0.0",
+                "content": DEFAULT_METADATA_WRITING_MD,
+                "change_description": "Initial default — OAuth2 credentials, install_fields, painter rules",
+                "created_at": now,
+                "is_active": True,
+            }
+        )
         logger.info("metadata_guidelines.seed_mongodb", version="1.0.0")
 
         r2 = _get_r2()
         await _r2_put_text(r2, f"{_R2_PREFIX}/{_STANDARD_KEY}", DEFAULT_METADATA_WRITING_MD)
-        await _r2_put_text(r2, f"{_R2_PREFIX}/{_VERSIONED_KEY.format(version='1.0.0')}", DEFAULT_METADATA_WRITING_MD)
+        await _r2_put_text(
+            r2,
+            f"{_R2_PREFIX}/{_VERSIONED_KEY.format(version='1.0.0')}",
+            DEFAULT_METADATA_WRITING_MD,
+        )
         logger.info("metadata_guidelines.seed_r2")
 
         await _ingest_to_rag(DEFAULT_METADATA_WRITING_MD, "Metadata Writing Guidelines v1.0.0")
@@ -805,7 +830,7 @@ async def seed_metadata_writing_guidelines() -> None:
         logger.error("metadata_guidelines.seed_failed", error=str(exc))
 
 
-async def _save(content: str, change_description: str = "") -> Dict[str, Any]:
+async def _save(content: str, change_description: str = "") -> dict[str, Any]:
     """Save new version to MongoDB + R2 + Redis + RAG."""
     col = _metadata_collection()
     prev = await col.find_one({"is_active": True}, sort=[("created_at", -1)])
@@ -819,15 +844,17 @@ async def _save(content: str, change_description: str = "") -> Dict[str, Any]:
     else:
         new_version = "1.0.1"
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await col.update_many({"is_active": True}, {"$set": {"is_active": False}})
-    await col.insert_one({
-        "version": new_version,
-        "content": content,
-        "change_description": change_description,
-        "created_at": now,
-        "is_active": True,
-    })
+    await col.insert_one(
+        {
+            "version": new_version,
+            "content": content,
+            "change_description": change_description,
+            "created_at": now,
+            "is_active": True,
+        }
+    )
 
     r2 = _get_r2()
     await _r2_put_text(r2, f"{_R2_PREFIX}/{_STANDARD_KEY}", content)
@@ -845,18 +872,22 @@ async def _save(content: str, change_description: str = "") -> Dict[str, Any]:
     return {"version": new_version, "content": content, "updated_at": str(now)}
 
 
-async def save_guidelines(content: str, change_description: str = "") -> Dict[str, Any]:
+async def save_guidelines(content: str, change_description: str = "") -> dict[str, Any]:
     """Public API — save a new version of the metadata writing guideline."""
     return await _save(content, change_description)
 
 
-async def get_active_guidelines() -> Dict[str, Any]:
+async def get_active_guidelines() -> dict[str, Any]:
     """Return active guideline: {version, content, updated_at}."""
     try:
         col = _metadata_collection()
         doc = await col.find_one({"is_active": True}, sort=[("created_at", -1)])
         if not doc:
-            return {"version": "1.0.0", "content": DEFAULT_METADATA_WRITING_MD, "updated_at": ""}
+            return {
+                "version": "1.0.0",
+                "content": DEFAULT_METADATA_WRITING_MD,
+                "updated_at": "",
+            }
 
         # Try Redis
         try:
@@ -864,20 +895,30 @@ async def get_active_guidelines() -> Dict[str, Any]:
             cached = await r.get(_REDIS_KEY_TPL.format(version=doc["version"]))
             await r.aclose()
             if cached:
-                return {"version": doc["version"], "content": cached,
-                        "updated_at": str(doc.get("created_at", ""))}
+                return {
+                    "version": doc["version"],
+                    "content": cached,
+                    "updated_at": str(doc.get("created_at", "")),
+                }
         except Exception:
             pass
 
         content = doc.get("content", DEFAULT_METADATA_WRITING_MD)
-        return {"version": doc["version"], "content": content,
-                "updated_at": str(doc.get("created_at", ""))}
+        return {
+            "version": doc["version"],
+            "content": content,
+            "updated_at": str(doc.get("created_at", "")),
+        }
     except Exception as exc:
         logger.error("metadata_guidelines.get_failed", error=str(exc))
-        return {"version": "1.0.0", "content": DEFAULT_METADATA_WRITING_MD, "updated_at": ""}
+        return {
+            "version": "1.0.0",
+            "content": DEFAULT_METADATA_WRITING_MD,
+            "updated_at": "",
+        }
 
 
-async def get_version_history() -> List[Dict[str, Any]]:
+async def get_version_history() -> list[dict[str, Any]]:
     """Return all versions, newest first."""
     try:
         col = _metadata_collection()

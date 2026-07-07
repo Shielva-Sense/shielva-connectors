@@ -1,7 +1,5 @@
 """Integration Builder — Plan history API routes (R2-backed)."""
 
-from typing import Optional
-
 import structlog
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -13,7 +11,7 @@ logger = structlog.get_logger(__name__)
 history_router = APIRouter(tags=["history"])
 
 
-def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> str:
+def _get_tenant(x_tenant_id: str | None = Header(None)) -> str:
     if not x_tenant_id:
         raise HTTPException(400, "X-Tenant-ID header is required")
     return x_tenant_id
@@ -23,8 +21,11 @@ def _get_tenant(x_tenant_id: Optional[str] = Header(None)) -> str:
 async def get_service_history(
     provider: str,
     service: str,
-    x_tenant_id: Optional[str] = Header(None),
-    service_slug: Optional[str] = Query(None, description="Connector slug (derived from connector name). Defaults to service name if not provided."),
+    x_tenant_id: str | None = Header(None),
+    service_slug: str | None = Query(
+        None,
+        description="Connector slug (derived from connector name). Defaults to service name if not provided.",
+    ),
 ):
     """Return the latest prompt, cached plan JSON, and plan markdown from R2.
 
@@ -57,8 +58,11 @@ async def get_service_history(
 async def get_plan_markdown(
     provider: str,
     service: str,
-    x_tenant_id: Optional[str] = Header(None),
-    service_slug: Optional[str] = Query(None, description="Connector slug (derived from connector name). Defaults to service name if not provided."),
+    x_tenant_id: str | None = Header(None),
+    service_slug: str | None = Query(
+        None,
+        description="Connector slug (derived from connector name). Defaults to service name if not provided.",
+    ),
 ):
     """Return the latest plan.md for a provider/service directly from R2.
 

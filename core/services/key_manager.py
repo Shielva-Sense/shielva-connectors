@@ -19,11 +19,12 @@ DEK record (Redis ``connectors:tenant_dek:{tenant_id}``):
 Fail-CLOSED: with no MASTER_KEY configured, every operation raises — secrets are
 never handled unencrypted.
 """
-import os
+
 import base64
 import json
+import os
+
 import structlog
-from typing import Tuple
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = structlog.get_logger(__name__)
@@ -61,9 +62,7 @@ class KeyManager:
 
     def _kek(self) -> AESGCM:
         if not self._kek_bytes:
-            raise KeyManagerMisconfigured(
-                "MASTER_KEY is not configured — refusing to wrap/unwrap data keys."
-            )
+            raise KeyManagerMisconfigured("MASTER_KEY is not configured — refusing to wrap/unwrap data keys.")
         return AESGCM(self._kek_bytes)
 
     # ── DEK wrapping under the KEK ──────────────────────────────────────────
@@ -78,14 +77,16 @@ class KeyManager:
     # ── Redis-backed DEK record ─────────────────────────────────────────────
     async def _load(self, tenant_id: str) -> dict:
         from .redis_service import redis_service
+
         raw = await redis_service.get(_DEK_REDIS_PREFIX + tenant_id)
         return json.loads(raw) if raw else {"active": 0, "versions": {}}
 
     async def _save(self, tenant_id: str, rec: dict) -> None:
         from .redis_service import redis_service
+
         await redis_service.set(_DEK_REDIS_PREFIX + tenant_id, json.dumps(rec))
 
-    async def active_dek(self, tenant_id: str) -> Tuple[int, bytes]:
+    async def active_dek(self, tenant_id: str) -> tuple[int, bytes]:
         """Return (version, dek) for the tenant's active DEK, bootstrapping v1 on first use."""
         self._kek()  # fail-closed before any I/O
         rec = await self._load(tenant_id)
@@ -102,7 +103,7 @@ class KeyManager:
             raise KeyError(f"No DEK version {version} for tenant {tenant_id}")
         return self._unwrap(wrapped)
 
-    async def rotate(self, tenant_id: str) -> Tuple[int, bytes]:
+    async def rotate(self, tenant_id: str) -> tuple[int, bytes]:
         """Mint a new DEK version and mark it active. Old versions are retained
         so existing ciphertext keeps decrypting. Returns (new_version, dek)."""
         self._kek()

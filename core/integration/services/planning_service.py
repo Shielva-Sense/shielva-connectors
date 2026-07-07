@@ -4,12 +4,15 @@ Generates structured integration plans via Claude, then stores them on the sessi
 """
 
 import asyncio
+import contextlib
 import json
 import re
 import time
-import structlog
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from collections.abc import AsyncGenerator
+from datetime import UTC
+from typing import Any
 
+import structlog
 from bson import ObjectId
 
 from integration.core.config import settings
@@ -29,11 +32,13 @@ from integration.schemas.models import (
     StepType,
 )
 from integration.services import r2_service
+from integration.services.codegen_service import (
+    _service_slug,
+    _slug_from_connector_name,
+)
 from integration.services.guidelines_service import get_active_guidelines
 from integration.services.llm_client import set_llm_tenant_id
-from integration.services.codegen_service import _slug_from_connector_name, _service_slug
 from platform_default.claude.skill import ClaudeSkill
-
 
 # ── Plan offload (Phase 4) ────────────────────────────────────────────
 # Mongo keeps only `{version, steps:[{index,title,type,status}]}` — the
@@ -49,7 +54,7 @@ from platform_default.claude.skill import ClaudeSkill
 _PLAN_STEP_SLIM_KEYS = ("index", "title", "type", "status")
 
 
-def _slim_plan(plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _slim_plan(plan: dict[str, Any] | None) -> dict[str, Any] | None:
     """Return a tiny copy of a plan dict suitable for Mongo storage.
 
     Keeps top-level metadata (version) and only the per-step fields the list
@@ -77,7 +82,7 @@ async def persist_conversation_history(
     session_id: str,
     provider: str,
     service_slug: str,
-    history: List[Dict[str, Any]],
+    history: list[dict[str, Any]],
 ) -> Any:
     """Write the full conversation history to R2 and return a slim Mongo pointer.
 
@@ -89,12 +94,15 @@ async def persist_conversation_history(
     never lose conversational context — degraded mode, not data loss.
     """
     from datetime import datetime as _dt
+
     if history is None:
         return []
     try:
         await r2_service.save_conversation_history(
-            provider=provider, service_slug=service_slug,
-            session_id=session_id, history=history,
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            history=history,
         )
         return {
             "_r2_offloaded": True,
@@ -104,15 +112,16 @@ async def persist_conversation_history(
     except Exception as exc:
         logger.warning(
             "conversation_history.r2_save_failed",
-            session_id=session_id, error=str(exc),
+            session_id=session_id,
+            error=str(exc),
         )
         return history
 
 
 async def hydrate_conversation_history(
     *,
-    session: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    session: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Return the full history list from a session dict.
 
     If Mongo holds the offload pointer, pull the array from R2; otherwise
@@ -132,7 +141,9 @@ async def hydrate_conversation_history(
         return []
     try:
         arr = await r2_service.get_conversation_history(
-            provider=provider, service_slug=service_slug, session_id=sid,
+            provider=provider,
+            service_slug=service_slug,
+            session_id=sid,
         )
         if isinstance(arr, list):
             return arr
@@ -146,8 +157,8 @@ async def persist_plan(
     session_id: str,
     provider: str,
     service_slug: str,
-    plan: Dict[str, Any],
-) -> Dict[str, Any]:
+    plan: dict[str, Any],
+) -> dict[str, Any]:
     """Write the FULL plan to R2 and return the slim version for Mongo.
 
     Callers should `$set: {"plan": <returned slim>}` on the session. The
@@ -159,13 +170,16 @@ async def persist_plan(
         return plan
     try:
         await r2_service.save_plan_full(
-            provider=provider, service_slug=service_slug,
-            session_id=session_id, plan=plan,
+            provider=provider,
+            service_slug=service_slug,
+            session_id=session_id,
+            plan=plan,
         )
         return _slim_plan(plan)
     except Exception as exc:
         logger.warning("plan.r2_save_failed", session_id=session_id, error=str(exc))
         return plan
+
 
 # Shared skill instance — loaded once at module import time from env settings
 _claude = ClaudeSkill.from_integration_settings()
@@ -177,14 +191,45 @@ logger = structlog.get_logger(__name__)
 
 # Verbs that map directly to connector method names
 _OPERATION_VERBS = [
-    "list", "send", "delete", "create", "get", "fetch", "update", "read",
-    "search", "find", "download", "upload", "move", "copy", "archive",
-    "restore", "mark", "label", "forward", "reply", "draft", "compose",
-    "attach", "filter", "watch", "unsubscribe", "subscribe", "publish",
-    "post", "put", "patch", "remove", "add", "insert", "upsert",
+    "list",
+    "send",
+    "delete",
+    "create",
+    "get",
+    "fetch",
+    "update",
+    "read",
+    "search",
+    "find",
+    "download",
+    "upload",
+    "move",
+    "copy",
+    "archive",
+    "restore",
+    "mark",
+    "label",
+    "forward",
+    "reply",
+    "draft",
+    "compose",
+    "attach",
+    "filter",
+    "watch",
+    "unsubscribe",
+    "subscribe",
+    "publish",
+    "post",
+    "put",
+    "patch",
+    "remove",
+    "add",
+    "insert",
+    "upsert",
 ]
 
-def _extract_user_operations(raw_prompt: str, service_slug: str) -> List[str]:
+
+def _extract_user_operations(raw_prompt: str, service_slug: str) -> list[str]:
     """Extract user-requested operations from an informal prompt and return method names.
 
     E.g. "need a gmail connector to list, send, delete email" →
@@ -199,15 +244,29 @@ def _extract_user_operations(raw_prompt: str, service_slug: str) -> List[str]:
     # Determine the object noun from the service slug
     # e.g. "gmail" → "email", "slack" → "message", "drive" → "file"
     _SERVICE_NOUNS: dict = {
-        "gmail": "email", "mail": "email", "email": "email",
-        "slack": "message", "teams": "message", "chat": "message",
-        "drive": "file", "storage": "file", "s3": "object",
-        "calendar": "event", "sheets": "sheet", "docs": "document",
-        "contacts": "contact", "crm": "contact",
-        "github": "issue", "jira": "ticket", "linear": "issue",
-        "stripe": "payment", "payments": "payment",
-        "notion": "page", "confluence": "page",
-        "hubspot": "contact", "salesforce": "record",
+        "gmail": "email",
+        "mail": "email",
+        "email": "email",
+        "slack": "message",
+        "teams": "message",
+        "chat": "message",
+        "drive": "file",
+        "storage": "file",
+        "s3": "object",
+        "calendar": "event",
+        "sheets": "sheet",
+        "docs": "document",
+        "contacts": "contact",
+        "crm": "contact",
+        "github": "issue",
+        "jira": "ticket",
+        "linear": "issue",
+        "stripe": "payment",
+        "payments": "payment",
+        "notion": "page",
+        "confluence": "page",
+        "hubspot": "contact",
+        "salesforce": "record",
     }
     # Try to find noun from slug parts
     slug_parts = re.split(r"[_\-]", service_slug.replace("_connector", ""))
@@ -219,14 +278,39 @@ def _extract_user_operations(raw_prompt: str, service_slug: str) -> List[str]:
 
     # Also check if prompt contains an explicit noun near a verb
     _COMMON_NOUNS = [
-        "email", "emails", "message", "messages", "file", "files",
-        "document", "documents", "event", "events", "contact", "contacts",
-        "record", "records", "item", "items", "object", "objects",
-        "ticket", "tickets", "issue", "issues", "payment", "payments",
-        "page", "pages", "post", "posts", "draft", "drafts",
+        "email",
+        "emails",
+        "message",
+        "messages",
+        "file",
+        "files",
+        "document",
+        "documents",
+        "event",
+        "events",
+        "contact",
+        "contacts",
+        "record",
+        "records",
+        "item",
+        "items",
+        "object",
+        "objects",
+        "ticket",
+        "tickets",
+        "issue",
+        "issues",
+        "payment",
+        "payments",
+        "page",
+        "pages",
+        "post",
+        "posts",
+        "draft",
+        "drafts",
     ]
 
-    found_methods: List[str] = []
+    found_methods: list[str] = []
     for i, word in enumerate(words):
         if word in _OPERATION_VERBS:
             # Look ahead 1–2 words for a noun
@@ -246,6 +330,7 @@ def _extract_user_operations(raw_prompt: str, service_slug: str) -> List[str]:
 
 # ── Guidelines helper ─────────────────────────────────────────────────
 
+
 async def _get_guidelines_for_planning() -> tuple:
     """Cache guidelines to a tmp file and return a file-read directive instead of inline content.
 
@@ -256,7 +341,9 @@ async def _get_guidelines_for_planning() -> tuple:
     Returns:
         Tuple of (guidelines_directive: str, version: str).
     """
-    import tempfile, os as _os
+    import os as _os
+    import tempfile
+
     try:
         record = await get_active_guidelines()
         content = record.get("content", "")
@@ -307,6 +394,7 @@ Rules:
 Keep it concise (under 400 words). Do NOT write code.\
 """
 
+
 async def reconstruct_user_prompt(
     raw_prompt: str,
     provider: str,
@@ -349,7 +437,7 @@ async def reconstruct_user_prompt(
                 reconstructed_len=len(reconstructed),
             )
             return reconstructed
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("plan.prompt_reconstruct_timeout", provider=provider, service=service)
     except Exception as exc:
         logger.warning("plan.prompt_reconstruct_failed", error=str(exc))
@@ -359,7 +447,8 @@ async def reconstruct_user_prompt(
 
 # ── SSE helper ───────────────────────────────────────────────────────
 
-def _sse(event_type: str, data: Dict[str, Any]) -> str:
+
+def _sse(event_type: str, data: dict[str, Any]) -> str:
     """Format a Server-Sent Event string."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
@@ -369,7 +458,7 @@ def _sse(event_type: str, data: Dict[str, Any]) -> str:
 VALID_STEP_TYPES = {e.value for e in StepType}
 
 
-def _ensure_user_methods_in_write_connector(steps: List[PlanStep], user_prompt: str, service_slug: str) -> None:
+def _ensure_user_methods_in_write_connector(steps: list[PlanStep], user_prompt: str, service_slug: str) -> None:
     """Post-processing guard: ensure user-requested operations are in write_connector.config.methods.
 
     If the planning LLM missed injecting user-requested methods (list_emails, send_email, etc.),
@@ -386,11 +475,18 @@ def _ensure_user_methods_in_write_connector(steps: List[PlanStep], user_prompt: 
     if write_step.config is None:
         write_step.config = {}
 
-    existing_methods: List[str] = write_step.config.get("methods", [])
+    existing_methods: list[str] = write_step.config.get("methods", [])
     extracted = _extract_user_operations(user_prompt, service_slug)
 
     # Base abstract methods that always exist — don't count as user-requested
-    _BASE_METHODS = {"install", "authorize", "health_check", "sync", "disconnect", "get_metadata"}
+    _BASE_METHODS = {
+        "install",
+        "authorize",
+        "health_check",
+        "sync",
+        "disconnect",
+        "get_metadata",
+    }
 
     added = []
     for method in extracted:
@@ -409,7 +505,7 @@ def _ensure_user_methods_in_write_connector(steps: List[PlanStep], user_prompt: 
         )
 
 
-def _ensure_terminal_steps(steps: List[PlanStep]) -> None:
+def _ensure_terminal_steps(steps: list[PlanStep]) -> None:
     """Enforce the canonical 7-step connector build workflow.
 
     Guaranteed order:
@@ -433,38 +529,42 @@ def _ensure_terminal_steps(steps: List[PlanStep]) -> None:
     # 0a. Ensure generate_implementation_plan exists before write_connector
     has_impl_plan = any(s.type == StepType.GENERATE_IMPLEMENTATION_PLAN for s in steps)
     if has_write_connector and not has_impl_plan:
-        write_connector_idx = next(
-            i for i, s in enumerate(steps) if s.type == StepType.WRITE_CONNECTOR
-        )
-        steps.insert(write_connector_idx, PlanStep(
-            index=write_connector_idx,
-            type=StepType.GENERATE_IMPLEMENTATION_PLAN,
-            title="Generate Implementation Plan",
-            description=(
-                "Analyse the API spec, auth type, and user requirements to produce a detailed "
-                "implementation_plan.md — full method surface (SOC/OCP), exact package names, "
-                "per-method implementation guidelines, and error-handling strategy. "
-                "write_connector uses this document as its specification."
+        write_connector_idx = next(i for i, s in enumerate(steps) if s.type == StepType.WRITE_CONNECTOR)
+        steps.insert(
+            write_connector_idx,
+            PlanStep(
+                index=write_connector_idx,
+                type=StepType.GENERATE_IMPLEMENTATION_PLAN,
+                title="Generate Implementation Plan",
+                description=(
+                    "Analyse the API spec, auth type, and user requirements to produce a detailed "
+                    "implementation_plan.md — full method surface (SOC/OCP), exact package names, "
+                    "per-method implementation guidelines, and error-handling strategy. "
+                    "write_connector uses this document as its specification."
+                ),
+                estimated_duration_s=60,
+                config={},
+                status=StepStatus.PENDING,
             ),
-            estimated_duration_s=60,
-            config={},
-            status=StepStatus.PENDING,
-        ))
+        )
 
     # 0b. Ensure install_deps exists and comes AFTER generate_implementation_plan.
     # impl_plan Section 7 lists exact pip package names — install_deps reads from it.
     has_install_deps = any(s.type == StepType.INSTALL_DEPS for s in steps)
     if has_write_connector and not has_install_deps:
         impl_idx = next(i for i, s in enumerate(steps) if s.type == StepType.GENERATE_IMPLEMENTATION_PLAN)
-        steps.insert(impl_idx + 1, PlanStep(
-            index=impl_idx + 1,
-            type=StepType.INSTALL_DEPS,
-            title="Install Python Dependencies",
-            description="Install required packages identified in the implementation plan. Package names are read from Section 7 of implementation_plan.md for accuracy.",
-            estimated_duration_s=30,
-            config={"packages": []},
-            status=StepStatus.PENDING,
-        ))
+        steps.insert(
+            impl_idx + 1,
+            PlanStep(
+                index=impl_idx + 1,
+                type=StepType.INSTALL_DEPS,
+                title="Install Python Dependencies",
+                description="Install required packages identified in the implementation plan. Package names are read from Section 7 of implementation_plan.md for accuracy.",
+                estimated_duration_s=30,
+                config={"packages": []},
+                status=StepStatus.PENDING,
+            ),
+        )
     elif has_install_deps:
         # Move install_deps to after generate_implementation_plan if it comes before it
         impl_plan_idx = next(i for i, s in enumerate(steps) if s.type == StepType.GENERATE_IMPLEMENTATION_PLAN)
@@ -477,63 +577,68 @@ def _ensure_terminal_steps(steps: List[PlanStep]) -> None:
     # 0b-ii. Ensure compliance_check exists immediately after write_connector (before smoke_test)
     has_compliance_check = any(s.type == StepType.COMPLIANCE_CHECK for s in steps)
     if has_write_connector and not has_compliance_check:
-        write_connector_idx = next(
-            i for i, s in enumerate(steps) if s.type == StepType.WRITE_CONNECTOR
-        )
-        steps.insert(write_connector_idx + 1, PlanStep(
-            index=write_connector_idx + 1,
-            type=StepType.COMPLIANCE_CHECK,
-            title="SOC/OCP Compliance Audit",
-            description=(
-                "Audit connector.py against all SOC (Separation of Concerns) and OCP (Open/Closed Principle) rules. "
-                "Calculate compliance percentage from 10-point checklist (5 SRP + 5 OCP). "
-                "Compliance must be >95% (10/10 — zero violations) to pass. "
-                "Automatically fix any violations found and re-audit until the gate passes."
+        write_connector_idx = next(i for i, s in enumerate(steps) if s.type == StepType.WRITE_CONNECTOR)
+        steps.insert(
+            write_connector_idx + 1,
+            PlanStep(
+                index=write_connector_idx + 1,
+                type=StepType.COMPLIANCE_CHECK,
+                title="SOC/OCP Compliance Audit",
+                description=(
+                    "Audit connector.py against all SOC (Separation of Concerns) and OCP (Open/Closed Principle) rules. "
+                    "Calculate compliance percentage from 10-point checklist (5 SRP + 5 OCP). "
+                    "Compliance must be >95% (10/10 — zero violations) to pass. "
+                    "Automatically fix any violations found and re-audit until the gate passes."
+                ),
+                estimated_duration_s=60,
+                config={"required_score": 10, "max_score": 10, "threshold_pct": 95},
+                status=StepStatus.PENDING,
             ),
-            estimated_duration_s=60,
-            config={"required_score": 10, "max_score": 10, "threshold_pct": 95},
-            status=StepStatus.PENDING,
-        ))
+        )
 
     # 0c. Ensure smoke_test exists immediately after compliance_check (or write_connector)
     has_smoke_test = any(s.type == StepType.SMOKE_TEST for s in steps)
     if has_write_connector and not has_smoke_test:
         # Insert after compliance_check if it exists, otherwise after write_connector
-        ref_type = StepType.COMPLIANCE_CHECK if has_compliance_check or True else StepType.WRITE_CONNECTOR
+        ref_type = StepType.COMPLIANCE_CHECK if True else StepType.WRITE_CONNECTOR
         ref_idx = next(
             (i for i, s in enumerate(steps) if s.type == ref_type),
             next(i for i, s in enumerate(steps) if s.type == StepType.WRITE_CONNECTOR),
         )
-        steps.insert(ref_idx + 1, PlanStep(
-            index=write_connector_idx + 1,
-            type=StepType.SMOKE_TEST,
-            title="Smoke Test Connector",
-            description=(
-                "Import the generated connector in a subprocess with all network calls mocked. "
-                "Verifies the connector class imports correctly, instantiates, and install() "
-                "returns a valid ConnectorStatus without making real network calls."
+        steps.insert(
+            ref_idx + 1,
+            PlanStep(
+                index=write_connector_idx + 1,
+                type=StepType.SMOKE_TEST,
+                title="Smoke Test Connector",
+                description=(
+                    "Import the generated connector in a subprocess with all network calls mocked. "
+                    "Verifies the connector class imports correctly, instantiates, and install() "
+                    "returns a valid ConnectorStatus without making real network calls."
+                ),
+                estimated_duration_s=20,
+                config={},
+                status=StepStatus.PENDING,
             ),
-            estimated_duration_s=20,
-            config={},
-            status=StepStatus.PENDING,
-        ))
+        )
 
     # 0d. Ensure generate_test_guidelines exists before write_tests
     has_write_tests = any(s.type == StepType.WRITE_TESTS for s in steps)
     has_gen_guidelines = any(s.type == StepType.GENERATE_TEST_GUIDELINES for s in steps)
     if has_write_tests and not has_gen_guidelines:
-        write_tests_idx = next(
-            i for i, s in enumerate(steps) if s.type == StepType.WRITE_TESTS
+        write_tests_idx = next(i for i, s in enumerate(steps) if s.type == StepType.WRITE_TESTS)
+        steps.insert(
+            write_tests_idx,
+            PlanStep(
+                index=write_tests_idx,
+                type=StepType.GENERATE_TEST_GUIDELINES,
+                title="Generate Test Guidelines",
+                description="Analyze the generated connector code and produce a connector-specific test guideline document used by the test writer.",
+                estimated_duration_s=45,
+                config={},
+                status=StepStatus.PENDING,
+            ),
         )
-        steps.insert(write_tests_idx, PlanStep(
-            index=write_tests_idx,
-            type=StepType.GENERATE_TEST_GUIDELINES,
-            title="Generate Test Guidelines",
-            description="Analyze the generated connector code and produce a connector-specific test guideline document used by the test writer.",
-            estimated_duration_s=45,
-            config={},
-            status=StepStatus.PENDING,
-        ))
 
     # 0e. Ensure generate_metadata exists (before setup_instructions / at end of core steps)
     has_gen_metadata = any(s.type == StepType.GENERATE_METADATA for s in steps)
@@ -543,52 +648,60 @@ def _ensure_terminal_steps(steps: List[PlanStep]) -> None:
             (i for i, s in enumerate(steps) if s.type == StepType.WRITE_TESTS),
             len(steps) - 1,
         )
-        steps.insert(ref_idx + 1, PlanStep(
-            index=ref_idx + 1,
-            type=StepType.GENERATE_METADATA,
-            title="Generate Connector Metadata",
-            description="Read the built connector.py and generate metadata/connector.json — install form schema, API catalogue, and Painter config.",
-            estimated_duration_s=45,
-            config={"version": "1.0.0"},
-            status=StepStatus.PENDING,
-        ))
+        steps.insert(
+            ref_idx + 1,
+            PlanStep(
+                index=ref_idx + 1,
+                type=StepType.GENERATE_METADATA,
+                title="Generate Connector Metadata",
+                description="Read the built connector.py and generate metadata/connector.json — install form schema, API catalogue, and Painter config.",
+                estimated_duration_s=45,
+                config={"version": "1.0.0"},
+                status=StepStatus.PENDING,
+            ),
+        )
 
     # 1. Ensure setup_instructions exists (before version_upgrade)
     if not any(s.type == StepType.SETUP_INSTRUCTIONS for s in steps):
         ref_idx = next(
             (i for i, s in enumerate(steps) if s.type == StepType.VERSION_UPGRADE),
-            len(steps)
+            len(steps),
         )
-        steps.insert(ref_idx, PlanStep(
-            index=ref_idx,
-            type=StepType.SETUP_INSTRUCTIONS,
-            title="Generate Setup Instructions",
-            description="Research and generate connector-specific configuration guide — shows users exactly where to find credentials in the provider portal.",
-            estimated_duration_s=45,
-            config={},
-            status=StepStatus.PENDING,
-        ))
+        steps.insert(
+            ref_idx,
+            PlanStep(
+                index=ref_idx,
+                type=StepType.SETUP_INSTRUCTIONS,
+                title="Generate Setup Instructions",
+                description="Research and generate connector-specific configuration guide — shows users exactly where to find credentials in the provider portal.",
+                estimated_duration_s=45,
+                config={},
+                status=StepStatus.PENDING,
+            ),
+        )
 
     # 2. (deploy_form removed — credential testing handled by integration tests step)
 
     # 3. Ensure version_upgrade is last
     if not any(s.type == StepType.VERSION_UPGRADE for s in steps):
-        steps.append(PlanStep(
-            index=len(steps),
-            type=StepType.VERSION_UPGRADE,
-            title="Version Upgrade",
-            description="Review changes and set the release version for this connector. Select patch, minor, or major version bump.",
-            estimated_duration_s=30,
-            config={"auto_suggest": True},
-            status=StepStatus.PENDING,
-        ))
+        steps.append(
+            PlanStep(
+                index=len(steps),
+                type=StepType.VERSION_UPGRADE,
+                title="Version Upgrade",
+                description="Review changes and set the release version for this connector. Select patch, minor, or major version bump.",
+                estimated_duration_s=30,
+                config={"auto_suggest": True},
+                status=StepStatus.PENDING,
+            )
+        )
 
     # Re-index
     for idx, s in enumerate(steps):
         s.index = idx
 
 
-def _parse_steps(raw_steps: List[Dict[str, Any]]) -> List[PlanStep]:
+def _parse_steps(raw_steps: list[dict[str, Any]]) -> list[PlanStep]:
     """Parse and validate LLM-generated step list."""
     steps = []
     for i, raw in enumerate(raw_steps):
@@ -596,22 +709,24 @@ def _parse_steps(raw_steps: List[Dict[str, Any]]) -> List[PlanStep]:
         if step_type not in VALID_STEP_TYPES:
             logger.warning("plan.invalid_step_type", type=step_type, index=i)
             continue
-        steps.append(PlanStep(
-            index=i,
-            type=StepType(step_type),
-            title=raw.get("title", f"Step {i + 1}"),
-            description=raw.get("description", ""),
-            estimated_duration_s=raw.get("estimated_duration_s", 30),
-            config=raw.get("config", {}),
-            status=StepStatus.PENDING,
-        ))
+        steps.append(
+            PlanStep(
+                index=i,
+                type=StepType(step_type),
+                title=raw.get("title", f"Step {i + 1}"),
+                description=raw.get("description", ""),
+                estimated_duration_s=raw.get("estimated_duration_s", 30),
+                config=raw.get("config", {}),
+                status=StepStatus.PENDING,
+            )
+        )
     # Re-index in case some were skipped
     for idx, step in enumerate(steps):
         step.index = idx
     return steps
 
 
-def _extract_plan_parts(llm_result: Any) -> Dict[str, Any]:
+def _extract_plan_parts(llm_result: Any) -> dict[str, Any]:
     """Extract steps, package_structure, recommended_features, default_config_fields from LLM output.
 
     Handles both old format (bare array) and new format (object with keys).
@@ -624,7 +739,7 @@ def _extract_plan_parts(llm_result: Any) -> Dict[str, Any]:
             "recommended_features": [],
             "default_config_fields": [],
         }
-    elif isinstance(llm_result, dict):
+    if isinstance(llm_result, dict):
         # New format: object with steps, package_structure, recommended_features, default_config_fields
         raw_steps = llm_result.get("steps", [])
         if not isinstance(raw_steps, list):
@@ -635,13 +750,12 @@ def _extract_plan_parts(llm_result: Any) -> Dict[str, Any]:
             "recommended_features": llm_result.get("recommended_features", []),
             "default_config_fields": llm_result.get("default_config_fields", []),
         }
-    else:
-        raise ValueError(f"Expected JSON object or array from LLM, got {type(llm_result).__name__}")
+    raise ValueError(f"Expected JSON object or array from LLM, got {type(llm_result).__name__}")
 
 
 def _fill_missing_plan_extras(
-    parts: Dict[str, Any],
-    parsed_steps: "List[PlanStep]",
+    parts: dict[str, Any],
+    parsed_steps: "list[PlanStep]",
     auth_type: str = "",
 ) -> None:
     """Backfill recommended_features and default_config_fields from step configs when LLM omitted them.
@@ -653,9 +767,15 @@ def _fill_missing_plan_extras(
             feat_list = (s.config or {}).get("features") if s.config else None
             if feat_list and isinstance(feat_list, list):
                 parts["recommended_features"] = [
-                    {"id": fid, "label": fid.replace("_", " ").title(),
-                     "recommended": True, "category": "connector", "description": ""}
-                    for fid in feat_list if isinstance(fid, str)
+                    {
+                        "id": fid,
+                        "label": fid.replace("_", " ").title(),
+                        "recommended": True,
+                        "category": "connector",
+                        "description": "",
+                    }
+                    for fid in feat_list
+                    if isinstance(fid, str)
                 ]
                 break
 
@@ -668,21 +788,37 @@ def _fill_missing_plan_extras(
         if not parts.get("default_config_fields") and auth_type:
             if auth_type == "oauth2":
                 parts["default_config_fields"] = [
-                    {"key": "client_id",     "label": "Client ID",     "type": "text",     "required": True},
-                    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": True},
+                    {
+                        "key": "client_id",
+                        "label": "Client ID",
+                        "type": "text",
+                        "required": True,
+                    },
+                    {
+                        "key": "client_secret",
+                        "label": "Client Secret",
+                        "type": "password",
+                        "required": True,
+                    },
                 ]
             elif auth_type in ("api_key", "bearer"):
                 parts["default_config_fields"] = [
-                    {"key": "api_key", "label": "API Key", "type": "password", "required": True}
+                    {
+                        "key": "api_key",
+                        "label": "API Key",
+                        "type": "password",
+                        "required": True,
+                    }
                 ]
 
 
 # ── Plan generation ───────────────────────────────────────────────────
 
+
 async def generate_plan(
     session_id: str,
-    tenant_id: Optional[str],
-) -> Dict[str, Any]:
+    tenant_id: str | None,
+) -> dict[str, Any]:
     """Generate an integration plan for a session using Claude.
 
     Updates the session document in-place and returns the plan + metadata.
@@ -704,11 +840,7 @@ async def generate_plan(
     if _stored_slug:
         service_slug = _stored_slug
     else:
-        service_slug = (
-            _slug_from_connector_name(connector_name)
-            if connector_name
-            else _service_slug(provider, service)
-        )
+        service_slug = _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
 
     # Look up catalog metadata — fall back to a minimal synthetic entry for custom connectors
     catalog = get_service_detail(provider, service)
@@ -732,8 +864,7 @@ async def generate_plan(
     _rcf = catalog.get("required_config_fields", [])
     if _rcf:
         _rcf_lines = "\n".join(
-            f"  - `{f['key']}` ({f['label']}) — bind:{f.get('bind', False)} — {f.get('help', '')}"
-            for f in _rcf
+            f"  - `{f['key']}` ({f['label']}) — bind:{f.get('bind', False)} — {f.get('help', '')}" for f in _rcf
         )
         required_config_fields_section = (
             "- **Required Config Fields** — these MUST appear in `default_config_fields` "
@@ -749,14 +880,16 @@ async def generate_plan(
             "**User-selected features** — the user has explicitly chosen these features. "
             "You MUST mark all of them as `recommended: true` in `recommended_features` and "
             "include all of their feature IDs in the `write_connector` step's `features` array:\n"
-            + "\n".join(f"  - {fid}" for fid in _sel_features) + "\n\n"
+            + "\n".join(f"  - {fid}" for fid in _sel_features)
+            + "\n\n"
         )
     else:
         _sel_section = ""
 
     # Build system prompt with service context + coding standards
     _prompt_base = await r2_service.get_step_prompt("PLANNING_SYSTEM_PROMPT", PLANNING_SYSTEM_PROMPT)
-    system = _safe_format(_prompt_base,
+    system = _safe_format(
+        _prompt_base,
         base_connector_interface=BASE_CONNECTOR_INTERFACE,
         connector_name=connector_name or catalog["display_name"],
         package_root=service_slug,
@@ -797,9 +930,15 @@ async def generate_plan(
     else:
         user_msg = f"Build a standard connector integration plan for {catalog['display_name']}."
 
-    logger.info("plan.generating", session_id=session_id, provider=provider, service=service,
-                service_slug=service_slug, guidelines_version=guidelines_version,
-                extracted_ops=extracted_ops)
+    logger.info(
+        "plan.generating",
+        session_id=session_id,
+        provider=provider,
+        service=service,
+        service_slug=service_slug,
+        guidelines_version=guidelines_version,
+        extracted_ops=extracted_ops,
+    )
 
     # Propagate tenant_id to LLM ContextVar (needed for MCP mode; empty string pre-login)
     set_llm_tenant_id(tenant_id or "")
@@ -834,18 +973,22 @@ async def generate_plan(
     # (version + per-step {index, title, type, status}). The Builder + codegen
     # lazy-hydrate the full step config back from R2 when needed.
     _plan_for_mongo = await persist_plan(
-        session_id=session_id, provider=provider, service_slug=service_slug,
+        session_id=session_id,
+        provider=provider,
+        service_slug=service_slug,
         plan=plan.model_dump(),
     )
 
     # Phase 5: conversation history → R2; Mongo gets a tiny pointer dict.
     _history_pointer = await persist_conversation_history(
-        session_id=session_id, provider=provider, service_slug=service_slug,
+        session_id=session_id,
+        provider=provider,
+        service_slug=service_slug,
         history=updated_history,
     )
 
     # Persist to session (include package_structure + recommended_features + default_config_fields + history)
-    update_fields: Dict[str, Any] = {
+    update_fields: dict[str, Any] = {
         "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
         "conversation_history": _history_pointer,
@@ -867,7 +1010,10 @@ async def generate_plan(
 
     # Persist to R2 (best-effort — failure does not block response)
     await r2_service.save_prompt_and_plan(
-        provider, service_slug, tenant_id, user_prompt,
+        provider,
+        service_slug,
+        tenant_id,
+        user_prompt,
         {
             "steps": plan.model_dump()["steps"],
             "version": 1,
@@ -880,25 +1026,29 @@ async def generate_plan(
 
     # Ingest plan into connector KB so Gemini can query it during code generation
     try:
+        from datetime import datetime
+
         from integration.services.knowledge_service import ingest_connector_docs
         from integration.services.r2_service import _build_plan_markdown
-        from datetime import datetime, timezone
+
         plan_md = _build_plan_markdown(
-            provider, service_slug, user_prompt,
+            provider,
+            service_slug,
+            user_prompt,
             {
                 "steps": plan.model_dump()["steps"],
                 "version": 1,
                 "package_structure": parts["package_structure"],
                 "recommended_features": parts["recommended_features"],
             },
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
         )
         await ingest_connector_docs(
             content=plan_md,
             title=f"Integration Plan: {provider} / {service}",
             tenant_id=tenant_id,
             provider=provider,
-            service=service,        # raw service name — must match what ingest_step_output uses
+            service=service,  # raw service name — must match what ingest_step_output uses
             session_id=session_id,
         )
         logger.info("plan.ingested_to_kb", session_id=session_id)
@@ -915,11 +1065,12 @@ async def generate_plan(
 
 # ── Parse raw Claude output → import plan (local execution flow) ─────
 
+
 async def parse_and_import_plan(
     session_id: str,
     tenant_id: str,
     raw_output: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Parse raw Claude CLI output, extract JSON plan, and import it.
 
     Called by the Electron desktop app after local Claude CLI finishes
@@ -928,25 +1079,22 @@ async def parse_and_import_plan(
     """
     # Strip ANSI escape codes (terminal color sequences from PTY output)
     import re as _re
-    clean = _re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', raw_output)
+
+    clean = _re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", raw_output)
 
     # Try to extract a JSON block — fenced (```json…```) or bare outermost object
     json_obj: Any = None
-    fence_match = _re.search(r'```(?:json)?\s*([\s\S]*?)```', clean)
+    fence_match = _re.search(r"```(?:json)?\s*([\s\S]*?)```", clean)
     if fence_match:
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             json_obj = json.loads(fence_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
 
     if json_obj is None:
         start = clean.find("{")
         end = clean.rfind("}")
         if start != -1 and end > start:
-            try:
-                json_obj = json.loads(clean[start:end + 1])
-            except json.JSONDecodeError:
-                pass
+            with contextlib.suppress(json.JSONDecodeError):
+                json_obj = json.loads(clean[start : end + 1])
 
     if json_obj is None:
         raise ValueError("No valid JSON found in Claude output")
@@ -954,18 +1102,23 @@ async def parse_and_import_plan(
     parts = _extract_plan_parts(json_obj)
 
     # Delegate to import_cached_plan which handles MongoDB + R2 persistence
-    return await import_cached_plan(session_id, tenant_id, {
-        "steps": parts["raw_steps"],
-        "version": json_obj.get("version", 1) if isinstance(json_obj, dict) else 1,
-        "package_structure": parts["package_structure"],
-        "recommended_features": parts["recommended_features"],
-        "default_config_fields": parts["default_config_fields"],
-    })
+    return await import_cached_plan(
+        session_id,
+        tenant_id,
+        {
+            "steps": parts["raw_steps"],
+            "version": json_obj.get("version", 1) if isinstance(json_obj, dict) else 1,
+            "package_structure": parts["package_structure"],
+            "recommended_features": parts["recommended_features"],
+            "default_config_fields": parts["default_config_fields"],
+        },
+    )
 
 
 # ── Planning prompt assembly (no LLM call) ──────────────────────────
 
-async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str, Any]:
+
+async def get_planning_prompt_text(session_id: str, tenant_id: str) -> dict[str, Any]:
     """Assemble the planning system + user prompts without calling Claude.
 
     Used by the Electron desktop app to run Claude CLI locally for plan generation.
@@ -985,11 +1138,7 @@ async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str,
     if _stored_slug:
         service_slug = _stored_slug
     else:
-        service_slug = (
-            _slug_from_connector_name(connector_name)
-            if connector_name
-            else _service_slug(provider, service)
-        )
+        service_slug = _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
 
     catalog = get_service_detail(provider, service)
     if not catalog:
@@ -1015,24 +1164,34 @@ async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str,
 
     _rcf = catalog.get("required_config_fields", [])
     required_config_fields_section = (
-        "- **Required Config Fields** — these MUST appear in `default_config_fields` "
-        "exactly as listed (correct key, bind value, and help text):\n"
-        + "\n".join(
-            f"  - `{f['key']}` ({f['label']}) — bind:{f.get('bind', False)} — {f.get('help', '')}"
-            for f in _rcf
-        ) + "\n"
-    ) if _rcf else ""
+        (
+            "- **Required Config Fields** — these MUST appear in `default_config_fields` "
+            "exactly as listed (correct key, bind value, and help text):\n"
+            + "\n".join(
+                f"  - `{f['key']}` ({f['label']}) — bind:{f.get('bind', False)} — {f.get('help', '')}" for f in _rcf
+            )
+            + "\n"
+        )
+        if _rcf
+        else ""
+    )
 
     _sel_features = session.get("selected_features", [])
     selected_features_section = (
-        "**User-selected features** — the user has explicitly chosen these features. "
-        "You MUST mark all of them as `recommended: true` in `recommended_features` and "
-        "include all of their feature IDs in the `write_connector` step's `features` array:\n"
-        + "\n".join(f"  - {fid}" for fid in _sel_features) + "\n\n"
-    ) if _sel_features else ""
+        (
+            "**User-selected features** — the user has explicitly chosen these features. "
+            "You MUST mark all of them as `recommended: true` in `recommended_features` and "
+            "include all of their feature IDs in the `write_connector` step's `features` array:\n"
+            + "\n".join(f"  - {fid}" for fid in _sel_features)
+            + "\n\n"
+        )
+        if _sel_features
+        else ""
+    )
 
     _prompt_base = await r2_service.get_step_prompt("PLANNING_SYSTEM_PROMPT", PLANNING_SYSTEM_PROMPT)
-    system = _safe_format(_prompt_base,
+    system = _safe_format(
+        _prompt_base,
         base_connector_interface=BASE_CONNECTOR_INTERFACE,
         connector_name=connector_name or catalog["display_name"],
         package_root=service_slug,
@@ -1090,11 +1249,12 @@ async def get_planning_prompt_text(session_id: str, tenant_id: str) -> Dict[str,
 
 # ── Streaming plan generation (SSE) ─────────────────────────────────
 
+
 async def generate_plan_stream(
     session_id: str,
-    tenant_id: Optional[str],
-    new_prompt: Optional[str] = None,
-    app_id: Optional[str] = None,
+    tenant_id: str | None,
+    new_prompt: str | None = None,
+    app_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate a plan and yield SSE events with real-time logs.
 
@@ -1115,11 +1275,14 @@ async def generate_plan_stream(
     t0 = time.time()
 
     try:
-        yield _sse("planning_start", {
-            "session_id": session_id,
-            "message": "Initializing plan generation...",
-            "timestamp": time.time(),
-        })
+        yield _sse(
+            "planning_start",
+            {
+                "session_id": session_id,
+                "message": "Initializing plan generation...",
+                "timestamp": time.time(),
+            },
+        )
 
         oid = ObjectId(session_id)
         session = await sessions_collection().find_one({"_id": oid})
@@ -1154,9 +1317,7 @@ async def generate_plan_stream(
             service_slug = _stored_slug
         else:
             service_slug = (
-                _slug_from_connector_name(connector_name)
-                if connector_name
-                else _service_slug(provider, service)
+                _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
             )
 
         # If a new prompt was supplied (forced fresh regeneration), persist it and wipe R2 cache
@@ -1164,11 +1325,13 @@ async def generate_plan_stream(
             user_prompt = new_prompt.strip()
             await sessions_collection().update_one(
                 {"_id": oid},
-                {"$set": {
-                    "user_prompt": user_prompt,
-                    "conversation_history": [],  # reset history so Claude starts fresh
-                    "updated_at": __import__("datetime").datetime.utcnow(),
-                }},
+                {
+                    "$set": {
+                        "user_prompt": user_prompt,
+                        "conversation_history": [],  # reset history so Claude starts fresh
+                        "updated_at": __import__("datetime").datetime.utcnow(),
+                    }
+                },
             )
             session["conversation_history"] = []
             # Invalidate R2 so the next "Generate Plan" call doesn't serve the old cached plan
@@ -1176,19 +1339,25 @@ async def generate_plan_stream(
                 await r2_service.invalidate_stale_plan(provider, service_slug, tenant_id)
             except Exception as _r2_err:
                 pass  # best-effort — don't block on R2 failure
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"New prompt saved — generating fresh plan from scratch (R2 cache cleared)...",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": "New prompt saved — generating fresh plan from scratch (R2 cache cleared)...",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
         else:
             user_prompt = session.get("user_prompt", "")
 
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": f"Session loaded — provider={provider}, service={service}, package_root={service_slug}_connector",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": f"Session loaded — provider={provider}, service={service}, package_root={service_slug}_connector",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Look up catalog metadata — fall back to synthetic entry for custom connectors
         catalog = get_service_detail(provider, service)
@@ -1203,25 +1372,34 @@ async def generate_plan_stream(
                 "auth_type": session.get("auth_type") or "api_key",
                 "category": "custom",
             }
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"Custom connector — using synthetic catalog entry for {connector_name_clean}",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": f"Custom connector — using synthetic catalog entry for {connector_name_clean}",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
         else:
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"Catalog entry found: {catalog['display_name']} (auth={catalog.get('auth_type', '?')}, sdk={catalog.get('sdk_package', 'N/A')})",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": f"Catalog entry found: {catalog['display_name']} (auth={catalog.get('auth_type', '?')}, sdk={catalog.get('sdk_package', 'N/A')})",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         # Fetch current guidelines — injected into prompt so plan is always compliant
         guidelines_content, guidelines_version = await _get_guidelines_for_planning()
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": f"CODE_EXECUTION_GUIDELINES loaded (version={guidelines_version}, {len(guidelines_content)} chars). Injecting into planning prompt.",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": f"CODE_EXECUTION_GUIDELINES loaded (version={guidelines_version}, {len(guidelines_content)} chars). Injecting into planning prompt.",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Build required_config_fields section for stream prompt
         _rcf_stream = catalog.get("required_config_fields", [])
@@ -1244,14 +1422,16 @@ async def generate_plan_stream(
                 "**User-selected features** — the user has explicitly chosen these features. "
                 "You MUST mark all of them as `recommended: true` in `recommended_features` and "
                 "include all of their feature IDs in the `write_connector` step's `features` array:\n"
-                + "\n".join(f"  - {fid}" for fid in _sel_features_stream) + "\n\n"
+                + "\n".join(f"  - {fid}" for fid in _sel_features_stream)
+                + "\n\n"
             )
         else:
             _sel_section_stream = ""
 
         # Build system prompt with coding standards injected
         _prompt_base_stream = await r2_service.get_step_prompt("PLANNING_SYSTEM_PROMPT", PLANNING_SYSTEM_PROMPT)
-        system = _safe_format(_prompt_base_stream,
+        system = _safe_format(
+            _prompt_base_stream,
             base_connector_interface=BASE_CONNECTOR_INTERFACE,
             connector_name=connector_name or catalog["display_name"],
             package_root=service_slug,
@@ -1271,7 +1451,9 @@ async def generate_plan_stream(
         prior_history = await hydrate_conversation_history(session=session)
 
         # Extract user-requested operations and inject as explicit method list
-        _stream_extracted_ops = _extract_user_operations(session.get("user_prompt", "") or user_prompt or "", service_slug)
+        _stream_extracted_ops = _extract_user_operations(
+            session.get("user_prompt", "") or user_prompt or "", service_slug
+        )
         if user_prompt:
             _ops_block = ""
             if _stream_extracted_ops:
@@ -1291,23 +1473,29 @@ async def generate_plan_stream(
         else:
             user_msg = f"Build a standard connector integration plan for {catalog['display_name']}."
 
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": (
-                f"System prompt built ({len(system)} chars). "
-                f"Injected BaseConnector interface + catalog metadata. "
-                f"Extracted user operations: {_stream_extracted_ops}. "
-                f"Prior conversation turns: {len(prior_history) // 2}."
-            ),
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": (
+                    f"System prompt built ({len(system)} chars). "
+                    f"Injected BaseConnector interface + catalog metadata. "
+                    f"Extracted user operations: {_stream_extracted_ops}. "
+                    f"Prior conversation turns: {len(prior_history) // 2}."
+                ),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
-        yield _sse("llm_calling", {
-            "message": "Calling Claude AI — generating integration plan...",
-            "prompt_length": len(system) + len(user_msg),
-            "prior_turns": len(prior_history) // 2,
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "llm_calling",
+            {
+                "message": "Calling Claude AI — generating integration plan...",
+                "prompt_length": len(system) + len(user_msg),
+                "prior_turns": len(prior_history) // 2,
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Stream Claude tokens via asyncio queue so we can yield SSE events
         # while the LLM call is running concurrently.
@@ -1332,7 +1520,7 @@ async def generate_plan_stream(
             try:
                 _chunk = await asyncio.wait_for(_token_queue.get(), timeout=0.05)
                 yield _sse("llm_token", {"chunk": _chunk})
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if _chat_task.done():
                     while not _token_queue.empty():
                         _chunk = _token_queue.get_nowait()
@@ -1341,11 +1529,14 @@ async def generate_plan_stream(
 
         llm_result, updated_history = await _chat_task
 
-        yield _sse("llm_response", {
-            "message": "Claude response received. Parsing plan data...",
-            "response_type": type(llm_result).__name__,
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "llm_response",
+            {
+                "message": "Claude response received. Parsing plan data...",
+                "response_type": type(llm_result).__name__,
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         parts = _extract_plan_parts(llm_result)
         raw_steps = parts["raw_steps"]
@@ -1359,44 +1550,59 @@ async def generate_plan_stream(
         package_structure = parts["package_structure"]
 
         if package_structure:
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"Package structure: {package_structure.get('root', '?')} — {len(package_structure.get('files', []))} files",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": f"Package structure: {package_structure.get('root', '?')} — {len(package_structure.get('files', []))} files",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         if recommended_features:
             feat_names = [f.get("label", f.get("id", "?")) for f in recommended_features]
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"Recommended features: {', '.join(feat_names)}",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": f"Recommended features: {', '.join(feat_names)}",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         if default_config_fields:
             field_names = [f.get("label", f.get("key", "?")) for f in default_config_fields]
-            yield _sse("planning_log", {
-                "level": "info",
-                "message": f"Config fields ({len(default_config_fields)}): {', '.join(field_names)}",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "info",
+                    "message": f"Config fields ({len(default_config_fields)}): {', '.join(field_names)}",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": f"LLM returned {len(raw_steps)} raw steps. Validating...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": f"LLM returned {len(raw_steps)} raw steps. Validating...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Parse steps, emit each one
         steps = []
         for i, raw in enumerate(raw_steps):
             step_type = raw.get("type", "")
             if step_type not in VALID_STEP_TYPES:
-                yield _sse("planning_log", {
-                    "level": "warn",
-                    "message": f"Skipping invalid step type '{step_type}' at index {i}",
-                    "elapsed_ms": int((time.time() - t0) * 1000),
-                })
+                yield _sse(
+                    "planning_log",
+                    {
+                        "level": "warn",
+                        "message": f"Skipping invalid step type '{step_type}' at index {i}",
+                        "elapsed_ms": int((time.time() - t0) * 1000),
+                    },
+                )
                 continue
             step = PlanStep(
                 index=len(steps),
@@ -1408,13 +1614,16 @@ async def generate_plan_stream(
                 status=StepStatus.PENDING,
             )
             steps.append(step)
-            yield _sse("step_parsed", {
-                "index": step.index,
-                "type": step_type,
-                "title": step.title,
-                "description": step.description[:120],
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "step_parsed",
+                {
+                    "index": step.index,
+                    "type": step_type,
+                    "title": step.title,
+                    "description": step.description[:120],
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         if not steps:
             yield _sse("planning_error", {"message": "LLM produced no valid steps"})
@@ -1425,32 +1634,42 @@ async def generate_plan_stream(
         # Guard: inject any user-requested methods the LLM missed
         _ensure_user_methods_in_write_connector(steps, session.get("user_prompt", ""), service_slug)
         # Backfill extras when LLM used old format (bare array)
-        _stream_parts = {"recommended_features": recommended_features, "default_config_fields": default_config_fields}
+        _stream_parts = {
+            "recommended_features": recommended_features,
+            "default_config_fields": default_config_fields,
+        }
         _fill_missing_plan_extras(_stream_parts, steps, auth_type=session.get("auth_type", ""))
         recommended_features = _stream_parts["recommended_features"]
         default_config_fields = _stream_parts["default_config_fields"]
 
         plan = PlanDocument(steps=steps, version=1)
 
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": f"Validated {len(steps)} steps. Saving plan to database...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": f"Validated {len(steps)} steps. Saving plan to database...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Phase 4: full plan → R2; slim summary → Mongo (see persist_plan docstring).
         _plan_for_mongo = await persist_plan(
-            session_id=session_id, provider=provider, service_slug=service_slug,
+            session_id=session_id,
+            provider=provider,
+            service_slug=service_slug,
             plan=plan.model_dump(),
         )
         # Phase 5: conversation history → R2; Mongo gets a pointer.
         _history_pointer = await persist_conversation_history(
-            session_id=session_id, provider=provider, service_slug=service_slug,
+            session_id=session_id,
+            provider=provider,
+            service_slug=service_slug,
             history=updated_history,
         )
 
         # Persist plan + conversation history
-        update_fields: Dict[str, Any] = {
+        update_fields: dict[str, Any] = {
             "plan": _plan_for_mongo,
             "status": SessionStatus.REVIEWING.value,
             "conversation_history": _history_pointer,
@@ -1469,14 +1688,20 @@ async def generate_plan_stream(
         )
 
         # Persist to R2 (best-effort — failure does not interrupt SSE stream)
-        yield _sse("planning_log", {
-            "level": "info",
-            "message": "Saving plan to Cloudflare R2 (prompts.csv + plan.json + plan.md)...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_log",
+            {
+                "level": "info",
+                "message": "Saving plan to Cloudflare R2 (prompts.csv + plan.json + plan.md)...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
         try:
             await r2_service.save_prompt_and_plan(
-                provider, service_slug, tenant_id, user_prompt,
+                provider,
+                service_slug,
+                tenant_id,
+                user_prompt,
                 {
                     "steps": plan.model_dump()["steps"],
                     "version": 1,
@@ -1486,50 +1711,68 @@ async def generate_plan_stream(
                 },
                 guidelines_version=guidelines_version,
             )
-            yield _sse("planning_log", {
-                "level": "success",
-                "message": f"R2 saved — {settings.R2_BUCKET_NAME}/{provider}/{service}/{tenant_id}/plan.md (guidelines v{guidelines_version})",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "success",
+                    "message": f"R2 saved — {settings.R2_BUCKET_NAME}/{provider}/{service}/{tenant_id}/plan.md (guidelines v{guidelines_version})",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
         except Exception as r2_exc:
-            yield _sse("planning_log", {
-                "level": "warn",
-                "message": f"R2 save skipped: {r2_exc}",
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "planning_log",
+                {
+                    "level": "warn",
+                    "message": f"R2 save skipped: {r2_exc}",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         total_ms = int((time.time() - t0) * 1000)
-        yield _sse("planning_complete", {
-            "message": f"Plan generated successfully — {len(steps)} steps in {total_ms}ms",
-            "step_count": len(steps),
-            "version": 1,
-            "elapsed_ms": total_ms,
-            "plan": {
-                **plan.model_dump(),
-                "package_structure": package_structure,
-                "recommended_features": recommended_features,
-                "default_config_fields": default_config_fields,
+        yield _sse(
+            "planning_complete",
+            {
+                "message": f"Plan generated successfully — {len(steps)} steps in {total_ms}ms",
+                "step_count": len(steps),
+                "version": 1,
+                "elapsed_ms": total_ms,
+                "plan": {
+                    **plan.model_dump(),
+                    "package_structure": package_structure,
+                    "recommended_features": recommended_features,
+                    "default_config_fields": default_config_fields,
+                },
             },
-        })
+        )
 
-        logger.info("plan.stream_generated", session_id=session_id, step_count=len(steps), elapsed_ms=total_ms)
+        logger.info(
+            "plan.stream_generated",
+            session_id=session_id,
+            step_count=len(steps),
+            elapsed_ms=total_ms,
+        )
 
     except Exception as exc:
         logger.error("plan.stream_error", session_id=session_id, error=str(exc), exc_info=True)
-        yield _sse("planning_error", {
-            "message": str(exc),
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "planning_error",
+            {
+                "message": str(exc),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
 
 # ── Replan ────────────────────────────────────────────────────────────
 
+
 async def replan(
     session_id: str,
-    tenant_id: Optional[str],
+    tenant_id: str | None,
     step_index: int,
     user_comment: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Regenerate the plan incorporating user feedback on a specific step."""
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one({"_id": oid})
@@ -1547,20 +1790,19 @@ async def replan(
     if _stored_slug:
         service_slug = _stored_slug
     else:
-        service_slug = (
-            _slug_from_connector_name(connector_name)
-            if connector_name
-            else _service_slug(provider, service)
-        )
+        service_slug = _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
 
     catalog = get_service_detail(provider, service)
     if not catalog:
         connector_name_clean = connector_name or f"{provider.title()} {service.replace('_', ' ').title()}"
         catalog = {
-            "provider": provider, "service": service, "service_key": service,
+            "provider": provider,
+            "service": service,
+            "service_key": service,
             "display_name": connector_name_clean,
             "description": session.get("user_prompt") or f"Custom connector for {connector_name_clean}",
-            "auth_type": session.get("auth_type") or "api_key", "category": "custom",
+            "auth_type": session.get("auth_type") or "api_key",
+            "category": "custom",
         }
 
     # Build current plan JSON including extras for context
@@ -1574,7 +1816,8 @@ async def replan(
     guidelines_content, guidelines_version = await _get_guidelines_for_planning()
 
     _replan_base = await r2_service.get_step_prompt("REPLAN_SYSTEM_PROMPT", REPLAN_SYSTEM_PROMPT)
-    system = _safe_format(_replan_base,
+    system = _safe_format(
+        _replan_base,
         base_connector_interface=BASE_CONNECTOR_INTERFACE,
         connector_name=connector_name or catalog["display_name"],
         package_root=service_slug,
@@ -1627,17 +1870,21 @@ async def replan(
 
     # Phase 4: full plan → R2; slim summary → Mongo.
     _plan_for_mongo = await persist_plan(
-        session_id=session_id, provider=provider, service_slug=service_slug,
+        session_id=session_id,
+        provider=provider,
+        service_slug=service_slug,
         plan=new_plan.model_dump(),
     )
     _history_pointer = await persist_conversation_history(
-        session_id=session_id, provider=provider, service_slug=service_slug,
+        session_id=session_id,
+        provider=provider,
+        service_slug=service_slug,
         history=updated_history,
     )
 
     # Save comment + updated plan + any new package_structure/features/config_fields + conversation history
     comment = StepComment(step_index=step_index, comment=user_comment)
-    update_fields: Dict[str, Any] = {
+    update_fields: dict[str, Any] = {
         "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
         "conversation_history": _history_pointer,
@@ -1658,12 +1905,19 @@ async def replan(
         },
     )
 
-    logger.info("plan.replanned", session_id=session_id, version=new_plan.version, step_count=len(steps))
+    logger.info(
+        "plan.replanned",
+        session_id=session_id,
+        version=new_plan.version,
+        step_count=len(steps),
+    )
 
     # Persist to R2 (best-effort)
     user_prompt = session.get("user_prompt", "")
     await r2_service.save_prompt_and_plan(
-        provider, service_slug, tenant_id,
+        provider,
+        service_slug,
+        tenant_id,
         f"{user_prompt} [replan v{new_plan.version}]: {user_comment}",
         {
             "steps": new_plan.model_dump()["steps"],
@@ -1685,22 +1939,26 @@ async def replan(
 
 # ── Replan with streaming SSE logs ────────────────────────────────────
 
+
 async def replan_stream(
     session_id: str,
-    tenant_id: Optional[str],
+    tenant_id: str | None,
     step_index: int,
     user_comment: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Regenerate the plan with user feedback — streams SSE events for real-time UI logs."""
     t0 = time.time()
     try:
-        yield _sse("replan_start", {
-            "session_id": session_id,
-            "message": "Starting plan regeneration...",
-            "step_index": step_index,
-            "timestamp": t0,
-        })
+        yield _sse(
+            "replan_start",
+            {
+                "session_id": session_id,
+                "message": "Starting plan regeneration...",
+                "step_index": step_index,
+                "timestamp": t0,
+            },
+        )
 
         oid = ObjectId(session_id)
         session = await sessions_collection().find_one({"_id": oid})
@@ -1731,34 +1989,41 @@ async def replan_stream(
             service_slug = _stored_slug
         else:
             service_slug = (
-                _slug_from_connector_name(connector_name)
-                if connector_name
-                else _service_slug(provider, service)
+                _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
             )
 
-        yield _sse("replan_log", {
-            "level": "info",
-            "message": f"Session loaded — {provider}/{service} (plan v{current_version}, package_root={service_slug}_connector)",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "replan_log",
+            {
+                "level": "info",
+                "message": f"Session loaded — {provider}/{service} (plan v{current_version}, package_root={service_slug}_connector)",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         catalog = get_service_detail(provider, service)
         if not catalog:
             connector_name_clean = connector_name or f"{provider.title()} {service.replace('_', ' ').title()}"
             catalog = {
-                "provider": provider, "service": service, "service_key": service,
+                "provider": provider,
+                "service": service,
+                "service_key": service,
                 "display_name": connector_name_clean,
                 "description": session.get("user_prompt") or f"Custom connector for {connector_name_clean}",
-                "auth_type": session.get("auth_type") or "api_key", "category": "custom",
+                "auth_type": session.get("auth_type") or "api_key",
+                "category": "custom",
             }
 
         # Fetch current guidelines
         guidelines_content, guidelines_version = await _get_guidelines_for_planning()
-        yield _sse("replan_log", {
-            "level": "info",
-            "message": f"Guidelines loaded (version={guidelines_version}). Building replan prompt...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "replan_log",
+            {
+                "level": "info",
+                "message": f"Guidelines loaded (version={guidelines_version}). Building replan prompt...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         current_data = {
             "steps": current_plan.get("steps", []),
@@ -1767,7 +2032,8 @@ async def replan_stream(
         }
 
         _replan_base_stream = await r2_service.get_step_prompt("REPLAN_SYSTEM_PROMPT", REPLAN_SYSTEM_PROMPT)
-        system = _safe_format(_replan_base_stream,
+        system = _safe_format(
+            _replan_base_stream,
             base_connector_interface=BASE_CONNECTOR_INTERFACE,
             connector_name=connector_name or catalog["display_name"],
             package_root=service_slug,
@@ -1786,11 +2052,14 @@ async def replan_stream(
         prior_history = await hydrate_conversation_history(session=session)
         user_msg = f"Replan the integration. My feedback on step {step_index}: {user_comment}"
 
-        yield _sse("llm_calling", {
-            "message": f"Calling Claude AI — regenerating plan with your feedback (prior turns: {len(prior_history) // 2})...",
-            "prompt_length": len(system) + len(user_msg),
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "llm_calling",
+            {
+                "message": f"Calling Claude AI — regenerating plan with your feedback (prior turns: {len(prior_history) // 2})...",
+                "prompt_length": len(system) + len(user_msg),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         llm_result, updated_history = await _claude.chat(
             user_message=user_msg,
@@ -1799,10 +2068,13 @@ async def replan_stream(
             parse_json=True,
         )
 
-        yield _sse("llm_response", {
-            "message": "Claude response received. Parsing updated plan...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "llm_response",
+            {
+                "message": "Claude response received. Parsing updated plan...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         parts = _extract_plan_parts(llm_result)
 
@@ -1818,12 +2090,15 @@ async def replan_stream(
 
         # Emit each parsed step
         for step in steps:
-            yield _sse("step_parsed", {
-                "index": step.index,
-                "type": step.type.value,
-                "title": step.title,
-                "elapsed_ms": int((time.time() - t0) * 1000),
-            })
+            yield _sse(
+                "step_parsed",
+                {
+                    "index": step.index,
+                    "type": step.type.value,
+                    "title": step.title,
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                },
+            )
 
         # Enforce terminal step sequence: setup_instructions → version_upgrade
         _ensure_terminal_steps(steps)
@@ -1833,17 +2108,21 @@ async def replan_stream(
 
         # Phase 4: full plan → R2; slim summary → Mongo.
         _plan_for_mongo = await persist_plan(
-            session_id=session_id, provider=provider, service_slug=service_slug,
+            session_id=session_id,
+            provider=provider,
+            service_slug=service_slug,
             plan=new_plan.model_dump(),
         )
         _history_pointer = await persist_conversation_history(
-            session_id=session_id, provider=provider, service_slug=service_slug,
+            session_id=session_id,
+            provider=provider,
+            service_slug=service_slug,
             history=updated_history,
         )
 
         # Persist
         comment_obj = StepComment(step_index=step_index, comment=user_comment)
-        update_fields: Dict[str, Any] = {
+        update_fields: dict[str, Any] = {
             "plan": _plan_for_mongo,
             "status": SessionStatus.REVIEWING.value,
             "conversation_history": _history_pointer,
@@ -1861,16 +2140,21 @@ async def replan_stream(
             {"$set": update_fields, "$push": {"comments": comment_obj.model_dump()}},
         )
 
-        yield _sse("replan_log", {
-            "level": "success",
-            "message": f"Plan saved to database (v{new_plan.version}). Updating R2 cache...",
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        yield _sse(
+            "replan_log",
+            {
+                "level": "success",
+                "message": f"Plan saved to database (v{new_plan.version}). Updating R2 cache...",
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
         # Persist to R2 (best-effort)
         user_prompt = session.get("user_prompt", "")
         await r2_service.save_prompt_and_plan(
-            provider, service_slug, tenant_id,
+            provider,
+            service_slug,
+            tenant_id,
             f"{user_prompt} [replan v{new_plan.version}]: {user_comment}",
             {
                 "steps": new_plan.model_dump()["steps"],
@@ -1889,25 +2173,37 @@ async def replan_stream(
             "default_config_fields": parts["default_config_fields"],
         }
 
-        yield _sse("replan_complete", {
-            "message": f"Plan regenerated successfully — {len(steps)} steps (v{new_plan.version})",
-            "version": new_plan.version,
-            "step_count": len(steps),
-            "elapsed_ms": int((time.time() - t0) * 1000),
-            "plan": plan_result,
-        })
+        yield _sse(
+            "replan_complete",
+            {
+                "message": f"Plan regenerated successfully — {len(steps)} steps (v{new_plan.version})",
+                "version": new_plan.version,
+                "step_count": len(steps),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+                "plan": plan_result,
+            },
+        )
 
     except Exception as exc:
-        logger.error("plan.replan_stream_failed", session_id=session_id, error=str(exc), exc_info=True)
-        yield _sse("replan_error", {
-            "message": str(exc),
-            "elapsed_ms": int((time.time() - t0) * 1000),
-        })
+        logger.error(
+            "plan.replan_stream_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        yield _sse(
+            "replan_error",
+            {
+                "message": str(exc),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+            },
+        )
 
 
 # ── Approve ───────────────────────────────────────────────────────────
 
-async def approve_plan(session_id: str, tenant_id: Optional[str]) -> Dict[str, Any]:
+
+async def approve_plan(session_id: str, tenant_id: str | None) -> dict[str, Any]:
     """Mark all steps as approved and transition session to APPROVED."""
     oid = ObjectId(session_id)
     session = await sessions_collection().find_one({"_id": oid})
@@ -1921,11 +2217,13 @@ async def approve_plan(session_id: str, tenant_id: Optional[str]) -> Dict[str, A
 
     await sessions_collection().update_one(
         {"_id": oid},
-        {"$set": {
-            "plan.steps": steps,
-            "status": SessionStatus.APPROVED.value,
-            "updated_at": __import__("datetime").datetime.utcnow(),
-        }},
+        {
+            "$set": {
+                "plan.steps": steps,
+                "status": SessionStatus.APPROVED.value,
+                "updated_at": __import__("datetime").datetime.utcnow(),
+            }
+        },
     )
 
     logger.info("plan.approved", session_id=session_id, step_count=len(steps))
@@ -1939,10 +2237,7 @@ async def approve_plan(session_id: str, tenant_id: Optional[str]) -> Dict[str, A
     _approval_slug = (
         _stored_approval_slug
         if _stored_approval_slug
-        else (
-            _slug_from_connector_name(_connector_name) if _connector_name
-            else _service_slug(provider, service)
-        )
+        else (_slug_from_connector_name(_connector_name) if _connector_name else _service_slug(provider, service))
     )
     if provider and _approval_slug:
         await r2_service.update_approval_status(provider, _approval_slug, tenant_id, "approved")
@@ -1952,7 +2247,8 @@ async def approve_plan(session_id: str, tenant_id: Optional[str]) -> Dict[str, A
 
 # ── Refresh R2 plan to current guidelines ────────────────────────────
 
-async def refresh_r2_plan(session_id: str, tenant_id: str) -> Dict[str, Any]:
+
+async def refresh_r2_plan(session_id: str, tenant_id: str) -> dict[str, Any]:
     """Regenerate the plan for a session using the current CODE_EXECUTION_GUIDELINES
     and overwrite the R2 cache (plan.json + plan.md + progress.json).
 
@@ -1971,18 +2267,14 @@ async def refresh_r2_plan(session_id: str, tenant_id: str) -> Dict[str, Any]:
         raise ValueError(f"Session {session_id} not found")
 
     provider = session["provider"]
-    service  = session["service"]
+    service = session["service"]
     connector_name = session.get("connector_name", "")
     # Always prefer the stored service_slug (includes unique hash from session creation).
     _stored_slug = session.get("service_slug", "")
     if _stored_slug:
         service_slug = _stored_slug
     else:
-        service_slug = (
-            _slug_from_connector_name(connector_name)
-            if connector_name
-            else _service_slug(provider, service)
-        )
+        service_slug = _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
 
     # Step 2: fetch R2 cache and current guidelines version in parallel
     cached, (_, current_version) = await asyncio.gather(
@@ -2002,8 +2294,7 @@ async def refresh_r2_plan(session_id: str, tenant_id: str) -> Dict[str, Any]:
             session_id=session_id,
             guidelines_version=current_version,
         )
-        plan_data = await import_cached_plan(session_id, tenant_id, cached["plan"])
-        return plan_data
+        return await import_cached_plan(session_id, tenant_id, cached["plan"])
 
     # Step 4: stale or missing cache — full LLM regeneration
     logger.info(
@@ -2023,11 +2314,12 @@ async def refresh_r2_plan(session_id: str, tenant_id: str) -> Dict[str, Any]:
 
 # ── Import cached plan (skip LLM) ─────────────────────────────────────
 
+
 async def import_cached_plan(
     session_id: str,
     tenant_id: str,
-    plan_data: Dict[str, Any],
-) -> Dict[str, Any]:
+    plan_data: dict[str, Any],
+) -> dict[str, Any]:
     """Import a pre-cached plan into a session without running the LLM.
 
     Saves to MongoDB (session doc) + R2/local dir cache (as source of truth)
@@ -2049,11 +2341,7 @@ async def import_cached_plan(
     if _stored_slug:
         service_slug = _stored_slug
     else:
-        service_slug = (
-            _slug_from_connector_name(connector_name)
-            if connector_name
-            else _service_slug(provider, service)
-        )
+        service_slug = _slug_from_connector_name(connector_name) if connector_name else _service_slug(provider, service)
 
     raw_steps = plan_data.get("steps", [])
     steps = _parse_steps(raw_steps)
@@ -2076,9 +2364,15 @@ async def import_cached_plan(
             feat_list = (s.config or {}).get("features") if s.config else None
             if feat_list and isinstance(feat_list, list):
                 recommended_features = [
-                    {"id": fid, "label": fid.replace("_", " ").title(),
-                     "recommended": True, "category": "connector", "description": ""}
-                    for fid in feat_list if isinstance(fid, str)
+                    {
+                        "id": fid,
+                        "label": fid.replace("_", " ").title(),
+                        "recommended": True,
+                        "category": "connector",
+                        "description": "",
+                    }
+                    for fid in feat_list
+                    if isinstance(fid, str)
                 ]
                 break
 
@@ -2092,24 +2386,41 @@ async def import_cached_plan(
             auth_type = session.get("auth_type", "")
             if auth_type == "oauth2":
                 default_config_fields = [
-                    {"key": "client_id",     "label": "Client ID",     "type": "text",     "required": True},
-                    {"key": "client_secret", "label": "Client Secret", "type": "password", "required": True},
+                    {
+                        "key": "client_id",
+                        "label": "Client ID",
+                        "type": "text",
+                        "required": True,
+                    },
+                    {
+                        "key": "client_secret",
+                        "label": "Client Secret",
+                        "type": "password",
+                        "required": True,
+                    },
                 ]
             elif auth_type in ("api_key", "bearer"):
                 default_config_fields = [
-                    {"key": "api_key", "label": "API Key", "type": "password", "required": True}
+                    {
+                        "key": "api_key",
+                        "label": "API Key",
+                        "type": "password",
+                        "required": True,
+                    }
                 ]
 
     plan = PlanDocument(steps=steps, version=plan_data.get("version", 1))
 
     # Phase 4: full plan → R2; slim summary → Mongo.
     _plan_for_mongo = await persist_plan(
-        session_id=session_id, provider=provider, service_slug=service_slug,
+        session_id=session_id,
+        provider=provider,
+        service_slug=service_slug,
         plan=plan.model_dump(),
     )
 
     # 1. Persist to MongoDB
-    update_fields: Dict[str, Any] = {
+    update_fields: dict[str, Any] = {
         "plan": _plan_for_mongo,
         "status": SessionStatus.REVIEWING.value,
         "updated_at": __import__("datetime").datetime.utcnow(),
@@ -2126,7 +2437,10 @@ async def import_cached_plan(
     _, guidelines_version = await _get_guidelines_for_planning()
     try:
         await r2_service.save_prompt_and_plan(
-            provider, service_slug, tenant_id, user_prompt,
+            provider,
+            service_slug,
+            tenant_id,
+            user_prompt,
             {
                 "steps": plan.model_dump()["steps"],
                 "version": plan_data.get("version", 1),
@@ -2136,8 +2450,13 @@ async def import_cached_plan(
             },
             guidelines_version=guidelines_version,
         )
-        logger.info("plan.imported_r2_saved", session_id=session_id,
-                    provider=provider, service_slug=service_slug, tenant_id=tenant_id)
+        logger.info(
+            "plan.imported_r2_saved",
+            session_id=session_id,
+            provider=provider,
+            service_slug=service_slug,
+            tenant_id=tenant_id,
+        )
     except Exception as r2_exc:
         logger.warning("plan.imported_r2_save_failed", session_id=session_id, error=str(r2_exc))
 

@@ -34,8 +34,9 @@ Usage pattern (planning service):
 """
 
 import json
+from typing import Any
+
 import structlog
-from typing import Any, Dict, List, Optional, Tuple
 
 logger = structlog.get_logger(__name__)
 
@@ -92,9 +93,9 @@ class ClaudeSkill:
         user_message: str,
         *,
         system: str = "",
-        prior_history: Optional[List[Dict[str, str]]] = None,
+        prior_history: list[dict[str, str]] | None = None,
         parse_json: bool = False,
-    ) -> Tuple[Any, List[Dict[str, str]]]:
+    ) -> tuple[Any, list[dict[str, str]]]:
         """Call Claude with full conversation history.
 
         Args:
@@ -112,7 +113,7 @@ class ClaudeSkill:
                                 assistant messages — persist this to MongoDB.
         """
         history = list(prior_history or [])
-        messages = history + [{"role": "user", "content": user_message}]
+        messages = [*history, {"role": "user", "content": user_message}]
 
         logger.info(
             "claude_skill.chat",
@@ -142,7 +143,7 @@ class ClaudeSkill:
             response = response_text
 
         # Append this turn so the next call gets full history
-        updated_history = messages + [{"role": "assistant", "content": response_text}]
+        updated_history = [*messages, {"role": "assistant", "content": response_text}]
 
         logger.info(
             "claude_skill.chat_done",

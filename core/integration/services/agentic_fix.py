@@ -9,22 +9,22 @@ Replaces one-shot LLM prompts with an observe → act → verify loop:
 The model reads real code instead of needing exhaustive prompt rules.
 """
 
+import ast as _ast
 import asyncio
+import contextlib
 import json
 import os
-import ast as _ast
 import site as _site
 import subprocess
 import sys
 import sysconfig as _sysconfig
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Optional
 
-import httpx
 import structlog
 
 from integration.core.config import settings
-from integration.services import r2_service as _r2_service
 
 logger = structlog.get_logger(__name__)
 
@@ -40,6 +40,7 @@ def _read_existing_connector_type(connector_dir: Path) -> str:
     """Return the parent connector's CONNECTOR_TYPE pinned in metadata/connector.json
     (or parsed from connector.py as fallback). Empty string if neither exists."""
     import re as _re
+
     meta = connector_dir / "metadata" / "connector.json"
     if meta.exists():
         try:
@@ -72,14 +73,14 @@ def _enhance_directive(
     Returns "" if there's nothing to preserve (no existing artifact on disk) — callers
     can therefore unconditionally append the result.
     """
-    files: Dict[str, Path] = {
-        "connector":        connector_dir / "connector.py",
-        "metadata":         connector_dir / "metadata" / "connector.json",
-        "tests":            connector_dir / "tests" / "test_connector.py",
-        "docs":             connector_dir / "DOCS.md",  # checked alongside docs/index.md below
-        "test_guidelines":  connector_dir / "test_guidelines.md",
-        "instructions":     connector_dir / "instructions" / "setup.md",
-        "plan":             connector_dir / "implementation_plan.md",
+    files: dict[str, Path] = {
+        "connector": connector_dir / "connector.py",
+        "metadata": connector_dir / "metadata" / "connector.json",
+        "tests": connector_dir / "tests" / "test_connector.py",
+        "docs": connector_dir / "DOCS.md",  # checked alongside docs/index.md below
+        "test_guidelines": connector_dir / "test_guidelines.md",
+        "instructions": connector_dir / "instructions" / "setup.md",
+        "plan": connector_dir / "implementation_plan.md",
     }
     contract = {
         "connector": (
@@ -122,16 +123,16 @@ def _enhance_directive(
         "plan": (
             "PRESERVE every existing Section (1–9) — identity, methods, config keys,\n"
             "exceptions, file layout, install_fields. EXTEND with the enhancement's new\n"
-            "methods/sections only. Mark unchanged sections as \"(unchanged)\". Do NOT\n"
+            'methods/sections only. Mark unchanged sections as "(unchanged)". Do NOT\n'
             "re-derive design choices."
         ),
     }.get(artifact, "")
     target = files.get(artifact)
     pinned_type = _read_existing_connector_type(connector_dir)
-    blocks: List[str] = []
+    blocks: list[str] = []
     blocks.append("\n\n## 🩹 ENHANCE MODE — EDIT THE EXISTING ARTIFACT, DO NOT REBUILD")
     if pinned_type:
-        blocks.append(f"- CONNECTOR_TYPE is PINNED to \"{pinned_type}\" — never change it.")
+        blocks.append(f'- CONNECTOR_TYPE is PINNED to "{pinned_type}" — never change it.')
     if contract:
         blocks.append(contract)
     if enhancement_ask:
@@ -142,10 +143,18 @@ def _enhance_directive(
         try:
             txt = target.read_text(encoding="utf-8")
             if len(txt) > max_existing_chars:
-                txt = txt[:max_existing_chars] + "\n# … (truncated for prompt budget — read the full file via read_file)"
-            lang = {"connector": "python", "metadata": "json", "tests": "python",
-                    "docs": "markdown", "test_guidelines": "markdown",
-                    "instructions": "markdown", "plan": "markdown"}.get(artifact, "")
+                txt = (
+                    txt[:max_existing_chars] + "\n# … (truncated for prompt budget — read the full file via read_file)"
+                )
+            lang = {
+                "connector": "python",
+                "metadata": "json",
+                "tests": "python",
+                "docs": "markdown",
+                "test_guidelines": "markdown",
+                "instructions": "markdown",
+                "plan": "markdown",
+            }.get(artifact, "")
             quoted = f"\n\n### Existing {target.name} (authoritative starting point)\n```{lang}\n{txt}\n```"
         except Exception:
             pass
@@ -154,6 +163,7 @@ def _enhance_directive(
     if not pinned_type and not quoted and not contract:
         return ""
     return "\n".join(blocks) + quoted
+
 
 # Optional knowledge query function — injected by the caller (e.g. docs_builder_service)
 # so this module doesn't hard-import knowledge_service.
@@ -221,8 +231,14 @@ _GENERATION_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Relative path within the connector package."},
-                        "content": {"type": "string", "description": "Complete file contents."},
+                        "path": {
+                            "type": "string",
+                            "description": "Relative path within the connector package.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Complete file contents.",
+                        },
                     },
                     "required": ["path", "content"],
                 },
@@ -242,7 +258,10 @@ _GENERATION_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Relative path to the Python file."}
+                        "path": {
+                            "type": "string",
+                            "description": "Relative path to the Python file.",
+                        }
                     },
                     "required": ["path"],
                 },
@@ -253,7 +272,10 @@ _GENERATION_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Relative path to the JSON file."}
+                        "path": {
+                            "type": "string",
+                            "description": "Relative path to the JSON file.",
+                        }
                     },
                     "required": ["path"],
                 },
@@ -278,7 +300,10 @@ _GENERATION_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "summary": {"type": "string", "description": "Brief summary of what was generated."}
+                        "summary": {
+                            "type": "string",
+                            "description": "Brief summary of what was generated.",
+                        }
                     },
                     "required": ["summary"],
                 },
@@ -320,9 +345,18 @@ _FIX_TOOLS = [
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "Relative path to the file."},
-                            "old_code": {"type": "string", "description": "The COMPLETE exact lines to replace (never truncate). Must match character-for-character as they appear in the file, including all whitespace and indentation."},
-                            "new_code": {"type": "string", "description": "The replacement lines."},
+                            "path": {
+                                "type": "string",
+                                "description": "Relative path to the file.",
+                            },
+                            "old_code": {
+                                "type": "string",
+                                "description": "The COMPLETE exact lines to replace (never truncate). Must match character-for-character as they appear in the file, including all whitespace and indentation.",
+                            },
+                            "new_code": {
+                                "type": "string",
+                                "description": "The replacement lines.",
+                            },
                         },
                         "required": ["path", "old_code", "new_code"],
                     },
@@ -330,8 +364,7 @@ _FIX_TOOLS = [
                 {
                     "name": "run_tests",
                     "description": (
-                        "Run pytest on the connector package. "
-                        "Call this after every write to verify your fix worked."
+                        "Run pytest on the connector package. Call this after every write to verify your fix worked."
                     ),
                     "parameters": {"type": "object", "properties": {}},
                 },
@@ -1286,17 +1319,18 @@ install_fields must include: `username` (type="text") and `password` (type="pass
 """
 
 # Registry so sync_all can seed these to R2 / local cache on startup
-_AUTH_TYPE_ADDENDA: Dict[str, str] = {
-    "oauth2_code":                 _CONNECTOR_GEN_ADDENDUM_oauth2_code,
-    "oauth2_pkce":                 _CONNECTOR_GEN_ADDENDUM_oauth2_pkce,
-    "oauth2_client_credentials":   _CONNECTOR_GEN_ADDENDUM_oauth2_client_credentials,
-    "api_key":                     _CONNECTOR_GEN_ADDENDUM_api_key,
-    "service_account":             _CONNECTOR_GEN_ADDENDUM_service_account,
-    "basic_auth":                  _CONNECTOR_GEN_ADDENDUM_basic_auth,
+_AUTH_TYPE_ADDENDA: dict[str, str] = {
+    "oauth2_code": _CONNECTOR_GEN_ADDENDUM_oauth2_code,
+    "oauth2_pkce": _CONNECTOR_GEN_ADDENDUM_oauth2_pkce,
+    "oauth2_client_credentials": _CONNECTOR_GEN_ADDENDUM_oauth2_client_credentials,
+    "api_key": _CONNECTOR_GEN_ADDENDUM_api_key,
+    "service_account": _CONNECTOR_GEN_ADDENDUM_service_account,
+    "basic_auth": _CONNECTOR_GEN_ADDENDUM_basic_auth,
 }
 
 
 # ── Tool execution ────────────────────────────────────────────────────────────
+
 
 def _safe_path(connector_dir: Path, relative_path: str) -> Path:
     """Resolve path, allowing connector_dir subtree and shared library reads."""
@@ -1328,24 +1362,44 @@ def _run_tests_sync(
                      Gemini sees failures from ALL methods when fixing just one.
     """
     abs_dir = connector_dir.resolve()
-    pythonpath = os.pathsep.join(filter(None, [
-        str(abs_dir), str(abs_dir.parent),
-        _SITE_PACKAGES, _USER_SITE, str(_CONNECTORS_ROOT),
-    ]))
+    pythonpath = os.pathsep.join(
+        filter(
+            None,
+            [
+                str(abs_dir),
+                str(abs_dir.parent),
+                _SITE_PACKAGES,
+                _USER_SITE,
+                str(_CONNECTORS_ROOT),
+            ],
+        )
+    )
 
     # -k expression: "health_check" or "install or health_check" etc.
     k_expr = " or ".join(methods) if methods else None
 
     if failed_only:
         cmd = [
-            sys.executable, "-m", "pytest", "tests/",
-            "-v", "--tb=short", "--no-header",
-            "--lf", "--lfnf=all", "--maxfail=10",
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-v",
+            "--tb=short",
+            "--no-header",
+            "--lf",
+            "--lfnf=all",
+            "--maxfail=10",
         ]
     else:
         cmd = [
-            sys.executable, "-m", "pytest", "tests/",
-            "-v", "--tb=short", "--no-header",
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-v",
+            "--tb=short",
+            "--no-header",
         ]
 
     # Apply method filter AFTER deciding --lf vs full run
@@ -1355,8 +1409,11 @@ def _run_tests_sync(
     try:
         result = subprocess.run(
             cmd,
-            cwd=str(abs_dir), capture_output=True, text=True,
-            env={**os.environ, "PYTHONPATH": pythonpath}, timeout=120,
+            cwd=str(abs_dir),
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": pythonpath},
+            timeout=120,
         )
         return (result.stdout + result.stderr).strip()[:8000]
     except subprocess.TimeoutExpired as _te:
@@ -1381,26 +1438,41 @@ async def _run_tests_async(
     """
     abs_dir = connector_dir.resolve()
     _connectors_root = Path(__file__).resolve().parent.parent.parent
-    _site = next(
-        (p for p in sys.path if "site-packages" in p and Path(p).is_dir()), ""
+    _site = next((p for p in sys.path if "site-packages" in p and Path(p).is_dir()), "")
+    pythonpath = os.pathsep.join(
+        filter(
+            None,
+            [
+                str(abs_dir),
+                str(abs_dir.parent),
+                _site,
+                str(_connectors_root),
+            ],
+        )
     )
-    pythonpath = os.pathsep.join(filter(None, [
-        str(abs_dir),
-        str(abs_dir.parent),
-        _site,
-        str(_connectors_root),
-    ]))
 
     if failed_only:
         cmd = [
-            sys.executable, "-m", "pytest", "tests/",
-            "-v", "--tb=short", "--no-header",
-            "--lf", "--lfnf=all", "--maxfail=10",
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-v",
+            "--tb=short",
+            "--no-header",
+            "--lf",
+            "--lfnf=all",
+            "--maxfail=10",
         ]
     else:
         cmd = [
-            sys.executable, "-m", "pytest", "tests/",
-            "-v", "--tb=short", "--no-header",
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-v",
+            "--tb=short",
+            "--no-header",
         ]
 
     if methods:
@@ -1428,16 +1500,14 @@ async def _run_tests_async(
         return await asyncio.to_thread(_drain)
     except asyncio.CancelledError:
         proc.kill()
-        try:
+        with contextlib.suppress(Exception):
             proc.wait(timeout=5)
-        except Exception:
-            pass
         raise
 
 
 def _execute_tool(
     name: str,
-    args: Dict,
+    args: dict,
     connector_dir: Path,
     protected_files: set = None,
     target_methods: list[str] | None = None,
@@ -1465,8 +1535,8 @@ def _execute_tool(
             old_code = args["old_code"]
             new_code = args["new_code"]
             # Unescape Gemini over-escaped triple quotes in the patch too
-            old_code = old_code.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'" , "'''")
-            new_code = new_code.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'" , "'''")
+            old_code = old_code.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'", "'''")
+            new_code = new_code.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'", "'''")
             if old_code not in content:
                 # Try with normalised line endings
                 _normalised = content.replace("\r\n", "\n")
@@ -1532,6 +1602,7 @@ def _execute_tool(
             if path.suffix == ".py":
                 try:
                     from integration.services.code_quality import auto_fix_python_file
+
                     _qfix = auto_fix_python_file(path)
                     if _qfix["tools_applied"]:
                         _patch_msg += f" | auto-fixed ({', '.join(_qfix['tools_applied'])})"
@@ -1555,6 +1626,7 @@ def _execute_tool(
             # block test_*.py files written at the package root. Tests belong in tests/ only.
             if protected_files is None:
                 import re as _re_path
+
                 _wname = Path(_write_path).name
                 _wparent = str(Path(_write_path).parent)
                 if (_re_path.match(r"test_.*\.py$", _wname) or _wname.endswith("_test.py")) and _wparent == ".":
@@ -1567,11 +1639,14 @@ def _execute_tool(
             # ("test_connector.py") — Gemini sometimes omits the tests/ prefix.
             _write_name = Path(_write_path).name
             _is_protected = protected_files and (
-                _write_path in protected_files
-                or any(Path(pf).name == _write_name for pf in protected_files)
+                _write_path in protected_files or any(Path(pf).name == _write_name for pf in protected_files)
             )
             if _is_protected:
-                _can_write = "connector.py and client/ files" if any("test" in pf for pf in protected_files) else "tests/test_connector.py"
+                _can_write = (
+                    "connector.py and client/ files"
+                    if any("test" in pf for pf in protected_files)
+                    else "tests/test_connector.py"
+                )
                 return (
                     f"ERROR: write_file('{_write_path}') is BLOCKED — this file is read-only in the current mode. "
                     f"You may ONLY write to {_can_write}. "
@@ -1587,12 +1662,13 @@ def _execute_tool(
             _is_connector_py = Path(_write_path).name == "connector.py"
             if _is_connector_py and path.exists():
                 import difflib as _difflib
+
                 _existing_lines = path.read_text(encoding="utf-8").splitlines()
                 _new_lines = args["content"].splitlines()
                 if len(_existing_lines) > 50:  # only guard non-stub files
                     _matcher = _difflib.SequenceMatcher(None, _existing_lines, _new_lines, autojunk=False)
-                    _ratio = _matcher.ratio()   # 0.0 = completely different, 1.0 = identical
-                    if _ratio < 0.80:           # >20% of content changed → full rewrite detected
+                    _ratio = _matcher.ratio()  # 0.0 = completely different, 1.0 = identical
+                    if _ratio < 0.80:  # >20% of content changed → full rewrite detected
                         _changed_lines = sum(
                             abs(i2 - i1) + abs(j2 - j1)
                             for tag, i1, i2, j1, j2 in _matcher.get_opcodes()
@@ -1627,6 +1703,7 @@ def _execute_tool(
             if path.suffix == ".py":
                 try:
                     from integration.services.code_quality import auto_fix_python_file
+
                     fix = auto_fix_python_file(path)
                     if fix["tools_applied"]:
                         result_msg += f" | auto-fixed ({', '.join(fix['tools_applied'])})"
@@ -1640,6 +1717,7 @@ def _execute_tool(
 
     elif name == "validate_connector_rules":
         import re as _re_rules
+
         conn_path = connector_dir / "connector.py"
         if not conn_path.exists():
             return "ERROR: connector.py not found — write it first"
@@ -1647,7 +1725,7 @@ def _execute_tool(
         violations = []
 
         # 1. stdlib logger instead of structlog
-        if _re_rules.search(r'\blogging\.getLogger\b', src):
+        if _re_rules.search(r"\blogging\.getLogger\b", src):
             violations.append(
                 "VIOLATION: uses `logging.getLogger` — MUST use `import structlog; logger = structlog.get_logger(__name__)`. "
                 "stdlib logger does NOT accept keyword arguments like logger.error('msg', field=value)."
@@ -1662,15 +1740,21 @@ def _execute_tool(
         # (?=\nasync def )     handles a top-level async function (rare).
         # \Z                   fallback: last method in file.
         install_match = _re_rules.search(
-            r'    async def install\(self\).*?(?=\n    (?:async )?def |\nclass |\nasync def |\Z)',
+            r"    async def install\(self\).*?(?=\n    (?:async )?def |\nclass |\nasync def |\Z)",
             src,
             _re_rules.DOTALL,
         )
         if install_match:
             install_body = install_match.group(0)
-            bad_calls = _re_rules.findall(r'await self\.\w+\(', install_body)
+            bad_calls = _re_rules.findall(r"await self\.\w+\(", install_body)
             # allow: save_config, set_token, get_token, clear_token, ingest_batch
-            allowed = {'save_config', 'set_token', 'get_token', 'clear_token', 'ingest_batch'}
+            allowed = {
+                "save_config",
+                "set_token",
+                "get_token",
+                "clear_token",
+                "ingest_batch",
+            }
             bad = [c for c in bad_calls if not any(a in c for a in allowed)]
             if bad:
                 violations.append(
@@ -1681,10 +1765,11 @@ def _execute_tool(
                 )
 
         # 3. Wrong ConnectorStatus field: .status doesn't exist
-        if _re_rules.search(r'\.status\s*==\s*ConnectorStatus\b', src) or \
-           _re_rules.search(r'ConnectorStatus\.[A-Z_]+\b(?!\()', src):
+        if _re_rules.search(r"\.status\s*==\s*ConnectorStatus\b", src) or _re_rules.search(
+            r"ConnectorStatus\.[A-Z_]+\b(?!\()", src
+        ):
             # Check for ConnectorStatus used as an enum value (it's a class, not an enum)
-            bad_uses = _re_rules.findall(r'ConnectorStatus\.(SUCCESS|FAILED|PENDING|UNKNOWN|OK|PASS)\b', src)
+            bad_uses = _re_rules.findall(r"ConnectorStatus\.(SUCCESS|FAILED|PENDING|UNKNOWN|OK|PASS)\b", src)
             if bad_uses:
                 violations.append(
                     f"VIOLATION: ConnectorStatus.{bad_uses[0]} doesn't exist. "
@@ -1693,14 +1778,14 @@ def _execute_tool(
                 )
 
         # 4. os.getenv / os.environ for credentials
-        if _re_rules.search(r'os\.getenv\(|os\.environ\.get\(', src):
+        if _re_rules.search(r"os\.getenv\(|os\.environ\.get\(", src):
             violations.append(
                 "VIOLATION: uses os.getenv/os.environ — ALL credentials must come from self.config.get(key). "
                 "NEVER read credentials from environment variables in the connector."
             )
 
         # 5. Missing connector_id in ConnectorStatus
-        status_calls = _re_rules.findall(r'ConnectorStatus\((?![^)]*connector_id)', src)
+        status_calls = _re_rules.findall(r"ConnectorStatus\((?![^)]*connector_id)", src)
         if status_calls:
             violations.append(
                 f"VIOLATION: {len(status_calls)} ConnectorStatus() call(s) missing connector_id=self.connector_id. "
@@ -1708,7 +1793,7 @@ def _execute_tool(
             )
 
         # 6. Relative imports
-        if _re_rules.search(r'from \.(connector|shared|base)', src):
+        if _re_rules.search(r"from \.(connector|shared|base)", src):
             violations.append(
                 "VIOLATION: relative import found. Use `from shared.base_connector import ...` — never `from .shared import ...`"
             )
@@ -1716,11 +1801,12 @@ def _execute_tool(
         # 7. Custom exception missing self.message
         # Pattern: class FooError ... def __init__(self, message ...) with super().__init__(message) but no self.message =
         for exc_match in _re_rules.finditer(
-            r'class\s+(\w+Error)\b.*?def __init__\(self,\s*message\b.*?\n(.*?)(?=\n    def |\nclass |\Z)',
-            src, _re_rules.DOTALL
+            r"class\s+(\w+Error)\b.*?def __init__\(self,\s*message\b.*?\n(.*?)(?=\n    def |\nclass |\Z)",
+            src,
+            _re_rules.DOTALL,
         ):
             init_body = exc_match.group(2)
-            if 'super().__init__(message)' in init_body and 'self.message' not in init_body:
+            if "super().__init__(message)" in init_body and "self.message" not in init_body:
                 violations.append(
                     f"VIOLATION: {exc_match.group(1)}.__init__ calls super().__init__(message) but never sets "
                     f"self.message = message. Connector code accesses e.message — add `self.message = message` "
@@ -1728,7 +1814,7 @@ def _execute_tool(
                 )
 
         # 8. super().disconnect() — BaseConnector has no disconnect() method
-        if _re_rules.search(r'await\s+super\(\)\.disconnect\(\)', src):
+        if _re_rules.search(r"await\s+super\(\)\.disconnect\(\)", src):
             violations.append(
                 "VIOLATION: `await super().disconnect()` — BaseConnector has NO disconnect() method. "
                 "Remove this line. Just close self._client and set self._client = None."
@@ -1736,7 +1822,7 @@ def _execute_tool(
 
         # 9. PaymentsConnectorConfig(**self.config) without uppercase key mapping
         # self.config stores lowercase keys (client_id) but pydantic fields are uppercase (CLIENT_ID)
-        if _re_rules.search(r'ConnectorConfig\(\*\*self\.config\)', src):
+        if _re_rules.search(r"ConnectorConfig\(\*\*self\.config\)", src):
             violations.append(
                 "VIOLATION: `SomeConnectorConfig(**self.config)` — self.config has lowercase keys (e.g. client_id) "
                 "but pydantic-settings fields are uppercase (CLIENT_ID). Use: "
@@ -1748,13 +1834,15 @@ def _execute_tool(
         # health_check can't return OFFLINE. Check if TimeoutException is explicitly re-raised or
         # caught before the generic handler in methods that callers rely on.
         # (Lightweight heuristic — only flag if TimeoutException is NOT mentioned at all)
-        if _re_rules.search(r'async def get_transaction_status', src):
+        if _re_rules.search(r"async def get_transaction_status", src):
             gts_match = _re_rules.search(
-                r'async def get_transaction_status.*?(?=\n    async def |\nclass |\Z)', src, _re_rules.DOTALL
+                r"async def get_transaction_status.*?(?=\n    async def |\nclass |\Z)",
+                src,
+                _re_rules.DOTALL,
             )
             if gts_match:
                 gts_body = gts_match.group(0)
-                if 'except Exception' in gts_body and 'TimeoutException' not in gts_body:
+                if "except Exception" in gts_body and "TimeoutException" not in gts_body:
                     violations.append(
                         "VIOLATION: get_transaction_status() has `except Exception` that will swallow "
                         "httpx.TimeoutException before health_check() can catch it. Add "
@@ -1768,7 +1856,7 @@ def _execute_tool(
             violations.append(
                 "VIOLATION: CONNECTOR_TYPE class attribute is missing. "
                 "Every connector class MUST define it as a class-level constant, e.g.: "
-                "  CONNECTOR_TYPE = \"gmail\"   # lowercase snake_case, no _connector suffix "
+                '  CONNECTOR_TYPE = "gmail"   # lowercase snake_case, no _connector suffix '
                 "The gateway uses this attribute to register and load the connector — "
                 "without it POST /connectors/deploy returns 404 'Connector type not found'."
             )
@@ -1777,26 +1865,26 @@ def _execute_tool(
             # 12. CONNECTOR_TYPE naming convention: lowercase snake_case, no _connector suffix, no spaces/hyphens
             if _ct_val != _ct_val.lower():
                 violations.append(
-                    f"VIOLATION: CONNECTOR_TYPE = \"{_ct_val}\" is not all-lowercase. "
-                    f"Use lowercase snake_case: CONNECTOR_TYPE = \"{_ct_val.lower()}\""
+                    f'VIOLATION: CONNECTOR_TYPE = "{_ct_val}" is not all-lowercase. '
+                    f'Use lowercase snake_case: CONNECTOR_TYPE = "{_ct_val.lower()}"'
                 )
             elif "-" in _ct_val or " " in _ct_val:
                 violations.append(
-                    f"VIOLATION: CONNECTOR_TYPE = \"{_ct_val}\" contains hyphens or spaces. "
-                    f"Use underscores: CONNECTOR_TYPE = \"{_ct_val.replace('-', '_').replace(' ', '_')}\""
+                    f'VIOLATION: CONNECTOR_TYPE = "{_ct_val}" contains hyphens or spaces. '
+                    f'Use underscores: CONNECTOR_TYPE = "{_ct_val.replace("-", "_").replace(" ", "_")}"'
                 )
             elif _ct_val.endswith("_connector"):
                 violations.append(
                     f"VIOLATION: CONNECTOR_TYPE = \"{_ct_val}\" must NOT end with '_connector'. "
-                    f"Standard: just the service slug — e.g. \"gmail\" not \"gmail_connector\". "
-                    f"Fix: CONNECTOR_TYPE = \"{_ct_val[:-len('_connector')]}\""
+                    f'Standard: just the service slug — e.g. "gmail" not "gmail_connector". '
+                    f'Fix: CONNECTOR_TYPE = "{_ct_val[: -len("_connector")]}"'
                 )
 
         # 13. Package-prefixed subpackage imports in connector.py
         # e.g. `from gmail_connector.client.http_client import X` — WRONG
         # Gateway adds connector dir to sys.path; use `from client.http_client import X`
         _pkg_prefix_imports = _re_rules.findall(
-            r'from\s+\w+_connector\.(client|helpers|repository)\b',
+            r"from\s+\w+_connector\.(client|helpers|repository)\b",
             src,
         )
         if _pkg_prefix_imports:
@@ -1815,13 +1903,15 @@ def _execute_tool(
         _ocp_viols: list = []
 
         # SRP-1: data transformation methods in connector.py (>6 lines → belongs in helpers/)
-        _dt_methods = list(_re_rules.finditer(
-            r'    def (_parse_\w+|_normalize_\w+|_map_\w+|_transform_\w+|_extract_\w+)\(self',
-            src,
-        ))
+        _dt_methods = list(
+            _re_rules.finditer(
+                r"    def (_parse_\w+|_normalize_\w+|_map_\w+|_transform_\w+|_extract_\w+)\(self",
+                src,
+            )
+        )
         for _dtm in _dt_methods:
-            _rest = src[_dtm.end():]
-            _nx = _re_rules.search(r'\n    (?:async )?def ', _rest)
+            _rest = src[_dtm.end() :]
+            _nx = _re_rules.search(r"\n    (?:async )?def ", _rest)
             _lines = (_rest[: _nx.start()] if _nx else _rest).count("\n")
             if _lines > 6:
                 _srp_score -= 1
@@ -1834,7 +1924,7 @@ def _execute_tool(
 
         # SRP-2: message/payload construction helpers in connector.py
         _mc = _re_rules.search(
-            r'    def (_create_message|_build_message|_encode_message|_build_payload|_build_request|_format_request)\(',
+            r"    def (_create_message|_build_message|_encode_message|_build_payload|_build_request|_format_request)\(",
             src,
         )
         if _mc:
@@ -1850,7 +1940,7 @@ def _execute_tool(
             _cl_src = _http_client_path.read_text(encoding="utf-8")
 
             # SRP-3: OAuth flow in client
-            if _re_rules.search(r'def get_flow|fetch_token|exchange_code|from_client_config', _cl_src):
+            if _re_rules.search(r"def get_flow|fetch_token|exchange_code|from_client_config", _cl_src):
                 _srp_score -= 1
                 _srp_viols.append(
                     "SRP-3: client/http_client.py contains OAuth flow code (get_flow/fetch_token). "
@@ -1858,10 +1948,13 @@ def _execute_tool(
                 )
 
             # SRP-4: duplicate token refresh in both files
-            _conn_refresh = bool(_re_rules.search(r'grant_type.*refresh_token|refresh_token.*grant_type', src))
-            _cl_refresh = bool(_re_rules.search(
-                r'grant_type.*refresh_token|refresh_token.*grant_type|credentials\.refresh\(', _cl_src
-            ))
+            _conn_refresh = bool(_re_rules.search(r"grant_type.*refresh_token|refresh_token.*grant_type", src))
+            _cl_refresh = bool(
+                _re_rules.search(
+                    r"grant_type.*refresh_token|refresh_token.*grant_type|credentials\.refresh\(",
+                    _cl_src,
+                )
+            )
             if _conn_refresh and _cl_refresh:
                 _srp_score -= 1
                 _srp_viols.append(
@@ -1870,7 +1963,7 @@ def _execute_tool(
                 )
 
             # SRP-5: data transformation in client
-            _cl_dt = _re_rules.search(r'    def (_normalize_\w+|_parse_\w+|_map_\w+|_transform_\w+)', _cl_src)
+            _cl_dt = _re_rules.search(r"    def (_normalize_\w+|_parse_\w+|_map_\w+|_transform_\w+)", _cl_src)
             if _cl_dt:
                 _srp_score -= 1
                 _srp_viols.append(
@@ -1882,18 +1975,20 @@ def _execute_tool(
         # Catches all common patterns: status_code ==, e.resp.status ==, resp.status ==,
         # response.status_code ==, e.status_code ==
         _hc_m = _re_rules.search(
-            r'async def health_check.*?(?=\n    (?:async )?def |\nclass |\Z)', src, _re_rules.DOTALL
+            r"async def health_check.*?(?=\n    (?:async )?def |\nclass |\Z)",
+            src,
+            _re_rules.DOTALL,
         )
         if _hc_m:
             _hc_body = _hc_m.group(0)
             _sc_pattern = (
-                r'(?:if|elif)\s+'
-                r'(?:status_code|e\.resp\.status|resp\.status|e\.status_code|'
-                r'response\.status_code|err\.resp\.status|error\.resp\.status)'
-                r'\s*==\s*\d+'
+                r"(?:if|elif)\s+"
+                r"(?:status_code|e\.resp\.status|resp\.status|e\.status_code|"
+                r"response\.status_code|err\.resp\.status|error\.resp\.status)"
+                r"\s*==\s*\d+"
             )
             _sc_branches = len(_re_rules.findall(_sc_pattern, _hc_body))
-            if _sc_branches >= 2 and not _re_rules.search(r'_STATUS_MAP|STATUS_MAP', src):
+            if _sc_branches >= 2 and not _re_rules.search(r"_STATUS_MAP|STATUS_MAP", src):
                 _ocp_score -= 1
                 _ocp_viols.append(
                     f"OCP-1: health_check() has {_sc_branches} status-code if/elif branches "
@@ -1905,7 +2000,7 @@ def _execute_tool(
                     "and look up: health, auth, msg = _STATUS_MAP.get(code, (UNHEALTHY, FAILED, f'Error {code}'))."
                 )
             # OCP-1 blind spot: health_check() exists but _STATUS_MAP is completely absent (zero branches too)
-            if not _re_rules.search(r'_STATUS_MAP|STATUS_MAP', src):
+            if not _re_rules.search(r"_STATUS_MAP|STATUS_MAP", src):
                 _ocp_score -= 1
                 _ocp_viols.append(
                     "OCP-1: health_check() exists but _STATUS_MAP class attribute is completely absent. "
@@ -1921,18 +2016,16 @@ def _execute_tool(
         _helpers_dir = connector_dir / "helpers"
         if _helpers_dir.is_dir():
             for _hf in _helpers_dir.glob("*.py"):
-                try:
+                with contextlib.suppress(Exception):
                     _mime_src_parts.append(_hf.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
         _mime_combined = "\n".join(_mime_src_parts)
-        _mime_count = len(_re_rules.findall(
-            r'(?:if|elif)\s+(?:mime_type|mimeType|part\[["\'"]mimeType["\'"\]|part\.get\(["\']mimeType["\']|mime)\s*(?:==|\.startswith\()',
-            _mime_combined,
-        ))
-        _has_mime_priority = _re_rules.search(
-            r'MIME_PRIORITY|mime_priority|CONTENT_PRIORITY', _mime_combined
+        _mime_count = len(
+            _re_rules.findall(
+                r'(?:if|elif)\s+(?:mime_type|mimeType|part\[["\'"]mimeType["\'"\]|part\.get\(["\']mimeType["\']|mime)\s*(?:==|\.startswith\()',
+                _mime_combined,
+            )
         )
+        _has_mime_priority = _re_rules.search(r"MIME_PRIORITY|mime_priority|CONTENT_PRIORITY", _mime_combined)
         if _mime_count >= 2 and not _has_mime_priority:
             _ocp_score -= 1
             _ocp_viols.append(
@@ -1943,8 +2036,8 @@ def _execute_tool(
 
         # OCP-3: Required config keys inline in install() (>2 keys → use REQUIRED_CONFIG_KEYS class constant)
         _install_body_ocp = install_match.group(0) if install_match else ""
-        _inline_req = _re_rules.search(r'required\s*=\s*\[([^\]]{25,})\]', _install_body_ocp)
-        if _inline_req and not _re_rules.search(r'REQUIRED_CONFIG_KEYS\s*=', src):
+        _inline_req = _re_rules.search(r"required\s*=\s*\[([^\]]{25,})\]", _install_body_ocp)
+        if _inline_req and not _re_rules.search(r"REQUIRED_CONFIG_KEYS\s*=", src):
             _key_count = _inline_req.group(1).count('"') // 2 + _inline_req.group(1).count("'") // 2
             if _key_count > 2:
                 _ocp_score -= 1
@@ -1956,10 +2049,10 @@ def _execute_tool(
 
         # OCP-4: ≥4 consecutive elif branches on same variable (should be a dict)
         _elif_chains = _re_rules.findall(
-            r'\bif\s+(\w+)\s*==\s*[^\n:]+:(?:\s*\n[^\n]*){0,6}?\n\s*(?:elif\s+\1\s*==\s*[^\n:]+:\s*\n[^\n]*){3,}',
+            r"\bif\s+(\w+)\s*==\s*[^\n:]+:(?:\s*\n[^\n]*){0,6}?\n\s*(?:elif\s+\1\s*==\s*[^\n:]+:\s*\n[^\n]*){3,}",
             src,
         )
-        if _elif_chains and not _re_rules.search(r'_MAP\s*=\s*\{|_map\s*=\s*\{', src):
+        if _elif_chains and not _re_rules.search(r"_MAP\s*=\s*\{|_map\s*=\s*\{", src):
             _ocp_score -= 1
             _ocp_viols.append(
                 f"OCP-4: Long if/elif chain (4+ branches) on `{_elif_chains[0]}` found. "
@@ -1967,8 +2060,8 @@ def _execute_tool(
             )
 
         # OCP-5: hardcoded asyncio.sleep values (≥2 → use class constants)
-        _sleep_vals = _re_rules.findall(r'asyncio\.sleep\(\s*\d+(?:\.\d+)?\s*\)', src)
-        if len(_sleep_vals) >= 2 and not _re_rules.search(r'RETRY_DELAY_S|BACKOFF|retry_delay', src):
+        _sleep_vals = _re_rules.findall(r"asyncio\.sleep\(\s*\d+(?:\.\d+)?\s*\)", src)
+        if len(_sleep_vals) >= 2 and not _re_rules.search(r"RETRY_DELAY_S|BACKOFF|retry_delay", src):
             _ocp_score -= 1
             _ocp_viols.append(
                 f"OCP-5: {len(_sleep_vals)} hardcoded asyncio.sleep() values. "
@@ -2009,7 +2102,12 @@ def _execute_tool(
         return f"OK — no rule violations found in connector.py{_score_summary}"
 
     elif name == "run_smoke_test":
-        import sys as _sys, os as _os, subprocess as _sp, tempfile as _tf, textwrap as _tw, json as _json_ag
+        import json as _json_ag
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+        import tempfile as _tf
+        import textwrap as _tw
 
         conn_path = connector_dir / "connector.py"
         if not conn_path.exists():
@@ -2033,8 +2131,11 @@ def _execute_tool(
                 pass
         if not _smoke_config_ag:
             _smoke_config_ag = {
-                "api_key": "test", "client_id": "test", "client_secret": "test",
-                "username": "test", "password": "test",
+                "api_key": "test",
+                "client_id": "test",
+                "client_secret": "test",
+                "username": "test",
+                "password": "test",
                 "service_account_json": '{"type":"service_account"}',
             }
         _smoke_config_ag_repr = repr(_smoke_config_ag)
@@ -2141,36 +2242,38 @@ def _execute_tool(
         """).replace("__SMOKE_CONFIG__", _smoke_config_ag_repr)
 
         try:
-            with _tf.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir=str(connector_dir)) as f:
+            with _tf.NamedTemporaryFile(mode="w", suffix=".py", delete=False, dir=str(connector_dir)) as f:
                 f.write(smoke_script)
                 tmp_path = f.name
 
-            env = {**__import__('os').environ}
+            env = {**__import__("os").environ}
             # PYTHONPATH needs:
             #   connector_dir.parent — so the connector can be imported as a package
             #                          (enables relative imports: `from .client import X`)
             #   connector_dir        — fallback for connectors using absolute sub-imports
             #   _CONNECTORS_ROOT     — so `from shared.base_connector import ...` resolves
-            existing_pp = env.get('PYTHONPATH', '')
-            env['PYTHONPATH'] = (
-                f"{str(connector_dir.parent)}{_os.pathsep}"
-                f"{str(connector_dir)}{_os.pathsep}"
-                f"{str(_CONNECTORS_ROOT)}{_os.pathsep}{existing_pp}"
+            existing_pp = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                f"{connector_dir.parent!s}{_os.pathsep}"
+                f"{connector_dir!s}{_os.pathsep}"
+                f"{_CONNECTORS_ROOT!s}{_os.pathsep}{existing_pp}"
             )
 
             proc = _sp.run(
                 [_sys.executable, tmp_path],
-                capture_output=True, text=True, timeout=30, env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
                 cwd=str(connector_dir),
             )
-            __import__('os').unlink(tmp_path)
+            __import__("os").unlink(tmp_path)
 
             output = (proc.stdout + proc.stderr).strip()
             if proc.returncode == 0 and "SMOKE TEST PASSED" in output:
                 lines = [l for l in output.splitlines() if l.strip()]
                 return "SMOKE TEST PASSED:\n" + "\n".join(f"  ✓ {l}" for l in lines if l != "SMOKE TEST PASSED")
-            else:
-                return f"SMOKE TEST FAILED — fix the issue then re-run:\n{output}"
+            return f"SMOKE TEST FAILED — fix the issue then re-run:\n{output}"
         except _sp.TimeoutExpired:
             return "SMOKE TEST FAILED: timed out (30s) — install() is likely making real network calls or blocking. Check install() only validates config keys."
         except Exception as e:
@@ -2208,7 +2311,10 @@ def _execute_tool(
     elif name == "check_imports":
         # Try to actually import the full connector package — catches NameError, ImportError,
         # missing typing imports, wrong attribute names, etc. that ast.parse misses.
-        import subprocess as _sp, sys as _sys, os as _os
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+
         # PYTHONPATH needs:
         #   1. connector_dir itself (so `import exceptions` resolves)
         #   2. repo_root (shielva-connectors/) so `from shared.base_connector import ...` resolves
@@ -2263,7 +2369,9 @@ def _execute_tool(
             _res = _sp.run(
                 [_sys.executable, "-c", _check_script],
                 cwd=str(connector_dir),
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
                 env={**__import__("os").environ, "PYTHONPATH": pythonpath},
             )
             out = (_res.stdout + _res.stderr).strip()
@@ -2332,7 +2440,7 @@ def _summarise_tool_result(tool_name: str, result: str) -> str:
     if tool_name == "write_file":
         lines = r.splitlines()
         if r.lower().startswith("ok:"):
-            return r.split("\n")[0]          # "OK: wrote N chars to path/file.py"
+            return r.split("\n")[0]  # "OK: wrote N chars to path/file.py"
         return f"Written ({len(lines)} lines)"
 
     if tool_name == "read_file":
@@ -2383,8 +2491,8 @@ def _summarise_tool_result(tool_name: str, result: str) -> str:
 # ── Core agentic loop ─────────────────────────────────────────────────────────
 
 
-
 # ── Public smoke test runner — called by the dedicated smoke_test step ────────
+
 
 async def run_connector_smoke_test(connector_dir: Path) -> str:
     """Run the connector smoke test in a subprocess and return the result string.
@@ -2392,7 +2500,12 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
     This is a standalone function (not part of the Gemini agentic loop) so it can
     be called directly from the smoke_test step handler after all files are generated.
     """
-    import sys as _sys, os as _os, subprocess as _sp, tempfile as _tf, textwrap as _tw, json as _json
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile as _tf
+    import textwrap as _tw
 
     conn_path = connector_dir / "connector.py"
     if not conn_path.exists():
@@ -2418,8 +2531,11 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
     # Fallback to a broad set of common keys if metadata is missing
     if not _smoke_config:
         _smoke_config = {
-            "api_key": "test", "client_id": "test", "client_secret": "test",
-            "username": "test", "password": "test",
+            "api_key": "test",
+            "client_id": "test",
+            "client_secret": "test",
+            "username": "test",
+            "password": "test",
             "service_account_json": '{"type":"service_account"}',
         }
     _smoke_config_repr = repr(_smoke_config)
@@ -2508,21 +2624,24 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
     """).replace("__SMOKE_CONFIG__", _smoke_config_repr)
 
     try:
-        with _tf.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir=str(connector_dir)) as f:
+        with _tf.NamedTemporaryFile(mode="w", suffix=".py", delete=False, dir=str(connector_dir)) as f:
             f.write(smoke_script)
             tmp_path = f.name
 
         env = {**_os.environ}
-        existing_pp = env.get('PYTHONPATH', '')
-        env['PYTHONPATH'] = (
-            f"{str(connector_dir.parent)}{_os.pathsep}"
-            f"{str(connector_dir)}{_os.pathsep}"
-            f"{str(_CONNECTORS_ROOT)}{_os.pathsep}{existing_pp}"
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{connector_dir.parent!s}{_os.pathsep}"
+            f"{connector_dir!s}{_os.pathsep}"
+            f"{_CONNECTORS_ROOT!s}{_os.pathsep}{existing_pp}"
         )
 
         proc = _sp.run(
             [_sys.executable, tmp_path],
-            capture_output=True, text=True, timeout=30, env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
             cwd=str(connector_dir),
         )
         _os.unlink(tmp_path)
@@ -2531,8 +2650,7 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
         if proc.returncode == 0 and "SMOKE TEST PASSED" in output:
             lines = [l for l in output.splitlines() if l.strip()]
             return "SMOKE TEST PASSED:\n" + "\n".join(f"  ✓ {l}" for l in lines if l != "SMOKE TEST PASSED")
-        else:
-            return f"SMOKE TEST FAILED:\n{output}"
+        return f"SMOKE TEST FAILED:\n{output}"
     except _sp.TimeoutExpired:
         return "SMOKE TEST FAILED: timed out (30s) — install() is likely making real network calls. Check install() only validates config keys."
     except Exception as e:
@@ -2540,15 +2658,6 @@ async def run_connector_smoke_test(connector_dir: Path) -> str:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
 
 
 _TEST_GEN_SYSTEM = """You are a Python testing expert generating pytest unit tests for a Shielva connector.
@@ -2696,9 +2805,9 @@ async def _ingest_connector_files(
     """
     try:
         from integration.services import knowledge_service
+
         py_files = sorted(
-            f for f in connector_dir.rglob("*.py")
-            if "__pycache__" not in f.parts and "tests" not in f.parts
+            f for f in connector_dir.rglob("*.py") if "__pycache__" not in f.parts and "tests" not in f.parts
         )
         for fpath in py_files:
             content = fpath.read_text(encoding="utf-8", errors="replace")
@@ -2714,12 +2823,9 @@ async def _ingest_connector_files(
                 step_type="connector_code",
             )
         if log_cb:
-            await log_cb("info", f"📚 Ingested {len(py_files)} connector files into KB for search_knowledge")
+            await log_cb(
+                "info",
+                f"📚 Ingested {len(py_files)} connector files into KB for search_knowledge",
+            )
     except Exception as exc:
         logger.warning("agentic.ingest_connector_files_failed", error=str(exc))
-
-
-
-
-
-

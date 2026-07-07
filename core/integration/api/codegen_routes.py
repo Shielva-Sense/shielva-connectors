@@ -1,23 +1,22 @@
 """Integration Builder — Code generation API routes."""
 
 import json
-import structlog
+from collections.abc import AsyncIterator
 from datetime import datetime
+
+import structlog
+from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import AsyncIterator, Optional
 
 from integration.db.database import sessions_collection
+from integration.services import execution_manager
 from integration.services.codegen_service import (
     attempt_fix_step,
-    auto_run_session,
-    execute_plan,
     execute_plan_sync,
     execute_single_step,
 )
-from integration.services import execution_manager
-from bson import ObjectId
 
 logger = structlog.get_logger(__name__)
 
@@ -30,7 +29,12 @@ async def start_execution(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Execute the approved plan (non-streaming). Returns final result."""
-    logger.info("codegen.execute_start", session_id=session_id, tenant_id=x_tenant_id, streaming=False)
+    logger.info(
+        "codegen.execute_start",
+        session_id=session_id,
+        tenant_id=x_tenant_id,
+        streaming=False,
+    )
     try:
         result = await execute_plan_sync(session_id, x_tenant_id)
         logger.info(
@@ -44,7 +48,12 @@ async def start_execution(
         logger.warning("codegen.execute_validation_error", session_id=session_id, error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("codegen.execute_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "codegen.execute_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -53,10 +62,10 @@ async def stream_execution(
     session_id: str,
     from_event: int = 0,
     skip_llm: bool = Query(False),
-    app_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
-    x_app_id: Optional[str] = Header(None, alias="X-App-ID"),
+    app_id: str | None = None,
+    tenant_id: str | None = None,
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+    x_app_id: str | None = Header(None, alias="X-App-ID"),
 ):
     """Execute the approved plan with SSE streaming progress.
 
@@ -69,16 +78,22 @@ async def stream_execution(
     If execution is already running (e.g., after page refresh), this endpoint
     re-attaches and streams events from where the client left off.
     """
-    resolved_app_id    = app_id or x_app_id
+    resolved_app_id = app_id or x_app_id
     resolved_tenant_id = tenant_id or x_tenant_id
-    logger.info("codegen.execute_stream_start", session_id=session_id,
-                app_id=resolved_app_id, tenant_id=resolved_tenant_id,
-                from_event=from_event, already_running=execution_manager.is_running(session_id))
+    logger.info(
+        "codegen.execute_stream_start",
+        session_id=session_id,
+        app_id=resolved_app_id,
+        tenant_id=resolved_tenant_id,
+        from_event=from_event,
+        already_running=execution_manager.is_running(session_id),
+    )
 
     # Start execution if not already running
     if not execution_manager.is_running(session_id):
-        started = await execution_manager.start_execution(session_id, resolved_tenant_id,
-                                                           skip_llm=skip_llm, app_id=resolved_app_id)
+        started = await execution_manager.start_execution(
+            session_id, resolved_tenant_id, skip_llm=skip_llm, app_id=resolved_app_id
+        )
         if not started:
             # Already running from a previous request — just re-attach
             logger.info("codegen.reattaching", session_id=session_id)
@@ -141,20 +156,29 @@ async def retry_single_step(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Re-execute a single step (e.g., retry a failed step)."""
-    logger.info("codegen.retry_step", session_id=session_id, step_index=step_index, tenant_id=x_tenant_id)
+    logger.info(
+        "codegen.retry_step",
+        session_id=session_id,
+        step_index=step_index,
+        tenant_id=x_tenant_id,
+    )
     try:
-        result = await execute_single_step(session_id, x_tenant_id, step_index)
-        return result
+        return await execute_single_step(session_id, x_tenant_id, step_index)
     except ValueError as exc:
         logger.warning("codegen.retry_step_validation_error", session_id=session_id, error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("codegen.retry_step_failed", session_id=session_id, error=str(exc), exc_info=True)
+        logger.error(
+            "codegen.retry_step_failed",
+            session_id=session_id,
+            error=str(exc),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 class AttemptFixRequest(BaseModel):
-    error_details: Optional[str] = ""
+    error_details: str | None = ""
 
 
 @codegen_router.post("/{session_id}/fix/step/{step_index}")
@@ -172,13 +196,21 @@ async def fix_single_step(
 
     Events: fix_log {level, message}, fix_complete {result}, fix_error {message}
     """
+
     def _sse(event: str, data: dict) -> str:
         return f"data: {json.dumps({'type': event, **data}, default=str)}\n\n"
 
     async def _stream() -> AsyncIterator[str]:
         import asyncio
+
         logger.info("codegen.fix_step", session_id=session_id, step_index=step_index)
-        yield _sse("fix_log", {"level": "info", "message": f"🔧 Starting AI fix for step {step_index + 1}..."})
+        yield _sse(
+            "fix_log",
+            {
+                "level": "info",
+                "message": f"🔧 Starting AI fix for step {step_index + 1}...",
+            },
+        )
 
         # Queue-based real-time log streaming:
         # attempt_fix_step calls external_log_cb which puts msgs into this queue.
@@ -192,7 +224,9 @@ async def fix_single_step(
         try:
             fix_task = asyncio.ensure_future(
                 attempt_fix_step(
-                    session_id, x_tenant_id, step_index,
+                    session_id,
+                    x_tenant_id,
+                    step_index,
                     body.error_details or "",
                     external_log_cb=_stream_log,
                 )
@@ -206,7 +240,7 @@ async def fix_single_step(
                 try:
                     level, msg = await asyncio.wait_for(log_queue.get(), timeout=0.3)
                     yield _sse("fix_log", {"level": level, "message": msg})
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"  # SSE comment — ignored by client, prevents proxy buffering
 
             # Drain any remaining logs after task completes
@@ -218,12 +252,22 @@ async def fix_single_step(
             yield _sse("fix_complete", result)
 
         except ValueError as exc:
-            logger.warning("codegen.fix_step_validation_error", session_id=session_id, error=str(exc))
+            logger.warning(
+                "codegen.fix_step_validation_error",
+                session_id=session_id,
+                error=str(exc),
+            )
             yield _sse("fix_error", {"message": str(exc)})
         except Exception as exc:
             import traceback as _tb
+
             tb_str = _tb.format_exc()
-            logger.error("codegen.fix_step_failed", session_id=session_id, error=str(exc), traceback=tb_str)
+            logger.error(
+                "codegen.fix_step_failed",
+                session_id=session_id,
+                error=str(exc),
+                traceback=tb_str,
+            )
             yield _sse("fix_error", {"message": str(exc), "traceback": tb_str[-1500:]})
 
     return StreamingResponse(
@@ -234,6 +278,7 @@ async def fix_single_step(
 
 
 # ── Inject a syntax_check step into an existing plan ─────────────────
+
 
 @codegen_router.post("/{session_id}/steps/inject-syntax-check")
 async def inject_syntax_check_step(
@@ -258,7 +303,10 @@ async def inject_syntax_check_step(
 
     # Idempotency — don't insert twice
     if any(s.get("type") == "syntax_check" for s in steps):
-        return {"steps": steps, "inserted_index": next(i for i, s in enumerate(steps) if s.get("type") == "syntax_check")}
+        return {
+            "steps": steps,
+            "inserted_index": next(i for i, s in enumerate(steps) if s.get("type") == "syntax_check"),
+        }
 
     # Find insertion point: right after write_connector (or after scaffold_code as fallback)
     insert_after = -1

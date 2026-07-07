@@ -2,9 +2,9 @@
 
 import shutil
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 
 def _resolve_claude_cli() -> str:
@@ -22,7 +22,9 @@ class IntegrationSettings(BaseSettings):
     """Settings loaded from environment variables."""
 
     # MongoDB
-    MONGODB_URL: str = "mongodb+srv://shielvaadmin:shielvaadmin123@mastershielva.8rbs44q.mongodb.net/?appName=MasterShielva"
+    MONGODB_URL: str = (
+        "mongodb+srv://shielvaadmin:shielvaadmin123@mastershielva.8rbs44q.mongodb.net/?appName=MasterShielva"
+    )
     MONGODB_DB: str = "ShielvaIntegration"
 
     # Service
@@ -35,7 +37,7 @@ class IntegrationSettings(BaseSettings):
     # ACP core (cms) — DIRECT internal URL (bypasses the JWT-gated public gateway) for the
     # connector↔session delete cascade. Token-gated /internal/* endpoint; never gateway-exposed.
     ACP_INTERNAL_URL: str = "https://localhost:8020"
-    ACP_INTERNAL_TOKEN: str = "acp-internal-dev-token"
+    ACP_INTERNAL_TOKEN: str = "acp-internal-dev-token"  # noqa: S105 — dev-placeholder default; real value from env/sealed config in prod
 
     # LLM — Claude as primary
     # Mode: "cli"    = use Claude CLI directly (local dev, Max plan, $0)
@@ -55,8 +57,8 @@ class IntegrationSettings(BaseSettings):
 
     # Google Gemini — connector generation + test generation
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"          # connector agentic generation
-    TEST_GEMINI_MODEL: str = "gemini-2.5-flash"    # test generation (thinking-capable)
+    GEMINI_MODEL: str = "gemini-2.5-flash"  # connector agentic generation
+    TEST_GEMINI_MODEL: str = "gemini-2.5-flash"  # test generation (thinking-capable)
     # Thinking budget for Gemini — applies to test generation and fix calls.
     # -1 = dynamic (model decides), 0 = disabled, N = max thinking tokens.
     GEMINI_THINKING_BUDGET: int = -1  # -1 = dynamic thinking for test gen/fix
@@ -107,7 +109,7 @@ class IntegrationSettings(BaseSettings):
     # Credential encryption — server-side HMAC secret for local credential files.
     # Frontend mixes this HMAC into AES-256-GCM key derivation so credentials
     # cannot be decrypted without the backend's secret.
-    CREDENTIAL_SECRET: str = "shielva-cred-secret-change-me"
+    CREDENTIAL_SECRET: str = "shielva-cred-secret-change-me"  # noqa: S105 — dev-placeholder default; real value from env/sealed config in prod
 
     # Shielva Security platform (SDK integration)
     # Set INTEGRATION_SHIELVA_SECURITY_API_KEY to enable enhanced scanning
@@ -134,8 +136,8 @@ class IntegrationSettings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # SSL
-    SSL_CERTFILE: Optional[str] = None
-    SSL_KEYFILE: Optional[str] = None
+    SSL_CERTFILE: str | None = None
+    SSL_KEYFILE: str | None = None
 
     # CORS origins (inherit from common or explicit)
     CORS_ORIGINS: list[str] = [
@@ -148,7 +150,11 @@ class IntegrationSettings(BaseSettings):
         "http://localhost:3005",
     ]
 
-    model_config = {"env_prefix": "INTEGRATION_", "env_file": (".env", "integration/.env"), "extra": "ignore"}
+    model_config = {
+        "env_prefix": "INTEGRATION_",
+        "env_file": (".env", "integration/.env"),
+        "extra": "ignore",
+    }
 
 
 settings = IntegrationSettings()

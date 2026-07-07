@@ -1,0 +1,43 @@
+# CI — Shielva flow-pipeline gate  (canonical thin trigger;  is
+# replaced per repo by rollout.sh, or left "" for single-service repos)
+#
+# On every PR to master this triggers OUR self-hosted CI in the devops
+# flow-pipeline (which buildkit-runs ruff/pytest/pip-audit against the PR head
+# commit) and lets it gate the merge via the `shielva/ci` commit status. CI
+# executes in the flow-pipeline, NOT in this job — this job only kicks it off.
+#
+# Branch protection must require the `shielva/ci` status context (posted by
+# devops-be), NOT this workflow's job.
+name: CI — Shielva flow-pipeline gate
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  trigger-ci:
+    name: Trigger Shielva CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kick off the flow-pipeline CI run
+        env:
+          DEVOPS_API_URL: ${{ secrets.DEVOPS_API_URL }}
+          ROLE_ID: ${{ secrets.DEVOPS_APPROLE_ROLE_ID }}
+          SECRET_ID: ${{ secrets.DEVOPS_APPROLE_SECRET_ID }}
+          CI_PIPELINE_ID: ${{ secrets.CI_PIPELINE_ID }}
+          SUBDIR: "core"
+        run: |
+          set -euo pipefail
+          if [ -z "${CI_PIPELINE_ID:-}" ] || [ -z "${DEVOPS_API_URL:-}" ]; then
+            echo "::warning::CI_PIPELINE_ID / DEVOPS_API_URL not set — CI gate not wired for this repo yet."
+            exit 0
+          fi
+          TOKEN=$(curl -sf -X POST "$DEVOPS_API_URL/api/v1/auth/approle/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"role_id\":\"$ROLE_ID\",\"secret_id\":\"$SECRET_ID\"}" \
+            | jq -r '.token // .access_token // empty')
+          if [ -z "$TOKEN" ]; then echo "::error::DevOps AppRole login failed"; exit 1; fi
+          curl -sf -X POST "$DEVOPS_API_URL/api/v1/flow-pipelines/$CI_PIPELINE_ID/ci" \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d "{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.event.pull_request.head.sha }}\",\"pr_number\":${{ github.event.pull_request.number }},\"context_subdir\":\"$SUBDIR\"}"
+          echo "Triggered Shielva CI — the shielva/ci check will gate this PR."

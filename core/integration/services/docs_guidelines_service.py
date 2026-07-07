@@ -7,11 +7,10 @@ Every save creates a new MongoDB version record.
 """
 
 import asyncio
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -841,16 +840,19 @@ _DOC_GUIDELINES_SENTINEL = "Changelog — Comprehensive v2"
 def _get_r2():
     """Lazy import r2_service to avoid circular imports."""
     from integration.services import r2_service
+
     return r2_service
 
 
 async def _get_redis():
     """Lazy Redis connection."""
     import redis.asyncio as aioredis
+
     return await aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
 
 
 # ── Version helpers ───────────────────────────────────────────────────
+
 
 def _bump_version(current: str) -> str:
     """Increment the patch version: '1.0.0' -> '1.0.1'."""
@@ -863,14 +865,17 @@ def _bump_version(current: str) -> str:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────
 
+
 def _doc_guidelines_collection():
     from integration.db.database import get_db
+
     return get_db()["connector_documentation_guidelines"]
 
 
 # ── Public API ────────────────────────────────────────────────────────
 
-async def get_active_doc_guidelines() -> Dict[str, Any]:
+
+async def get_active_doc_guidelines() -> dict[str, Any]:
     """Return active doc guidelines dict: {version, content, updated_at}.
 
     Cache hierarchy: Redis -> MongoDB (metadata) + R2 (content) -> default.
@@ -892,7 +897,11 @@ async def get_active_doc_guidelines() -> Dict[str, Any]:
             await r.aclose()
             if cached:
                 logger.debug("doc_guidelines.cache_hit", version=version)
-                return {"version": version, "content": cached, "updated_at": str(doc.get("created_at", ""))}
+                return {
+                    "version": version,
+                    "content": cached,
+                    "updated_at": str(doc.get("created_at", "")),
+                }
         except Exception as exc:
             logger.warning("doc_guidelines.redis_error", error=str(exc))
 
@@ -909,18 +918,26 @@ async def get_active_doc_guidelines() -> Dict[str, Any]:
                 await r.aclose()
             except Exception:
                 pass
-            return {"version": version, "content": content, "updated_at": str(doc.get("created_at", ""))}
+            return {
+                "version": version,
+                "content": content,
+                "updated_at": str(doc.get("created_at", "")),
+            }
 
         # 4. Fallback: use content stored in MongoDB doc
         content = doc.get("content", DEFAULT_CONNECTOR_DOCUMENTATION_MD)
-        return {"version": version, "content": content, "updated_at": str(doc.get("created_at", ""))}
+        return {
+            "version": version,
+            "content": content,
+            "updated_at": str(doc.get("created_at", "")),
+        }
 
     except Exception as exc:
         logger.error("doc_guidelines.get_failed", error=str(exc))
         return _default_record()
 
 
-async def save_doc_guidelines(content: str, change_description: str = "") -> Dict[str, Any]:
+async def save_doc_guidelines(content: str, change_description: str = "") -> dict[str, Any]:
     """Save new version of doc guidelines to MongoDB + R2 + Redis.
 
     Deactivates previous active version, creates new one.
@@ -933,7 +950,7 @@ async def save_doc_guidelines(content: str, change_description: str = "") -> Dic
     prev_version = prev["version"] if prev else "1.0.0"
     new_version = _bump_version(prev_version) if prev else "1.0.0"
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Deactivate all current active
     await col.update_many({"is_active": True}, {"$set": {"is_active": False}})
@@ -967,6 +984,7 @@ async def save_doc_guidelines(content: str, change_description: str = "") -> Dic
     # Ingest into MCP RAG for semantic search across all connectors
     try:
         from integration.services.guidelines_service import _ingest_guidelines_to_rag
+
         await _ingest_guidelines_to_rag(content, f"Documentation Guidelines v{new_version}", "docs")
     except Exception as exc:
         logger.warning("doc_guidelines.rag_ingest_failed", error=str(exc))
@@ -975,7 +993,7 @@ async def save_doc_guidelines(content: str, change_description: str = "") -> Dic
     return {"version": new_version, "content": content, "updated_at": str(now)}
 
 
-async def get_doc_guidelines_version_history() -> List[Dict[str, Any]]:
+async def get_doc_guidelines_version_history() -> list[dict[str, Any]]:
     """Return all versions from MongoDB, newest first."""
     try:
         col = _doc_guidelines_collection()
@@ -1013,13 +1031,18 @@ async def seed_default_doc_guidelines() -> None:
         if active:
             # Check whether the active version already has the comprehensive v2 content
             if _DOC_GUIDELINES_SENTINEL in active.get("content", ""):
-                logger.info("doc_guidelines.seed_skipped", reason="already_up_to_date",
-                            version=active.get("version"))
+                logger.info(
+                    "doc_guidelines.seed_skipped",
+                    reason="already_up_to_date",
+                    version=active.get("version"),
+                )
                 return
             # Upgrade: create a new version with the comprehensive v2 template
-            logger.info("doc_guidelines.seed_upgrading",
-                        from_version=active.get("version"),
-                        reason="missing comprehensive v2 documentation guidelines")
+            logger.info(
+                "doc_guidelines.seed_upgrading",
+                from_version=active.get("version"),
+                reason="missing comprehensive v2 documentation guidelines",
+            )
             await save_doc_guidelines(
                 DEFAULT_CONNECTOR_DOCUMENTATION_MD,
                 change_description=(
@@ -1031,7 +1054,7 @@ async def seed_default_doc_guidelines() -> None:
             return
 
         # First boot — no records at all
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         doc = {
             "version": "1.0.0",
             "content": DEFAULT_CONNECTOR_DOCUMENTATION_MD,
@@ -1048,11 +1071,18 @@ async def seed_default_doc_guidelines() -> None:
         versioned_key = f"{_DOC_GUIDELINES_R2_PREFIX}/{_VERSIONED_KEY_TPL.format(version='1.0.0')}"
         await _r2_put_text(r2, standard_key, DEFAULT_CONNECTOR_DOCUMENTATION_MD)
         await _r2_put_text(r2, versioned_key, DEFAULT_CONNECTOR_DOCUMENTATION_MD)
-        logger.info("doc_guidelines.seed_r2", standard_key=standard_key, versioned_key=versioned_key)
+        logger.info(
+            "doc_guidelines.seed_r2",
+            standard_key=standard_key,
+            versioned_key=versioned_key,
+        )
 
         # Ingest into MCP RAG on first boot
         try:
-            from integration.services.guidelines_service import _ingest_guidelines_to_rag
+            from integration.services.guidelines_service import (
+                _ingest_guidelines_to_rag,
+            )
+
             await _ingest_guidelines_to_rag(
                 DEFAULT_CONNECTOR_DOCUMENTATION_MD,
                 "Documentation Guidelines v1.0.0",
@@ -1067,7 +1097,8 @@ async def seed_default_doc_guidelines() -> None:
 
 # ── Internal helpers ─────────────────────────────────────────────────
 
-def _default_record() -> Dict[str, Any]:
+
+def _default_record() -> dict[str, Any]:
     return {
         "version": "1.0.0",
         "content": DEFAULT_CONNECTOR_DOCUMENTATION_MD,
@@ -1075,7 +1106,7 @@ def _default_record() -> Dict[str, Any]:
     }
 
 
-async def _r2_get_text(r2, key: str) -> Optional[str]:
+async def _r2_get_text(r2, key: str) -> str | None:
     """Read text from R2 or local cache. Returns None if not found."""
     try:
         if r2._use_local():
@@ -1085,7 +1116,7 @@ async def _r2_get_text(r2, key: str) -> Optional[str]:
             return None
         loop = asyncio.get_event_loop()
         import boto3
-        import botocore.exceptions
+
         s3 = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
@@ -1110,6 +1141,7 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
             return
         loop = asyncio.get_event_loop()
         import boto3
+
         s3 = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",

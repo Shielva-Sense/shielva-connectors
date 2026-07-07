@@ -3,7 +3,6 @@
 import structlog
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
 from integration.services import guidelines_service
 from integration.services.llm_client import call_llm
@@ -14,9 +13,10 @@ guidelines_router = APIRouter(prefix="/guidelines", tags=["guidelines"])
 
 # ── Request/Response models ───────────────────────────────────────────
 
+
 class UpdateGuidelinesRequest(BaseModel):
     prompt: str  # User instruction for how to update the guidelines
-    current_content: Optional[str] = None  # Pass current content to avoid extra fetch
+    current_content: str | None = None  # Pass current content to avoid extra fetch
 
 
 class GuidelinesResponse(BaseModel):
@@ -26,6 +26,7 @@ class GuidelinesResponse(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────
+
 
 @guidelines_router.get("/connector-development", response_model=GuidelinesResponse)
 async def get_connector_development_guidelines():
@@ -49,17 +50,17 @@ async def update_connector_development_guidelines(
         current_record = await guidelines_service.get_active_guidelines()
         current = current_record["content"]
 
-    system_prompt = """You are updating the Shielva Connector Development Standard (connector_development.md).
+    system_prompt = f"""You are updating the Shielva Connector Development Standard (connector_development.md).
 
 This document defines the standard package structure, coding rules, and practices for all Shielva connectors.
 
 ## Current Document
 ```markdown
-{current_content}
+{current}
 ```
 
 ## User Instruction
-{user_prompt}
+{body.prompt}
 
 ## Rules
 1. Return ONLY the complete updated markdown document
@@ -68,10 +69,7 @@ This document defines the standard package structure, coding rules, and practice
 4. Keep the same heading structure (# ## ###)
 5. If the user asks to add/change something, incorporate it while keeping all other sections intact
 6. Never remove the Package Structure or Core Rules sections
-7. Return the complete document, ready to save as connector_development.md""".format(
-        current_content=current,
-        user_prompt=body.prompt,
-    )
+7. Return the complete document, ready to save as connector_development.md"""
 
     try:
         updated_content = await call_llm(

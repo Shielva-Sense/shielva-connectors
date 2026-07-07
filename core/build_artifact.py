@@ -42,6 +42,7 @@ Usage::
     # single connector (fast iteration)
     python core/build_artifact.py --src ~/Documents/client_dir --only activecampaign --publish
 """
+
 from __future__ import annotations
 
 import argparse
@@ -57,8 +58,11 @@ from pathlib import Path
 # Files/dirs that must never end up inside a runtime wheel.
 _EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", ".shielva", "tests", ".git"}
 _EXCLUDE_FILES = {
-    ".DS_Store", "pytest.ini", "conftest.py",
-    "plan_steps.json", "stepper_progress.json",
+    ".DS_Store",
+    "pytest.ini",
+    "conftest.py",
+    "plan_steps.json",
+    "stepper_progress.json",
 }
 # Test-only deps in requirements.txt that the runtime artifact must not carry.
 _TEST_DEP_RE = re.compile(r"^(pytest|pytest-|coverage|mock\b|responses|freezegun|tox)", re.I)
@@ -91,8 +95,9 @@ def _parse_connector(connector_py: Path) -> tuple[str, str] | None:
     base_aliases: set[str] = set()  # names bound to BaseConnector, e.g. `_BASE = BaseConnector`
 
     def _is_base_ref(v: ast.expr | None) -> bool:
-        return (isinstance(v, ast.Name) and v.id.endswith("BaseConnector")) or \
-               (isinstance(v, ast.Attribute) and v.attr.endswith("BaseConnector"))
+        return (isinstance(v, ast.Name) and v.id.endswith("BaseConnector")) or (
+            isinstance(v, ast.Attribute) and v.attr.endswith("BaseConnector")
+        )
 
     # Pass 1 — CONNECTOR_TYPE literal (any scope) + BaseConnector aliases.
     for node in ast.walk(tree):
@@ -136,7 +141,9 @@ def _parse_connector(connector_py: Path) -> tuple[str, str] | None:
     return None
 
 
-def _discover(src_root: Path) -> tuple[dict[str, tuple[Path, str, str]], list[tuple[str, str, str]]]:
+def _discover(
+    src_root: Path,
+) -> tuple[dict[str, tuple[Path, str, str]], list[tuple[str, str, str]]]:
     """Scan source → ({norm_type: (dir, type, class)}, [collisions]).
 
     Two source dirs can resolve to the SAME CONNECTOR_TYPE (a generic alias dir plus
@@ -188,12 +195,14 @@ def _runtime_deps(req_file: Path) -> list[str]:
 
 def _copy_pkg(src_pkg: Path, dst_pkg: Path) -> None:
     """Copy the connector package, dropping test/junk dirs and files."""
+
     def _ignore(_dir: str, names: list[str]) -> set[str]:
         drop = set()
         for n in names:
             if n in _EXCLUDE_DIRS or n in _EXCLUDE_FILES or n.endswith(".pyc"):
                 drop.add(n)
         return drop
+
     shutil.copytree(src_pkg, dst_pkg, ignore=_ignore)
 
 
@@ -232,7 +241,7 @@ def _rewrite_imports(pkg_dst: Path, pkg_name: str) -> int:
             m = from_re.match(ln)
             if m:
                 indent, mod, sub = m.group(1), m.group(2), m.group(3)
-                ln = f"{indent}from {pkg_name}.{mod}{sub} import" + ln[m.end():]
+                ln = f"{indent}from {pkg_name}.{mod}{sub} import" + ln[m.end() :]
                 dirty = True
             else:
                 mi = import_re.match(ln)
@@ -247,8 +256,7 @@ def _rewrite_imports(pkg_dst: Path, pkg_name: str) -> int:
     return changed
 
 
-def _pyproject(dist: str, version: str, pkg_dir_name: str, ctype: str,
-               cls: str, deps: list[str]) -> str:
+def _pyproject(dist: str, version: str, pkg_dir_name: str, ctype: str, cls: str, deps: list[str]) -> str:
     dep_lines = ",\n    ".join(f'"{d}"' for d in deps)
     return f"""\
 [build-system]
@@ -311,9 +319,18 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
         # in the venv) instead of building a fresh env per wheel — ~15× faster across
         # 200+ connectors. The build needs no exotic build deps, so this is safe.
         proc = subprocess.run(
-            [sys.executable, "-m", "build", "--wheel", "--no-isolation",
-             "--outdir", str(out_dir)],
-            cwd=tmp_path, capture_output=True, text=True,
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--no-isolation",
+                "--outdir",
+                str(out_dir),
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
         )
         if proc.returncode != 0:
             print(f"  ✗ {dist}: build failed\n{proc.stdout[-600:]}\n{proc.stderr[-600:]}")
@@ -335,9 +352,10 @@ def write_snapshot(src_root: Path, version: str, dest: Path) -> int:
           "connectors": [ <metadata/connector.json verbatim, plus connector_type>, ... ] }
     """
     import json as _json
+
     chosen, _ = _discover(src_root)
     items: list[dict] = []
-    for (dir_, ctype, _cls) in chosen.values():
+    for dir_, ctype, _cls in chosen.values():
         meta_path = dir_ / "metadata" / "connector.json"
         if not meta_path.exists():
             continue
@@ -367,8 +385,7 @@ def write_manifest(src_root: Path, version: str, dest: Path) -> int:
     lines = sorted(f"shielva-connector-{key}=={version}" for key in chosen)
     dest.write_text(
         "# Auto-generated by core/build_artifact.py — connector artifact manifest.\n"
-        "# Installed by the gateway image from the JFrog PyPI index. Do not hand-edit.\n"
-        + "\n".join(lines) + "\n",
+        "# Installed by the gateway image from the JFrog PyPI index. Do not hand-edit.\n" + "\n".join(lines) + "\n",
         encoding="utf-8",
     )
     print(f"→ wrote manifest ({len(lines)} connectors) → {dest}")
@@ -393,8 +410,19 @@ def publish(out_dir: Path) -> int:
     # NB: this JFrog PyPI repo rejects twine's --skip-existing. Re-publishing an
     # existing version will error per-repo policy — bump CONNECTOR_VERSION to re-push.
     proc = subprocess.run(
-        [sys.executable, "-m", "twine", "upload",
-         "--repository-url", repo_url, "-u", user, "-p", token, *wheels],
+        [
+            sys.executable,
+            "-m",
+            "twine",
+            "upload",
+            "--repository-url",
+            repo_url,
+            "-u",
+            user,
+            "-p",
+            token,
+            *wheels,
+        ],
         text=True,
     )
     return proc.returncode
@@ -402,22 +430,43 @@ def publish(out_dir: Path) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--src", default=os.path.expanduser("~/Documents/client_dir"),
-                    help="dir of {name}_connector source packages (the R2 source, mirrored locally)")
-    ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "dist_connectors"),
-                    help="where built wheels land")
-    ap.add_argument("--version", default=os.environ.get("CONNECTOR_VERSION", "1.0.0"),
-                    help="artifact version stamped on every wheel")
+    ap.add_argument(
+        "--src",
+        default=os.path.expanduser("~/Documents/client_dir"),
+        help="dir of {name}_connector source packages (the R2 source, mirrored locally)",
+    )
+    ap.add_argument(
+        "--out",
+        default=str(Path(__file__).resolve().parent / "dist_connectors"),
+        help="where built wheels land",
+    )
+    ap.add_argument(
+        "--version",
+        default=os.environ.get("CONNECTOR_VERSION", "1.0.0"),
+        help="artifact version stamped on every wheel",
+    )
     ap.add_argument("--only", default="", help="build only this connector type (fast iteration)")
     ap.add_argument("--publish", action="store_true", help="twine-upload to JFrog after building")
-    ap.add_argument("--manifest", default=str(Path(__file__).resolve().parent / "connectors-requirements.txt"),
-                    help="committed pip manifest the gateway image installs from")
-    ap.add_argument("--manifest-only", action="store_true",
-                    help="just (re)write the manifest by scanning source — no build/publish")
-    ap.add_argument("--snapshot", default=str(Path(__file__).resolve().parent / "shielva_connectors.json"),
-                    help="consolidated metadata/connector.json snapshot, baked into the image")
-    ap.add_argument("--snapshot-only", action="store_true",
-                    help="just (re)write the snapshot from metadata/connector.json — no build/publish")
+    ap.add_argument(
+        "--manifest",
+        default=str(Path(__file__).resolve().parent / "connectors-requirements.txt"),
+        help="committed pip manifest the gateway image installs from",
+    )
+    ap.add_argument(
+        "--manifest-only",
+        action="store_true",
+        help="just (re)write the manifest by scanning source — no build/publish",
+    )
+    ap.add_argument(
+        "--snapshot",
+        default=str(Path(__file__).resolve().parent / "shielva_connectors.json"),
+        help="consolidated metadata/connector.json snapshot, baked into the image",
+    )
+    ap.add_argument(
+        "--snapshot-only",
+        action="store_true",
+        help="just (re)write the snapshot from metadata/connector.json — no build/publish",
+    )
     args = ap.parse_args()
 
     src_root = Path(args.src).expanduser()

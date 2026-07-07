@@ -26,7 +26,6 @@ The worker:
   4. Loops forever — Ctrl+C to stop
 """
 
-import asyncio
 import os
 import shutil
 import signal
@@ -94,7 +93,7 @@ def main():
     try:
         r = redis.from_url(REDIS_URL, decode_responses=True)
         r.ping()
-        print(f"\n  Redis connected OK")
+        print("\n  Redis connected OK")
     except Exception as e:
         print(f"\n  ERROR: Cannot connect to Redis: {e}")
         sys.exit(1)
@@ -111,7 +110,7 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
 
     # ── Main loop ────────────────────────────────────────────────────
-    print(f"\n  Worker ready — waiting for jobs...\n")
+    print("\n  Worker ready — waiting for jobs...\n")
     jobs_processed = 0
 
     while running:
@@ -166,39 +165,51 @@ def main():
 
                 if proc.returncode == 0:
                     response_text = proc.stdout.strip()
-                    r.hset(job_key, mapping={
-                        "status": "completed",
-                        "result": response_text,
-                        "completed_at": str(time.time()),
-                    })
+                    r.hset(
+                        job_key,
+                        mapping={
+                            "status": "completed",
+                            "result": response_text,
+                            "completed_at": str(time.time()),
+                        },
+                    )
                     r.expire(job_key, 3600)  # 1h TTL
                     jobs_processed += 1
                     print(f"        Done in {duration}s — response: {len(response_text)} chars")
                 else:
                     error_msg = proc.stderr[:500] if proc.stderr else f"Exit code {proc.returncode}"
-                    r.hset(job_key, mapping={
-                        "status": "failed",
-                        "error": error_msg,
-                        "completed_at": str(time.time()),
-                    })
+                    r.hset(
+                        job_key,
+                        mapping={
+                            "status": "failed",
+                            "error": error_msg,
+                            "completed_at": str(time.time()),
+                        },
+                    )
                     r.expire(job_key, 3600)
                     print(f"        FAILED in {duration}s — {error_msg[:100]}")
 
             except subprocess.TimeoutExpired:
-                r.hset(job_key, mapping={
-                    "status": "failed",
-                    "error": "Claude CLI timed out after 300s",
-                    "completed_at": str(time.time()),
-                })
+                r.hset(
+                    job_key,
+                    mapping={
+                        "status": "failed",
+                        "error": "Claude CLI timed out after 300s",
+                        "completed_at": str(time.time()),
+                    },
+                )
                 r.expire(job_key, 3600)
-                print(f"        TIMEOUT after 300s")
+                print("        TIMEOUT after 300s")
 
             except Exception as exc:
-                r.hset(job_key, mapping={
-                    "status": "failed",
-                    "error": str(exc)[:500],
-                    "completed_at": str(time.time()),
-                })
+                r.hset(
+                    job_key,
+                    mapping={
+                        "status": "failed",
+                        "error": str(exc)[:500],
+                        "completed_at": str(time.time()),
+                    },
+                )
                 r.expire(job_key, 3600)
                 print(f"        ERROR: {exc}")
 

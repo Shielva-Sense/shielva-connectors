@@ -1,16 +1,22 @@
 """Integration Builder — MongoDB async driver (Motor)."""
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from integration.core.config import settings
 import structlog
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+
+from integration.core.config import settings
+
 try:
-    import certifi as _certifi; _TLS_CA = _certifi.where()
+    import certifi as _certifi
+
+    _TLS_CA = _certifi.where()
 except ImportError:
     _TLS_CA = None
+
 
 def _make_client(url: str) -> AsyncIOMotorClient:
     kw = {"tlsCAFile": _TLS_CA} if _TLS_CA and url.startswith("mongodb+srv") else {}
     return AsyncIOMotorClient(url, **kw)
+
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +45,7 @@ def get_db() -> AsyncIOMotorDatabase:
 
 
 # ── Collection accessors ─────────────────────────────────────────────
+
 
 def sessions_collection():
     """IntegrationSession documents."""

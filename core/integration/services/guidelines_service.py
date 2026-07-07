@@ -6,11 +6,10 @@ Every save creates a new MongoDB version record.
 """
 
 import asyncio
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -740,16 +739,19 @@ _DESIGN_PRINCIPLES_SENTINEL = "BARE module name ONLY (NEVER package-prefixed)"
 def _get_r2():
     """Lazy import r2_service to avoid circular imports."""
     from integration.services import r2_service
+
     return r2_service
 
 
 async def _get_redis():
     """Lazy Redis connection."""
     import redis.asyncio as aioredis
+
     return await aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
 
 
 # ── Version helpers ───────────────────────────────────────────────────
+
 
 def _bump_version(current: str) -> str:
     """Increment the patch version: '1.0.0' → '1.0.1'."""
@@ -762,14 +764,17 @@ def _bump_version(current: str) -> str:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────
 
+
 def _guidelines_collection():
     from integration.db.database import get_db
+
     return get_db()["connector_guidelines"]
 
 
 # ── Public API ────────────────────────────────────────────────────────
 
-async def get_active_guidelines() -> Dict[str, Any]:
+
+async def get_active_guidelines() -> dict[str, Any]:
     """Return active guidelines dict: {version, content, updated_at}.
 
     Cache hierarchy: Redis → MongoDB (metadata) + R2 (content) → default.
@@ -791,7 +796,11 @@ async def get_active_guidelines() -> Dict[str, Any]:
             await r.aclose()
             if cached:
                 logger.debug("guidelines.cache_hit", version=version)
-                return {"version": version, "content": cached, "updated_at": str(doc.get("created_at", ""))}
+                return {
+                    "version": version,
+                    "content": cached,
+                    "updated_at": str(doc.get("created_at", "")),
+                }
         except Exception as exc:
             logger.warning("guidelines.redis_error", error=str(exc))
 
@@ -808,11 +817,19 @@ async def get_active_guidelines() -> Dict[str, Any]:
                 await r.aclose()
             except Exception:
                 pass
-            return {"version": version, "content": content, "updated_at": str(doc.get("created_at", ""))}
+            return {
+                "version": version,
+                "content": content,
+                "updated_at": str(doc.get("created_at", "")),
+            }
 
         # 4. Fallback: use content stored in MongoDB doc
         content = doc.get("content", DEFAULT_CONNECTOR_DEVELOPMENT_MD)
-        return {"version": version, "content": content, "updated_at": str(doc.get("created_at", ""))}
+        return {
+            "version": version,
+            "content": content,
+            "updated_at": str(doc.get("created_at", "")),
+        }
 
     except Exception as exc:
         logger.error("guidelines.get_failed", error=str(exc))
@@ -830,9 +847,10 @@ async def _ingest_guidelines_to_rag(content: str, title: str, guideline_type: st
     """
     try:
         from integration.services import knowledge_service
+
         # Use a deterministic doc_id so updates replace, not duplicate
         doc_id = f"guidelines_{guideline_type}_global"
-        kb_id = f"codegen-guidelines-global"
+        kb_id = "codegen-guidelines-global"
         await knowledge_service._ingest_to_mcp(
             content=content,
             title=title,
@@ -840,13 +858,13 @@ async def _ingest_guidelines_to_rag(content: str, title: str, guideline_type: st
             tenant_id="__global__",  # shared across all tenants
             doc_id=doc_id,
         )
-        logger.info(f"guidelines.rag_ingested", type=guideline_type, doc_id=doc_id)
+        logger.info("guidelines.rag_ingested", type=guideline_type, doc_id=doc_id)
     except Exception as exc:
         # Non-fatal — guidelines still work via direct prompt injection
-        logger.warning(f"guidelines.rag_ingest_failed", type=guideline_type, error=str(exc))
+        logger.warning("guidelines.rag_ingest_failed", type=guideline_type, error=str(exc))
 
 
-async def save_guidelines(content: str, change_description: str = "") -> Dict[str, Any]:
+async def save_guidelines(content: str, change_description: str = "") -> dict[str, Any]:
     """Save new version of guidelines to MongoDB + R2 + Redis + RAG.
 
     Deactivates previous active version, creates new one.
@@ -859,7 +877,7 @@ async def save_guidelines(content: str, change_description: str = "") -> Dict[st
     prev_version = prev["version"] if prev else "1.0.0"
     new_version = _bump_version(prev_version) if prev else "1.0.0"
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Deactivate all current active
     await col.update_many({"is_active": True}, {"$set": {"is_active": False}})
@@ -897,7 +915,7 @@ async def save_guidelines(content: str, change_description: str = "") -> Dict[st
     return {"version": new_version, "content": content, "updated_at": str(now)}
 
 
-async def get_version_history() -> List[Dict[str, Any]]:
+async def get_version_history() -> list[dict[str, Any]]:
     """Return all versions from MongoDB, newest first."""
     try:
         col = _guidelines_collection()
@@ -935,13 +953,18 @@ async def seed_default_guidelines() -> None:
         if active:
             # Check whether the active version already has the Design Principles section
             if _DESIGN_PRINCIPLES_SENTINEL in active.get("content", ""):
-                logger.info("guidelines.seed_skipped", reason="already_up_to_date",
-                            version=active.get("version"))
+                logger.info(
+                    "guidelines.seed_skipped",
+                    reason="already_up_to_date",
+                    version=active.get("version"),
+                )
                 return
             # Upgrade: create a new version with the updated default content
-            logger.info("guidelines.seed_upgrading",
-                        from_version=active.get("version"),
-                        reason="missing Authentication Types section")
+            logger.info(
+                "guidelines.seed_upgrading",
+                from_version=active.get("version"),
+                reason="missing Authentication Types section",
+            )
             await save_guidelines(
                 DEFAULT_CONNECTOR_DEVELOPMENT_MD,
                 change_description=(
@@ -954,7 +977,7 @@ async def seed_default_guidelines() -> None:
             return
 
         # First boot — no records at all
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         doc = {
             "version": "1.0.0",
             "content": DEFAULT_CONNECTOR_DEVELOPMENT_MD,
@@ -986,7 +1009,8 @@ async def seed_default_guidelines() -> None:
 
 # ── Internal helpers ─────────────────────────────────────────────────
 
-def _default_record() -> Dict[str, Any]:
+
+def _default_record() -> dict[str, Any]:
     return {
         "version": "1.0.0",
         "content": DEFAULT_CONNECTOR_DEVELOPMENT_MD,
@@ -1020,8 +1044,11 @@ async def seed_test_case_writing_guidelines() -> None:
         # Check if already in R2
         existing = await _r2_get_text(r2, _TEST_GUIDELINES_R2_KEY)
         if existing:
-            logger.info("test_guidelines.seed_skipped", reason="already_in_r2",
-                        key=_TEST_GUIDELINES_R2_KEY)
+            logger.info(
+                "test_guidelines.seed_skipped",
+                reason="already_in_r2",
+                key=_TEST_GUIDELINES_R2_KEY,
+            )
             return
 
         # Read from local disk
@@ -1041,7 +1068,7 @@ async def seed_test_case_writing_guidelines() -> None:
         logger.warning("test_guidelines.seed_failed", error=str(exc))
 
 
-async def get_test_case_writing_guidelines() -> Optional[str]:
+async def get_test_case_writing_guidelines() -> str | None:
     """Return the content of TEST_CASE_WRITING_GUIDELINES.md.
 
     Lookup hierarchy:
@@ -1079,7 +1106,7 @@ async def get_test_case_writing_guidelines() -> Optional[str]:
         return None
 
 
-async def _r2_get_text(r2, key: str) -> Optional[str]:
+async def _r2_get_text(r2, key: str) -> str | None:
     """Read text from R2 or local cache. Returns None if not found."""
     try:
         if r2._use_local():
@@ -1089,7 +1116,7 @@ async def _r2_get_text(r2, key: str) -> Optional[str]:
             return None
         loop = asyncio.get_event_loop()
         import boto3
-        import botocore.exceptions
+
         s3 = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
@@ -1114,6 +1141,7 @@ async def _r2_put_text(r2, key: str, content: str) -> None:
             return
         loop = asyncio.get_event_loop()
         import boto3
+
         s3 = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",

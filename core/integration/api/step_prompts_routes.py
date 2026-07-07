@@ -7,10 +7,9 @@ Prompts can be read and updated at runtime without a code deployment.
 import structlog
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Optional
 
-from integration.services import r2_service
 from integration.prompts import codegen_prompt
+from integration.services import r2_service
 
 logger = structlog.get_logger(__name__)
 
@@ -59,7 +58,7 @@ MANAGED_PROMPTS = [
 ]
 
 # Map name → local fallback constant (Tier-1 only; rest handled by _get_fallback)
-_LOCAL_FALLBACKS: Dict[str, str] = {
+_LOCAL_FALLBACKS: dict[str, str] = {
     "CONNECTOR_SYSTEM_PROMPT": codegen_prompt.CONNECTOR_SYSTEM_PROMPT,
     "TEST_SYSTEM_PROMPT": codegen_prompt.TEST_SYSTEM_PROMPT,
     "INTEGRATION_TEST_SYSTEM_PROMPT": codegen_prompt.INTEGRATION_TEST_SYSTEM_PROMPT,
@@ -80,13 +79,24 @@ def _get_fallback(prompt_name: str) -> str:
         return _LOCAL_FALLBACKS[prompt_name]
     try:
         # Tier-2: agentic/step prompts
-        if prompt_name in ("CONNECTOR_GEN_SYSTEM", "METADATA_GEN_SYSTEM", "DOCS_GEN_SYSTEM",
-                           "FIX_SYSTEM", "CONNECTOR_FIX_SYSTEM", "TEST_GEN_SYSTEM") or \
-           prompt_name.startswith("CONNECTOR_GEN_SYSTEM_"):
+        if prompt_name in (
+            "CONNECTOR_GEN_SYSTEM",
+            "METADATA_GEN_SYSTEM",
+            "DOCS_GEN_SYSTEM",
+            "FIX_SYSTEM",
+            "CONNECTOR_FIX_SYSTEM",
+            "TEST_GEN_SYSTEM",
+        ) or prompt_name.startswith("CONNECTOR_GEN_SYSTEM_"):
             from integration.services.agentic_fix import (
-                _CONNECTOR_GEN_SYSTEM, _METADATA_GEN_SYSTEM, _DOCS_GEN_SYSTEM,
-                _FIX_SYSTEM, _CONNECTOR_FIX_SYSTEM, _TEST_GEN_SYSTEM, _AUTH_TYPE_ADDENDA,
+                _AUTH_TYPE_ADDENDA,
+                _CONNECTOR_FIX_SYSTEM,
+                _CONNECTOR_GEN_SYSTEM,
+                _DOCS_GEN_SYSTEM,
+                _FIX_SYSTEM,
+                _METADATA_GEN_SYSTEM,
+                _TEST_GEN_SYSTEM,
             )
+
             _agentic = {
                 "CONNECTOR_GEN_SYSTEM": _CONNECTOR_GEN_SYSTEM,
                 "METADATA_GEN_SYSTEM": _METADATA_GEN_SYSTEM,
@@ -97,36 +107,70 @@ def _get_fallback(prompt_name: str) -> str:
                 **{f"CONNECTOR_GEN_SYSTEM_{k}": v for k, v in _AUTH_TYPE_ADDENDA.items()},
             }
             return _agentic.get(prompt_name, "")
-        if prompt_name in ("METADATA_SYSTEM_PROMPT", "SETUP_INSTRUCTIONS_SYSTEM", "TEST_GUIDELINES_SYSTEM"):
+        if prompt_name in (
+            "METADATA_SYSTEM_PROMPT",
+            "SETUP_INSTRUCTIONS_SYSTEM",
+            "TEST_GUIDELINES_SYSTEM",
+        ):
             from integration.services.step_executor import (
-                _METADATA_SYSTEM_PROMPT, _SETUP_INSTRUCTIONS_SYSTEM, _TEST_GUIDELINES_SYSTEM,
+                _METADATA_SYSTEM_PROMPT,
+                _SETUP_INSTRUCTIONS_SYSTEM,
+                _TEST_GUIDELINES_SYSTEM,
             )
-            return {"METADATA_SYSTEM_PROMPT": _METADATA_SYSTEM_PROMPT,
-                    "SETUP_INSTRUCTIONS_SYSTEM": _SETUP_INSTRUCTIONS_SYSTEM,
-                    "TEST_GUIDELINES_SYSTEM": _TEST_GUIDELINES_SYSTEM}.get(prompt_name, "")
+
+            return {
+                "METADATA_SYSTEM_PROMPT": _METADATA_SYSTEM_PROMPT,
+                "SETUP_INSTRUCTIONS_SYSTEM": _SETUP_INSTRUCTIONS_SYSTEM,
+                "TEST_GUIDELINES_SYSTEM": _TEST_GUIDELINES_SYSTEM,
+            }.get(prompt_name, "")
         # Tier-3: planning
         if prompt_name in ("PLANNING_SYSTEM_PROMPT", "REPLAN_SYSTEM_PROMPT"):
-            from integration.prompts.planning_prompt import PLANNING_SYSTEM_PROMPT, REPLAN_SYSTEM_PROMPT
-            return {"PLANNING_SYSTEM_PROMPT": PLANNING_SYSTEM_PROMPT,
-                    "REPLAN_SYSTEM_PROMPT": REPLAN_SYSTEM_PROMPT}.get(prompt_name, "")
+            from integration.prompts.planning_prompt import (
+                PLANNING_SYSTEM_PROMPT,
+                REPLAN_SYSTEM_PROMPT,
+            )
+
+            return {
+                "PLANNING_SYSTEM_PROMPT": PLANNING_SYSTEM_PROMPT,
+                "REPLAN_SYSTEM_PROMPT": REPLAN_SYSTEM_PROMPT,
+            }.get(prompt_name, "")
         # Tier-3: docs
         if prompt_name in ("DOCS_GENERATION_PROMPT", "DOCS_UPDATE_PROMPT"):
-            from integration.prompts.docs_prompt import DOCS_GENERATION_PROMPT, DOCS_UPDATE_PROMPT
-            return {"DOCS_GENERATION_PROMPT": DOCS_GENERATION_PROMPT,
-                    "DOCS_UPDATE_PROMPT": DOCS_UPDATE_PROMPT}.get(prompt_name, "")
+            from integration.prompts.docs_prompt import (
+                DOCS_GENERATION_PROMPT,
+                DOCS_UPDATE_PROMPT,
+            )
+
+            return {
+                "DOCS_GENERATION_PROMPT": DOCS_GENERATION_PROMPT,
+                "DOCS_UPDATE_PROMPT": DOCS_UPDATE_PROMPT,
+            }.get(prompt_name, "")
         # Tier-3: catalog
         if prompt_name in ("SUGGEST_SERVICES_SYSTEM", "SUGGEST_DEPS_SYSTEM"):
-            from integration.api.catalog_routes import _SUGGEST_SERVICES_SYSTEM, _SUGGEST_DEPS_SYSTEM
-            return {"SUGGEST_SERVICES_SYSTEM": _SUGGEST_SERVICES_SYSTEM,
-                    "SUGGEST_DEPS_SYSTEM": _SUGGEST_DEPS_SYSTEM}.get(prompt_name, "")
+            from integration.api.catalog_routes import (
+                _SUGGEST_DEPS_SYSTEM,
+                _SUGGEST_SERVICES_SYSTEM,
+            )
+
+            return {
+                "SUGGEST_SERVICES_SYSTEM": _SUGGEST_SERVICES_SYSTEM,
+                "SUGGEST_DEPS_SYSTEM": _SUGGEST_DEPS_SYSTEM,
+            }.get(prompt_name, "")
         # Tier-3: analysis / synthesis
         if prompt_name == "ANALYSIS_SYSTEM":
             from integration.services.code_analysis_service import _ANALYSIS_SYSTEM
+
             return _ANALYSIS_SYSTEM
         if prompt_name in ("SYNTHESIS_PROMPT", "EXTRACTION_PROMPT"):
-            from integration.services.docs_synth_service import _SYNTHESIS_PROMPT, _EXTRACTION_PROMPT
-            return {"SYNTHESIS_PROMPT": _SYNTHESIS_PROMPT,
-                    "EXTRACTION_PROMPT": _EXTRACTION_PROMPT}.get(prompt_name, "")
+            from integration.services.docs_synth_service import (
+                _EXTRACTION_PROMPT,
+                _SYNTHESIS_PROMPT,
+            )
+
+            return {
+                "SYNTHESIS_PROMPT": _SYNTHESIS_PROMPT,
+                "EXTRACTION_PROMPT": _EXTRACTION_PROMPT,
+            }.get(prompt_name, "")
     except Exception as _e:
         logger.warning("step_prompt.fallback_load_failed", prompt=prompt_name, error=str(_e))
     return ""
@@ -144,7 +188,8 @@ class StepPromptResponse(BaseModel):
 
 # ── Routes ────────────────────────────────────────────────────────────
 
-@step_prompts_router.get("", response_model=Dict[str, str])
+
+@step_prompts_router.get("", response_model=dict[str, str])
 async def list_step_prompts():
     """List all managed step prompt names."""
     return {"prompts": MANAGED_PROMPTS}
@@ -154,12 +199,20 @@ async def list_step_prompts():
 async def get_step_prompt(prompt_name: str):
     """Get the active content of a step prompt (R2 → local fallback)."""
     if prompt_name not in MANAGED_PROMPTS:
-        raise HTTPException(status_code=404, detail=f"Unknown prompt: {prompt_name}. Valid names: {MANAGED_PROMPTS}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown prompt: {prompt_name}. Valid names: {MANAGED_PROMPTS}",
+        )
 
     fallback = _get_fallback(prompt_name)
     content = await r2_service.get_step_prompt(prompt_name, fallback)
     source = "r2_or_local_cache" if content != fallback else "local_fallback"
-    return {"name": prompt_name, "content": content, "source": source, "length": len(content)}
+    return {
+        "name": prompt_name,
+        "content": content,
+        "source": source,
+        "length": len(content),
+    }
 
 
 @step_prompts_router.put("/{prompt_name}")
@@ -173,14 +226,22 @@ async def update_step_prompt(
     Used to fix contradictions or improve prompts without redeploying code.
     """
     if prompt_name not in MANAGED_PROMPTS:
-        raise HTTPException(status_code=404, detail=f"Unknown prompt: {prompt_name}. Valid names: {MANAGED_PROMPTS}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown prompt: {prompt_name}. Valid names: {MANAGED_PROMPTS}",
+        )
 
     if len(body.content.strip()) < 50:
         raise HTTPException(status_code=400, detail="Prompt content too short — likely an accident")
 
     try:
         await r2_service.save_step_prompt(prompt_name, body.content)
-        logger.info("step_prompt.updated_via_api", prompt=prompt_name, tenant_id=x_tenant_id, chars=len(body.content))
+        logger.info(
+            "step_prompt.updated_via_api",
+            prompt=prompt_name,
+            tenant_id=x_tenant_id,
+            chars=len(body.content),
+        )
         return {"name": prompt_name, "status": "saved", "chars": len(body.content)}
     except Exception as exc:
         logger.error("step_prompt.update_failed", prompt=prompt_name, error=str(exc))
@@ -244,8 +305,7 @@ async def get_builder_advanced_prompts(auth_type: str = "api_key"):
             results["CODE_EXECUTION_GUIDELINES"] = guidelines_content
             # Also prepend into CONNECTOR_GEN_SYSTEM so Claude CLI sees the full ruleset
             results["CONNECTOR_GEN_SYSTEM"] = (
-                f"# Implementation Guidelines\n{guidelines_content}\n\n"
-                + results["CONNECTOR_GEN_SYSTEM"]
+                f"# Implementation Guidelines\n{guidelines_content}\n\n" + results["CONNECTOR_GEN_SYSTEM"]
             )
     except Exception:
         results["CODE_EXECUTION_GUIDELINES"] = ""

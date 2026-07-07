@@ -36,11 +36,11 @@ Usage (dry-run first — counts only, writes nothing):
     # only the global catalog (skip the tenant-scoped sessions):
     python core/seed_integration_to_prod.py --apply --catalog-only
 """
+
 from __future__ import annotations
 
 import argparse
 import os
-import sys
 
 GLOBAL_COLLECTIONS = [
     "provider_categories",
@@ -58,6 +58,7 @@ _LOCAL_DEFAULT = "mongodb+srv://shielvaadmin:shielvaadmin123@mastershielva.8rbs4
 
 def _upsert_all(dst_col, docs) -> int:
     from pymongo import ReplaceOne
+
     ops = [ReplaceOne({"_id": d["_id"]}, d, upsert=True) for d in docs if "_id" in d]
     if not ops:
         return 0
@@ -68,7 +69,11 @@ def _upsert_all(dst_col, docs) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true", help="actually write (default is dry-run)")
-    ap.add_argument("--catalog-only", action="store_true", help="skip the tenant-scoped integration_sessions")
+    ap.add_argument(
+        "--catalog-only",
+        action="store_true",
+        help="skip the tenant-scoped integration_sessions",
+    )
     args = ap.parse_args()
 
     from pymongo import MongoClient
@@ -92,8 +97,10 @@ def main() -> int:
     dst = MongoClient(dst_url, serverSelectionTimeoutMS=8000)[dst_db_name] if dst_url else None
 
     mode = "APPLY" if args.apply else "DRY-RUN"
-    print(f"== {mode} ==  src={src_db_name}  dst={dst_db_name or '(none)'}  "
-          f"tenant {old_tenant}→{new_tenant or '(unchanged)'}  app_id→{new_app_id or '(unchanged)'}")
+    print(
+        f"== {mode} ==  src={src_db_name}  dst={dst_db_name or '(none)'}  "
+        f"tenant {old_tenant}→{new_tenant or '(unchanged)'}  app_id→{new_app_id or '(unchanged)'}"
+    )
 
     print("\n-- global catalog --")
     for name in GLOBAL_COLLECTIONS:

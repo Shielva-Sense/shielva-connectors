@@ -24,9 +24,8 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from pymongo import ASCENDING
@@ -38,9 +37,7 @@ from integration.db.database import (
 
 logger = structlog.get_logger(__name__)
 
-_CATALOG_JSON_PATH = (
-    Path(__file__).parent.parent / "data" / "connector_catalog.json"
-)
+_CATALOG_JSON_PATH = Path(__file__).parent.parent / "data" / "connector_catalog.json"
 
 # ── In-process cache ─────────────────────────────────────────────────
 # Resolving categories per request is hot path. Cache the mapping in
@@ -78,18 +75,12 @@ def slugify(label: str) -> str:
 async def ensure_indexes() -> None:
     """Create the indexes the read + write paths rely on. Idempotent."""
     try:
-        await provider_categories_collection().create_index(
-            [("slug", ASCENDING)], unique=True, name="slug_unique"
-        )
-        await provider_categories_collection().create_index(
-            [("sort_order", ASCENDING)], name="sort_order"
-        )
+        await provider_categories_collection().create_index([("slug", ASCENDING)], unique=True, name="slug_unique")
+        await provider_categories_collection().create_index([("sort_order", ASCENDING)], name="sort_order")
         await provider_category_map_collection().create_index(
             [("provider_key", ASCENDING)], unique=True, name="provider_key_unique"
         )
-        await provider_category_map_collection().create_index(
-            [("category_slug", ASCENDING)], name="category_slug"
-        )
+        await provider_category_map_collection().create_index([("category_slug", ASCENDING)], name="category_slug")
     except Exception as exc:
         logger.warning("categories.ensure_indexes_failed", error=str(exc))
 
@@ -121,7 +112,7 @@ async def seed_categories_from_json() -> dict:
 
     cats_coll = provider_categories_collection()
     inserted_cats = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for sort_order, slug in enumerate(sorted(labels)):
         # Upsert-if-missing: do NOT overwrite an existing row (an admin
         # may have renamed the label).
@@ -195,15 +186,11 @@ async def get_provider_category_map() -> dict[str, str]:
 
     # Build slug → label first, then provider_key → label.
     slug_to_label: dict[str, str] = {}
-    async for cat in provider_categories_collection().find(
-        {}, {"slug": 1, "label": 1}
-    ):
+    async for cat in provider_categories_collection().find({}, {"slug": 1, "label": 1}):
         slug_to_label[cat["slug"]] = cat.get("label", cat["slug"])
 
     out: dict[str, str] = {}
-    async for row in provider_category_map_collection().find(
-        {}, {"provider_key": 1, "category_slug": 1}
-    ):
+    async for row in provider_category_map_collection().find({}, {"provider_key": 1, "category_slug": 1}):
         key = row.get("provider_key")
         slug = row.get("category_slug")
         if not key or not slug:
@@ -246,9 +233,7 @@ async def list_categories() -> list[dict]:
     return out
 
 
-async def create_category(
-    label: str, *, slug: Optional[str] = None, description: str = ""
-) -> dict:
+async def create_category(label: str, *, slug: str | None = None, description: str = "") -> dict:
     """Create a new category. Slug is auto-derived from the label when
     omitted. Raises ValueError on duplicate slug."""
     label = (label or "").strip()
@@ -266,7 +251,7 @@ async def create_category(
     last = await coll.find({}, {"sort_order": 1}).sort("sort_order", -1).limit(1).to_list(1)
     next_sort = (last[0].get("sort_order", 0) + 1) if last else 0
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     doc = {
         "slug": final_slug,
         "label": label,
@@ -291,9 +276,9 @@ async def create_category(
 async def update_category(
     slug: str,
     *,
-    label: Optional[str] = None,
-    description: Optional[str] = None,
-    sort_order: Optional[int] = None,
+    label: str | None = None,
+    description: str | None = None,
+    sort_order: int | None = None,
 ) -> dict:
     """Rename / re-describe / re-order a category. Slug is immutable —
     renaming the label preserves all existing mappings."""
@@ -302,7 +287,7 @@ async def update_category(
     if not existing:
         raise LookupError(f"category '{slug}' not found")
 
-    patch: dict = {"updated_at": datetime.now(timezone.utc)}
+    patch: dict = {"updated_at": datetime.now(UTC)}
     if label is not None:
         label = label.strip()
         if not label:
@@ -333,22 +318,16 @@ async def delete_category(slug: str) -> dict:
     if not existing:
         raise LookupError(f"category '{slug}' not found")
 
-    in_use = await provider_category_map_collection().count_documents(
-        {"category_slug": slug}, limit=1
-    )
+    in_use = await provider_category_map_collection().count_documents({"category_slug": slug}, limit=1)
     if in_use:
-        raise ValueError(
-            f"category '{slug}' has providers mapped to it — remap them first"
-        )
+        raise ValueError(f"category '{slug}' has providers mapped to it — remap them first")
 
     await coll.delete_one({"slug": slug})
     invalidate_cache()
     return {"slug": slug, "deleted": True}
 
 
-async def set_provider_category(
-    provider_key: str, category_slug: str, *, updated_by: Optional[str] = None
-) -> dict:
+async def set_provider_category(provider_key: str, category_slug: str, *, updated_by: str | None = None) -> dict:
     """Map (or remap) a provider to a category.
 
     The category lookup is lenient — callers may pass either a stored slug
@@ -369,9 +348,7 @@ async def set_provider_category(
     # Fallback 1: maybe the caller passed a label that doesn't yet have a
     # row but matches one by label (case-insensitive).
     if not cat:
-        cat = await coll.find_one(
-            {"label": {"$regex": f"^{category_slug}$", "$options": "i"}}
-        )
+        cat = await coll.find_one({"label": {"$regex": f"^{category_slug}$", "$options": "i"}})
 
     # Fallback 2: auto-create. Slugify the input, treat the original as
     # the label. This makes every freeform label from the static catalog
@@ -382,14 +359,9 @@ async def set_provider_category(
         if existing:
             cat = existing
         else:
-            last = (
-                await coll.find({}, {"sort_order": 1})
-                .sort("sort_order", -1)
-                .limit(1)
-                .to_list(1)
-            )
+            last = await coll.find({}, {"sort_order": 1}).sort("sort_order", -1).limit(1).to_list(1)
             next_sort = (last[0].get("sort_order", 0) + 1) if last else 0
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             doc = {
                 "slug": new_slug,
                 "label": category_slug,
@@ -404,7 +376,7 @@ async def set_provider_category(
 
     final_slug = cat["slug"]
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await provider_category_map_collection().update_one(
         {"provider_key": provider_key},
         {

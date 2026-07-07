@@ -6,8 +6,7 @@ compliance, and checks for tenant isolation.
 
 import ast
 import re
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
@@ -44,19 +43,20 @@ BLOCKED_CALLS = {
 }
 
 DANGEROUS_PATTERNS = [
-    r"os\.environ\[",         # direct env mutation
-    r"shutil\.rmtree",        # mass deletion
-    r"__builtins__",          # builtin manipulation
-    r"ctypes\.",              # C interop
-    r"pickle\.loads",         # deserialization
-    r"yaml\.load\(",          # unsafe YAML
-    r"socket\.",              # raw networking
+    r"os\.environ\[",  # direct env mutation
+    r"shutil\.rmtree",  # mass deletion
+    r"__builtins__",  # builtin manipulation
+    r"ctypes\.",  # C interop
+    r"pickle\.loads",  # deserialization
+    r"yaml\.load\(",  # unsafe YAML
+    r"socket\.",  # raw networking
 ]
 
 
 # ── Validators ───────────────────────────────────────────────────────
 
-def validate_syntax(code: str, filename: str = "<generated>") -> Dict[str, Any]:
+
+def validate_syntax(code: str, filename: str = "<generated>") -> dict[str, Any]:
     """Check Python syntax validity.
 
     Returns: {valid: bool, error: str|None, line: int|None}
@@ -68,7 +68,7 @@ def validate_syntax(code: str, filename: str = "<generated>") -> Dict[str, Any]:
         return {"valid": False, "error": str(exc), "line": exc.lineno}
 
 
-def validate_imports(code: str) -> Dict[str, Any]:
+def validate_imports(code: str) -> dict[str, Any]:
     """Check for dangerous/blocked imports and function calls.
 
     Returns: {safe: bool, blocked: list[str], warnings: list[str]}
@@ -79,7 +79,11 @@ def validate_imports(code: str) -> Dict[str, Any]:
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return {"safe": False, "blocked": [], "warnings": ["Syntax error — cannot analyze imports"]}
+        return {
+            "safe": False,
+            "blocked": [],
+            "warnings": ["Syntax error — cannot analyze imports"],
+        }
 
     for node in ast.walk(tree):
         # Check imports
@@ -104,7 +108,7 @@ def validate_imports(code: str) -> Dict[str, Any]:
     for pattern in DANGEROUS_PATTERNS:
         matches = re.finditer(pattern, code)
         for m in matches:
-            line_num = code[:m.start()].count("\n") + 1
+            line_num = code[: m.start()].count("\n") + 1
             warnings.append(f"Suspicious pattern: {m.group()} (line {line_num})")
 
     return {
@@ -127,7 +131,7 @@ def _extract_auth_type(tree: ast.AST) -> str:
     return ""
 
 
-def validate_base_connector_compliance(code: str) -> Dict[str, Any]:
+def validate_base_connector_compliance(code: str) -> dict[str, Any]:
     """Check that generated code inherits BaseConnector and implements required methods.
 
     authorize() is ONLY required for oauth2_code and oauth2_pkce auth types — the base
@@ -138,7 +142,13 @@ def validate_base_connector_compliance(code: str) -> Dict[str, Any]:
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return {"compliant": False, "missing_methods": [], "has_class": False, "class_name": "", "auth_type": ""}
+        return {
+            "compliant": False,
+            "missing_methods": [],
+            "has_class": False,
+            "class_name": "",
+            "auth_type": "",
+        }
 
     # Always required
     required_methods = {"install", "health_check", "sync"}
@@ -158,11 +168,7 @@ def validate_base_connector_compliance(code: str) -> Dict[str, Any]:
                     base_names.append(base.attr)
 
             if "BaseConnector" in base_names:
-                methods = {
-                    n.name
-                    for n in node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                }
+                methods = {n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
                 missing = required_methods - methods
                 return {
                     "compliant": len(missing) == 0,
@@ -181,7 +187,7 @@ def validate_base_connector_compliance(code: str) -> Dict[str, Any]:
     }
 
 
-def validate_tenant_isolation(code: str) -> Dict[str, Any]:
+def validate_tenant_isolation(code: str) -> dict[str, Any]:
     """Check that generated code properly uses tenant_id for data isolation.
 
     Returns: {isolated: bool, warnings: list[str]}
@@ -198,7 +204,7 @@ def validate_tenant_isolation(code: str) -> Dict[str, Any]:
     for pattern, desc in hardcoded_patterns:
         matches = re.finditer(pattern, code)
         for m in matches:
-            line_num = code[:m.start()].count("\n") + 1
+            line_num = code[: m.start()].count("\n") + 1
             warnings.append(f"{desc}: {m.group()[:50]} (line {line_num})")
 
     # Verify self.tenant_id usage
@@ -213,20 +219,34 @@ def validate_tenant_isolation(code: str) -> Dict[str, Any]:
 
 
 _OAUTH2_FLOW_TYPES = {
-    "oauth2_code", "oauth2_pkce", "oauth2_client_credentials",
-    "oauth2_password", "oauth2_device",
+    "oauth2_code",
+    "oauth2_pkce",
+    "oauth2_client_credentials",
+    "oauth2_password",
+    "oauth2_device",
 }
 
 # Field names that Gemini commonly hallucinates
-_WRONG_SYNC_FIELDS = ["docs_synced", "synced", "count", "sync_count", "num_synced",
-                      "docs_failed", "failed_count", "num_failed"]
-_WRONG_DOC_FIELDS  = ["doc_id", "document_id", "docid", "uid", "uuid"]
+_WRONG_SYNC_FIELDS = [
+    "docs_synced",
+    "synced",
+    "count",
+    "sync_count",
+    "num_synced",
+    "docs_failed",
+    "failed_count",
+    "num_failed",
+]
+_WRONG_DOC_FIELDS = ["doc_id", "document_id", "docid", "uid", "uuid"]
 _WRONG_INSTALL_PARAMS = re.compile(r"async def install\s*\(\s*self\s*,\s*config")
-_WRONG_SYNC_PARAM     = re.compile(r"def sync\s*\([^)]*full_sync\s*[=:]")
-_CREDENTIAL_ENV       = re.compile(r"os\.getenv\s*\(\s*['\"](?:client_id|client_secret|api_key|token|secret|password|credential)", re.IGNORECASE)
+_WRONG_SYNC_PARAM = re.compile(r"def sync\s*\([^)]*full_sync\s*[=:]")
+_CREDENTIAL_ENV = re.compile(
+    r"os\.getenv\s*\(\s*['\"](?:client_id|client_secret|api_key|token|secret|password|credential)",
+    re.IGNORECASE,
+)
 
 
-def validate_oauth_constants(code: str) -> Dict[str, Any]:
+def validate_oauth_constants(code: str) -> dict[str, Any]:
     """For OAuth2 connectors, verify AUTH_URI and TOKEN_URI class attributes are set.
 
     Missing these causes a silent runtime failure: BaseConnector.get_oauth_url() raises
@@ -255,14 +275,16 @@ def validate_oauth_constants(code: str) -> Dict[str, Any]:
 
     warnings = []
     if "AUTH_URI" not in attr_names:
-        warnings.append(f"AUTH_URI not set — required for {auth_type}. BaseConnector.get_oauth_url() will raise 'auth_uri is not set'.")
+        warnings.append(
+            f"AUTH_URI not set — required for {auth_type}. BaseConnector.get_oauth_url() will raise 'auth_uri is not set'."
+        )
     if "TOKEN_URI" not in attr_names:
         warnings.append(f"TOKEN_URI not set — required for {auth_type}. Token exchange will fail.")
 
     return {"valid": len(warnings) == 0, "warnings": warnings}
 
 
-def validate_field_names(code: str) -> Dict[str, Any]:
+def validate_field_names(code: str) -> dict[str, Any]:
     """Check for wrong SyncResult / NormalizedDocument field names that cause TypeError at runtime.
 
     Returns: {valid: bool, warnings: list[str]}
@@ -270,14 +292,16 @@ def validate_field_names(code: str) -> Dict[str, Any]:
     warnings = []
     for wrong in _WRONG_SYNC_FIELDS:
         if re.search(rf"\b{re.escape(wrong)}\s*=", code):
-            warnings.append(f"Wrong SyncResult field '{wrong}' — use documents_synced / documents_failed / documents_found")
+            warnings.append(
+                f"Wrong SyncResult field '{wrong}' — use documents_synced / documents_failed / documents_found"
+            )
     for wrong in _WRONG_DOC_FIELDS:
         if re.search(rf"\b{re.escape(wrong)}\s*=", code):
             warnings.append(f"Wrong NormalizedDocument field '{wrong}' — use 'id' (not doc_id / document_id)")
     return {"valid": len(warnings) == 0, "warnings": warnings}
 
 
-def validate_method_signatures(code: str) -> Dict[str, Any]:
+def validate_method_signatures(code: str) -> dict[str, Any]:
     """Check install() and sync() have the correct signatures.
 
     install(self, config) → silent bug: config is always None, credentials are ignored
@@ -287,13 +311,17 @@ def validate_method_signatures(code: str) -> Dict[str, Any]:
     """
     warnings = []
     if _WRONG_INSTALL_PARAMS.search(code):
-        warnings.append("install(self, config) detected — MUST be install(self). Config comes from self.config; passing config param means it is always None at runtime.")
+        warnings.append(
+            "install(self, config) detected — MUST be install(self). Config comes from self.config; passing config param means it is always None at runtime."
+        )
     if _WRONG_SYNC_PARAM.search(code):
-        warnings.append("sync() uses 'full_sync' parameter — MUST be 'full'. Gateway calls sync(full=True); wrong name causes a silent TypeError.")
+        warnings.append(
+            "sync() uses 'full_sync' parameter — MUST be 'full'. Gateway calls sync(full=True); wrong name causes a silent TypeError."
+        )
     return {"valid": len(warnings) == 0, "warnings": warnings}
 
 
-def validate_credential_sourcing(code: str) -> Dict[str, Any]:
+def validate_credential_sourcing(code: str) -> dict[str, Any]:
     """Warn when credentials are read from os.getenv() instead of self.config.
 
     All credentials must come from self.config (populated by the gateway via install()).
@@ -309,16 +337,27 @@ def validate_credential_sourcing(code: str) -> Dict[str, Any]:
     return {"valid": len(warnings) == 0, "warnings": warnings}
 
 
-def validate_all(code: str, filename: str = "<generated>") -> Dict[str, Any]:
+def validate_all(code: str, filename: str = "<generated>") -> dict[str, Any]:
     """Run all validators and return aggregated results."""
     syntax = validate_syntax(code, filename)
     if not syntax["valid"]:
         return {
             "valid": False,
             "syntax": syntax,
-            "imports": {"safe": False, "blocked": [], "warnings": ["Cannot analyze — syntax error"]},
-            "compliance": {"compliant": False, "missing_methods": [], "has_class": False},
-            "isolation": {"isolated": False, "warnings": ["Cannot analyze — syntax error"]},
+            "imports": {
+                "safe": False,
+                "blocked": [],
+                "warnings": ["Cannot analyze — syntax error"],
+            },
+            "compliance": {
+                "compliant": False,
+                "missing_methods": [],
+                "has_class": False,
+            },
+            "isolation": {
+                "isolated": False,
+                "warnings": ["Cannot analyze — syntax error"],
+            },
         }
 
     imports = validate_imports(code)
@@ -341,7 +380,7 @@ def validate_all(code: str, filename: str = "<generated>") -> Dict[str, Any]:
     )
 
     # Aggregate all non-blocking warnings for UI display
-    all_warnings: List[str] = (
+    all_warnings: list[str] = (
         imports.get("warnings", [])
         + isolation.get("warnings", [])
         + field_names.get("warnings", [])
@@ -364,6 +403,7 @@ def validate_all(code: str, filename: str = "<generated>") -> Dict[str, Any]:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _get_call_name(node: ast.Call) -> str:
     """Extract the dotted name of a function call."""

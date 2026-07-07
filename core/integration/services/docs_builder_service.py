@@ -5,11 +5,11 @@ renders via the SiteRenderer component. Uses the LLM to produce docs
 from the generated connector source code and metadata.
 """
 
+import contextlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 import structlog
 from bson import ObjectId
@@ -17,8 +17,8 @@ from bson import ObjectId
 from integration.core.config import settings
 from integration.db.database import sessions_collection
 from integration.prompts.docs_prompt import DOCS_GENERATION_PROMPT, DOCS_UPDATE_PROMPT
-from integration.services.docs_guidelines_service import get_active_doc_guidelines
 from integration.services import knowledge_service, r2_service
+from integration.services.docs_guidelines_service import get_active_doc_guidelines
 from integration.services.llm_client import call_llm
 
 logger = structlog.get_logger(__name__)
@@ -34,8 +34,9 @@ def _output_dir(tenant_id: str, service_slug: str) -> Path:
     Path: {GENERATED_CODE_DIR}/{tenant_id}/{service_slug}_connector/
     """
     import re as _re
+
     base = Path(settings.GENERATED_CODE_DIR).resolve()
-    clean = _re.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+    clean = _re.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
     return base / tenant_id / f"{clean}_connector"
 
 
@@ -54,7 +55,6 @@ def _normalise_to_sections(flat: dict, connector_name: str) -> dict:
 
     Called as a fallback if Gemini returns the wrong schema despite prompt instructions.
     """
-    import textwrap
 
     def _md(content) -> str:
         if isinstance(content, str):
@@ -76,7 +76,7 @@ def _normalise_to_sections(flat: dict, connector_name: str) -> dict:
         if auth.get("fields"):
             content += "\n\n| Field | Description |\n|---|---|\n"
             for f in auth["fields"]:
-                content += f"| `{f.get('name','')}` | {f.get('description','')} |\n"
+                content += f"| `{f.get('name', '')}` | {f.get('description', '')} |\n"
         sections.append({"id": "authentication", "title": "Authentication", "content": content})
 
     if flat.get("methods"):
@@ -86,18 +86,31 @@ def _normalise_to_sections(flat: dict, connector_name: str) -> dict:
             if m.get("params"):
                 params_md = "\n\n**Parameters:**\n| Param | Type | Required | Description |\n|---|---|---|---|\n"
                 for p in m["params"]:
-                    params_md += f"| `{p.get('name','')}` | {p.get('type','')} | {p.get('required','')} | {p.get('description','')} |\n"
+                    params_md += f"| `{p.get('name', '')}` | {p.get('type', '')} | {p.get('required', '')} | {p.get('description', '')} |\n"
             content = m.get("description", "") + params_md
             if m.get("returns"):
                 content += f"\n\n**Returns**: {m['returns']}"
             if m.get("example"):
                 content += f"\n\n**Example**:\n```python\n{m['example']}\n```"
-            children.append({"id": f"method-{m.get('name','').replace('_','-')}", "title": m.get("name", ""), "content": content})
-        sections.append({"id": "api-reference", "title": "API Reference", "content": "Available methods:", "children": children})
+            children.append(
+                {
+                    "id": f"method-{m.get('name', '').replace('_', '-')}",
+                    "title": m.get("name", ""),
+                    "content": content,
+                }
+            )
+        sections.append(
+            {
+                "id": "api-reference",
+                "title": "API Reference",
+                "content": "Available methods:",
+                "children": children,
+            }
+        )
 
     if flat.get("setup_guide"):
         steps = flat["setup_guide"]
-        content = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps)) if isinstance(steps, list) else _md(steps)
+        content = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps)) if isinstance(steps, list) else _md(steps)
         sections.append({"id": "setup-guide", "title": "Setup Guide", "content": content})
 
     if flat.get("troubleshooting"):
@@ -105,16 +118,25 @@ def _normalise_to_sections(flat: dict, connector_name: str) -> dict:
         if isinstance(items, list) and items and isinstance(items[0], dict):
             content = "| Problem | Solution |\n|---|---|\n"
             for item in items:
-                content += f"| {item.get('problem','')} | {item.get('solution','')} |\n"
+                content += f"| {item.get('problem', '')} | {item.get('solution', '')} |\n"
         else:
             content = _md(items)
         sections.append({"id": "troubleshooting", "title": "Troubleshooting", "content": content})
 
     if not sections:
         # Last resort: dump everything as a single overview section
-        sections.append({"id": "overview", "title": "Overview", "content": json.dumps(flat, indent=2)})
+        sections.append(
+            {
+                "id": "overview",
+                "title": "Overview",
+                "content": json.dumps(flat, indent=2),
+            }
+        )
 
-    return {"title": flat.get("title", f"{connector_name} Documentation"), "sections": sections}
+    return {
+        "title": flat.get("title", f"{connector_name} Documentation"),
+        "sections": sections,
+    }
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -166,6 +188,7 @@ def _validate_sections(sections: list) -> tuple:
     - Children arrays are recursively validated.
     """
     import re as _re
+
     warnings = []
     valid = []
     seen_ids: set = set()
@@ -209,9 +232,9 @@ def _check_section_coverage(sections: list, guidelines_text: str) -> list:
 
     # Extract expected headings from guidelines (lines starting with ## or ###)
     import re as _re
+
     expected_headings = [
-        m.group(1).strip().lower()
-        for m in _re.finditer(r"^#{2,3}\s+(.+)$", guidelines_text, _re.MULTILINE)
+        m.group(1).strip().lower() for m in _re.finditer(r"^#{2,3}\s+(.+)$", guidelines_text, _re.MULTILINE)
     ]
     if not expected_headings:
         return []
@@ -243,10 +266,7 @@ def _parse_docs_json(raw: str) -> dict:
     try:
         data = json.loads(extracted)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"LLM response is not valid JSON: {exc}\n"
-            f"Raw preview: {raw[:500]}"
-        ) from exc
+        raise ValueError(f"LLM response is not valid JSON: {exc}\nRaw preview: {raw[:500]}") from exc
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object, got {type(data).__name__}")
@@ -273,7 +293,7 @@ async def generate_docs(
     session_id: str,
     tenant_id: str,
     extra_prompt: str = "",
-    log_cb=None,          # optional async callable(level: str, message: str)
+    log_cb=None,  # optional async callable(level: str, message: str)
 ) -> dict:
     """Generate connector documentation as SiteRenderer JSON.
 
@@ -289,10 +309,8 @@ async def generate_docs(
 
     async def _log(level: str, msg: str):
         if log_cb:
-            try:
+            with contextlib.suppress(Exception):
                 await log_cb(level, msg)
-            except Exception:
-                pass
 
     await _log("info", "📄 Starting documentation generation...")
 
@@ -337,14 +355,19 @@ async def generate_docs(
 
     # Read ALL additional Python files for complete context
     additional_files = []
-    for pattern in ["__init__.py", "exceptions.py", "models.py",
-                     "helpers/*.py", "client/*.py"]:
+    for pattern in [
+        "__init__.py",
+        "exceptions.py",
+        "models.py",
+        "helpers/*.py",
+        "client/*.py",
+    ]:
         for fp in sorted(out_dir.glob(pattern)):
             fc = _read_file_safe(fp)
             if fc.strip():
                 rel = fp.relative_to(out_dir)
                 additional_files.append(f"# === {rel} ===\n{fc}")
-    additional_code = "\n\n".join(additional_files) if additional_files else "(no additional modules)"
+    "\n\n".join(additional_files) if additional_files else "(no additional modules)"
 
     # connector.json may be in metadata/ subdirectory
     connector_json_path = out_dir / "metadata" / "connector.json"
@@ -360,7 +383,10 @@ async def generate_docs(
     # generation produces connector-specific docs that are actually useful.
     guidelines_record = await get_active_doc_guidelines()
     doc_guidelines = guidelines_record.get("content", "")
-    await _log("info", f"📋 Guidelines v{guidelines_record.get('version', '?')} loaded (coverage audit only — not injected into LLM)")
+    await _log(
+        "info",
+        f"📋 Guidelines v{guidelines_record.get('version', '?')} loaded (coverage audit only — not injected into LLM)",
+    )
 
     # 3b. Query RAG vectors for relevant API/SDK context
     _provider = session.get("provider", "")
@@ -369,13 +395,16 @@ async def generate_docs(
     rag_context = ""
     if _tenant_id:
         try:
-            rag_context = await knowledge_service.query_knowledge(
-                query=f"{connector_name} {_service_name} API documentation methods authentication",
-                tenant_id=_tenant_id,
-                provider=_provider,
-                service=_service_name,
-                top_k=12,
-            ) or ""
+            rag_context = (
+                await knowledge_service.query_knowledge(
+                    query=f"{connector_name} {_service_name} API documentation methods authentication",
+                    tenant_id=_tenant_id,
+                    provider=_provider,
+                    service=_service_name,
+                    top_k=12,
+                )
+                or ""
+            )
         except Exception as _e:
             logger.warning("docs_builder.rag_query_failed", error=str(_e))
 
@@ -384,13 +413,16 @@ async def generate_docs(
         if not _tenant_id:
             return ""
         try:
-            return await knowledge_service.query_knowledge(
-                query=query,
-                tenant_id=_tenant_id,
-                provider=_provider,
-                service=_service_name,
-                top_k=8,
-            ) or ""
+            return (
+                await knowledge_service.query_knowledge(
+                    query=query,
+                    tenant_id=_tenant_id,
+                    provider=_provider,
+                    service=_service_name,
+                    top_k=8,
+                )
+                or ""
+            )
         except Exception:
             return ""
 
@@ -398,6 +430,7 @@ async def generate_docs(
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         await _log("info", "🤖 Starting Gemini agentic docs generation...")
         from integration.services.agentic_fix import gemini_agentic_generate_docs
+
         agentic_result = await gemini_agentic_generate_docs(
             out_dir,
             guidelines=doc_guidelines,
@@ -431,14 +464,25 @@ async def generate_docs(
                 # Guidelines coverage check
                 coverage_gaps = _check_section_coverage(docs_json.get("sections", []), doc_guidelines)
                 if coverage_gaps:
-                    logger.warning("docs_builder.coverage_gaps", gaps=coverage_gaps, session_id=session_id)
+                    logger.warning(
+                        "docs_builder.coverage_gaps",
+                        gaps=coverage_gaps,
+                        session_id=session_id,
+                    )
                     docs_json["_coverage_gaps"] = coverage_gaps
-                logger.info("docs_builder.agentic_success", session_id=session_id,
-                            iterations=agentic_result["iterations"],
-                            sections=len(docs_json.get("sections", [])))
+                logger.info(
+                    "docs_builder.agentic_success",
+                    session_id=session_id,
+                    iterations=agentic_result["iterations"],
+                    sections=len(docs_json.get("sections", [])),
+                )
                 return docs_json
             except (json.JSONDecodeError, Exception) as _e:
-                logger.warning("docs_builder.agentic_json_invalid_fallback", session_id=session_id, error=str(_e))
+                logger.warning(
+                    "docs_builder.agentic_json_invalid_fallback",
+                    session_id=session_id,
+                    error=str(_e),
+                )
                 # Fall through to prompt-based path
 
     # 4b. Build prompt and call LLM (Claude fallback)
@@ -497,15 +541,22 @@ async def generate_docs(
             )
             if attempt < _MAX_JSON_RETRIES:
                 # Add a correction message for the retry
-                messages.append({"role": "assistant", "content": raw_response[:2000] if raw_response else ""})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Your response was not valid JSON. Error: {exc}\n\n"
-                        "Please output ONLY a valid JSON object with the exact schema specified. "
-                        "No text before or after the JSON. No markdown code fences."
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": raw_response[:2000] if raw_response else "",
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your response was not valid JSON. Error: {exc}\n\n"
+                            "Please output ONLY a valid JSON object with the exact schema specified. "
+                            "No text before or after the JSON. No markdown code fences."
+                        ),
+                    }
+                )
             else:
                 raise ValueError(
                     f"Failed to parse docs JSON after {_MAX_JSON_RETRIES} attempts: {last_error}"
@@ -517,7 +568,11 @@ async def generate_docs(
         logger.warning("docs_builder.coverage_gaps", gaps=coverage_gaps, session_id=session_id)
         docs_json["_coverage_gaps"] = coverage_gaps
 
-    logger.info("docs_builder.generated", session_id=session_id, sections=len(docs_json.get("sections", [])))
+    logger.info(
+        "docs_builder.generated",
+        session_id=session_id,
+        sections=len(docs_json.get("sections", [])),
+    )
     return docs_json
 
 
@@ -590,14 +645,21 @@ async def update_docs_with_prompt(
                 error=str(exc),
             )
             if attempt < _MAX_JSON_RETRIES:
-                messages.append({"role": "assistant", "content": raw_response[:2000] if raw_response else ""})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Your response was not valid JSON. Error: {exc}\n\n"
-                        "Output ONLY the complete updated JSON object. No extra text."
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": raw_response[:2000] if raw_response else "",
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your response was not valid JSON. Error: {exc}\n\n"
+                            "Output ONLY the complete updated JSON object. No extra text."
+                        ),
+                    }
+                )
             else:
                 raise ValueError(
                     f"Failed to parse updated docs JSON after {_MAX_JSON_RETRIES} attempts: {last_error}"
@@ -614,6 +676,7 @@ async def update_docs_with_prompt(
     if session_meta:
         try:
             from integration.services import r2_service as _r2
+
             await _r2.save_connector_docs(
                 tenant_id=tenant_id,
                 provider=session_meta.get("provider", ""),
@@ -626,8 +689,8 @@ async def update_docs_with_prompt(
         {"_id": oid, "tenant_id": tenant_id},
         {
             "$set": {
-                "docs_updated_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
+                "docs_updated_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
             },
             "$unset": {"docs_json": ""},
         },
@@ -675,21 +738,12 @@ async def export_docs_html(docs_json: dict) -> str:
         sid = _html_escape(section.get("id", ""))
         stitle = _html_escape(section.get("title", ""))
         scontent = _md_to_html(section.get("content", ""))
-        content_parts.append(
-            f'<section id="{sid}">'
-            f"<h2>{stitle}</h2>"
-            f"<div>{scontent}</div>"
-        )
+        content_parts.append(f'<section id="{sid}"><h2>{stitle}</h2><div>{scontent}</div>')
         for child in section.get("children", []):
             cid = _html_escape(child.get("id", ""))
             ctitle = _html_escape(child.get("title", ""))
             ccontent = _md_to_html(child.get("content", ""))
-            content_parts.append(
-                f'<section id="{cid}">'
-                f"<h3>{ctitle}</h3>"
-                f"<div>{ccontent}</div>"
-                f"</section>"
-            )
+            content_parts.append(f'<section id="{cid}"><h3>{ctitle}</h3><div>{ccontent}</div></section>')
         content_parts.append("</section>")
 
     body_html = "\n".join(content_parts)
@@ -744,6 +798,7 @@ img {{ max-width: 100%; border-radius: 8px; margin: 12px 0; }}
 
 
 # ── Internal helpers ─────────────────────────────────────────────────
+
 
 def _html_escape(text: str) -> str:
     """Escape HTML special characters."""
@@ -837,8 +892,7 @@ def _md_to_html(md: str) -> str:
             row = stripped.strip("|")
             table_rows.append(row)
             continue
-        else:
-            _flush_table()
+        _flush_table()
 
         # Headings
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
@@ -913,7 +967,9 @@ def _inline_md(text: str) -> str:
     # Links: [text](url) — sanitize URL to prevent XSS
     text = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
-        lambda m: f'<a href="{_sanitize_url(m.group(2))}" target="_blank" rel="noopener noreferrer">{_html_escape(m.group(1))}</a>',
+        lambda m: (
+            f'<a href="{_sanitize_url(m.group(2))}" target="_blank" rel="noopener noreferrer">{_html_escape(m.group(1))}</a>'
+        ),
         text,
     )
     # Inline code: `code`
@@ -925,5 +981,4 @@ def _inline_md(text: str) -> str:
     text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
     text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<em>\1</em>", text)
     # Checkbox: - [ ] or - [x]
-    text = text.replace("[ ]", "&#9744;").replace("[x]", "&#9745;").replace("[X]", "&#9745;")
-    return text
+    return text.replace("[ ]", "&#9744;").replace("[x]", "&#9745;").replace("[X]", "&#9745;")

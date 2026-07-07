@@ -24,12 +24,9 @@ Falls back to local filesystem when R2 is not configured (mirrors r2_service pat
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
 from datetime import datetime
-from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -48,6 +45,7 @@ _LOCAL_CACHE_DIR = Path(settings.GENERATED_CODE_DIR).parent / "plan_cache"
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def _failure_id(step_type: str, session_id: str) -> str:
     """Deterministic failure ID per step per session: {step_type}_{first-8-chars-of-session}_failures.
@@ -70,15 +68,12 @@ def _r2_key(provider: str, service: str, tenant_id: str, failure_id: str) -> str
 
 
 def _is_r2_configured() -> bool:
-    return bool(
-        settings.R2_ACCOUNT_ID
-        and settings.R2_ACCESS_KEY_ID
-        and settings.R2_SECRET_ACCESS_KEY
-    )
+    return bool(settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID and settings.R2_SECRET_ACCESS_KEY)
 
 
 def _get_r2_client():
     import boto3
+
     return boto3.client(
         "s3",
         endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
@@ -90,9 +85,12 @@ def _get_r2_client():
 
 # ── R2 / local sync I/O ─────────────────────────────────────────────────────
 
-def _sync_r2_read(key: str) -> Optional[str]:
+
+def _sync_r2_read(key: str) -> str | None:
     from botocore.exceptions import ClientError
+
     from integration.services.r2_service import _get_bucket
+
     try:
         client = _get_r2_client()
         resp = client.get_object(Bucket=_get_bucket(), Key=key)
@@ -110,6 +108,7 @@ def _sync_r2_read(key: str) -> Optional[str]:
 
 def _sync_r2_write(key: str, content: str) -> None:
     from integration.services.r2_service import _get_bucket
+
     client = _get_r2_client()
     client.put_object(
         Bucket=_get_bucket(),  # per-app bucket — failure data is session-specific
@@ -121,7 +120,9 @@ def _sync_r2_write(key: str, content: str) -> None:
 
 def _sync_r2_delete(key: str) -> None:
     from botocore.exceptions import ClientError
+
     from integration.services.r2_service import _get_bucket
+
     try:
         client = _get_r2_client()
         client.delete_object(Bucket=_get_bucket(), Key=key)
@@ -137,7 +138,7 @@ def _local_path(key: str) -> Path:
     return _LOCAL_CACHE_DIR / key
 
 
-def _local_read(key: str) -> Optional[str]:
+def _local_read(key: str) -> str | None:
     p = _local_path(key)
     return p.read_text(encoding="utf-8") if p.exists() else None
 
@@ -156,14 +157,15 @@ def _local_delete(key: str) -> None:
 
 # ── Redis helpers ────────────────────────────────────────────────────────────
 
+
 async def _redis():
     """Return a connected Redis client (lazy, per-call)."""
     import redis.asyncio as aioredis
-    client = aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
-    return client
+
+    return aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
 
 
-async def _redis_get(key: str) -> Optional[str]:
+async def _redis_get(key: str) -> str | None:
     try:
         r = await _redis()
         val = await r.get(key)
@@ -196,6 +198,7 @@ async def _redis_delete(*keys: str) -> None:
 
 # ── Markdown builder ─────────────────────────────────────────────────────────
 
+
 def _build_failure_md(
     failure_id: str,
     session_id: str,
@@ -211,14 +214,14 @@ def _build_failure_md(
     lines = [
         f"# Failure Report: `{failure_id}`",
         "",
-        f"| Field | Value |",
-        f"|-------|-------|",
+        "| Field | Value |",
+        "|-------|-------|",
         f"| **Session** | `{session_id}` |",
         f"| **Step** | `{step_type}` (index: {step_index}) |",
         f"| **Provider** | `{provider}` / `{service}` |",
         f"| **Tenant** | `{tenant_id}` |",
         f"| **Created** | {created_at} |",
-        f"| **Status** | 🔴 open |",
+        "| **Status** | 🔴 open |",
         "",
         "## Error Summary",
         "",
@@ -241,7 +244,7 @@ def _build_failure_md(
 def _append_attempt_to_md(
     content: str,
     attempt_number: int,
-    outcome: str,          # "succeeded" | "failed"
+    outcome: str,  # "succeeded" | "failed"
     strategy: str,
     details: str,
     timestamp: str,
@@ -258,26 +261,28 @@ def _append_attempt_to_md(
     if "_No fix attempts yet._" in content:
         content = content.replace("_No fix attempts yet._", "")
 
-    attempt_block = "\n".join([
-        f"### Attempt {attempt_number} — {timestamp}",
-        "",
-        f"**Outcome:** {outcome_icon} {outcome}",
-        f"**Strategy:** {strategy}",
-        "",
-        "**Details:**",
-        "```",
-        details.strip()[-3000:] if details else "—",
-        "```",
-        "",
-    ])
+    attempt_block = "\n".join(
+        [
+            f"### Attempt {attempt_number} — {timestamp}",
+            "",
+            f"**Outcome:** {outcome_icon} {outcome}",
+            f"**Strategy:** {strategy}",
+            "",
+            "**Details:**",
+            "```",
+            details.strip()[-3000:] if details else "—",
+            "```",
+            "",
+        ]
+    )
 
-    content = content.rstrip() + "\n\n" + attempt_block
-    return content
+    return content.rstrip() + "\n\n" + attempt_block
 
 
 # ── Storage layer (async, uses asyncio.to_thread for sync I/O) ───────────────
 
-async def _storage_read(key: str) -> Optional[str]:
+
+async def _storage_read(key: str) -> str | None:
     if _is_r2_configured():
         return await asyncio.to_thread(_sync_r2_read, key)
     return await asyncio.to_thread(_local_read, key)
@@ -298,6 +303,7 @@ async def _storage_delete(key: str) -> None:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 async def create_failure(
     *,
@@ -374,7 +380,7 @@ async def get_failure_context(
     provider: str,
     service: str,
     tenant_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Load the active failure context for a step.
 
     Cache hierarchy: Redis → R2/local → None.
@@ -429,7 +435,7 @@ async def append_fix_attempt(
     provider: str,
     service: str,
     tenant_id: str,
-    outcome: str,      # "succeeded" | "failed"
+    outcome: str,  # "succeeded" | "failed"
     strategy: str,
     details: str,
 ) -> None:
@@ -503,7 +509,9 @@ async def resolve_failure(
         content = await _redis_get(content_key) or await _storage_read(r2_key)
         if content:
             resolved_content = content.replace("| **Status** | 🔴 open |", "| **Status** | 🟢 resolved |")
-            resolved_content = resolved_content.replace("| **Status** | 🟡 in-progress |", "| **Status** | 🟢 resolved |")
+            resolved_content = resolved_content.replace(
+                "| **Status** | 🟡 in-progress |", "| **Status** | 🟢 resolved |"
+            )
             await _storage_write(r2_key, resolved_content)
     except Exception:
         pass
@@ -527,6 +535,7 @@ async def resolve_failure(
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
+
 def _extract_summary(content: str) -> str:
     """Pull the Error Summary section text (first ~600 chars) from a failure markdown."""
     try:
@@ -537,13 +546,13 @@ def _extract_summary(content: str) -> str:
             return content[:500]
         start += len(marker)
         end = content.find(end_marker, start)
-        snippet = content[start:end].strip() if end != -1 else content[start:start + 600].strip()
+        snippet = content[start:end].strip() if end != -1 else content[start : start + 600].strip()
         return snippet[:600]
     except Exception:
         return content[:500]
 
 
-def build_failure_context_for_llm(context: Optional[Dict[str, Any]]) -> str:
+def build_failure_context_for_llm(context: dict[str, Any] | None) -> str:
     """Format failure context into a compact string for injection into LLM prompts.
 
     Returns an empty string when context is None.
@@ -569,6 +578,10 @@ def build_failure_context_for_llm(context: Optional[Dict[str, Any]]) -> str:
         summary,
     ]
     if fix_section and "No fix attempts yet" not in fix_section:
-        lines += ["", "Previous Fix Attempts (do NOT repeat these strategies):", fix_section]
+        lines += [
+            "",
+            "Previous Fix Attempts (do NOT repeat these strategies):",
+            fix_section,
+        ]
     lines += ["─────────────────────────────────────────────────────────────────────"]
     return "\n".join(lines)

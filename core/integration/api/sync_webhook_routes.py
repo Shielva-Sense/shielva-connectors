@@ -17,18 +17,15 @@ import hashlib
 import hmac
 import json
 from datetime import datetime
-from typing import Optional
 
 import httpx
 import structlog
-from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException, Request
-
-from integration.core.config import settings
-from integration.db.database import get_db
 
 # Import the broadcast function from sync_request_routes
 from integration.api.sync_request_routes import _broadcast
+from integration.core.config import settings
+from integration.db.database import get_db
 
 logger = structlog.get_logger(__name__)
 
@@ -39,7 +36,7 @@ def _sync_requests_col():
     return get_db()["sync_requests"]
 
 
-async def _verify_github_signature(payload: bytes, signature: Optional[str]) -> bool:
+async def _verify_github_signature(payload: bytes, signature: str | None) -> bool:
     """Verify HMAC-SHA256 signature from GitHub webhook.
 
     Checks for the secret in order:
@@ -60,7 +57,8 @@ async def _verify_github_signature(payload: bytes, signature: Optional[str]) -> 
 
     # Fallback: check all tenants' webhook secrets in MongoDB
     # (handles server restart where in-memory secret is lost)
-    from integration.api.sync_request_routes import _sync_settings_col, _decrypt_token
+    from integration.api.sync_request_routes import _decrypt_token, _sync_settings_col
+
     try:
         col = _sync_settings_col()
         async for doc in col.find({"webhook_secret": {"$ne": None}}, {"webhook_secret": 1}):
@@ -100,7 +98,7 @@ async def _trigger_pull_and_reload(
     result = {"git_pull": None, "reload": None}
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:  # noqa: S501 — internal in-cluster call; harden w/ CA bundle (SOC2 debt)
             resp = await client.post(
                 f"{gateway_url}/internal/pull-and-reload",
                 json={
@@ -120,25 +118,39 @@ async def _trigger_pull_and_reload(
                     "sync_webhook.pull_and_reload_success",
                     branch=target_branch,
                     git_pull=data.get("git_pull"),
-                    reload_loaded=data.get("reload", {}).get("loaded") if isinstance(data.get("reload"), dict) else None,
+                    reload_loaded=data.get("reload", {}).get("loaded")
+                    if isinstance(data.get("reload"), dict)
+                    else None,
                 )
             elif resp.status_code == 403:
                 result["git_pull"] = f"forbidden: {resp.text[:100]}"
-                logger.warning("sync_webhook.pull_and_reload_forbidden", status=403, body=resp.text[:200])
+                logger.warning(
+                    "sync_webhook.pull_and_reload_forbidden",
+                    status=403,
+                    body=resp.text[:200],
+                )
             else:
                 result["git_pull"] = f"failed: HTTP {resp.status_code}"
-                logger.warning("sync_webhook.pull_and_reload_failed", status=resp.status_code, body=resp.text[:200])
+                logger.warning(
+                    "sync_webhook.pull_and_reload_failed",
+                    status=resp.status_code,
+                    body=resp.text[:200],
+                )
     except Exception as e:
         result["git_pull"] = f"error: {str(e)[:100]}"
         logger.error("sync_webhook.pull_and_reload_error", error=str(e)[:200])
 
     # Broadcast to all tenant clients
-    _broadcast(tenant_id, "sync:code_pulled", {
-        "tenant_id": tenant_id,
-        "branch": target_branch,
-        "git_pull": result["git_pull"],
-        "reload": result["reload"],
-    })
+    _broadcast(
+        tenant_id,
+        "sync:code_pulled",
+        {
+            "tenant_id": tenant_id,
+            "branch": target_branch,
+            "git_pull": result["git_pull"],
+            "reload": result["reload"],
+        },
+    )
 
     return result
 
@@ -146,8 +158,8 @@ async def _trigger_pull_and_reload(
 @sync_webhook_router.post("/github")
 async def github_sync_webhook(
     request: Request,
-    x_github_event: Optional[str] = Header(None, alias="X-GitHub-Event"),
-    x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
+    x_github_event: str | None = Header(None, alias="X-GitHub-Event"),
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
 ):
     """Handle GitHub webhook events for sync request PRs."""
     body = await request.body()
@@ -184,31 +196,42 @@ async def github_sync_webhook(
                 if doc["status"] != "merged":
                     await col.update_one(
                         {"_id": doc["_id"]},
-                        {"$set": {
-                            "status": "merged",
-                            "pr_state": "merged",
-                            "merged_at": datetime.utcnow(),
-                            "updated_at": datetime.utcnow(),
-                        }},
+                        {
+                            "$set": {
+                                "status": "merged",
+                                "pr_state": "merged",
+                                "merged_at": datetime.utcnow(),
+                                "updated_at": datetime.utcnow(),
+                            }
+                        },
                     )
-                    _broadcast(tenant_id, "sync:request_merged", {
-                        "sync_request_id": sync_request_id,
-                        "approved_by": "github",
-                        "merged_at": datetime.utcnow().isoformat(),
-                    })
+                    _broadcast(
+                        tenant_id,
+                        "sync:request_merged",
+                        {
+                            "sync_request_id": sync_request_id,
+                            "approved_by": "github",
+                            "merged_at": datetime.utcnow().isoformat(),
+                        },
+                    )
 
                     # Check if queue is empty
-                    open_count = await col.count_documents({
-                        "tenant_id": tenant_id,
-                        "status": {"$nin": ["merged", "dismissed", "error"]},
-                    })
+                    open_count = await col.count_documents(
+                        {
+                            "tenant_id": tenant_id,
+                            "status": {"$nin": ["merged", "dismissed", "error"]},
+                        }
+                    )
                     if open_count == 0:
                         _broadcast(tenant_id, "sync:queue_empty", {"tenant_id": tenant_id})
 
                 # ── Auto-pull + hot-reload via gateway API ──────────────────
                 # Uses the tenant's PAT from sync settings for authenticated pull.
                 # The gateway handles git pull + connector reload in one call.
-                from integration.api.sync_request_routes import _get_tenant_sync_settings
+                from integration.api.sync_request_routes import (
+                    _get_tenant_sync_settings,
+                )
+
                 sync_settings = await _get_tenant_sync_settings(tenant_id)
                 target_branch = doc.get("target_branch", "connector-development")
                 # Webhook-triggered pulls run as super_admin (system action)
@@ -224,33 +247,51 @@ async def github_sync_webhook(
                     sync_request_id=sync_request_id,
                     result=pull_result,
                 )
-            else:
-                # PR was closed without merging (externally). Always reflect pr_state=closed
-                # (even if already locally dismissed) so the card never shows a stale "PR open".
-                if doc["status"] not in ("merged", "dismissed"):
-                    await col.update_one(
-                        {"_id": doc["_id"]},
-                        {"$set": {"status": "dismissed", "pr_state": "closed", "updated_at": datetime.utcnow()}},
-                    )
-                    _broadcast(tenant_id, "sync:request_dismissed", {
+            # PR was closed without merging (externally). Always reflect pr_state=closed
+            # (even if already locally dismissed) so the card never shows a stale "PR open".
+            elif doc["status"] not in ("merged", "dismissed"):
+                await col.update_one(
+                    {"_id": doc["_id"]},
+                    {
+                        "$set": {
+                            "status": "dismissed",
+                            "pr_state": "closed",
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+                _broadcast(
+                    tenant_id,
+                    "sync:request_dismissed",
+                    {
                         "sync_request_id": sync_request_id,
                         "reason": "closed_externally",
-                    })
-                elif doc.get("pr_state") != "closed":
-                    await col.update_one(
-                        {"_id": doc["_id"]},
-                        {"$set": {"pr_state": "closed", "updated_at": datetime.utcnow()}},
-                    )
-                    _broadcast(tenant_id, "sync:pr_state", {
-                        "sync_request_id": sync_request_id, "pr_state": "closed",
-                    })
+                    },
+                )
+            elif doc.get("pr_state") != "closed":
+                await col.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"pr_state": "closed", "updated_at": datetime.utcnow()}},
+                )
+                _broadcast(
+                    tenant_id,
+                    "sync:pr_state",
+                    {
+                        "sync_request_id": sync_request_id,
+                        "pr_state": "closed",
+                    },
+                )
 
         elif action == "synchronize":
             # PR was updated (new commits pushed)
-            _broadcast(tenant_id, "sync:request_updated", {
-                "sync_request_id": sync_request_id,
-                "action": "synchronize",
-            })
+            _broadcast(
+                tenant_id,
+                "sync:request_updated",
+                {
+                    "sync_request_id": sync_request_id,
+                    "action": "synchronize",
+                },
+            )
 
         elif action == "reopened":
             if doc["status"] == "dismissed":
@@ -258,10 +299,14 @@ async def github_sync_webhook(
                     {"_id": doc["_id"]},
                     {"$set": {"status": "ready", "updated_at": datetime.utcnow()}},
                 )
-                _broadcast(tenant_id, "sync:request_ready", {
-                    "sync_request_id": sync_request_id,
-                    "action": "reopened",
-                })
+                _broadcast(
+                    tenant_id,
+                    "sync:request_ready",
+                    {
+                        "sync_request_id": sync_request_id,
+                        "action": "reopened",
+                    },
+                )
 
     elif event == "pull_request_review":
         pr_number = payload.get("pull_request", {}).get("number")
@@ -275,10 +320,14 @@ async def github_sync_webhook(
         review_state = payload.get("review", {}).get("state", "")
         reviewer = payload.get("review", {}).get("user", {}).get("login", "")
 
-        _broadcast(doc["tenant_id"], "sync:review_submitted", {
-            "sync_request_id": str(doc["_id"]),
-            "reviewer": reviewer,
-            "state": review_state,
-        })
+        _broadcast(
+            doc["tenant_id"],
+            "sync:review_submitted",
+            {
+                "sync_request_id": str(doc["_id"]),
+                "reviewer": reviewer,
+                "state": review_state,
+            },
+        )
 
     return {"status": "processed", "event": event, "action": action}

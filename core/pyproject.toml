@@ -27,3 +27,7 @@ packages = ["shared", "shielva_connector_sdk"]
 
 [tool.setuptools.package-dir]
 "shielva_connector_sdk" = "shared"
+
+[tool.pytest.ini_options]
+# pytest-asyncio runs bare `async def test_*` functions without a per-test marker.
+asyncio_mode = "auto"

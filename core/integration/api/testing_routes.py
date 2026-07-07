@@ -3,23 +3,25 @@
 import ast
 import json
 import re
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator, List, Optional
 
 import structlog
 from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from pydantic import BaseModel as _BaseModel
 
 from integration.core.config import settings
 from integration.db.database import sessions_collection
 from integration.services.testing_service import run_tests
-from pydantic import BaseModel as _BaseModel
+
 
 class _TestRequest(_BaseModel):
-    test_mode: Optional[str] = "unit"
-    methods: Optional[List[str]] = None
+    test_mode: str | None = "unit"
+    methods: list[str] | None = None
+
 
 logger = structlog.get_logger(__name__)
 
@@ -27,6 +29,7 @@ testing_router = APIRouter(prefix="/sessions", tags=["testing"])
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _get_session_output_dir(session_id: str, tenant_id: str) -> tuple[Path, str, str]:
     """Resolve the generated code directory for a session.
@@ -44,7 +47,7 @@ async def _get_session_output_dir(session_id: str, tenant_id: str) -> tuple[Path
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
     session = await sessions_collection().find_one(
-        {"_id": oid},                          # no tenant filter — avoids gateway injection mismatch
+        {"_id": oid},  # no tenant filter — avoids gateway injection mismatch
         {"service": 1, "service_slug": 1, "tenant_id": 1, "provider": 1},
     )
     if not session:
@@ -56,11 +59,14 @@ async def _get_session_output_dir(session_id: str, tenant_id: str) -> tuple[Path
     service_slug = session.get("service_slug") or service.replace("-", "_").lower()
     out_dir = Path(settings.GENERATED_CODE_DIR).resolve() / stored_tenant / f"{service_slug}_connector"
     if not out_dir.exists():
-        raise HTTPException(status_code=404, detail=f"No generated files found at {service_slug}_connector")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No generated files found at {service_slug}_connector",
+        )
     return out_dir, session.get("provider", ""), service
 
 
-def _extract_methods_from_source(source: str) -> List[str]:
+def _extract_methods_from_source(source: str) -> list[str]:
     """Parse connector.py with AST and return the public methods defined on the
     connector class itself (the first class that inherits from BaseConnector).
 
@@ -70,14 +76,14 @@ def _extract_methods_from_source(source: str) -> List[str]:
       - methods inherited from BaseConnector (get_token, set_token, etc.)
         — those live in shared/ and must never appear as test targets
     """
-    methods: List[str] = []
+    methods: list[str] = []
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return methods
 
     # Find the connector class (inherits from BaseConnector)
-    connector_class: Optional[ast.ClassDef] = None
+    connector_class: ast.ClassDef | None = None
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             base_names = [
@@ -112,6 +118,7 @@ def _extract_methods_from_source(source: str) -> List[str]:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @testing_router.post("/{session_id}/test")
 async def start_tests(
     session_id: str,
@@ -126,11 +133,15 @@ async def start_tests(
                  uses pytest -k filter so only matching test functions execute
     """
     methods = body.methods or []
-    logger.info("testing.start", session_id=session_id, tenant_id=x_tenant_id,
-                methods=methods, test_mode=body.test_mode)
+    logger.info(
+        "testing.start",
+        session_id=session_id,
+        tenant_id=x_tenant_id,
+        methods=methods,
+        test_mode=body.test_mode,
+    )
     try:
-        result = await run_tests(session_id, x_tenant_id, methods=methods,
-                                 test_mode=body.test_mode or "unit")
+        result = await run_tests(session_id, x_tenant_id, methods=methods, test_mode=body.test_mode or "unit")
         logger.info(
             "testing.complete",
             session_id=session_id,
@@ -163,6 +174,7 @@ async def get_test_cases_map(
         return {"method_tests": {}}
     try:
         from integration.services.step_executor import _build_method_test_map as _bmtm
+
         method_tests = _bmtm(test_file)
         return {"method_tests": method_tests}
     except Exception as exc:
@@ -192,7 +204,10 @@ async def get_connector_methods(
         connector_py = nested[0] if nested else None
 
     if not connector_py:
-        raise HTTPException(status_code=404, detail="connector.py not found — run write_connector step first")
+        raise HTTPException(
+            status_code=404,
+            detail="connector.py not found — run write_connector step first",
+        )
 
     try:
         source = connector_py.read_text(encoding="utf-8")
@@ -210,7 +225,7 @@ async def get_connector_methods(
 
 
 class GenerateTestsRequest(BaseModel):
-    methods: List[str]
+    methods: list[str]
     reset: bool = False
 
 
@@ -227,6 +242,7 @@ async def generate_unit_tests(
     clear message so the caller can route to the new flow.
     """
     from fastapi import HTTPException as _HTTPException
+
     raise _HTTPException(
         status_code=410,
         detail=(
@@ -250,6 +266,7 @@ async def _legacy_generate_unit_tests_DISABLED(
       generate_complete  — final generated code + saved file path
       generate_error     — something went wrong
     """
+
     def _sse(event: str, data: dict) -> str:
         return f"data: {json.dumps({'type': event, **data})}\n\n"
 
@@ -269,14 +286,20 @@ async def _legacy_generate_unit_tests_DISABLED(
         # Extract class name from connector.py (agentic loop reads the file itself via read_file tool)
         connector_py = out_dir / "connector.py"
         if not connector_py.exists():
-            yield _sse("generate_error", {"message": "connector.py not found — run write_connector first"})
+            yield _sse(
+                "generate_error",
+                {"message": "connector.py not found — run write_connector first"},
+            )
             return
         connector_source = connector_py.read_text(encoding="utf-8")
         _cls_match = re.search(r"^class\s+(\w+)\s*\(BaseConnector\)", connector_source, re.MULTILINE)
         class_name = _cls_match.group(1) if _cls_match else "Connector"
 
-        source_files = [str(f.relative_to(out_dir)) for f in sorted(out_dir.rglob("*.py"))
-                        if "__pycache__" not in str(f) and "tests" not in f.parts]
+        source_files = [
+            str(f.relative_to(out_dir))
+            for f in sorted(out_dir.rglob("*.py"))
+            if "__pycache__" not in str(f) and "tests" not in f.parts
+        ]
 
         # Handle existing test file: delete on reset, preserve on partial re-run
         _existing_test = out_dir / "tests" / "test_connector.py"
@@ -284,22 +307,31 @@ async def _legacy_generate_unit_tests_DISABLED(
         if _existing_test.exists():
             if reset:
                 _existing_test.unlink()
-                yield _sse("generate_progress", {
-                    "message": "🗑 Reset: deleted existing test_connector.py — regenerating from scratch",
-                    "lines_generated": 0,
-                })
+                yield _sse(
+                    "generate_progress",
+                    {
+                        "message": "🗑 Reset: deleted existing test_connector.py — regenerating from scratch",
+                        "lines_generated": 0,
+                    },
+                )
             else:
                 existing_tests_content = _existing_test.read_text(encoding="utf-8")
-                yield _sse("generate_progress", {
-                    "message": f"📄 Existing tests preserved — only adding/replacing tests for: {', '.join(methods)}",
-                    "lines_generated": 0,
-                })
+                yield _sse(
+                    "generate_progress",
+                    {
+                        "message": f"📄 Existing tests preserved — only adding/replacing tests for: {', '.join(methods)}",
+                        "lines_generated": 0,
+                    },
+                )
 
-        yield _sse("generate_started", {
-            "message": f"🧪 Agentic test generation for {len(methods)} method(s): {', '.join(methods)} [class={class_name}]",
-            "methods": methods,
-            "source_files": source_files,
-        })
+        yield _sse(
+            "generate_started",
+            {
+                "message": f"🧪 Agentic test generation for {len(methods)} method(s): {', '.join(methods)} [class={class_name}]",
+                "methods": methods,
+                "source_files": source_files,
+            },
+        )
 
         logger.info("testing.generate_unit_tests", session_id=session_id, methods=methods)
 
@@ -310,10 +342,15 @@ async def _legacy_generate_unit_tests_DISABLED(
             _guidelines_raw = _guidelines_local.read_text(encoding="utf-8")
             if len(_guidelines_raw.strip()) > 300:  # ignore stub/summary content
                 _test_guidelines = _guidelines_raw
-                logger.info("testing.guidelines_loaded_local", session_id=session_id, chars=len(_test_guidelines))
+                logger.info(
+                    "testing.guidelines_loaded_local",
+                    session_id=session_id,
+                    chars=len(_test_guidelines),
+                )
         if not _test_guidelines:
             try:
                 from integration.services import r2_service as _r2
+
                 _session_for_slugs = await sessions_collection().find_one(
                     {"_id": ObjectId(session_id)}, {"service_slug": 1}
                 )
@@ -322,32 +359,46 @@ async def _legacy_generate_unit_tests_DISABLED(
                     _r2_guidelines = await _r2.get_test_guidelines(session_provider, _svc_slug) or ""
                     if len(_r2_guidelines.strip()) > 300:
                         _test_guidelines = _r2_guidelines
-                        logger.info("testing.guidelines_loaded_r2", session_id=session_id, chars=len(_test_guidelines))
+                        logger.info(
+                            "testing.guidelines_loaded_r2",
+                            session_id=session_id,
+                            chars=len(_test_guidelines),
+                        )
             except Exception:
                 pass
         if _test_guidelines:
-            yield _sse("generate_progress", {
-                "message": f"📋 Connector-specific test guidelines loaded ({len(_test_guidelines)} chars) — Gemini will follow per-method specs",
-                "lines_generated": 0,
-            })
+            yield _sse(
+                "generate_progress",
+                {
+                    "message": f"📋 Connector-specific test guidelines loaded ({len(_test_guidelines)} chars) — Gemini will follow per-method specs",
+                    "lines_generated": 0,
+                },
+            )
         else:
-            yield _sse("generate_progress", {
-                "message": "⚠ No connector-specific guidelines found — run 'Generate Test Guidelines' step first for best results",
-                "lines_generated": 0,
-            })
+            yield _sse(
+                "generate_progress",
+                {
+                    "message": "⚠ No connector-specific guidelines found — run 'Generate Test Guidelines' step first for best results",
+                    "lines_generated": 0,
+                },
+            )
 
         # Queue for streaming agentic loop logs → SSE
         import asyncio as _asyncio
+
         _progress_queue: _asyncio.Queue = _asyncio.Queue()
 
         # ── Gemini agentic generation: read connector → write tests → run → fix → done ──
         # Each write_file call in the loop automatically triggers autoflake+ruff deterministic fix.
         from integration.services.agentic_fix import gemini_agentic_generate_tests
 
-        yield _sse("generate_progress", {
-            "message": f"🤖 Gemini agentic generation starting — reads connector.py, writes tests, runs pytest, fixes until passing...",
-            "lines_generated": 0,
-        })
+        yield _sse(
+            "generate_progress",
+            {
+                "message": "🤖 Gemini agentic generation starting — reads connector.py, writes tests, runs pytest, fixes until passing...",
+                "lines_generated": 0,
+            },
+        )
 
         async def _agentic_log(level: str, msg: str):
             await _progress_queue.put(msg)
@@ -356,13 +407,16 @@ async def _legacy_generate_unit_tests_DISABLED(
 
         async def _knowledge_fn(query: str) -> str:
             try:
-                return await _ks.query_knowledge(
-                    query=query,
-                    tenant_id=x_tenant_id,
-                    provider=session_provider,
-                    service=session_service,
-                    top_k=8,
-                ) or ""
+                return (
+                    await _ks.query_knowledge(
+                        query=query,
+                        tenant_id=x_tenant_id,
+                        provider=session_provider,
+                        service=session_service,
+                        top_k=8,
+                    )
+                    or ""
+                )
             except Exception:
                 return ""
 
@@ -386,7 +440,7 @@ async def _legacy_generate_unit_tests_DISABLED(
                 try:
                     msg = await _asyncio.wait_for(_progress_queue.get(), timeout=0.4)
                     yield _sse("generate_progress", {"message": msg, "lines_generated": 0})
-                except _asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
             agentic_result = await _gen_task
             # Drain any messages queued during the final iteration before _gen_task.done() fired
@@ -398,7 +452,10 @@ async def _legacy_generate_unit_tests_DISABLED(
                     break
         except Exception as exc:
             logger.error("testing.generate_failed", session_id=session_id, error=str(exc))
-            yield _sse("generate_error", {"message": f"Gemini agentic generation failed: {exc}"})
+            yield _sse(
+                "generate_error",
+                {"message": f"Gemini agentic generation failed: {exc}"},
+            )
             return
 
         # Read the test file written by Gemini
@@ -406,55 +463,77 @@ async def _legacy_generate_unit_tests_DISABLED(
         test_file_name = "test_connector.py"
         test_file_path = tests_dir / test_file_name
         if not test_file_path.exists():
-            yield _sse("generate_error", {"message": "Gemini did not write tests/test_connector.py — try again"})
+            yield _sse(
+                "generate_error",
+                {"message": "Gemini did not write tests/test_connector.py — try again"},
+            )
             return
 
         generated_code = test_file_path.read_text(encoding="utf-8")
 
         # ── Safety net: fix wrong import paths + inject missing @pytest.mark.asyncio ──
         # write_file already ran autoflake+ruff; these are semantic/AST fixes only.
-        from integration.services.step_executor import _fix_connector_import, _strip_hallucinated_imports
+        from integration.services.step_executor import (
+            _fix_connector_import,
+            _strip_hallucinated_imports,
+        )
+
         generated_code = _fix_connector_import(generated_code, class_name)
         generated_code = _strip_hallucinated_imports(generated_code, out_dir / "connector.py")
         test_file_path.write_text(generated_code, encoding="utf-8")
 
         agentic_ok = agentic_result.get("success", False)
         iters = agentic_result.get("iterations", 0)
-        yield _sse("generate_progress", {
-            "message": f"{'✅' if agentic_ok else '⚠'} Agentic generation complete ({iters} iteration(s)) — {'all tests passing' if agentic_ok else 'some tests may still fail, Attempt Fix available'}",
-            "lines_generated": 0,
-        })
+        yield _sse(
+            "generate_progress",
+            {
+                "message": f"{'✅' if agentic_ok else '⚠'} Agentic generation complete ({iters} iteration(s)) — {'all tests passing' if agentic_ok else 'some tests may still fail, Attempt Fix available'}",
+                "lines_generated": 0,
+            },
+        )
 
         # ── RAG indexing: ingest test file into connector KB ──────────
         import asyncio as _asyncio
-        from integration.services import knowledge_service as _ks
-        _asyncio.ensure_future(_ks.ingest_step_output(
-            content=generated_code,
-            filename=f"tests/{test_file_name}",
-            tenant_id=x_tenant_id,
-            provider=session_provider,
-            service=session_service,
-            step_type="write_tests",
-        ))
+
+        _asyncio.ensure_future(
+            _ks.ingest_step_output(
+                content=generated_code,
+                filename=f"tests/{test_file_name}",
+                tenant_id=x_tenant_id,
+                provider=session_provider,
+                service=session_service,
+                step_type="write_tests",
+            )
+        )
 
         line_count = generated_code.count("\n") + 1
-        logger.info("testing.generated_saved", session_id=session_id, file=test_file_name, lines=line_count,
-                    agentic_success=agentic_ok, iterations=iters)
+        logger.info(
+            "testing.generated_saved",
+            session_id=session_id,
+            file=test_file_name,
+            lines=line_count,
+            agentic_success=agentic_ok,
+            iterations=iters,
+        )
 
         # Emit method→test-cases map so the UI can show test names immediately
         from integration.services.step_executor import _build_method_test_map as _bmtm
+
         _method_tests = _bmtm(test_file_path)
         if _method_tests:
             yield _sse("test_cases_map", {"method_tests": _method_tests})
 
-        yield _sse("generate_complete", {
-            "message": f"✅ Generated {line_count} lines of test code → saved as {test_file_name}",
-            "session_id": session_id,
-            "methods": methods,
-            "test_file": test_file_name,
-            "generated_code": generated_code,
-            "line_count": line_count,
-        })
+        yield _sse(
+            "generate_complete",
+            {
+                "message": f"✅ Generated {line_count} lines of test code → saved as {test_file_name}",
+                "session_id": session_id,
+                "methods": methods,
+                "test_file": test_file_name,
+                "generated_code": generated_code,
+                "line_count": line_count,
+            },
+        )
 
     return StreamingResponse(
         _stream(),
@@ -542,9 +621,9 @@ async def auto_fix_compile_errors(
 
     # Collect all .py files (excluding tests/__pycache__)
     py_files = [
-        f for f in out_dir.rglob("*.py")
-        if "__pycache__" not in f.parts and "tests" not in f.parts
-        and not f.name.startswith("test_")
+        f
+        for f in out_dir.rglob("*.py")
+        if "__pycache__" not in f.parts and "tests" not in f.parts and not f.name.startswith("test_")
     ]
 
     for py_file in py_files:
@@ -558,16 +637,29 @@ async def auto_fix_compile_errors(
         # ── Fix 1: Gemini over-escaped triple quotes ────────────────────────
         # Pattern: literal backslash-quote-quote-quote written to file
         if '\\"\\"\\"' in content or "\\'\\'\\'" in content:
-            content = content.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'" , "'''")
+            content = content.replace('\\"\\"\\"', '"""').replace("\\'\\'\\'", "'''")
             if content != original:
                 changes.append(f"Fixed escaped triple-quotes in {py_file.name}")
 
         # ── Fix 2: Missing typing imports ────────────────────────────────────
         # Parse with AST, find annotation names, add any missing typing imports.
         TYPING_NAMES = {
-            "Optional", "List", "Dict", "Tuple", "Union", "Set", "Any",
-            "Callable", "Type", "Sequence", "Iterable", "Generator",
-            "Iterator", "ClassVar", "Final", "Literal",
+            "Optional",
+            "List",
+            "Dict",
+            "Tuple",
+            "Union",
+            "Set",
+            "Any",
+            "Callable",
+            "Type",
+            "Sequence",
+            "Iterable",
+            "Generator",
+            "Iterator",
+            "ClassVar",
+            "Final",
+            "Literal",
         }
         try:
             tree = _ast.parse(content)
@@ -605,7 +697,11 @@ async def auto_fix_compile_errors(
             if existing_match:
                 existing_names = [n.strip() for n in existing_match.group(1).split(",")]
                 merged = sorted(set(existing_names) | set(missing))
-                content = content[:existing_match.start()] + f"from typing import {', '.join(merged)}" + content[existing_match.end():]
+                content = (
+                    content[: existing_match.start()]
+                    + f"from typing import {', '.join(merged)}"
+                    + content[existing_match.end() :]
+                )
             else:
                 # Insert after the last future/stdlib import block, or at top
                 lines = content.splitlines(keepends=True)
@@ -623,14 +719,15 @@ async def auto_fix_compile_errors(
             # as the normal write_file tool so the file is properly cleaned up.
             try:
                 from integration.services.code_quality import auto_fix_python_file
+
                 auto_fix_python_file(py_file)
             except Exception:
                 pass
 
     # Re-run compile check to see if anything remains
+    import os as _os
     import subprocess as _sp
     import sys as _sys
-    import os as _os
 
     repo_root = Path(settings.GENERATED_CODE_DIR).resolve().parent
     pythonpath = _os.pathsep.join([str(out_dir), str(repo_root), str(out_dir.parent)])
@@ -691,10 +788,15 @@ async def auto_fix_compile_errors(
     )
 
     import asyncio as _asyncio
+
     try:
         proc = await _asyncio.to_thread(
-            _sp.run, [_sys.executable, "-c", check_script],
-            cwd=str(out_dir), capture_output=True, text=True, timeout=30,
+            _sp.run,
+            [_sys.executable, "-c", check_script],
+            cwd=str(out_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
             env={**_os.environ, "PYTHONPATH": pythonpath},
         )
         remaining_out = (proc.stdout + proc.stderr).strip()
@@ -726,9 +828,9 @@ async def check_connector_imports(
         clean=True  → all imports OK, safe to run tests
         clean=False → import/syntax errors found, fix first
     """
+    import os as _os
     import subprocess as _sp
     import sys as _sys
-    import os as _os
 
     try:
         out_dir, _, _ = await _get_session_output_dir(session_id, x_tenant_id)
@@ -802,7 +904,7 @@ async def check_connector_imports(
         "            r = subprocess.run(\n"
         "                [sys.executable, '-c', f'import sys; sys.path.insert(0,\".\"); import {mod_name}'],\n"
         "                cwd=str(cwd), capture_output=True, text=True, timeout=5,\n"
-        "                env=__import__(\"os\").environ.copy(),\n"
+        '                env=__import__("os").environ.copy(),\n'
         "            )\n"
         "            if r.returncode != 0:\n"
         "                err = (r.stdout + r.stderr).strip()\n"

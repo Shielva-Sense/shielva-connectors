@@ -11,8 +11,8 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from integration.core.config import settings
-from integration.services.code_quality import analyze_directory, analyze_file
 from integration.services import r2_service
+from integration.services.code_quality import analyze_directory, analyze_file
 
 logger = structlog.get_logger(__name__)
 
@@ -30,8 +30,9 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
             "session_id": str,
         }
     """
-    from integration.db.database import sessions_collection
     import re as _re_cv
+
+    from integration.db.database import sessions_collection
 
     try:
         oid = ObjectId(session_id)
@@ -40,12 +41,26 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
 
     session = await sessions_collection().find_one(
         {"_id": oid, "tenant_id": tenant_id},
-        {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1, "output_dir": 1},
+        {
+            "provider": 1,
+            "service": 1,
+            "service_slug": 1,
+            "tenant_id": 1,
+            "tenant_name": 1,
+            "output_dir": 1,
+        },
     )
     if not session:
         session = await sessions_collection().find_one(
             {"_id": oid},
-            {"provider": 1, "service": 1, "service_slug": 1, "tenant_id": 1, "tenant_name": 1, "output_dir": 1},
+            {
+                "provider": 1,
+                "service": 1,
+                "service_slug": 1,
+                "tenant_id": 1,
+                "tenant_name": 1,
+                "output_dir": 1,
+            },
         )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -55,7 +70,7 @@ async def _resolve_session_meta(session_id: str, tenant_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Session has no service")
 
     service_slug = session.get("service_slug") or service.replace("-", "_").lower()
-    clean = _re_cv.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+    clean = _re_cv.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
 
     return {
         "service_slug": clean,
@@ -116,9 +131,7 @@ async def _resolve_output_dir(session_id: str, tenant_id: str) -> Path:
     raise HTTPException(status_code=404, detail=f"No generated files found for {meta['service_slug']}")
 
 
-async def _disk_or_r2(
-    session_id: str, tenant_id: str
-) -> tuple[Path | None, dict | None]:
+async def _disk_or_r2(session_id: str, tenant_id: str) -> tuple[Path | None, dict | None]:
     """Return (disk_path, None) if code exists on disk, else (None, r2_meta).
 
     r2_meta contains {service_slug, r2_tenant_id} needed to call r2_service methods.
@@ -182,29 +195,33 @@ async def get_file_tree(
         if r2_meta is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        r2_files = await r2_service.list_connector_files(
-            r2_meta["r2_tenant_id"], r2_meta["service_slug"], session_id
-        )
+        r2_files = await r2_service.list_connector_files(r2_meta["r2_tenant_id"], r2_meta["service_slug"], session_id)
         if not r2_files:
-            raise HTTPException(status_code=404, detail="No generated files found (disk and R2 both empty)")
+            raise HTTPException(
+                status_code=404,
+                detail="No generated files found (disk and R2 both empty)",
+            )
 
         tree = []
         for rel in sorted(r2_files):
             ext = Path(rel).suffix.lower()
             lang = _LANG_MAP.get(ext, "text")
-            content = await r2_service.get_connector_file(
-                r2_meta["r2_tenant_id"], r2_meta["service_slug"], session_id, rel
-            ) or ""
-            tree.append({
-                "path": rel,
-                "size": len(content.encode("utf-8")),
-                "language": lang,
-                "quality_score": None,
-                "line_count": len(content.splitlines()) if content else None,
-                "function_count": None,
-                "class_count": None,
-                "source": "r2",
-            })
+            content = (
+                await r2_service.get_connector_file(r2_meta["r2_tenant_id"], r2_meta["service_slug"], session_id, rel)
+                or ""
+            )
+            tree.append(
+                {
+                    "path": rel,
+                    "size": len(content.encode("utf-8")),
+                    "language": lang,
+                    "quality_score": None,
+                    "line_count": len(content.splitlines()) if content else None,
+                    "function_count": None,
+                    "class_count": None,
+                    "source": "r2",
+                }
+            )
 
         logger.info("codeview.file_tree_r2", session_id=session_id, file_count=len(tree))
         package_root = f"{r2_meta['service_slug']}_connector"
@@ -253,8 +270,12 @@ async def get_file_tree(
 
         tree.append(entry)
 
-    logger.info("codeview.file_tree", session_id=session_id, file_count=len(tree),
-                avg_quality=quality.get("average_quality_score", 0))
+    logger.info(
+        "codeview.file_tree",
+        session_id=session_id,
+        file_count=len(tree),
+        avg_quality=quality.get("average_quality_score", 0),
+    )
     return {
         "session_id": session_id,
         "directory": str(out_dir),
@@ -275,10 +296,13 @@ async def get_connector_metadata_from_session(
     out_dir = await _resolve_output_dir(session_id, x_tenant_id)
     meta_path = out_dir / "metadata" / "connector.json"
     if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="connector.json not found — run generate_metadata step first")
+        raise HTTPException(
+            status_code=404,
+            detail="connector.json not found — run generate_metadata step first",
+        )
     import json as _json
-    metadata = _json.loads(meta_path.read_text(encoding="utf-8"))
-    return metadata
+
+    return _json.loads(meta_path.read_text(encoding="utf-8"))
 
 
 @codeview_router.get("/{session_id}/files/{file_path:path}")
@@ -291,7 +315,6 @@ async def get_file_content(
 
     Reads from local disk first; falls back to R2 when disk is absent.
     """
-    import re as _re_path
     # Reject obvious path traversal attempts before any disk/R2 lookup
     if ".." in file_path or file_path.startswith("/"):
         raise HTTPException(status_code=403, detail="Path traversal not allowed")
@@ -328,7 +351,11 @@ async def get_file_content(
     try:
         target.resolve().relative_to(out_dir.resolve())
     except ValueError:
-        logger.warning("codeview.path_traversal_attempt", session_id=session_id, file_path=file_path)
+        logger.warning(
+            "codeview.path_traversal_attempt",
+            session_id=session_id,
+            file_path=file_path,
+        )
         raise HTTPException(status_code=403, detail="Path traversal not allowed")
 
     if not target.exists():
@@ -339,8 +366,14 @@ async def get_file_content(
         if content is not None:
             ext = Path(file_path).suffix.lower()
             lang = _LANG_MAP.get(ext, "text")
-            return {"path": file_path, "content": content, "size": len(content.encode("utf-8")),
-                    "language": lang, "quality": None, "source": "r2"}
+            return {
+                "path": file_path,
+                "content": content,
+                "size": len(content.encode("utf-8")),
+                "language": lang,
+                "quality": None,
+                "source": "r2",
+            }
         logger.warning("codeview.file_not_found", session_id=session_id, file_path=file_path)
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
@@ -352,8 +385,13 @@ async def get_file_content(
     if lang == "python":
         quality = analyze_file(str(target))
 
-    logger.info("codeview.file_content", session_id=session_id, file_path=file_path,
-                size=target.stat().st_size, quality_score=quality.get("quality_score"))
+    logger.info(
+        "codeview.file_content",
+        session_id=session_id,
+        file_path=file_path,
+        size=target.stat().st_size,
+        quality_score=quality.get("quality_score"),
+    )
 
     return {
         "path": file_path,
@@ -388,11 +426,7 @@ async def download_connector_zip(
         except Exception:
             pass
 
-    zip_name = (
-        f"{connector_name_slug}_v{version}.zip"
-        if version
-        else f"{connector_name_slug}_unversioned.zip"
-    )
+    zip_name = f"{connector_name_slug}_v{version}.zip" if version else f"{connector_name_slug}_unversioned.zip"
 
     # Build zip in memory
     buf = io.BytesIO()

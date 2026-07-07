@@ -9,37 +9,31 @@ import asyncio
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-import textwrap
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Optional
 
 import structlog
 
 from integration.core.config import settings
 from integration.prompts.codegen_prompt import (
-    AUTH_CONFIG_PROMPT,
     CONNECTOR_SYSTEM_PROMPT,
     FIX_CODE_PROMPT,
     FIX_CONNECTOR_FOR_TESTS_PROMPT,
     FIX_TESTS_PROMPT,
-    SCAFFOLD_CONFIG_TEMPLATE,
     SCAFFOLD_CONFIG_TEMPLATE_APIKEY,
     SCAFFOLD_CONFIG_TEMPLATE_OAUTH,
     SCAFFOLD_INIT_TEMPLATE,
     TEST_MODULE_SYSTEM_PROMPT,
-    TEST_RULES_GENERATION_PROMPT,
     TEST_SYSTEM_PROMPT,
 )
 from integration.prompts.planning_prompt import BASE_CONNECTOR_INTERFACE
+from integration.services import knowledge_service, r2_service
 from integration.services.code_quality import analyze_file
-from integration.services.llm_client import call_llm, call_llm_fix, call_llm_tests
-from integration.services import knowledge_service
-from integration.services import r2_service
-from integration.services import r2_service
+from integration.services.llm_client import call_llm_fix, call_llm_tests
 
 
 async def _get_prompt(name: str, fallback: str) -> str:
@@ -50,6 +44,7 @@ async def _get_prompt(name: str, fallback: str) -> str:
     so the system never breaks even when R2 is unavailable.
     """
     return await r2_service.get_step_prompt(name, fallback)
+
 
 logger = structlog.get_logger(__name__)
 
@@ -123,21 +118,50 @@ def _extract_connector_facts(context: dict) -> dict:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 pkg = alias.name.split(".")[0]
-                if pkg not in ("os", "re", "json", "datetime", "typing", "asyncio",
-                               "logging", "pathlib", "enum", "abc", "http", "urllib"):
+                if pkg not in (
+                    "os",
+                    "re",
+                    "json",
+                    "datetime",
+                    "typing",
+                    "asyncio",
+                    "logging",
+                    "pathlib",
+                    "enum",
+                    "abc",
+                    "http",
+                    "urllib",
+                ):
                     facts["sdk_imports"].append(pkg)
         if isinstance(node, ast.ImportFrom) and node.module:
             pkg = node.module.split(".")[0]
-            if pkg not in ("os", "re", "json", "datetime", "typing", "asyncio",
-                           "logging", "pathlib", "enum", "abc", "http", "urllib",
-                           "shared", "connector", "__future__"):
+            if pkg not in (
+                "os",
+                "re",
+                "json",
+                "datetime",
+                "typing",
+                "asyncio",
+                "logging",
+                "pathlib",
+                "enum",
+                "abc",
+                "http",
+                "urllib",
+                "shared",
+                "connector",
+                "__future__",
+            ):
                 facts["sdk_imports"].append(pkg)
 
         # Extract install_fields from self.config.get("field_name", ...)
         if isinstance(node, ast.Call):
-            if (isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-                    and isinstance(node.func.value, ast.Attribute)
-                    and node.func.value.attr == "config"):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "config"
+            ):
                 if node.args and isinstance(node.args[0], ast.Constant):
                     field = str(node.args[0].value)
                     if field not in facts["install_fields"]:
@@ -156,8 +180,13 @@ def _extract_connector_facts(context: dict) -> dict:
     return facts
 
 
-def _build_context_aware_rag_query(step_type: str, facts: dict, service_name: str,
-                                    connector_name: str, user_prompt: str) -> str:
+def _build_context_aware_rag_query(
+    step_type: str,
+    facts: dict,
+    service_name: str,
+    connector_name: str,
+    user_prompt: str,
+) -> str:
     """Build a targeted RAG query from actual connector facts rather than generic templates.
 
     Each step type focuses on what the retriever needs to surface:
@@ -176,7 +205,7 @@ def _build_context_aware_rag_query(step_type: str, facts: dict, service_name: st
     token_uri = facts.get("token_uri", "") or ""
     fields = " ".join(facts.get("install_fields", []))
     class_name = facts.get("class_name", "") or connector_name
-    endpoints = " ".join(facts.get("api_endpoints", []))
+    " ".join(facts.get("api_endpoints", []))
 
     if step_type == "write_connector":
         parts = [service_name, sdk or connector_name, auth_type or "authentication"]
@@ -216,12 +245,24 @@ def _build_context_aware_rag_query(step_type: str, facts: dict, service_name: st
         return " ".join(filter(None, parts))
 
     if step_type == "scaffold_code":
-        parts = [service_name, sdk or connector_name, auth_type or "authentication",
-                 "BaseConnector", "scaffold", "structure"]
+        parts = [
+            service_name,
+            sdk or connector_name,
+            auth_type or "authentication",
+            "BaseConnector",
+            "scaffold",
+            "structure",
+        ]
         return " ".join(filter(None, parts))
 
     if step_type == "install_deps":
-        parts = [service_name, sdk or connector_name, "Python", "packages", "requirements"]
+        parts = [
+            service_name,
+            sdk or connector_name,
+            "Python",
+            "packages",
+            "requirements",
+        ]
         return " ".join(filter(None, parts))
 
     if step_type in ("fix_connector", "fix_tests"):
@@ -231,7 +272,13 @@ def _build_context_aware_rag_query(step_type: str, facts: dict, service_name: st
         return " ".join(filter(None, parts))
 
     # Generic fallback
-    parts = [class_name or connector_name, service_name, sdk, auth_type, user_prompt[:80]]
+    parts = [
+        class_name or connector_name,
+        service_name,
+        sdk,
+        auth_type,
+        user_prompt[:80],
+    ]
     return " ".join(filter(None, parts)).strip()
 
 
@@ -362,7 +409,7 @@ def _fix_connector_import(code: str, class_name: str) -> str:
     fixed_lines = []
     last_import_idx = -1
 
-    for i, line in enumerate(code.splitlines()):
+    for _i, line in enumerate(code.splitlines()):
         stripped = line.strip()
 
         # ── Fix: `from <something>.connector import <ClassName>` ──
@@ -419,10 +466,7 @@ def _fix_connector_import(code: str, class_name: str) -> str:
     # line, also remove its indented body — otherwise the orphaned indented code
     # causes IndentationError and every test fails to collect.
     def _has_hallucinated_method(line: str) -> bool:
-        for bad in _HALLUCINATED_METHODS:
-            if bad + "(" in line or f"'{bad}'" in line or f'"{bad}"' in line:
-                return True
-        return False
+        return any(bad + "(" in line or f"'{bad}'" in line or f'"{bad}"' in line for bad in _HALLUCINATED_METHODS)
 
     src_lines = result.splitlines()
     filtered: list[str] = []
@@ -442,9 +486,8 @@ def _fix_connector_import(code: str, class_name: str) -> str:
             if line.strip() == "" or indent > skip_indent:
                 # Part of the stripped block's body — drop it
                 continue
-            else:
-                # Back to original indentation level — stop skipping
-                skip_indent = None
+            # Back to original indentation level — stop skipping
+            skip_indent = None
         filtered.append(line)
     return "\n".join(filtered)
 
@@ -474,9 +517,7 @@ def _strip_hallucinated_imports(code: str, connector_path: "Path") -> str:
             src = path.read_text(encoding="utf-8")
             tree = ast.parse(src)
             for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    real_names.add(node.name)
-                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                     real_names.add(node.name)
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
@@ -514,7 +555,7 @@ def _strip_hallucinated_imports(code: str, connector_path: "Path") -> str:
         stripped = line.strip()
         # Only process `from connector import ...` lines
         if stripped.startswith("from connector import "):
-            after_import = stripped[len("from connector import "):]
+            after_import = stripped[len("from connector import ") :]
             # Parse the imported names (handle parentheses and trailing commas)
             names = [n.strip().rstrip(",") for n in after_import.replace("(", "").replace(")", "").split(",")]
             valid_names = [n for n in names if n and n in real_names]
@@ -548,7 +589,9 @@ def _build_step_memory_summary(context: dict) -> str:
     if mem.get("connector_methods"):
         lines.append(f"  🔧 Connector public methods: {', '.join(mem['connector_methods'])}")
     if mem.get("test_methods_covered"):
-        lines.append(f"  🧪 Test functions written: {len(mem['test_methods_covered'])} ({', '.join(mem['test_methods_covered'][:5])}{'...' if len(mem['test_methods_covered']) > 5 else ''})")
+        lines.append(
+            f"  🧪 Test functions written: {len(mem['test_methods_covered'])} ({', '.join(mem['test_methods_covered'][:5])}{'...' if len(mem['test_methods_covered']) > 5 else ''})"
+        )
     if mem.get("last_test_passed") or mem.get("last_test_failed"):
         lines.append(f"  📊 Last test run: {mem['last_test_passed']} passed, {mem['last_test_failed']} failed")
     if mem.get("errors_encountered"):
@@ -606,10 +649,11 @@ def _output_dir(tenant_id: str, service_slug: str) -> Path:
     Both produce a clean '{name}_connector' directory name.
     """
     import re as _re
+
     base = Path(settings.GENERATED_CODE_DIR).resolve()
     # Case 1: trailing _connector (no hash suffix)
     # Case 2: _connector immediately before a 6-char hex hash at end of slug (legacy sessions)
-    clean_slug = _re.sub(r'_connector(_[a-f0-9]{6}$|$)', r'\1', service_slug)
+    clean_slug = _re.sub(r"_connector(_[a-f0-9]{6}$|$)", r"\1", service_slug)
     # Local disk is always flat: GENERATED_CODE_DIR/{slug}_connector/
     # Tenant/app scoping lives in R2 keys, not on the local filesystem.
     return base / f"{clean_slug}_connector"
@@ -650,8 +694,10 @@ _CONNECTORS_ROOT = Path(__file__).resolve().parent.parent.parent
 # Site-packages of the current interpreter — injected BEFORE _CONNECTORS_ROOT in PYTHONPATH
 # so that installed packages (e.g. PyGithub's `github`) always take precedence over any
 # local directory at _CONNECTORS_ROOT that shares the same name.
-import sysconfig as _sysconfig
+import contextlib
 import site as _site
+import sysconfig as _sysconfig
+
 _SITE_PACKAGES = _sysconfig.get_paths().get("purelib", "")
 # Also include user site-packages (pip install --user puts packages there)
 _USER_SITE = _site.getusersitepackages() if hasattr(_site, "getusersitepackages") else ""
@@ -660,7 +706,7 @@ _USER_SITE = _site.getusersitepackages() if hasattr(_site, "getusersitepackages"
 # use the correct Python version and pre-installed common deps
 try:
     from integration.services.shared_venv import VENV_DIR as _VENV_DIR
-    import sysconfig as _venv_sysconfig
+
     _VENV_SITE_PACKAGES = str(_VENV_DIR / "lib" / "python3.13" / "site-packages")
 except Exception:
     _VENV_SITE_PACKAGES = ""
@@ -708,7 +754,7 @@ _VALID_PYTHON_STARTS = ("import ", "from ", "#", '"""', "class ", "def ", "async
 _MAX_FIX_TEST_LINES = 600  # 15 min CLI timeout supports larger focused test code
 
 
-def _extract_failing_names(error_details: str) -> List[str]:
+def _extract_failing_names(error_details: str) -> list[str]:
     """Parse pytest output and return unique failing test class/function names.
 
     Matches patterns like:
@@ -716,7 +762,7 @@ def _extract_failing_names(error_details: str) -> List[str]:
       FAILED tests/test_connector.py::test_bar
     Returns a deduped list of class + function names to look up in the AST.
     """
-    names: List[str] = []
+    names: list[str] = []
     for m in re.finditer(r"FAILED\s+\S+::(\w+)(?:::(\w+))?", error_details):
         if m.group(2):
             names.append(m.group(1))  # class name
@@ -756,7 +802,7 @@ def _focused_test_code(full_code: str, error_details: str) -> str:
     failing_name_set = set(failing_names)
 
     # Collect line ranges of top-level nodes that match failing names
-    include_ranges: List[tuple] = []
+    include_ranges: list[tuple] = []
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name in failing_name_set:
@@ -778,7 +824,7 @@ def _focused_test_code(full_code: str, error_details: str) -> str:
         return "\n".join(lines_out) + "\n# ... (truncated)"
 
     # Find where the first class/function starts — everything before is imports/fixtures
-    first_node_line = min(r[0] for r in include_ranges)
+    min(r[0] for r in include_ranges)
     # Collect imports: everything before the first top-level class/function
     preamble_end = 0
     for node in ast.iter_child_nodes(tree):
@@ -825,10 +871,17 @@ def _clean_llm_code_response(raw: str) -> str:
         code = "\n".join(lines)
 
     # ── Step 2: Handle XML tool-call artifacts from agent mode ────────────
-    _XML_AGENT_MARKERS = ("<function_calls>", "<invoke ", "</function_calls>", "<result>", "<invoke")
+    _XML_AGENT_MARKERS = (
+        "<function_calls>",
+        "<invoke ",
+        "</function_calls>",
+        "<result>",
+        "<invoke",
+    )
     if any(marker in code for marker in _XML_AGENT_MARKERS):
         import re as _re
-        match = _re.search(r'```(?:python)?\s*\n(.*?)```', code, _re.DOTALL)
+
+        match = _re.search(r"```(?:python)?\s*\n(.*?)```", code, _re.DOTALL)
         if match:
             code = match.group(1).strip()
         else:
@@ -839,8 +892,9 @@ def _clean_llm_code_response(raw: str) -> str:
     stripped = code.lstrip()
     if stripped and not stripped.startswith(_VALID_PYTHON_STARTS):
         import re as _re
+
         # First try: extract the largest ```python...``` block
-        match = _re.search(r'```(?:python)?\s*\n(.*?)```', code, _re.DOTALL)
+        match = _re.search(r"```(?:python)?\s*\n(.*?)```", code, _re.DOTALL)
         if match:
             candidate = match.group(1).strip()
             if candidate and candidate.lstrip().startswith(_VALID_PYTHON_STARTS):
@@ -863,14 +917,21 @@ def _clean_llm_code_response(raw: str) -> str:
 
 
 # Non-existent BaseConnector methods Gemini hallucinates — remove any lines referencing them
-_HALLUCINATED_METHODS = frozenset([
-    # save_config IS REAL — it lives in BaseConnector. Do NOT add it here.
-    "_save_config", "save_token", "_save_token",
-    "save_credentials", "_save_credentials", "save_state", "_save_state",
-])
+_HALLUCINATED_METHODS = frozenset(
+    [
+        # save_config IS REAL — it lives in BaseConnector. Do NOT add it here.
+        "_save_config",
+        "save_token",
+        "_save_token",
+        "save_credentials",
+        "_save_credentials",
+        "save_state",
+        "_save_state",
+    ]
+)
 
 
-def _validate_file(path: Path) -> Dict[str, Any]:
+def _validate_file(path: Path) -> dict[str, Any]:
     """Check if a Python file exists, is valid syntax, and isn't an error string."""
     if not path.exists():
         return {"valid": False, "reason": "missing"}
@@ -878,7 +939,11 @@ def _validate_file(path: Path) -> Dict[str, Any]:
     if len(content) < 50:
         return {"valid": False, "reason": "too_short", "content_preview": content[:100]}
     if not content.lstrip().startswith(_VALID_PYTHON_STARTS):
-        return {"valid": False, "reason": "not_python", "content_preview": content[:100]}
+        return {
+            "valid": False,
+            "reason": "not_python",
+            "content_preview": content[:100],
+        }
     try:
         ast.parse(content)
     except SyntaxError as exc:
@@ -886,7 +951,7 @@ def _validate_file(path: Path) -> Dict[str, Any]:
     return {"valid": True, "line_count": content.count("\n") + 1}
 
 
-def _extract_connector_class_name(connector_path: Path) -> Optional[str]:
+def _extract_connector_class_name(connector_path: Path) -> str | None:
     """Parse connector.py and return the class name that extends BaseConnector.
 
     Falls back to finding any class whose name ends with 'Connector'.
@@ -921,7 +986,7 @@ def _extract_connector_class_name(connector_path: Path) -> Optional[str]:
     return None
 
 
-def _sync_init_with_connector(out_dir: Path, context: Dict[str, Any]) -> Optional[str]:
+def _sync_init_with_connector(out_dir: Path, context: dict[str, Any]) -> str | None:
     """Read the actual class name from connector.py and rewrite __init__.py to match.
 
     Returns the actual class name, or None if extraction failed.
@@ -945,16 +1010,17 @@ def _sync_init_with_connector(out_dir: Path, context: Dict[str, Any]) -> Optiona
     return actual_class
 
 
-def validate_step_output(step_type: str, out_dir: Path, result: Dict[str, Any]) -> Dict[str, Any]:
+def validate_step_output(step_type: str, out_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
     """Validate that a step's expected outputs actually exist after the step completes.
 
     Returns {"valid": bool, "reason": str} — if valid is False, the step should
     NOT be marked completed in MongoDB even if the handler returned "pass".
     """
+
     def _file_ok(path: Path) -> bool:
         return path.exists() and path.stat().st_size > 10
 
-    checks: Dict[str, bool] = {}
+    checks: dict[str, bool] = {}
 
     if step_type in ("write_connector", "fix_connector", "syntax_check"):
         checks["connector.py"] = _file_ok(out_dir / "connector.py")
@@ -998,6 +1064,7 @@ def validate_step_output(step_type: str, out_dir: Path, result: Dict[str, Any]) 
         meta_path = out_dir / "metadata" / "connector.json"
         if meta_path.exists():
             import json as _json
+
             try:
                 meta = _json.loads(meta_path.read_text())
                 checks["version_present"] = bool(meta.get("version"))
@@ -1016,11 +1083,14 @@ def validate_step_output(step_type: str, out_dir: Path, result: Dict[str, Any]) 
 
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        return {"valid": False, "reason": f"Missing or empty output(s): {', '.join(failed)}"}
+        return {
+            "valid": False,
+            "reason": f"Missing or empty output(s): {', '.join(failed)}",
+        }
     return {"valid": True, "reason": "all outputs verified"}
 
 
-def validate_generated_files(out_dir: Path) -> Dict[str, Dict[str, Any]]:
+def validate_generated_files(out_dir: Path) -> dict[str, dict[str, Any]]:
     """Validate all generated files in the connector output directory.
 
     Returns a dict keyed by logical name (connector, config, init, tests)
@@ -1038,12 +1108,13 @@ def _get_venv_python() -> str:
     """Return the shared venv Python executable (Python 3.13). Falls back to sys.executable."""
     try:
         from integration.services.shared_venv import get_venv_python
+
         return get_venv_python()
     except Exception:
         return sys.executable
 
 
-def _pip_install_sync(pkg: str) -> Dict[str, Any]:
+def _pip_install_sync(pkg: str) -> dict[str, Any]:
     """Run pip install synchronously — for asyncio.to_thread()."""
     try:
         python = _get_venv_python()
@@ -1058,7 +1129,7 @@ def _pip_install_sync(pkg: str) -> Dict[str, Any]:
         return {"ok": False, "stderr": str(exc)}
 
 
-async def _pip_install_async(pkg: str) -> Dict[str, Any]:
+async def _pip_install_async(pkg: str) -> dict[str, Any]:
     """Cancellable async pip install. Kills the subprocess on CancelledError."""
     python = _get_venv_python()
     proc = subprocess.Popen(
@@ -1068,7 +1139,7 @@ async def _pip_install_async(pkg: str) -> Dict[str, Any]:
         text=True,
     )
 
-    def _wait() -> Dict[str, Any]:
+    def _wait() -> dict[str, Any]:
         try:
             _, stderr = proc.communicate(timeout=120)
             return {"ok": proc.returncode == 0, "stderr": (stderr or "")[:200]}
@@ -1082,14 +1153,12 @@ async def _pip_install_async(pkg: str) -> Dict[str, Any]:
         return await asyncio.to_thread(_wait)
     except asyncio.CancelledError:
         proc.kill()
-        try:
+        with contextlib.suppress(Exception):
             proc.wait(timeout=5)
-        except Exception:
-            pass
         raise
 
 
-def _build_method_test_map(test_file: Path) -> Dict[str, List[str]]:
+def _build_method_test_map(test_file: Path) -> dict[str, list[str]]:
     """Parse a pytest test file and map connector method names to their test functions.
 
     Two strategies, in order:
@@ -1113,8 +1182,8 @@ def _build_method_test_map(test_file: Path) -> Dict[str, List[str]]:
         return {}
 
     # ── Strategy 1: class-per-method ──────────────────────────────────────────
-    result: Dict[str, List[str]] = {}
-    all_funcs_in_file: List[str] = []
+    result: dict[str, list[str]] = {}
+    all_funcs_in_file: list[str] = []
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
@@ -1130,15 +1199,18 @@ def _build_method_test_map(test_file: Path) -> Dict[str, List[str]]:
         test_funcs = [
             item.name
             for item in node.body
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and item.name.startswith("test_")
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test_")
         ]
         if test_funcs:
             all_funcs_in_file.extend(test_funcs)
             # Only add to result if class name looks like a specific method
             # (i.e. not a generic class like TestGmailConnector or TestConnector)
             # Heuristic: if snake contains "_connector" or "_client" it's generic
-            if not snake.endswith("_connector") and not snake.endswith("_client") and snake not in ("connector", "client"):
+            if (
+                not snake.endswith("_connector")
+                and not snake.endswith("_client")
+                and snake not in ("connector", "client")
+            ):
                 result[snake] = test_funcs
 
     # ── Strategy 2: function-name grouping (fallback for generic class) ───────
@@ -1159,20 +1231,14 @@ def _build_method_test_map(test_file: Path) -> Dict[str, List[str]]:
             for n in range(1, len(parts)):
                 cand = "_".join(parts[:n])
                 siblings = [
-                    f for f in unassigned
-                    if f not in used and (
-                        f.startswith(f"test_{cand}_") or f == f"test_{cand}"
-                    )
+                    f for f in unassigned if f not in used and (f.startswith(f"test_{cand}_") or f == f"test_{cand}")
                 ]
                 if len(siblings) >= 2:
                     method = cand  # keep extending as long as ≥2 share the prefix
 
             # Collect all functions for this method
             members = [
-                f for f in unassigned
-                if f not in used and (
-                    f.startswith(f"test_{method}_") or f == f"test_{method}"
-                )
+                f for f in unassigned if f not in used and (f.startswith(f"test_{method}_") or f == f"test_{method}")
             ]
             if not members:
                 members = [fn]
@@ -1185,7 +1251,7 @@ def _build_method_test_map(test_file: Path) -> Dict[str, List[str]]:
     return result
 
 
-def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, Any]:
+def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> dict[str, Any]:
     """Run pytest synchronously with streaming output — for asyncio.to_thread().
 
     Args:
@@ -1205,18 +1271,31 @@ def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, 
         #                            BEFORE _CONNECTORS_ROOT so local dirs don't shadow them
         #  4. _VENV_SITE_PACKAGES  — shared Python 3.13 venv (pydantic, httpx, etc.)
         #  5. _CONNECTORS_ROOT     — so `from shared.base_connector import BaseConnector` works
-        pythonpath = os.pathsep.join(filter(None, [
-            str(abs_out_dir),
-            str(abs_out_dir.parent),
-            _VENV_SITE_PACKAGES,  # shared venv first (Python 3.13 deps)
-            _SITE_PACKAGES,
-            _USER_SITE,          # user pip packages (pip install --user)
-            str(_CONNECTORS_ROOT),
-        ]))
+        pythonpath = os.pathsep.join(
+            filter(
+                None,
+                [
+                    str(abs_out_dir),
+                    str(abs_out_dir.parent),
+                    _VENV_SITE_PACKAGES,  # shared venv first (Python 3.13 deps)
+                    _SITE_PACKAGES,
+                    _USER_SITE,  # user pip packages (pip install --user)
+                    str(_CONNECTORS_ROOT),
+                ],
+            )
+        )
 
         # Use Popen for streaming output instead of run() which collects everything
         proc = subprocess.Popen(
-            [sys.executable, "-m", "pytest", str(abs_tests_dir), "-v", "--tb=short", "--no-header"],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(abs_tests_dir),
+                "-v",
+                "--tb=short",
+                "--no-header",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -1232,7 +1311,7 @@ def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, 
         # Stream output line-by-line while pytest runs
         try:
             for line in proc.stdout:
-                line = line.rstrip('\n\r')
+                line = line.rstrip("\n\r")
                 output_lines.append(line)
 
                 # Count results from this line
@@ -1253,7 +1332,13 @@ def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, 
             proc.wait(timeout=120)
         except subprocess.TimeoutExpired:
             proc.kill()
-            return {"returncode": -1, "output": "Timeout after 120s", "passed": 0, "failed": 0, "errors": 0}
+            return {
+                "returncode": -1,
+                "output": "Timeout after 120s",
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+            }
 
         output = "\n".join(output_lines)
         details = []
@@ -1273,10 +1358,16 @@ def _pytest_run_sync(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, 
             "details": details,
         }
     except Exception as exc:
-        return {"returncode": -1, "output": str(exc), "passed": 0, "failed": 0, "errors": 0}
+        return {
+            "returncode": -1,
+            "output": str(exc),
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+        }
 
 
-async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dict[str, Any]:
+async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> dict[str, Any]:
     """Cancellable async pytest runner.
 
     Unlike ``asyncio.to_thread(_pytest_run_sync, ...)``, this function creates
@@ -1286,17 +1377,30 @@ async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dic
     """
     abs_tests_dir = tests_dir.resolve()
     abs_out_dir = out_dir.resolve()
-    pythonpath = os.pathsep.join(filter(None, [
-        str(abs_out_dir),
-        str(abs_out_dir.parent),
-        _VENV_SITE_PACKAGES,  # shared venv first (Python 3.13 deps)
-        _SITE_PACKAGES,
-        _USER_SITE,
-        str(_CONNECTORS_ROOT),
-    ]))
+    pythonpath = os.pathsep.join(
+        filter(
+            None,
+            [
+                str(abs_out_dir),
+                str(abs_out_dir.parent),
+                _VENV_SITE_PACKAGES,  # shared venv first (Python 3.13 deps)
+                _SITE_PACKAGES,
+                _USER_SITE,
+                str(_CONNECTORS_ROOT),
+            ],
+        )
+    )
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pytest", str(abs_tests_dir), "-v", "--tb=short", "--no-header"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(abs_tests_dir),
+            "-v",
+            "--tb=short",
+            "--no-header",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -1318,10 +1422,8 @@ async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dic
             if " ERROR" in line or line.startswith("ERROR "):
                 e += 1
             if on_line:
-                try:
+                with contextlib.suppress(Exception):
                     on_line(line)
-                except Exception:
-                    pass
         try:
             proc.wait(timeout=120)
         except subprocess.TimeoutExpired:
@@ -1333,10 +1435,8 @@ async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dic
     except asyncio.CancelledError:
         # Stop button pressed — kill pytest immediately and propagate
         proc.kill()
-        try:
+        with contextlib.suppress(Exception):
             proc.wait(timeout=5)
-        except Exception:
-            pass
         raise
 
     output = "\n".join(output_lines)
@@ -1346,10 +1446,7 @@ async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dic
             parts = line.strip().split()
             if parts:
                 test_name = parts[0]
-                status = (
-                    "passed" if " PASSED" in line
-                    else ("failed" if " FAILED" in line else "skipped")
-                )
+                status = "passed" if " PASSED" in line else ("failed" if " FAILED" in line else "skipped")
                 details.append({"test": test_name, "status": status})
     return {
         "returncode": proc.returncode,
@@ -1362,6 +1459,7 @@ async def _pytest_run_async(tests_dir: Path, out_dir: Path, on_line=None) -> Dic
 
 
 # ── install_deps ─────────────────────────────────────────────────────
+
 
 def _extract_packages_from_impl_plan(impl_plan_text: str) -> list[str]:
     """Extract package specifiers from the Dependencies section of implementation_plan.md.
@@ -1377,6 +1475,7 @@ def _extract_packages_from_impl_plan(impl_plan_text: str) -> list[str]:
     Returns a deduplicated list of requirement specifiers (e.g. "google-auth==2.25.2").
     """
     import re as _re
+
     lines = impl_plan_text.splitlines()
     in_section = False
     in_code_block = False
@@ -1388,7 +1487,7 @@ def _extract_packages_from_impl_plan(impl_plan_text: str) -> list[str]:
         r"(?:package\s+dep|required\s+package|dependenc|pip\s+package|install\s+package)",
         _re.IGNORECASE,
     )
-    _next_h2_re = _re.compile(r"^#{1,2}\s", _re.IGNORECASE)   # ## or # heading ends the section
+    _next_h2_re = _re.compile(r"^#{1,2}\s", _re.IGNORECASE)  # ## or # heading ends the section
     _code_fence_re = _re.compile(r"^```")
 
     # Matches bullet lines: - pkg or * pkg (with optional backticks/version)
@@ -1470,8 +1569,10 @@ def _is_common_dep(pkg_spec: str) -> bool:
     skipping them when the implementation plan or requirements.txt pins old versions.
     """
     import re as _re
+
     try:
         from integration.services.shared_venv import COMMON_DEPS as _cd
+
         _name_re = _re.compile(r"^([a-zA-Z][a-zA-Z0-9_\-]+)")
         pkg_name = (_name_re.match(pkg_spec.strip()) or _name_re.match("x")).group(1).lower().replace("-", "_")
         common_names = set()
@@ -1485,10 +1586,10 @@ def _is_common_dep(pkg_spec: str) -> bool:
 
 
 async def handle_install_deps(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Install Python packages using the shared venv (Python 3.13).
 
     Package source priority:
@@ -1501,6 +1602,7 @@ async def handle_install_deps(
     The shared venv Python is always used — never the system Python.
     """
     import re as _re
+
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
     impl_plan_path = out_dir / "implementation_plan.md"
 
@@ -1511,7 +1613,11 @@ async def handle_install_deps(
             impl_text = impl_plan_path.read_text(encoding="utf-8")
             plan_packages = _extract_packages_from_impl_plan(impl_text)
             if plan_packages:
-                await _emit(log_cb, "info", f"📦 Using packages from implementation_plan.md: {', '.join(plan_packages)}")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"📦 Using packages from implementation_plan.md: {', '.join(plan_packages)}",
+                )
         except Exception as _e:
             await _emit(log_cb, "warn", f"Could not parse implementation_plan.md packages: {_e}")
 
@@ -1527,13 +1633,17 @@ async def handle_install_deps(
                 _pkg_re = _re.compile(r"^([a-zA-Z][a-zA-Z0-9_\-]+(?:[>=!<,][^\s#]+)?)")
                 for ln in req_lines:
                     ln = ln.strip()
-                    if not ln or ln.startswith("#") or ln.startswith("-"):
+                    if not ln or ln.startswith(("#", "-")):
                         continue
                     m = _pkg_re.match(ln)
                     if m:
                         packages.append(m.group(1).strip())
                 if packages:
-                    await _emit(log_cb, "info", f"📦 Using packages from requirements.txt: {', '.join(packages)}")
+                    await _emit(
+                        log_cb,
+                        "info",
+                        f"📦 Using packages from requirements.txt: {', '.join(packages)}",
+                    )
             except Exception as _e:
                 await _emit(log_cb, "warn", f"Could not parse requirements.txt: {_e}")
 
@@ -1546,14 +1656,29 @@ async def handle_install_deps(
     # versions that lack Python 3.13/3.14 pre-built wheels (e.g. pydantic==2.5.3
     # requires pydantic-core 2.14.6 which has no Python 3.14 wheel → build failure).
     to_install = [p for p in packages if not _is_common_dep(p)]
-    skipped    = [p for p in packages if     _is_common_dep(p)]
+    skipped = [p for p in packages if _is_common_dep(p)]
     if skipped:
-        await _emit(log_cb, "info", f"⏭  Skipping pre-installed common deps: {', '.join(skipped)}")
+        await _emit(
+            log_cb,
+            "info",
+            f"⏭  Skipping pre-installed common deps: {', '.join(skipped)}",
+        )
     if not to_install:
-        await _emit(log_cb, "info", "✓ All packages are pre-installed in shared venv — nothing to install")
-        return {"status": "pass", "output": {"installed": [], "failed": [], "skipped": skipped}}
+        await _emit(
+            log_cb,
+            "info",
+            "✓ All packages are pre-installed in shared venv — nothing to install",
+        )
+        return {
+            "status": "pass",
+            "output": {"installed": [], "failed": [], "skipped": skipped},
+        }
 
-    await _emit(log_cb, "info", f"Installing {len(to_install)} package(s) via shared venv (Python 3.13): {', '.join(to_install)}")
+    await _emit(
+        log_cb,
+        "info",
+        f"Installing {len(to_install)} package(s) via shared venv (Python 3.13): {', '.join(to_install)}",
+    )
 
     installed = []
     failed = []
@@ -1575,11 +1700,12 @@ async def handle_install_deps(
 
 # ── configure_auth ───────────────────────────────────────────────────
 
+
 async def handle_configure_auth(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate auth configuration boilerplate."""
     provider = context.get("provider", "unknown")
     service_name = context.get("service_name", "Unknown Service")
@@ -1619,11 +1745,12 @@ async def handle_configure_auth(
 
 # ── scaffold_code ────────────────────────────────────────────────────
 
+
 async def handle_scaffold_code(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Create directory structure and __init__.py."""
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1658,7 +1785,14 @@ async def handle_scaffold_code(
         await _emit(log_cb, "success", f"  ✓ {subdir}/__init__.py")
 
     # Initialise ImplementationTimeline.md for this session (idempotent — appends new session)
-    _append_timeline(out_dir, context.get("session_id", ""), "Scaffold Package Structure", 0, "pass", 0)
+    _append_timeline(
+        out_dir,
+        context.get("session_id", ""),
+        "Scaffold Package Structure",
+        0,
+        "pass",
+        0,
+    )
 
     return {
         "status": "pass",
@@ -1670,16 +1804,20 @@ async def handle_scaffold_code(
 
 
 async def handle_write_connector(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Use LLM to generate the main connector.py file."""
-    provider = context.get("provider", "unknown")
+    context.get("provider", "unknown")
     service_name = context.get("service_name", "Unknown Service")
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
 
-    await _emit(log_cb, "info", f"Generating connector code for {service_name} via {_llm_label()}...")
+    await _emit(
+        log_cb,
+        "info",
+        f"Generating connector code for {service_name} via {_llm_label()}...",
+    )
 
     # Build a structured constraints block from everything the planner extracted into the
     # write_connector step's config.  This bridges planning → codegen: the LLM only sees
@@ -1711,9 +1849,11 @@ async def handle_write_connector(
         # When handler features are selected, inject specific directions so the
         # LLM knows these methods exist on BaseConnector and must be overridden
         # with the correct signatures — not invented from scratch.
-        _handler_features = [f for f in config["features"] if f in (
-            "handle_webhook", "process_callback", "handle_event", "batch_processor"
-        )]
+        _handler_features = [
+            f
+            for f in config["features"]
+            if f in ("handle_webhook", "process_callback", "handle_event", "batch_processor")
+        ]
         if _handler_features:
             plan_constraints_lines.append(
                 "- **Handler methods** — these are BaseConnector lifecycle methods. "
@@ -1723,7 +1863,7 @@ async def handle_write_connector(
                 "handle_webhook": (
                     "  - `async def handle_webhook(self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]` "
                     "— Route events by type using private `_handle_<event_type>()` methods. "
-                    "Return `{\"status\": \"processed\"|\"ignored\"}`. "
+                    'Return `{"status": "processed"|"ignored"}`. '
                     "Call `self.process_callback(payload, headers)` first if signature verification is needed. "
                     "Add `webhook_secret` to install_fields if the provider signs payloads."
                 ),
@@ -1731,18 +1871,18 @@ async def handle_write_connector(
                     "  - `async def process_callback(self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]` "
                     "— Verify webhook signature (HMAC-SHA256 or provider-specific). "
                     "Use `hmac.compare_digest()` for timing-safe comparison. "
-                    "Read secret from `self.config.get(\"webhook_secret\")`. "
-                    "Return `{\"verified\": True, \"data\": payload}` or `{\"verified\": False, \"error\": \"reason\"}`."
+                    'Read secret from `self.config.get("webhook_secret")`. '
+                    'Return `{"verified": True, "data": payload}` or `{"verified": False, "error": "reason"}`.'
                 ),
                 "handle_event": (
                     "  - `async def handle_event(self, event: Dict[str, Any]) -> Dict[str, Any]` "
                     "— Process a single event. Check idempotency (skip duplicate event IDs). "
-                    "Return `{\"event_id\": ..., \"processed\": True}`."
+                    'Return `{"event_id": ..., "processed": True}`.'
                 ),
                 "batch_processor": (
                     "  - `async def batch_processor(self, items: list, **kwargs) -> Dict[str, Any]` "
                     "— Process items one by one. Catch per-item errors — never fail the whole batch. "
-                    "Return `{\"processed\": N, \"failed\": N, \"errors\": [...]}`."
+                    'Return `{"processed": N, "failed": N, "errors": [...]}`.'
                 ),
             }
             for hf in _handler_features:
@@ -1778,8 +1918,15 @@ async def handle_write_connector(
 
     # config.py — create with appropriate auth template if missing
     if not (out_dir / "config.py").exists():
-        _oauth_types = {"oauth2_code", "oauth2_pkce", "oauth2_client_credentials", "oauth2"}
-        _cfg_template = SCAFFOLD_CONFIG_TEMPLATE_OAUTH if _auth_type in _oauth_types else SCAFFOLD_CONFIG_TEMPLATE_APIKEY
+        _oauth_types = {
+            "oauth2_code",
+            "oauth2_pkce",
+            "oauth2_client_credentials",
+            "oauth2",
+        }
+        _cfg_template = (
+            SCAFFOLD_CONFIG_TEMPLATE_OAUTH if _auth_type in _oauth_types else SCAFFOLD_CONFIG_TEMPLATE_APIKEY
+        )
         _cfg_code = _cfg_template.format(
             service_name=_service_name,
             class_name=_class_name,
@@ -1790,9 +1937,9 @@ async def handle_write_connector(
 
     # tests/, helpers/, client/ — create dirs + __init__.py if missing
     for _subdir, _comment in [
-        ("tests",   "# Tests package\n"),
+        ("tests", "# Tests package\n"),
         ("helpers", '"""Helpers package."""\n'),
-        ("client",  '"""Client package."""\n'),
+        ("client", '"""Client package."""\n'),
     ]:
         _sub = out_dir / _subdir
         _sub.mkdir(exist_ok=True)
@@ -1805,20 +1952,29 @@ async def handle_write_connector(
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         # Gemini agentic path (reads base_connector.py, writes + validates in a tool-call loop)
         try:
-            from integration.services.agentic_fix import gemini_agentic_generate_connector
+            from integration.services.agentic_fix import (
+                gemini_agentic_generate_connector,
+            )
+
             result = await gemini_agentic_generate_connector(
                 out_dir,
                 context={**context, "plan_constraints": plan_constraints},
                 log_cb=log_cb,
             )
             if not result["success"] or not (out_dir / "connector.py").exists():
-                _fail_reason = result.get("message") or result.get("result") or "Agentic loop did not complete successfully"
+                _fail_reason = (
+                    result.get("message") or result.get("result") or "Agentic loop did not complete successfully"
+                )
                 await _emit(log_cb, "error", f"Connector generation failed: {_fail_reason}")
                 return {"status": "fail", "output": _fail_reason}
 
             connector_path = out_dir / "connector.py"
             code = connector_path.read_text(encoding="utf-8")
-            await _emit(log_cb, "success", f"✅ Connector generated ({len(code.splitlines())} lines) in {result['iterations']} iteration(s)")
+            await _emit(
+                log_cb,
+                "success",
+                f"✅ Connector generated ({len(code.splitlines())} lines) in {result['iterations']} iteration(s)",
+            )
             _sync_init_with_connector(out_dir, context)
 
         except Exception as _agentic_err:
@@ -1846,25 +2002,44 @@ async def handle_write_connector(
             _conn_system = await _inject_rag_context(_conn_system, context)
 
             code = await call_llm_fix(
-                [{"role": "user", "content": "Generate the connector.py for this service. Return ONLY raw Python code — no markdown fences, no prose."}],
+                [
+                    {
+                        "role": "user",
+                        "content": "Generate the connector.py for this service. Return ONLY raw Python code — no markdown fences, no prose.",
+                    }
+                ],
                 system=_conn_system,
                 max_tokens=60000,
             )
             code = _clean_llm_code_response(code)
 
             if not code or len(code) < 100 or not code.lstrip().startswith(_VALID_PYTHON_STARTS):
-                await _emit(log_cb, "error", f"Claude returned invalid connector code: {code[:120]}")
-                return {"status": "fail", "output": f"LLM did not return valid Python: {code[:200]}"}
+                await _emit(
+                    log_cb,
+                    "error",
+                    f"Claude returned invalid connector code: {code[:120]}",
+                )
+                return {
+                    "status": "fail",
+                    "output": f"LLM did not return valid Python: {code[:200]}",
+                }
 
             try:
                 ast.parse(code)
             except SyntaxError as _syn:
                 await _emit(log_cb, "warn", f"Syntax error at line {_syn.lineno} — {_syn}")
-                return {"status": "fail", "output": f"Generated connector has syntax error: {_syn}"}
+                return {
+                    "status": "fail",
+                    "output": f"Generated connector has syntax error: {_syn}",
+                }
 
             connector_path = out_dir / "connector.py"
             connector_path.write_text(code, encoding="utf-8")
-            await _emit(log_cb, "success", f"✅ Connector generated ({len(code.splitlines())} lines)")
+            await _emit(
+                log_cb,
+                "success",
+                f"✅ Connector generated ({len(code.splitlines())} lines)",
+            )
             _sync_init_with_connector(out_dir, context)
 
         except Exception as _claude_err:
@@ -1885,13 +2060,19 @@ async def handle_write_connector(
         for f in sorted(out_dir.rglob("*"))
         if f.is_file() and "__pycache__" not in str(f) and not str(f.relative_to(out_dir)).startswith("tests/")
     ]
-    await _emit(log_cb, "success",
-        f"✅ Package written — {len(all_pkg_files)} file(s): {', '.join(all_pkg_files)}")
+    await _emit(
+        log_cb,
+        "success",
+        f"✅ Package written — {len(all_pkg_files)} file(s): {', '.join(all_pkg_files)}",
+    )
 
     # ── Upload all generated files to R2 (production source of truth) ──────────
     try:
         count = await r2_service.upload_connector_dir(
-            context["tenant_id"], context["service_slug"], context["session_id"], out_dir
+            context["tenant_id"],
+            context["service_slug"],
+            context["session_id"],
+            out_dir,
         )
         r2_prefix = r2_service.connector_session_r2_prefix(
             context["tenant_id"], context["service_slug"], context["session_id"]
@@ -1915,11 +2096,12 @@ async def handle_write_connector(
 
 # ── write_tests ──────────────────────────────────────────────────────
 
+
 async def handle_write_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Use LLM to generate test files."""
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
     connector_path = out_dir / "connector.py"
@@ -1936,9 +2118,9 @@ async def handle_write_tests(
         await _emit(log_cb, "info", "Loaded connector-specific test guidelines from local file")
     else:
         try:
-            guidelines_content = await r2_service.get_test_guidelines(
-                context.get("provider", ""), context.get("service_slug", "")
-            ) or ""
+            guidelines_content = (
+                await r2_service.get_test_guidelines(context.get("provider", ""), context.get("service_slug", "")) or ""
+            )
             if guidelines_content:
                 await _emit(log_cb, "info", "Loaded connector-specific test guidelines from R2")
         except Exception:
@@ -1947,7 +2129,11 @@ async def handle_write_tests(
     connector_code = connector_path.read_text(encoding="utf-8")
     # When called from handle_fix_tests (regeneration path), skip extra module test files.
     is_regen = context.get("_regen_tests_only", False)
-    await _emit(log_cb, "info", f"Regenerating tests via {_llm_label()}..." if is_regen else f"Generating tests via {_llm_label()}...")
+    await _emit(
+        log_cb,
+        "info",
+        f"Regenerating tests via {_llm_label()}..." if is_regen else f"Generating tests via {_llm_label()}...",
+    )
 
     # ── Always extract class_name from the actual connector.py (session context may be stale) ──
     _class_match = re.search(r"^class\s+(\w+)\s*\(BaseConnector\)", connector_code, re.MULTILINE)
@@ -1959,6 +2145,7 @@ async def handle_write_tests(
     # ── Load TEST_CASE_WRITING_GUIDELINES.md and prepend to system prompt ──
     # R2 shared bucket → local disk fallback (via guidelines_service)
     from integration.services.guidelines_service import get_test_case_writing_guidelines
+
     _guidelines_content = await get_test_case_writing_guidelines()
     _guidelines_header = ""
     if _guidelines_content:
@@ -1971,8 +2158,11 @@ async def handle_write_tests(
         )
         await _emit(log_cb, "info", "📋 TEST_CASE_WRITING_GUIDELINES.md loaded into prompt")
     else:
-        await _emit(log_cb, "warn", "⚠ TEST_CASE_WRITING_GUIDELINES.md not found in R2 or local disk — using inline rules only")
-
+        await _emit(
+            log_cb,
+            "warn",
+            "⚠ TEST_CASE_WRITING_GUIDELINES.md not found in R2 or local disk — using inline rules only",
+        )
 
     system = (await _get_prompt("TEST_SYSTEM_PROMPT", TEST_SYSTEM_PROMPT)).format(
         connector_code=connector_code,
@@ -2008,10 +2198,8 @@ async def handle_write_tests(
     # Patch guidelines in memory before injecting — fixes stale/hallucinated class names,
     # exception names, and config keys without requiring a re-generation step.
     if guidelines_content:
-        try:
+        with contextlib.suppress(Exception):
             guidelines_content = await _validate_and_patch_guidelines(guidelines_content, out_dir, log_cb=None)
-        except Exception:
-            pass
     # Inject connector-specific test guidelines (from generate_test_guidelines step) if available
     _connector_guidelines_block = ""
     if guidelines_content:
@@ -2034,9 +2222,15 @@ async def handle_write_tests(
             + _write_tests_ground_truth
             + "\n## ══════════════ END OF GROUND TRUTH ══════════════\n\n"
         )
-        await _emit(log_cb, "info", "Ground truth (AST-extracted) injected into test generation prompt")
+        await _emit(
+            log_cb,
+            "info",
+            "Ground truth (AST-extracted) injected into test generation prompt",
+        )
 
-    system = _ground_truth_block_write + _guidelines_header + _connector_guidelines_block + mandatory_import_block + system
+    system = (
+        _ground_truth_block_write + _guidelines_header + _connector_guidelines_block + mandatory_import_block + system
+    )
 
     # Inject session plan steps so Gemini knows what each method is supposed to do.
     # Without the plan, Gemini can only guess behavior from the connector code (circular).
@@ -2049,24 +2243,42 @@ async def handle_write_tests(
             if _stype or _desc:
                 _plan_lines.append(f"  Step {_i + 1} ({_stype}): {_desc}")
         if _plan_lines:
-            system += (
-                "\n\n## CONNECTOR BUILD PLAN (the specification — what each method must implement)\n"
-                + "\n".join(_plan_lines)
+            system += "\n\n## CONNECTOR BUILD PLAN (the specification — what each method must implement)\n" + "\n".join(
+                _plan_lines
             )
-            await _emit(log_cb, "info", f"📋 Plan steps ({len(_plan_lines)}) injected into test generation prompt")
+            await _emit(
+                log_cb,
+                "info",
+                f"📋 Plan steps ({len(_plan_lines)}) injected into test generation prompt",
+            )
 
     # Inject prior failure history so Gemini writes tests that avoid known issues.
     # error_details is pre-loaded by execute_plan() in codegen_service.py before calling this handler.
     failure_ctx = context.get("error_details")
     if failure_ctx:
-        system += f"\n\n## ⚠ Known test failures from previous runs — write tests that avoid these patterns\n{failure_ctx}"
-        await _emit(log_cb, "info", "📋 Prior failure history injected into test generation prompt")
+        system += (
+            f"\n\n## ⚠ Known test failures from previous runs — write tests that avoid these patterns\n{failure_ctx}"
+        )
+        await _emit(
+            log_cb,
+            "info",
+            "📋 Prior failure history injected into test generation prompt",
+        )
 
     # ── Gemini agentic path — tool-calling loop (read files → write tests → run → fix) ──
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
-            from integration.services.agentic_fix import _gemini_agentic_loop, _FIX_TOOLS, _enhance_directive
-            await _emit(log_cb, "info", "🤖 Gemini agentic write_tests (tool-call loop: read → write → run → fix)...")
+            from integration.services.agentic_fix import (
+                _FIX_TOOLS,
+                _enhance_directive,
+                _gemini_agentic_loop,
+            )
+
+            await _emit(
+                log_cb,
+                "info",
+                "🤖 Gemini agentic write_tests (tool-call loop: read → write → run → fix)...",
+            )
             _tests_initial = (
                 f"Generate pytest unit tests for the connector in: {out_dir.name}/\n\n"
                 f"Connector class: {class_name}\n\n"
@@ -2082,11 +2294,14 @@ async def handle_write_tests(
                 "CRITICAL: write to tests/test_connector.py — not to the package root."
             )
             if context.get("is_enhance"):
-                _tests_initial += _enhance_directive(out_dir, artifact="tests",
-                                                    enhancement_ask=context.get("user_prompt", ""))
+                _tests_initial += _enhance_directive(
+                    out_dir,
+                    artifact="tests",
+                    enhancement_ask=context.get("user_prompt", ""),
+                )
             agentic_result = await _gemini_agentic_loop(
                 out_dir,
-                system_prompt=system,   # pre-built rich system with ground truth + guidelines
+                system_prompt=system,  # pre-built rich system with ground truth + guidelines
                 initial_message=_tests_initial,
                 tools=_FIX_TOOLS,
                 log_cb=log_cb,
@@ -2099,33 +2314,58 @@ async def handle_write_tests(
                 pytest_out = await _pytest_run_async(out_dir / "tests", out_dir)
                 passed = pytest_out.get("passed", 0)
                 failed = pytest_out.get("failed", 0)
-                await _emit(log_cb, "success" if failed == 0 else "warn",
-                    f"✅ Agentic write_tests done in {agentic_result['iterations']} iteration(s) — {passed} passed, {failed} failed")
+                await _emit(
+                    log_cb,
+                    "success" if failed == 0 else "warn",
+                    f"✅ Agentic write_tests done in {agentic_result['iterations']} iteration(s) — {passed} passed, {failed} failed",
+                )
                 return {
                     "status": "pass" if failed == 0 else "fail",
                     "output": {
-                        "passed": passed, "failed": failed,
+                        "passed": passed,
+                        "failed": failed,
                         "test_file": str(out_dir / "tests" / "test_connector.py"),
                     },
                 }
-            else:
-                await _emit(log_cb, "warn", "Gemini agentic write_tests incomplete — falling back to direct generation")
+            await _emit(
+                log_cb,
+                "warn",
+                "Gemini agentic write_tests incomplete — falling back to direct generation",
+            )
         except Exception as _ag_err:
-            await _emit(log_cb, "warn", f"Gemini agentic write_tests failed ({_ag_err}) — falling back to direct generation")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Gemini agentic write_tests failed ({_ag_err}) — falling back to direct generation",
+            )
 
     messages = [
-        {"role": "user", "content": "Output comprehensive pytest test code for this connector. Return ONLY raw Python — no prose, no tools, no file operations."},
+        {
+            "role": "user",
+            "content": "Output comprehensive pytest test code for this connector. Return ONLY raw Python — no prose, no tools, no file operations.",
+        },
     ]
 
     try:
-        code = await call_llm_fix(messages, system=system, max_tokens=60000,
-                                   on_chunk=_make_gemini_progress_cb(log_cb, "Gemini tests"))
+        code = await call_llm_fix(
+            messages,
+            system=system,
+            max_tokens=60000,
+            on_chunk=_make_gemini_progress_cb(log_cb, "Gemini tests"),
+        )
         code = _clean_llm_code_response(code)
 
         # Guard: reject obviously non-Python LLM responses
         if not code or len(code) < 50 or (not code.lstrip().startswith(_VALID_PYTHON_STARTS)):
-            await _emit(log_cb, "error", f"LLM returned invalid response (not Python code): {code[:120]}")
-            return {"status": "fail", "output": f"LLM did not return valid Python test code: {code[:200]}"}
+            await _emit(
+                log_cb,
+                "error",
+                f"LLM returned invalid response (not Python code): {code[:120]}",
+            )
+            return {
+                "status": "fail",
+                "output": f"LLM did not return valid Python test code: {code[:200]}",
+            }
 
         # Validate syntax — if broken (likely truncated), ask Gemini to continue from last clean line
         try:
@@ -2133,9 +2373,13 @@ async def handle_write_tests(
         except SyntaxError as exc:
             lines = code.splitlines()
             # Keep only lines before the error — send that as context and ask Gemini to continue
-            clean_lines = lines[:max(0, (exc.lineno or len(lines)) - 1)]
+            clean_lines = lines[: max(0, (exc.lineno or len(lines)) - 1)]
             clean_prefix = "\n".join(clean_lines)
-            await _emit(log_cb, "warn", f"Test code truncated at line {exc.lineno} — asking Gemini to continue from line {len(clean_lines)}...")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Test code truncated at line {exc.lineno} — asking Gemini to continue from line {len(clean_lines)}...",
+            )
             continuation_messages = [
                 {
                     "role": "user",
@@ -2155,16 +2399,31 @@ async def handle_write_tests(
                 "No prose. No markdown. Do NOT repeat existing lines. "
                 "Close all open indentation blocks and functions properly."
             )
-            continuation = await call_llm_fix(continuation_messages, system=continuation_system, max_tokens=60000,
-                                              on_chunk=_make_gemini_progress_cb(log_cb, "Gemini continuation"))
+            continuation = await call_llm_fix(
+                continuation_messages,
+                system=continuation_system,
+                max_tokens=60000,
+                on_chunk=_make_gemini_progress_cb(log_cb, "Gemini continuation"),
+            )
             continuation = _clean_llm_code_response(continuation)
             code = clean_prefix + "\n" + continuation
             try:
                 ast.parse(code)
-                await _emit(log_cb, "success", f"✅ Test file completed ({len(code.splitlines())} lines total)")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Test file completed ({len(code.splitlines())} lines total)",
+                )
             except SyntaxError as exc2:
-                await _emit(log_cb, "error", f"Still broken after continuation: {exc2} — aborting")
-                return {"status": "fail", "output": f"Generated test code has persistent syntax error: {exc2}"}
+                await _emit(
+                    log_cb,
+                    "error",
+                    f"Still broken after continuation: {exc2} — aborting",
+                )
+                return {
+                    "status": "fail",
+                    "output": f"Generated test code has persistent syntax error: {exc2}",
+                }
 
         # ── Post-process: fix connector import path ────────────────────
         # Gemini frequently hallucinates the package name (e.g. google_adsense_connector,
@@ -2175,7 +2434,11 @@ async def handle_write_tests(
         code = _fix_connector_import(code, class_name)
         # Strip hallucinated import names that don't actually exist in connector.py
         code = _strip_hallucinated_imports(code, out_dir / "connector.py")
-        await _emit(log_cb, "info", f"✔ Import paths normalised → from connector import {class_name}")
+        await _emit(
+            log_cb,
+            "info",
+            f"✔ Import paths normalised → from connector import {class_name}",
+        )
 
         tests_dir = out_dir / "tests"
         tests_dir.mkdir(exist_ok=True)
@@ -2185,13 +2448,18 @@ async def handle_write_tests(
         # ── Non-AI syntax auto-fix (autoflake → ruff → ast.parse) ──────────
         await _emit(log_cb, "info", "🔧 Running syntax auto-fix (autoflake → ruff)...")
         from integration.services.code_quality import auto_fix_python_file
+
         _fix = auto_fix_python_file(test_path)
         if _fix["tools_applied"]:
             await _emit(log_cb, "info", f"✔ Auto-fixed with: {', '.join(_fix['tools_applied'])}")
         if _fix["clean"]:
             await _emit(log_cb, "success", "✅ Syntax check passed after auto-fix")
         else:
-            await _emit(log_cb, "warn", f"⚠ Syntax issue remains after auto-fix: {_fix.get('syntax_error', 'unknown')} — will be resolved by Attempt Fix")
+            await _emit(
+                log_cb,
+                "warn",
+                f"⚠ Syntax issue remains after auto-fix: {_fix.get('syntax_error', 'unknown')} — will be resolved by Attempt Fix",
+            )
         # Re-read in case tools modified the file
         code = test_path.read_text(encoding="utf-8")
 
@@ -2220,10 +2488,9 @@ async def handle_write_tests(
                 if _gen_has_asyncio_marker(_gen_fn):
                     continue
                 _dec_start = (
-                    min(d.lineno for d in _gen_fn.decorator_list) - 1
-                    if _gen_fn.decorator_list else _gen_fn.lineno - 1
+                    min(d.lineno for d in _gen_fn.decorator_list) - 1 if _gen_fn.decorator_list else _gen_fn.lineno - 1
                 )
-                _indent = re.match(r'^(\s*)', _gen_lines[_dec_start]).group(1)
+                _indent = re.match(r"^(\s*)", _gen_lines[_dec_start]).group(1)
                 _gen_inserts.append((_dec_start, _indent))
 
             if _gen_inserts:
@@ -2233,18 +2500,28 @@ async def handle_write_tests(
                 ast.parse(_fixed_gen)  # validate before writing
                 test_path.write_text(_fixed_gen, encoding="utf-8")
                 code = _fixed_gen
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix: added @pytest.mark.asyncio to {len(_gen_inserts)} async test(s)")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix: added @pytest.mark.asyncio to {len(_gen_inserts)} async test(s)",
+                )
         except Exception as _gen_async_exc:
             await _emit(log_cb, "warn", f"Auto-fix (asyncio marker) skipped: {_gen_async_exc}")
 
         # Verify at least one test function exists
         if "def test_" not in code:
             await _emit(log_cb, "warn", "Generated test file contains no test_ functions")
-            return {"status": "fail", "output": "No test functions found in generated code"}
+            return {
+                "status": "fail",
+                "output": "No test functions found in generated code",
+            }
 
         quality = analyze_file(str(test_path))
-        await _emit(log_cb, "success", f"✓ {test_path.name} ({quality.get('line_count', 0)} lines)")
+        await _emit(
+            log_cb,
+            "success",
+            f"✓ {test_path.name} ({quality.get('line_count', 0)} lines)",
+        )
 
         # ── Generate additional test files from package_structure ──
         # Skip when called as regeneration fix — only test_connector.py matters for passing pytest.
@@ -2262,33 +2539,42 @@ async def handle_write_tests(
         pkg_files = package_structure.get("files", [])
 
         extra_test_py = [
-            f for f in pkg_files
+            f
+            for f in pkg_files
             if f.get("path", "").startswith("tests/")
             and f.get("path", "").endswith(".py")
             and f.get("path") not in ("tests/test_connector.py", "tests/__init__.py")
         ]
 
         fixture_files = [
-            f for f in pkg_files
-            if f.get("path", "").startswith("tests/fixtures/")
-            and f.get("path", "").endswith(".json")
+            f
+            for f in pkg_files
+            if f.get("path", "").startswith("tests/fixtures/") and f.get("path", "").endswith(".json")
         ]
 
         total_extra = len(extra_test_py) + len(fixture_files)
         done_extra = 0
         if extra_test_py:
-            await _emit(log_cb, "info", f"Generating {len(extra_test_py)} additional test file(s) from package structure...")
+            await _emit(
+                log_cb,
+                "info",
+                f"Generating {len(extra_test_py)} additional test file(s) from package structure...",
+            )
 
         for file_info in extra_test_py:
             file_path = file_info.get("path", "")
             # Strip any accidental "{service}_connector/" prefix
-            file_path = re.sub(r'^[^/]+_connector/', '', file_path)
+            file_path = re.sub(r"^[^/]+_connector/", "", file_path)
             file_desc = file_info.get("description", f"Tests for {context.get('service_name', 'service')}")
             if not file_path:
                 continue
 
             done_extra += 1
-            await _emit(log_cb, "info", f"  [{done_extra}/{total_extra}] Generating {file_path}...")
+            await _emit(
+                log_cb,
+                "info",
+                f"  [{done_extra}/{total_extra}] Generating {file_path}...",
+            )
 
             test_mod_system = (await _get_prompt("TEST_MODULE_SYSTEM_PROMPT", TEST_MODULE_SYSTEM_PROMPT)).format(
                 provider=_get_ctx(context, "provider", "unknown"),
@@ -2305,39 +2591,69 @@ async def handle_write_tests(
 
             try:
                 test_mod_code = await call_llm_fix(
-                    [{"role": "user", "content": (
-                        f"Output the complete Python test source code for {file_path}. "
-                        f"Return ONLY raw Python — no prose, no tools, no file operations. "
-                        f"Keep docstrings to one line to avoid truncation."
-                    )}],
+                    [
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Output the complete Python test source code for {file_path}. "
+                                f"Return ONLY raw Python — no prose, no tools, no file operations. "
+                                f"Keep docstrings to one line to avoid truncation."
+                            ),
+                        }
+                    ],
                     system=test_mod_system,
                     max_tokens=60000,
                     on_chunk=_make_gemini_progress_cb(log_cb, f"Gemini {file_path}"),
                 )
                 test_mod_code = _clean_llm_code_response(test_mod_code)
 
-                if not test_mod_code or len(test_mod_code) < 30 or not test_mod_code.lstrip().startswith(_VALID_PYTHON_STARTS):
-                    await _emit(log_cb, "warn", f"  ⚠ {file_path}: LLM returned invalid code — skipping")
+                if (
+                    not test_mod_code
+                    or len(test_mod_code) < 30
+                    or not test_mod_code.lstrip().startswith(_VALID_PYTHON_STARTS)
+                ):
+                    await _emit(
+                        log_cb,
+                        "warn",
+                        f"  ⚠ {file_path}: LLM returned invalid code — skipping",
+                    )
                     continue
 
                 # Syntax check — retry once if broken
                 try:
                     ast.parse(test_mod_code)
                 except SyntaxError as syn_exc:
-                    await _emit(log_cb, "warn", f"  ⚠ {file_path}: syntax error at line {syn_exc.lineno} — retrying...")
-                    retry_msg = [{"role": "user", "content": (
-                        f"The previous output for {file_path} was truncated and has a syntax error at line {syn_exc.lineno}: {syn_exc.msg}\n\n"
-                        f"Broken code:\n```python\n{test_mod_code}\n```\n\n"
-                        f"Output the COMPLETE, CORRECTED Python test file. "
-                        f"Use only single-line # comments — NO multi-line triple-quoted strings. No markdown fences."
-                    )}]
-                    test_mod_code = await call_llm_fix(retry_msg, system=test_mod_system, max_tokens=60000,
-                                                       on_chunk=_make_gemini_progress_cb(log_cb, f"Gemini retry {file_path}"))
+                    await _emit(
+                        log_cb,
+                        "warn",
+                        f"  ⚠ {file_path}: syntax error at line {syn_exc.lineno} — retrying...",
+                    )
+                    retry_msg = [
+                        {
+                            "role": "user",
+                            "content": (
+                                f"The previous output for {file_path} was truncated and has a syntax error at line {syn_exc.lineno}: {syn_exc.msg}\n\n"
+                                f"Broken code:\n```python\n{test_mod_code}\n```\n\n"
+                                f"Output the COMPLETE, CORRECTED Python test file. "
+                                f"Use only single-line # comments — NO multi-line triple-quoted strings. No markdown fences."
+                            ),
+                        }
+                    ]
+                    test_mod_code = await call_llm_fix(
+                        retry_msg,
+                        system=test_mod_system,
+                        max_tokens=60000,
+                        on_chunk=_make_gemini_progress_cb(log_cb, f"Gemini retry {file_path}"),
+                    )
                     test_mod_code = _clean_llm_code_response(test_mod_code)
                     try:
                         ast.parse(test_mod_code)
                     except SyntaxError as exc2:
-                        await _emit(log_cb, "warn", f"  ⚠ {file_path}: still broken after retry ({exc2}) — skipping")
+                        await _emit(
+                            log_cb,
+                            "warn",
+                            f"  ⚠ {file_path}: still broken after retry ({exc2}) — skipping",
+                        )
                         continue
 
                 test_mod_path = out_dir / file_path
@@ -2345,18 +2661,29 @@ async def handle_write_tests(
                 test_mod_path.write_text(test_mod_code, encoding="utf-8")
                 # Apply same auto-fixes to conftest.py / extra test files that we apply to test_connector.py
                 try:
-                    from integration.services.code_quality import auto_fix_python_file as _afpf2
+                    from integration.services.code_quality import (
+                        auto_fix_python_file as _afpf2,
+                    )
+
                     _afpf2(test_mod_path)
                 except Exception:
                     pass
-                await _emit(log_cb, "success", f"  ✓ {file_path} ({test_mod_code.count(chr(10)) + 1} lines)")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"  ✓ {file_path} ({test_mod_code.count(chr(10)) + 1} lines)",
+                )
 
             except Exception as exc:
                 await _emit(log_cb, "warn", f"  ⚠ {file_path}: generation failed — {exc}")
 
         # ── Generate JSON fixture files ──
         if fixture_files:
-            await _emit(log_cb, "info", f"Generating {len(fixture_files)} JSON fixture file(s)...")
+            await _emit(
+                log_cb,
+                "info",
+                f"Generating {len(fixture_files)} JSON fixture file(s)...",
+            )
             fixtures_dir = out_dir / "tests" / "fixtures"
             fixtures_dir.mkdir(parents=True, exist_ok=True)
             # Ensure __init__.py in fixtures dir
@@ -2366,7 +2693,11 @@ async def handle_write_tests(
             file_path = file_info.get("path", "")
             done_extra += 1
             if file_path:
-                await _emit(log_cb, "info", f"  [{done_extra}/{total_extra}] Generating fixture {file_path}...")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"  [{done_extra}/{total_extra}] Generating fixture {file_path}...",
+                )
             file_desc = file_info.get("description", "API response fixture")
             if not file_path:
                 continue
@@ -2397,19 +2728,34 @@ async def handle_write_tests(
                 await _emit(log_cb, "success", f"  ✓ {file_path}")
 
             except json.JSONDecodeError:
-                await _emit(log_cb, "warn", f"  ⚠ {file_path}: LLM returned invalid JSON — writing empty fixture")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"  ⚠ {file_path}: LLM returned invalid JSON — writing empty fixture",
+                )
                 fixture_path = out_dir / file_path
                 fixture_path.parent.mkdir(parents=True, exist_ok=True)
                 fixture_path.write_text("{}", encoding="utf-8")
             except Exception as exc:
-                await _emit(log_cb, "warn", f"  ⚠ {file_path}: fixture generation failed — {exc}")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"  ⚠ {file_path}: fixture generation failed — {exc}",
+                )
 
         # ── Upload test files to R2 ─────────────────────────────────────────
         try:
             _r2_count = await r2_service.upload_connector_dir(
-                context["tenant_id"], context["service_slug"], context["session_id"], out_dir
+                context["tenant_id"],
+                context["service_slug"],
+                context["session_id"],
+                out_dir,
             )
-            await _emit(log_cb, "success", f"  ↑ {_r2_count} file(s) synced to R2 (including tests)")
+            await _emit(
+                log_cb,
+                "success",
+                f"  ↑ {_r2_count} file(s) synced to R2 (including tests)",
+            )
         except Exception as _r2_err:
             await _emit(log_cb, "warn", f"  R2 upload skipped: {_r2_err}")
 
@@ -2429,11 +2775,12 @@ async def handle_write_tests(
 
 # ── run_tests ────────────────────────────────────────────────────────
 
+
 async def handle_run_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run pytest on generated test files.
 
     Pre-validates connector.py and test_connector.py before running pytest.
@@ -2453,14 +2800,22 @@ async def handle_run_tests(
     if not file_status["connector"]["valid"]:
         reason = file_status["connector"]["reason"]
         preview = file_status["connector"].get("content_preview", file_status["connector"].get("error", ""))
-        await _emit(log_cb, "error", f"connector.py is invalid ({reason}) — cannot run tests. {preview}")
+        await _emit(
+            log_cb,
+            "error",
+            f"connector.py is invalid ({reason}) — cannot run tests. {preview}",
+        )
         return {
             "status": "fail",
             "output": {
                 "root_cause": "connector_invalid",
                 "reason": reason,
                 "detail": preview,
-                "passed": 0, "failed": 0, "errors": 0, "returncode": -1, "stdout": "",
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "returncode": -1,
+                "stdout": "",
             },
         }
 
@@ -2470,24 +2825,36 @@ async def handle_run_tests(
     actual_class = _sync_init_with_connector(out_dir, context)
     expected_class = context.get("class_name", "Connector")
     if actual_class and actual_class != expected_class:
-        await _emit(log_cb, "info", f"Auto-fixed __init__.py: '{expected_class}' → '{actual_class}'")
+        await _emit(
+            log_cb,
+            "info",
+            f"Auto-fixed __init__.py: '{expected_class}' → '{actual_class}'",
+        )
 
     if not file_status["tests"]["valid"]:
         reason = file_status["tests"]["reason"]
         preview = file_status["tests"].get("content_preview", file_status["tests"].get("error", ""))
-        await _emit(log_cb, "error", f"test_connector.py is invalid ({reason}) — cannot run tests. {preview}")
+        await _emit(
+            log_cb,
+            "error",
+            f"test_connector.py is invalid ({reason}) — cannot run tests. {preview}",
+        )
         return {
             "status": "fail",
             "output": {
                 "root_cause": "tests_invalid",
                 "reason": reason,
                 "detail": preview,
-                "passed": 0, "failed": 0, "errors": 0, "returncode": -1, "stdout": "",
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "returncode": -1,
+                "stdout": "",
             },
         }
 
     # ── Run pytest with live streaming ──
-    await _emit(log_cb, "info", f"🧪 Running test suite...")
+    await _emit(log_cb, "info", "🧪 Running test suite...")
 
     # Build a thread-safe line emitter: _pytest_run_sync calls on_line(line) from
     # a worker thread; we post each line back into the asyncio event loop via
@@ -2500,26 +2867,22 @@ async def handle_run_tests(
         # Classify the line so the UI colours it correctly
         if " PASSED" in line:
             level = "success"
-        elif " FAILED" in line or line.startswith("FAILED "):
-            level = "error"
-        elif line.startswith("E ") or "ERROR" in line:
+        elif " FAILED" in line or line.startswith(("FAILED ", "E ")) or "ERROR" in line:
             level = "error"
         elif line.startswith("WARNING") or "warning" in line.lower():
             level = "warn"
         else:
             level = "info"
-        loop.call_soon_threadsafe(
-            lambda l=level, m=line: asyncio.ensure_future(log_cb(l, m))
-        )
+        loop.call_soon_threadsafe(lambda l=level, m=line: asyncio.ensure_future(log_cb(l, m)))
 
-    result = await _pytest_run_async( tests_dir, out_dir, _on_pytest_line)
+    result = await _pytest_run_async(tests_dir, out_dir, _on_pytest_line)
 
     # Build method-level test results for UI tracking
     _test_file = tests_dir / "test_connector.py"
     _method_test_map = _build_method_test_map(_test_file)
 
-    def _compute_method_results(details: List[Dict[str, Any]]) -> Dict[str, Any]:
-        mr: Dict[str, Any] = {}
+    def _compute_method_results(details: list[dict[str, Any]]) -> dict[str, Any]:
+        mr: dict[str, Any] = {}
         for method, test_funcs in _method_test_map.items():
             method_tests = []
             m_passed = 0
@@ -2527,7 +2890,13 @@ async def handle_run_tests(
             for detail in details:
                 func_name = detail["test"].split("::")[-1] if "::" in detail["test"] else detail["test"]
                 if func_name in test_funcs:
-                    method_tests.append({"name": func_name, "status": detail["status"], "node_id": detail["test"]})
+                    method_tests.append(
+                        {
+                            "name": func_name,
+                            "status": detail["status"],
+                            "node_id": detail["test"],
+                        }
+                    )
                     if detail["status"] == "passed":
                         m_passed += 1
                     else:
@@ -2553,7 +2922,11 @@ async def handle_run_tests(
 
     # ── Classify failure root cause from pytest output ──
     output_text = result["output"] or ""
-    await _emit(log_cb, "error", f"Tests: {result['passed']} passed, {result['failed']} failed, {result['errors']} errors (exit code {result['returncode']})")
+    await _emit(
+        log_cb,
+        "error",
+        f"Tests: {result['passed']} passed, {result['failed']} failed, {result['errors']} errors (exit code {result['returncode']})",
+    )
     # Emit the actual pytest output so the developer can see what went wrong
     # Lines already streamed live above — no need to dump bulk output here
 
@@ -2563,11 +2936,19 @@ async def handle_run_tests(
             # Try to auto-fix __init__.py class mismatch right now
             fixed_class = _sync_init_with_connector(out_dir, context)
             if fixed_class:
-                await _emit(log_cb, "info", f"Detected class name mismatch in __init__.py — fixed to '{fixed_class}'. Re-running tests...")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"Detected class name mismatch in __init__.py — fixed to '{fixed_class}'. Re-running tests...",
+                )
                 # Re-run pytest immediately after the fix
-                rerun_result = await _pytest_run_async( tests_dir, out_dir)
+                rerun_result = await _pytest_run_async(tests_dir, out_dir)
                 if rerun_result["returncode"] == 0:
-                    await _emit(log_cb, "success", f"All tests passed after __init__.py fix! ({rerun_result['passed']} passed)")
+                    await _emit(
+                        log_cb,
+                        "success",
+                        f"All tests passed after __init__.py fix! ({rerun_result['passed']} passed)",
+                    )
                     return {
                         "status": "pass",
                         "output": {
@@ -2585,7 +2966,11 @@ async def handle_run_tests(
                 # Re-run still failed — fall through to normal classification
                 output_text = rerun_result["output"] or ""
                 result = rerun_result
-                await _emit(log_cb, "warn", f"Tests still failing after __init__.py fix — classifying remaining errors")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    "Tests still failing after __init__.py fix — classifying remaining errors",
+                )
 
             root_cause = "connector_import_error"
         elif "from connector" in output_text or "import connector" in output_text or "from .connector" in output_text:
@@ -2595,7 +2980,11 @@ async def handle_run_tests(
     elif result["returncode"] in (4, 5) or "collected 0 items" in output_text or "no tests ran" in output_text.lower():
         # Exit code 4 = usage/path error (bad path arg), 5 = no tests collected
         root_cause = "tests_invalid"
-        await _emit(log_cb, "error", "No tests were collected — test file may be empty or have no test_ functions")
+        await _emit(
+            log_cb,
+            "error",
+            "No tests were collected — test file may be empty or have no test_ functions",
+        )
     elif result["errors"] > 0 and result["passed"] == 0 and result["failed"] == 0:
         root_cause = "collection_error"
     elif result["failed"] > 0:
@@ -2620,11 +3009,12 @@ async def handle_run_tests(
 
 # ── AI fix handlers ──────────────────────────────────────────────────
 
+
 async def handle_fix_connector(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Use LLM to fix errors in the generated connector.py."""
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
     connector_path = out_dir / "connector.py"
@@ -2644,39 +3034,53 @@ async def handle_fix_connector(
     _fix_pkgs = _fix_req.read_text(encoding="utf-8").strip() if _fix_req.exists() else "(not found)"
     _fix_prev = context.get("previous_fix_summaries", [])
     _fix_prev_str = (
-        "\n".join(f"  Attempt {i+1}: {s}" for i, s in enumerate(_fix_prev))
-        if _fix_prev else "  None — this is the first attempt."
+        "\n".join(f"  Attempt {i + 1}: {s}" for i, s in enumerate(_fix_prev))
+        if _fix_prev
+        else "  None — this is the first attempt."
     )
 
-    system = await _inject_rag_context((await _get_prompt("FIX_CODE_PROMPT", FIX_CODE_PROMPT)).format(
-        current_code=current_code,
-        error_details=error_details,
-        provider=_get_ctx(context, "provider", "unknown"),
-        service_name=_get_ctx(context, "service_name", "Unknown Service"),
-        connector_name=_get_ctx(context, "connector_name", _get_ctx(context, "service_name")),
-        auth_type=_get_ctx(context, "auth_type", "unknown"),
-        sdk_package=_get_ctx(context, "sdk_package"),
-        user_prompt=_get_ctx(context, "user_prompt", "(not provided)"),
-        fix_attempt=str(context.get("fix_attempt", 1)),
-        step_memory_summary=_build_step_memory_summary(context),
-        previous_fix_summary=_fix_prev_str,
-        installed_packages=_fix_pkgs,
-        base_connector_interface=BASE_CONNECTOR_INTERFACE,
-    ), context)
+    system = await _inject_rag_context(
+        (await _get_prompt("FIX_CODE_PROMPT", FIX_CODE_PROMPT)).format(
+            current_code=current_code,
+            error_details=error_details,
+            provider=_get_ctx(context, "provider", "unknown"),
+            service_name=_get_ctx(context, "service_name", "Unknown Service"),
+            connector_name=_get_ctx(context, "connector_name", _get_ctx(context, "service_name")),
+            auth_type=_get_ctx(context, "auth_type", "unknown"),
+            sdk_package=_get_ctx(context, "sdk_package"),
+            user_prompt=_get_ctx(context, "user_prompt", "(not provided)"),
+            fix_attempt=str(context.get("fix_attempt", 1)),
+            step_memory_summary=_build_step_memory_summary(context),
+            previous_fix_summary=_fix_prev_str,
+            installed_packages=_fix_pkgs,
+            base_connector_interface=BASE_CONNECTOR_INTERFACE,
+        ),
+        context,
+    )
 
     messages = [
-        {"role": "user", "content": "Output the complete corrected Python source code for this connector. Fix all errors shown. Return ONLY raw Python — no prose, no tools, no file operations."},
+        {
+            "role": "user",
+            "content": "Output the complete corrected Python source code for this connector. Fix all errors shown. Return ONLY raw Python — no prose, no tools, no file operations.",
+        },
     ]
 
     try:
-        code = await call_llm_fix(messages, system=system, max_tokens=35000,
-                                   on_chunk=_make_gemini_progress_cb(log_cb, "Gemini fix"))
+        code = await call_llm_fix(
+            messages,
+            system=system,
+            max_tokens=35000,
+            on_chunk=_make_gemini_progress_cb(log_cb, "Gemini fix"),
+        )
         code = _clean_llm_code_response(code)
 
         # Guard: reject obviously non-Python LLM responses
         if not code or len(code) < 50 or (not code.lstrip().startswith(_VALID_PYTHON_STARTS)):
             await _emit(log_cb, "error", f"LLM returned invalid response for fix: {code[:120]}")
-            return {"status": "fail", "output": f"LLM fix did not return valid Python code: {code[:200]}"}
+            return {
+                "status": "fail",
+                "output": f"LLM fix did not return valid Python code: {code[:200]}",
+            }
 
         # Validate syntax
         try:
@@ -2688,15 +3092,33 @@ async def handle_fix_connector(
             if recovered:
                 try:
                     ast.parse(recovered)
-                    await _emit(log_cb, "warn", f"Auto-recovered truncated LLM output (closed unterminated string)")
+                    await _emit(
+                        log_cb,
+                        "warn",
+                        "Auto-recovered truncated LLM output (closed unterminated string)",
+                    )
                     code = recovered
                 except SyntaxError as exc2:
-                    await _emit(log_cb, "error", f"Fixed code still has syntax error after recovery attempt: {exc2} — NOT overwriting connector.py")
-                    return {"status": "fail", "output": f"Fixed code has syntax error: {exc2}"}
+                    await _emit(
+                        log_cb,
+                        "error",
+                        f"Fixed code still has syntax error after recovery attempt: {exc2} — NOT overwriting connector.py",
+                    )
+                    return {
+                        "status": "fail",
+                        "output": f"Fixed code has syntax error: {exc2}",
+                    }
             else:
-                await _emit(log_cb, "error", f"Fixed code still has syntax error: {exc} — NOT overwriting connector.py")
+                await _emit(
+                    log_cb,
+                    "error",
+                    f"Fixed code still has syntax error: {exc} — NOT overwriting connector.py",
+                )
                 # DO NOT write broken code — preserve the working connector.py
-                return {"status": "fail", "output": f"Fixed code has syntax error: {exc}"}
+                return {
+                    "status": "fail",
+                    "output": f"Fixed code has syntax error: {exc}",
+                }
 
         connector_path.write_text(code, encoding="utf-8")
 
@@ -2707,7 +3129,11 @@ async def handle_fix_connector(
 
         quality = analyze_file(str(connector_path))
 
-        await _emit(log_cb, "success", f"Fixed connector written → {connector_path.name} ({quality.get('line_count', 0)} lines, score: {quality.get('quality_score', 0)})")
+        await _emit(
+            log_cb,
+            "success",
+            f"Fixed connector written → {connector_path.name} ({quality.get('line_count', 0)} lines, score: {quality.get('quality_score', 0)})",
+        )
         return {
             "status": "pass",
             "output": {
@@ -2723,10 +3149,10 @@ async def handle_fix_connector(
 
 
 async def handle_fix_connector_for_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """TDD fix: update connector.py so it satisfies the failing tests.
 
     When TEST_LLM_MODE=gemini, uses an agentic loop (Gemini + tool calls) so the
@@ -2745,21 +3171,30 @@ async def handle_fix_connector_for_tests(
 
     # ── Agentic fix: Gemini + tool calls ────────────────────────────────────
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
-        from integration.services.agentic_fix import gemini_agentic_fix, gemini_agentic_fix_connector
         from integration.services import knowledge_service as _ks
+        from integration.services.agentic_fix import (
+            gemini_agentic_fix_connector,
+        )
+
         tests_dir = out_dir / "tests"
         await _emit(log_cb, "info", f"🤖 Using {_llm_label()} agentic fix (tool-call loop)...")
 
         _tenant_id = context.get("tenant_id", "")
-        _provider  = context.get("provider", "")
-        _service   = context.get("service_slug", context.get("service_name", ""))
+        _provider = context.get("provider", "")
+        _service = context.get("service_slug", context.get("service_name", ""))
 
         async def _knowledge_fn(query: str) -> str:
             try:
-                return await _ks.query_knowledge(
-                    query=query, tenant_id=_tenant_id,
-                    provider=_provider, service=_service, top_k=8,
-                ) or ""
+                return (
+                    await _ks.query_knowledge(
+                        query=query,
+                        tenant_id=_tenant_id,
+                        provider=_provider,
+                        service=_service,
+                        top_k=8,
+                    )
+                    or ""
+                )
             except Exception:
                 return ""
 
@@ -2769,12 +3204,23 @@ async def handle_fix_connector_for_tests(
         if _fix_attempt_num <= 1:
             _test_guidelines = await _load_test_guidelines(out_dir, _provider, _service)
             if _test_guidelines:
-                await _emit(log_cb, "info",
-                    f"📋 Test guidelines loaded ({len(_test_guidelines)} chars) — injected into fix prompts")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"📋 Test guidelines loaded ({len(_test_guidelines)} chars) — injected into fix prompts",
+                )
             else:
-                await _emit(log_cb, "info", "ℹ No test guidelines found — using generic fix prompt")
+                await _emit(
+                    log_cb,
+                    "info",
+                    "ℹ No test guidelines found — using generic fix prompt",
+                )
         else:
-            await _emit(log_cb, "info", f"ℹ Fix attempt {_fix_attempt_num} — skipping test guidelines (already applied on attempt 1)")
+            await _emit(
+                log_cb,
+                "info",
+                f"ℹ Fix attempt {_fix_attempt_num} — skipping test guidelines (already applied on attempt 1)",
+            )
 
         # Run fresh pytest to get latest output
         fresh = await _pytest_run_async(tests_dir, out_dir)
@@ -2782,6 +3228,7 @@ async def handle_fix_connector_for_tests(
 
         # ── Parse target methods for -k filter (same logic as handle_fix_tests) ──
         import re as _re_meth2
+
         _error_details_ctx = context.get("error_details", "")
         _target_methods2: list[str] = []
         _single2 = _re_meth2.search(r"Fixing ONLY method:\s*(\w+)", _error_details_ctx)
@@ -2792,8 +3239,11 @@ async def handle_fix_connector_for_tests(
             if _multi2:
                 _target_methods2 = [m.strip() for m in _multi2.group(1).split(",") if m.strip()]
         if _target_methods2:
-            await _emit(log_cb, "info",
-                f"🎯 Targeting methods: {', '.join(_target_methods2)} — run_tests() will use -k filter")
+            await _emit(
+                log_cb,
+                "info",
+                f"🎯 Targeting methods: {', '.join(_target_methods2)} — run_tests() will use -k filter",
+            )
 
         # ── Agentic fix: fix connector + client files to make tests pass ──────
         await _emit(log_cb, "info", "Agentic fix: analysing failures and fixing connector...")
@@ -2823,15 +3273,18 @@ async def handle_fix_connector_for_tests(
                     "agentic_iterations": result["iterations"],
                 },
             }
-        else:
-            await _emit(log_cb, "warn", f"Agentic fix did not fully pass ({result['message']}) — falling back to prompt-based fix")
+        await _emit(
+            log_cb,
+            "warn",
+            f"Agentic fix did not fully pass ({result['message']}) — falling back to prompt-based fix",
+        )
 
     current_code = connector_path.read_text(encoding="utf-8")
 
     # ── Run pytest live to get fresh full traceback output ──
     tests_dir = out_dir / "tests"
     await _emit(log_cb, "info", "Running tests to collect live traceback output for Gemini...")
-    live_result = await _pytest_run_async( tests_dir, out_dir)
+    live_result = await _pytest_run_async(tests_dir, out_dir)
     live_output = live_result.get("output", "")
     live_failed = live_result.get("failed", 0)
     live_errors = live_result.get("errors", 0)
@@ -2856,22 +3309,26 @@ async def handle_fix_connector_for_tests(
         f"Full pytest output (--tb=short):\n{live_output}"
     )
 
-    await _emit(log_cb, "info",
+    await _emit(
+        log_cb,
+        "info",
         f"TDD fix: sending all {test_failed_count} failures + full tracebacks to Gemini "
-        f"({len(all_test_files)} test file(s))...")
+        f"({len(all_test_files)} test file(s))...",
+    )
 
     # ── Gather full connector context for Gemini ──────────────────────────────────────────
-    _tdd_provider     = context.get("provider", "unknown")
-    _tdd_service      = context.get("service", context.get("service_slug", "unknown"))
-    _tdd_conn_name    = context.get("connector_name", "") or _tdd_service
-    _tdd_auth_type    = context.get("auth_type", "unknown")
-    _tdd_user_prompt  = context.get("user_prompt", "(not available)")
-    _tdd_fix_attempt  = context.get("fix_attempt", 1)
+    _tdd_provider = context.get("provider", "unknown")
+    _tdd_service = context.get("service", context.get("service_slug", "unknown"))
+    _tdd_conn_name = context.get("connector_name", "") or _tdd_service
+    _tdd_auth_type = context.get("auth_type", "unknown")
+    _tdd_user_prompt = context.get("user_prompt", "(not available)")
+    _tdd_fix_attempt = context.get("fix_attempt", 1)
 
     _tdd_prev_attempts = context.get("previous_fix_summaries", [])
     _tdd_prev_str = (
-        "\n".join(f"  Attempt {i+1}: {s}" for i, s in enumerate(_tdd_prev_attempts))
-        if _tdd_prev_attempts else "  None — this is the first fix attempt."
+        "\n".join(f"  Attempt {i + 1}: {s}" for i, s in enumerate(_tdd_prev_attempts))
+        if _tdd_prev_attempts
+        else "  None — this is the first fix attempt."
     )
 
     _tdd_req_path = out_dir / "requirements.txt"
@@ -2882,6 +3339,7 @@ async def handle_fix_connector_for_tests(
     if _tdd_json_path.exists():
         try:
             import json as _json_tdd
+
             _tdd_json_str = _json_tdd.dumps(_json_tdd.loads(_tdd_json_path.read_text(encoding="utf-8")), indent=2)
         except Exception:
             _tdd_json_str = _tdd_json_path.read_text(encoding="utf-8")
@@ -2899,50 +3357,69 @@ async def handle_fix_connector_for_tests(
                     for _tbm in _tbn.body:
                         if isinstance(_tbm, (ast.FunctionDef, ast.AsyncFunctionDef)):
                             _sig_end = _tbm.body[0].lineno - 1 if _tbm.body else _tbm.lineno
-                            _tdd_sigs.append("\n".join(_tdd_base_lines[_tbm.lineno - 1:_sig_end]))
+                            _tdd_sigs.append("\n".join(_tdd_base_lines[_tbm.lineno - 1 : _sig_end]))
             _tdd_base_str = "\n".join(_tdd_sigs) if _tdd_sigs else _tdd_base_src[:3000]
         except Exception:
             _tdd_base_str = _tdd_base_path.read_text(encoding="utf-8")[:3000]
 
-    system = await _inject_rag_context((await _get_prompt("FIX_CONNECTOR_FOR_TESTS_PROMPT", FIX_CONNECTOR_FOR_TESTS_PROMPT)).format(
-        provider=_tdd_provider,
-        service=_tdd_service,
-        connector_name=_tdd_conn_name,
-        auth_type=_tdd_auth_type,
-        user_prompt=_tdd_user_prompt,
-        fix_attempt=_tdd_fix_attempt,
-        previous_fix_summary=_tdd_prev_str,
-        base_connector_interface=_tdd_base_str,
-        installed_packages=_tdd_pkgs,
-        connector_json=_tdd_json_str,
-        failing_tests_code=failing_tests_code,
-        current_code=current_code,
-        error_details=error_details,
-        step_memory_summary=_build_step_memory_summary(context),
-    ), context)
+    system = await _inject_rag_context(
+        (await _get_prompt("FIX_CONNECTOR_FOR_TESTS_PROMPT", FIX_CONNECTOR_FOR_TESTS_PROMPT)).format(
+            provider=_tdd_provider,
+            service=_tdd_service,
+            connector_name=_tdd_conn_name,
+            auth_type=_tdd_auth_type,
+            user_prompt=_tdd_user_prompt,
+            fix_attempt=_tdd_fix_attempt,
+            previous_fix_summary=_tdd_prev_str,
+            base_connector_interface=_tdd_base_str,
+            installed_packages=_tdd_pkgs,
+            connector_json=_tdd_json_str,
+            failing_tests_code=failing_tests_code,
+            current_code=current_code,
+            error_details=error_details,
+            step_memory_summary=_build_step_memory_summary(context),
+        ),
+        context,
+    )
 
     messages = [
-        {"role": "user", "content":
-            "Output the complete corrected connector.py that satisfies all the failing tests above. "
-            "Return ONLY raw Python — no prose, no tools, no file operations."},
+        {
+            "role": "user",
+            "content": "Output the complete corrected connector.py that satisfies all the failing tests above. "
+            "Return ONLY raw Python — no prose, no tools, no file operations.",
+        },
     ]
 
     try:
-        code = await call_llm_fix(messages, system=system, max_tokens=35000,
-                                   on_chunk=_make_gemini_progress_cb(log_cb, "Gemini TDD fix"))
+        code = await call_llm_fix(
+            messages,
+            system=system,
+            max_tokens=35000,
+            on_chunk=_make_gemini_progress_cb(log_cb, "Gemini TDD fix"),
+        )
         code = _clean_llm_code_response(code)
 
         if not code or len(code) < 50 or not code.lstrip().startswith(_VALID_PYTHON_STARTS):
             await _emit(log_cb, "error", f"LLM returned invalid response: {code[:120]}")
-            return {"status": "fail", "output": f"LLM did not return valid Python code: {code[:200]}"}
+            return {
+                "status": "fail",
+                "output": f"LLM did not return valid Python code: {code[:200]}",
+            }
 
         try:
             ast.parse(code)
             await _emit(log_cb, "success", "TDD-fixed connector passes syntax validation")
         except SyntaxError as exc:
-            await _emit(log_cb, "error", f"Fixed connector has syntax error: {exc} — NOT overwriting connector.py")
+            await _emit(
+                log_cb,
+                "error",
+                f"Fixed connector has syntax error: {exc} — NOT overwriting connector.py",
+            )
             # DO NOT write broken code — preserve the working connector.py
-            return {"status": "fail", "output": f"Syntax error in fixed connector: {exc}"}
+            return {
+                "status": "fail",
+                "output": f"Syntax error in fixed connector: {exc}",
+            }
 
         connector_path.write_text(code, encoding="utf-8")
         actual_class = _sync_init_with_connector(out_dir, context)
@@ -2950,9 +3427,12 @@ async def handle_fix_connector_for_tests(
             await _emit(log_cb, "info", f"__init__.py synced with class: {actual_class}")
 
         quality = analyze_file(str(connector_path))
-        await _emit(log_cb, "success",
+        await _emit(
+            log_cb,
+            "success",
             f"Connector updated → {connector_path.name} ({quality.get('line_count', 0)} lines, "
-            f"score: {quality.get('quality_score', 0)})")
+            f"score: {quality.get('quality_score', 0)})",
+        )
         return {
             "status": "pass",
             "output": {
@@ -2983,8 +3463,8 @@ async def _fast_fix_test_collection_errors(
 
     Returns True if at least one change was made.
     """
-    import re as _re
     import ast as _ast
+    import re as _re
 
     tests_dir = out_dir / "tests"
     test_file = tests_dir / "test_connector.py"
@@ -2999,7 +3479,7 @@ async def _fast_fix_test_collection_errors(
 
     connector_src = _read(out_dir / "connector.py")
     exceptions_src = _read(out_dir / "exceptions.py")
-    metadata_src = _read(out_dir / "metadata" / "connector.json")
+    _read(out_dir / "metadata" / "connector.json")
 
     original = _read(test_file)
     patched = original
@@ -3033,17 +3513,19 @@ async def _fast_fix_test_collection_errors(
         r"(# [^\n]*import[^\n]*\n)((?:[ \t]+\w[\w,\s]*\n)+)\)",
         _re.MULTILINE,
     )
+
     def _rebuild_import(m):
         # Extract names from the orphaned lines
         names_raw = m.group(2)
         names = [n.strip().rstrip(",") for n in _re.findall(r"\b(\w+)\b", names_raw)]
         # Split into connector class vs exceptions
-        exc_names = [n for n in names if n.endswith("Error") or n.endswith("Exception")]
+        exc_names = [n for n in names if n.endswith(("Error", "Exception"))]
         conn_names = [n for n in names if n not in exc_names]
         # Map hallucinated names to real ones
         if real_class_name:
-            conn_names = [real_class_name if n.endswith("Connector") and n != "BaseConnector" else n
-                          for n in conn_names]
+            conn_names = [
+                real_class_name if n.endswith("Connector") and n != "BaseConnector" else n for n in conn_names
+            ]
         fixed_exc = []
         for e in exc_names:
             if e in real_exceptions:
@@ -3062,7 +3544,11 @@ async def _fast_fix_test_collection_errors(
     new_patched = _import_comment_re.sub(_rebuild_import, patched)
     if new_patched != patched:
         patched = new_patched
-        await _emit(log_cb, "info", "⚡ Fast fix: repaired broken import block (IndentationError)")
+        await _emit(
+            log_cb,
+            "info",
+            "⚡ Fast fix: repaired broken import block (IndentationError)",
+        )
 
     # ── 4. Ensure bare 'from connector import' (NOT full package path) ───────
     # The test runner sets cwd=<package>/ and includes that dir in PYTHONPATH.
@@ -3094,9 +3580,17 @@ async def _fast_fix_test_collection_errors(
 
     # ── 6. Fix hallucinated exception names ──────────────────────────────────
     _KNOWN_EXTERNAL = {
-        "ConnectError", "TimeoutException", "RequestError", "HTTPStatusError",
-        "Exception", "RuntimeError", "ValueError", "KeyError",
-        "TypeError", "ImportError", "AttributeError",
+        "ConnectError",
+        "TimeoutException",
+        "RequestError",
+        "HTTPStatusError",
+        "Exception",
+        "RuntimeError",
+        "ValueError",
+        "KeyError",
+        "TypeError",
+        "ImportError",
+        "AttributeError",
     }
     if real_exceptions:
         fake_excs = set(_re.findall(r"\b(\w+(?:Error|Exception))\b", patched))
@@ -3128,10 +3622,10 @@ async def _fast_fix_test_collection_errors(
 
 
 async def handle_fix_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fix STRUCTURAL errors in the test file (imports, class names, mock wiring).
 
     When TEST_LLM_MODE=gemini, uses an agentic loop (Gemini + tool calls) so the
@@ -3153,12 +3647,10 @@ async def handle_fix_tests(
     # Collection errors (IndentationError, ImportError, wrong class names) are
     # trivially mechanical — no LLM needed. Fix them here in <1s so Gemini
     # only runs when the problem actually requires intelligence.
-    _fast_fix_applied = await _fast_fix_test_collection_errors(
-        out_dir, error_details, log_cb
-    )
+    _fast_fix_applied = await _fast_fix_test_collection_errors(out_dir, error_details, log_cb)
     if _fast_fix_applied:
         # Re-run pytest to see if the fast fix was enough
-        _fast_rerun = await _pytest_run_async( tests_dir, out_dir)
+        _fast_rerun = await _pytest_run_async(tests_dir, out_dir)
         if _fast_rerun["returncode"] == 0 or _fast_rerun["errors"] == 0:
             await _emit(log_cb, "info", "✓ Fast pre-fix resolved all collection errors")
             return {
@@ -3173,17 +3665,22 @@ async def handle_fix_tests(
                     "fast_fix": True,
                 },
             }
-        await _emit(log_cb, "info", "Fast pre-fix applied but errors remain — handing off to Gemini agentic")
+        await _emit(
+            log_cb,
+            "info",
+            "Fast pre-fix applied but errors remain — handing off to Gemini agentic",
+        )
 
     # ── Agentic fix: Gemini + tool calls (read/write/run loop) ──────────────
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
-        from integration.services.agentic_fix import gemini_agentic_fix
         from integration.services import knowledge_service as _ks
+        from integration.services.agentic_fix import gemini_agentic_fix
+
         await _emit(log_cb, "info", f"🤖 Using {_llm_label()} agentic fix (tool-call loop)...")
 
         _tenant_id = context.get("tenant_id", "")
-        _provider  = context.get("provider", "")
-        _service   = context.get("service_slug", context.get("service_name", ""))
+        _provider = context.get("provider", "")
+        _service = context.get("service_slug", context.get("service_name", ""))
 
         # ── Run pytest fresh so Gemini sees the CURRENT real failures, not stale frontend state ──
         # The frontend sends its last-known pytest output which may be from a filtered/partial run.
@@ -3196,10 +3693,17 @@ async def handle_fix_tests(
                 _f = _fresh_run.get("failed", 0)
                 _p = _fresh_run.get("passed", 0)
                 _e = _fresh_run.get("errors", 0)
-                await _emit(log_cb, "info",
-                    f"🔍 Fresh test run: {_p} passed, {_f} failed, {_e} errors — using this as ground truth for Gemini")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"🔍 Fresh test run: {_p} passed, {_f} failed, {_e} errors — using this as ground truth for Gemini",
+                )
         except Exception as _fe:
-            await _emit(log_cb, "warn", f"Fresh test run failed ({_fe}) — using frontend-provided output")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Fresh test run failed ({_fe}) — using frontend-provided output",
+            )
 
         # ── Store failures to disk so Gemini can read them via read_file ──
         # Gemini's read_file tool already has access to out_dir — writing test_failures.md
@@ -3213,16 +3717,26 @@ async def handle_fix_tests(
             )
             _local_failures = out_dir / "test_failures.md"
             _local_failures.write_text(_failures_content, encoding="utf-8")
-            await _emit(log_cb, "info", f"📝 Test failures written to {_local_failures.name} for Gemini to read")
+            await _emit(
+                log_cb,
+                "info",
+                f"📝 Test failures written to {_local_failures.name} for Gemini to read",
+            )
         except Exception:
             pass
 
         async def _knowledge_fn(query: str) -> str:
             try:
-                return await _ks.query_knowledge(
-                    query=query, tenant_id=_tenant_id,
-                    provider=_provider, service=_service, top_k=8,
-                ) or ""
+                return (
+                    await _ks.query_knowledge(
+                        query=query,
+                        tenant_id=_tenant_id,
+                        provider=_provider,
+                        service=_service,
+                        top_k=8,
+                    )
+                    or ""
+                )
             except Exception:
                 return ""
 
@@ -3233,12 +3747,23 @@ async def handle_fix_tests(
         if _fix_attempt_num_ft <= 1:
             _test_guidelines = await _load_test_guidelines(out_dir, _provider, _service)
             if _test_guidelines:
-                await _emit(log_cb, "info",
-                    f"📋 Test guidelines loaded ({len(_test_guidelines)} chars) — injected into fix prompt (attempt 1 only)")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"📋 Test guidelines loaded ({len(_test_guidelines)} chars) — injected into fix prompt (attempt 1 only)",
+                )
             else:
-                await _emit(log_cb, "info", "ℹ No test guidelines found — using generic fix prompt")
+                await _emit(
+                    log_cb,
+                    "info",
+                    "ℹ No test guidelines found — using generic fix prompt",
+                )
         else:
-            await _emit(log_cb, "info", f"ℹ Fix attempt {_fix_attempt_num_ft} — skipping test guidelines")
+            await _emit(
+                log_cb,
+                "info",
+                f"ℹ Fix attempt {_fix_attempt_num_ft} — skipping test guidelines",
+            )
 
         # ── Derive target methods from error_details ──────────────────────────
         # The frontend encodes "Fixing ONLY method: health_check" for single-method
@@ -3246,24 +3771,27 @@ async def handle_fix_tests(
         # Extract these so run_tests() inside the loop uses -k filter — preventing
         # Gemini from seeing failures from OTHER methods and going off-track.
         import re as _re_meth
+
         _target_methods: list[str] = []
         _single = _re_meth.search(r"Fixing ONLY method:\s*(\w+)", error_details)
         if _single:
             _target_methods = [_single.group(1).strip()]
         else:
-            _multi = _re_meth.search(
-                r"method test\(s\) failing:\s*([^\n]+)", error_details
-            )
+            _multi = _re_meth.search(r"method test\(s\) failing:\s*([^\n]+)", error_details)
             if _multi:
                 _target_methods = [m.strip() for m in _multi.group(1).split(",") if m.strip()]
 
         if _target_methods:
-            await _emit(log_cb, "info",
-                f"🎯 Targeting methods: {', '.join(_target_methods)} — run_tests() will use -k filter")
+            await _emit(
+                log_cb,
+                "info",
+                f"🎯 Targeting methods: {', '.join(_target_methods)} — run_tests() will use -k filter",
+            )
 
         # Extract compile errors forwarded from the frontend compile-gate check.
         # These come prefixed with "COMPILE ERRORS IN CONNECTOR FILES" in error_details.
         import re as _re_compile
+
         _compile_errors = ""
         _compile_match = _re_compile.search(
             r"COMPILE ERRORS IN CONNECTOR FILES[^\n]*\n(.*?)(?=\n\n[A-Z]|\Z)",
@@ -3272,8 +3800,11 @@ async def handle_fix_tests(
         )
         if _compile_match:
             _compile_errors = _compile_match.group(0).strip()
-            await _emit(log_cb, "info",
-                f"🔍 Compile errors detected — injecting into Gemini context as CRITICAL priority")
+            await _emit(
+                log_cb,
+                "info",
+                "🔍 Compile errors detected — injecting into Gemini context as CRITICAL priority",
+            )
 
         result = await gemini_agentic_fix(
             out_dir,
@@ -3289,7 +3820,7 @@ async def handle_fix_tests(
         )
         if result["success"]:
             # Re-run pytest via standard runner to get structured pass/fail counts
-            rerun = await _pytest_run_async( tests_dir, out_dir)
+            rerun = await _pytest_run_async(tests_dir, out_dir)
             return {
                 "status": "pass" if rerun["returncode"] == 0 else "fail",
                 "output": {
@@ -3302,14 +3833,18 @@ async def handle_fix_tests(
                     "agentic_iterations": result["iterations"],
                 },
             }
-        else:
-            await _emit(log_cb, "warn", f"Agentic fix did not fully pass ({result['message']}) — falling back to prompt-based fix")
-            # Fall through to prompt-based fix below
+        await _emit(
+            log_cb,
+            "warn",
+            f"Agentic fix did not fully pass ({result['message']}) — falling back to prompt-based fix",
+        )
+        # Fall through to prompt-based fix below
 
     # ── Find which test file(s) have errors ──
     # Parse the error_details/traceback to identify the specific file with the problem
     import re as _re2
-    _err_file_match = _re2.search(r'tests/([\w]+\.py)', error_details)
+
+    _err_file_match = _re2.search(r"tests/([\w]+\.py)", error_details)
     if _err_file_match:
         errored_file = tests_dir / _err_file_match.group(1)
         test_path = errored_file if errored_file.exists() else tests_dir / "test_connector.py"
@@ -3345,9 +3880,9 @@ async def handle_fix_tests(
                     continue
                 # Check if it has @pytest.fixture decorator
                 _has_fixture = any(
-                    (isinstance(_d, ast.Attribute) and _d.attr == "fixture") or
-                    (isinstance(_d, ast.Call) and isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture") or
-                    (isinstance(_d, ast.Name) and _d.id == "fixture")
+                    (isinstance(_d, ast.Attribute) and _d.attr == "fixture")
+                    or (isinstance(_d, ast.Call) and isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
+                    or (isinstance(_d, ast.Name) and _d.id == "fixture")
                     for _d in _node.decorator_list
                 )
                 if not _has_fixture:
@@ -3358,31 +3893,39 @@ async def handle_fix_tests(
                 _args = _node.args.args
                 _has_self_param2 = _args and _args[0].arg == "self"
                 _has_self_body2 = any(
-                    isinstance(_sn2, ast.Attribute) and
-                    isinstance(_sn2.value, ast.Name) and _sn2.value.id == "self"
+                    isinstance(_sn2, ast.Attribute) and isinstance(_sn2.value, ast.Name) and _sn2.value.id == "self"
                     for _sn2 in ast.walk(_node)
                 )
                 if _has_self_param2 or _has_self_body2:
                     # Mark all lines of this function for deletion (decorator lines + body)
                     # AST gives decorator line numbers in _node.decorator_list[].lineno
-                    _start_line = min(
-                        (d.lineno for d in _node.decorator_list),
-                        default=_node.lineno
-                    ) - 1  # 0-indexed
+                    _start_line = (
+                        min(
+                            (d.lineno for d in _node.decorator_list),
+                            default=_node.lineno,
+                        )
+                        - 1
+                    )  # 0-indexed
                     _end_line = _node.end_lineno  # 1-indexed inclusive
                     _lines_to_delete.update(range(_start_line, _end_line))
                     _deleted_fixtures.append(_node.name)
                     _conf_changed = True
-                    await _emit(log_cb, "info",
-                        f"Auto-fix conftest: deleting `{_node.name}` — has invalid `self` param + self.* body (rewrites needed)")
+                    await _emit(
+                        log_cb,
+                        "info",
+                        f"Auto-fix conftest: deleting `{_node.name}` — has invalid `self` param + self.* body (rewrites needed)",
+                    )
             if _conf_changed and _lines_to_delete:
                 _conf_new_lines = [l for i, l in enumerate(_conf_lines) if i not in _lines_to_delete]
                 _conf_new_src = "\n".join(_conf_new_lines)
                 try:
                     ast.parse(_conf_new_src)
                     conftest_path.write_text(_conf_new_src, encoding="utf-8")
-                    await _emit(log_cb, "success",
-                        f"✅ conftest.py fixed: deleted invalid self-fixtures {_deleted_fixtures}")
+                    await _emit(
+                        log_cb,
+                        "success",
+                        f"✅ conftest.py fixed: deleted invalid self-fixtures {_deleted_fixtures}",
+                    )
                     # Append to error_details so Gemini knows to rewrite TestSync
                     _self_fixture_hint = (
                         f"\n\n## CRITICAL conftest.py AUTO-FIX APPLIED\n"
@@ -3403,22 +3946,33 @@ async def handle_fix_tests(
     # ── Auto-fix class name mismatches before sending to Gemini ──
     # Extract actual class name from connector.py and replace wrong names in test file
     if connector_code:
-        _class_match = _re2.search(r'^class\s+(\w+)\s*\(', connector_code, _re2.MULTILINE)
+        _class_match = _re2.search(r"^class\s+(\w+)\s*\(", connector_code, _re2.MULTILINE)
         if _class_match:
             actual_class = _class_match.group(1)
             # Find what the test file is importing
-            _import_match = _re2.search(r'from connector import (\w+)', full_test_code)
+            _import_match = _re2.search(r"from connector import (\w+)", full_test_code)
             if _import_match:
                 wrong_class = _import_match.group(1)
                 if wrong_class != actual_class:
-                    await _emit(log_cb, "info", f"Auto-fixing class name: '{wrong_class}' → '{actual_class}' in {test_path.name}")
+                    await _emit(
+                        log_cb,
+                        "info",
+                        f"Auto-fixing class name: '{wrong_class}' → '{actual_class}' in {test_path.name}",
+                    )
                     full_test_code = full_test_code.replace(wrong_class, actual_class)
                     test_path.write_text(full_test_code, encoding="utf-8")
                     # Verify syntax after auto-fix
                     try:
                         ast.parse(full_test_code)
-                        await _emit(log_cb, "success", f"✅ Class name fixed — {test_path.name} is now valid")
-                        return {"status": "pass", "output": f"Auto-fixed class name: {wrong_class} → {actual_class}"}
+                        await _emit(
+                            log_cb,
+                            "success",
+                            f"✅ Class name fixed — {test_path.name} is now valid",
+                        )
+                        return {
+                            "status": "pass",
+                            "output": f"Auto-fixed class name: {wrong_class} → {actual_class}",
+                        }
                     except SyntaxError:
                         pass  # Still has issues — fall through to Gemini fix
 
@@ -3431,8 +3985,11 @@ async def handle_fix_tests(
             ast.parse(_stripped_pre)
             test_path.write_text(_stripped_pre, encoding="utf-8")
             full_test_code = _stripped_pre
-            await _emit(log_cb, "success",
-                f"✅ Pre-fix: stripped hallucinated import names from {test_path.name}")
+            await _emit(
+                log_cb,
+                "success",
+                f"✅ Pre-fix: stripped hallucinated import names from {test_path.name}",
+            )
         except SyntaxError:
             pass  # Don't apply if it breaks syntax
 
@@ -3449,8 +4006,10 @@ async def handle_fix_tests(
                 _i0 = 0
                 while _i0 < len(_lines0):
                     _line0 = _lines0[_i0]
-                    if _re2.match(r'^(\s*)(async\s+)?def\s+\w+.*:\s*$', _line0) or _re2.match(r'^(\s*)class\s+\w+.*:\s*$', _line0):
-                        _indent_m0 = _re2.match(r'^(\s*)', _line0)
+                    if _re2.match(r"^(\s*)(async\s+)?def\s+\w+.*:\s*$", _line0) or _re2.match(
+                        r"^(\s*)class\s+\w+.*:\s*$", _line0
+                    ):
+                        _indent_m0 = _re2.match(r"^(\s*)", _line0)
                         _base_indent0 = _indent_m0.group(1) if _indent_m0 else ""
                         _body_indent0 = _base_indent0 + "    "
                         _next0 = _i0 + 1
@@ -3465,8 +4024,11 @@ async def handle_fix_tests(
                     ast.parse(_fixed0)  # validate fix
                     full_test_code = _fixed0
                     test_path.write_text(full_test_code, encoding="utf-8")
-                    await _emit(log_cb, "success",
-                        f"✅ Auto-fix 0: inserted `pass` into empty function bodies in {test_path.name}")
+                    await _emit(
+                        log_cb,
+                        "success",
+                        f"✅ Auto-fix 0: inserted `pass` into empty function bodies in {test_path.name}",
+                    )
             except Exception as _exc0:
                 await _emit(log_cb, "warn", f"Auto-fix 0 (empty body) failed: {_exc0}")
 
@@ -3486,20 +4048,26 @@ async def handle_fix_tests(
                 continue
             for _dec in _top.decorator_list:
                 _is_fix2 = (
-                    (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture") or
-                    (isinstance(_dec, ast.Name) and _dec.id == "fixture") or
-                    (isinstance(_dec, ast.Call) and (
-                        (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture") or
-                        (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
-                    ))
+                    (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture")
+                    or (isinstance(_dec, ast.Name) and _dec.id == "fixture")
+                    or (
+                        isinstance(_dec, ast.Call)
+                        and (
+                            (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture")
+                            or (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
+                        )
+                    )
                 )
                 if _is_fix2:
                     # Record the line of this decorator (0-indexed)
                     _class_fixture_lines_to_remove.append(_dec.lineno - 1)
 
         if _class_fixture_lines_to_remove:
-            await _emit(log_cb, "info",
-                f"Auto-fix A: removing {len(_class_fixture_lines_to_remove)} @pytest.fixture decorator(s) from test class definition(s)...")
+            await _emit(
+                log_cb,
+                "info",
+                f"Auto-fix A: removing {len(_class_fixture_lines_to_remove)} @pytest.fixture decorator(s) from test class definition(s)...",
+            )
             _new_lines2 = [l for i, l in enumerate(_lines2) if i not in set(_class_fixture_lines_to_remove)]
             _fixed_code2 = "\n".join(_new_lines2)
             try:
@@ -3508,10 +4076,17 @@ async def handle_fix_tests(
                 # Do NOT write to disk yet — B may also have fixes to apply.
                 full_test_code = _fixed_code2
                 _autofix_ab_changed = True
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix A: removed @pytest.fixture from test class(es) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix A: removed @pytest.fixture from test class(es) in {test_path.name}",
+                )
             except SyntaxError as _se2:
-                await _emit(log_cb, "warn", f"Auto-fix A produced syntax error ({_se2}) — continuing")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"Auto-fix A produced syntax error ({_se2}) — continuing",
+                )
     except Exception as _fix_exc2:
         await _emit(log_cb, "warn", f"Class decorator auto-fix check failed ({_fix_exc2})")
 
@@ -3532,30 +4107,52 @@ async def handle_fix_tests(
                 # Check if any decorator is @pytest.fixture
                 for _dec in _child.decorator_list:
                     _is_fixture = (
-                        (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture") or
-                        (isinstance(_dec, ast.Name) and _dec.id == "fixture") or
-                        (isinstance(_dec, ast.Call) and (
-                            (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture") or
-                            (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
-                        ))
+                        (isinstance(_dec, ast.Attribute) and _dec.attr == "fixture")
+                        or (isinstance(_dec, ast.Name) and _dec.id == "fixture")
+                        or (
+                            isinstance(_dec, ast.Call)
+                            and (
+                                (isinstance(_dec.func, ast.Attribute) and _dec.func.attr == "fixture")
+                                or (isinstance(_dec.func, ast.Name) and _dec.func.id == "fixture")
+                            )
+                        )
                     )
                     if _is_fixture:
                         # Collect: class node's start line, and fixture function's full span
                         _dec_start = _dec.lineno - 1  # 0-indexed, decorator start
                         _func_end = getattr(_child, "end_lineno", _child.lineno)  # 1-indexed
-                        _fixture_patches.append((_node.lineno, _child.lineno, _dec_start, _func_end, _node, _child))
+                        _fixture_patches.append(
+                            (
+                                _node.lineno,
+                                _child.lineno,
+                                _dec_start,
+                                _func_end,
+                                _node,
+                                _child,
+                            )
+                        )
                         break
 
         if _fixture_patches:
-            await _emit(log_cb, "info",
-                f"Auto-fix: moving {len(_fixture_patches)} class-level @pytest.fixture(s) to module level...")
+            await _emit(
+                log_cb,
+                "info",
+                f"Auto-fix: moving {len(_fixture_patches)} class-level @pytest.fixture(s) to module level...",
+            )
             # Rebuild file: extract fixture functions from inside classes, inject before the class
             # Process patches in reverse order (by class line) to preserve offsets
             _new_lines = list(_lines)
 
             # Collect all (class_lineno, fixture_extract_lines, fixture_class_line_range)
             _extractions = []
-            for (_class_lineno, _func_lineno, _dec_start_0, _func_end_1, _cls_node, _fn_node) in _fixture_patches:
+            for (
+                _class_lineno,
+                _func_lineno,
+                _dec_start_0,
+                _func_end_1,
+                _cls_node,
+                _fn_node,
+            ) in _fixture_patches:
                 # Lines of the entire fixture (decorator + def + body), 0-indexed
                 _start_0 = _dec_start_0
                 _end_0 = _func_end_1  # exclusive, 0-indexed equivalent: _func_end_1 (since 1-indexed end)
@@ -3575,12 +4172,14 @@ async def handle_fix_tests(
                         _dedented.append(_l[4:])
                     else:
                         _dedented.append(_l)
-                _extractions.append({
-                    "class_lineno_0": _class_lineno - 1,  # 0-indexed class line
-                    "fixture_start_0": _start_0,
-                    "fixture_end_0": _end_0,
-                    "fixture_lines": _dedented,
-                })
+                _extractions.append(
+                    {
+                        "class_lineno_0": _class_lineno - 1,  # 0-indexed class line
+                        "fixture_start_0": _start_0,
+                        "fixture_end_0": _end_0,
+                        "fixture_lines": _dedented,
+                    }
+                )
 
             # Collect module-level fixture names that already exist to avoid duplicates
             _existing_module_fixtures: set = set()
@@ -3588,12 +4187,15 @@ async def handle_fix_tests(
                 if isinstance(_top_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     for _top_dec in _top_node.decorator_list:
                         _is_fix = (
-                            (isinstance(_top_dec, ast.Attribute) and _top_dec.attr == "fixture") or
-                            (isinstance(_top_dec, ast.Name) and _top_dec.id == "fixture") or
-                            (isinstance(_top_dec, ast.Call) and (
-                                (isinstance(_top_dec.func, ast.Attribute) and _top_dec.func.attr == "fixture") or
-                                (isinstance(_top_dec.func, ast.Name) and _top_dec.func.id == "fixture")
-                            ))
+                            (isinstance(_top_dec, ast.Attribute) and _top_dec.attr == "fixture")
+                            or (isinstance(_top_dec, ast.Name) and _top_dec.id == "fixture")
+                            or (
+                                isinstance(_top_dec, ast.Call)
+                                and (
+                                    (isinstance(_top_dec.func, ast.Attribute) and _top_dec.func.attr == "fixture")
+                                    or (isinstance(_top_dec.func, ast.Name) and _top_dec.func.id == "fixture")
+                                )
+                            )
                         )
                         if _is_fix:
                             _existing_module_fixtures.add(_top_node.name)
@@ -3603,18 +4205,21 @@ async def handle_fix_tests(
                 # Get fixture function name from its lines
                 _fn_name = None
                 for _l in _ext["fixture_lines"]:
-                    _m = _re2.match(r'\s*(?:async\s+)?def\s+(\w+)', _l)
+                    _m = _re2.match(r"\s*(?:async\s+)?def\s+(\w+)", _l)
                     if _m:
                         _fn_name = _m.group(1)
                         break
 
                 # Remove fixture from class body
-                del _new_lines[_ext["fixture_start_0"]:_ext["fixture_end_0"]]
+                del _new_lines[_ext["fixture_start_0"] : _ext["fixture_end_0"]]
 
                 # Only insert at module level if no fixture with same name already exists there
                 if _fn_name and _fn_name in _existing_module_fixtures:
-                    await _emit(log_cb, "info",
-                        f"  Skipping insert of '{_fn_name}' — module-level fixture already exists")
+                    await _emit(
+                        log_cb,
+                        "info",
+                        f"  Skipping insert of '{_fn_name}' — module-level fixture already exists",
+                    )
                 else:
                     # Insert before the class (at class_lineno - offset due to deletion)
                     _insert_at = _ext["class_lineno_0"]
@@ -3629,28 +4234,52 @@ async def handle_fix_tests(
                 test_path.write_text(_fixed_code, encoding="utf-8")
                 full_test_code = _fixed_code
                 _autofix_ab_changed = True
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix B: moved {len(_fixture_patches)} class-level fixture(s) to module level in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix B: moved {len(_fixture_patches)} class-level fixture(s) to module level in {test_path.name}",
+                )
                 # Return immediately — A+B both ran; file is now valid
-                return {"status": "pass", "output": f"Auto-fixed {len(_fixture_patches)} class-level fixture(s) moved to module level"}
+                return {
+                    "status": "pass",
+                    "output": f"Auto-fixed {len(_fixture_patches)} class-level fixture(s) moved to module level",
+                }
             except SyntaxError as _se:
-                await _emit(log_cb, "warn",
-                    f"Auto-fix B produced syntax error ({_se}) — falling through to Gemini fix")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"Auto-fix B produced syntax error ({_se}) — falling through to Gemini fix",
+                )
                 # Revert: restore original
                 test_path.write_text(full_test_code, encoding="utf-8")
                 _autofix_ab_changed = False
     except Exception as _fix_exc:
-        await _emit(log_cb, "warn", f"Class fixture auto-fix failed ({_fix_exc}) — falling through to Gemini")
+        await _emit(
+            log_cb,
+            "warn",
+            f"Class fixture auto-fix failed ({_fix_exc}) — falling through to Gemini",
+        )
 
     # If auto-fix A changed the code but B had nothing to move, write A's fixes and return early.
     if _autofix_ab_changed:
         try:
             ast.parse(full_test_code)
             test_path.write_text(full_test_code, encoding="utf-8")
-            await _emit(log_cb, "success", f"✅ Auto-fix A+B complete — {test_path.name} written")
-            return {"status": "pass", "output": "Auto-fixed class fixture decorator(s) from class definitions"}
+            await _emit(
+                log_cb,
+                "success",
+                f"✅ Auto-fix A+B complete — {test_path.name} written",
+            )
+            return {
+                "status": "pass",
+                "output": "Auto-fixed class fixture decorator(s) from class definitions",
+            }
         except SyntaxError as _final_se:
-            await _emit(log_cb, "warn", f"Post auto-fix syntax error ({_final_se}) — falling through to Gemini")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Post auto-fix syntax error ({_final_se}) — falling through to Gemini",
+            )
 
     # ── Auto-fix C: duplicate @pytest.fixture on the same function ──────────────────────────
     # Error: "ValueError: @pytest.fixture is being applied more than once to the same function"
@@ -3663,12 +4292,15 @@ async def handle_fix_tests(
 
         def _is_fixture_decorator(node: ast.expr) -> bool:
             return (
-                (isinstance(node, ast.Name) and node.id == "fixture") or
-                (isinstance(node, ast.Attribute) and node.attr == "fixture") or
-                (isinstance(node, ast.Call) and (
-                    (isinstance(node.func, ast.Name) and node.func.id == "fixture") or
-                    (isinstance(node.func, ast.Attribute) and node.func.attr == "fixture")
-                ))
+                (isinstance(node, ast.Name) and node.id == "fixture")
+                or (isinstance(node, ast.Attribute) and node.attr == "fixture")
+                or (
+                    isinstance(node, ast.Call)
+                    and (
+                        (isinstance(node.func, ast.Name) and node.func.id == "fixture")
+                        or (isinstance(node.func, ast.Attribute) and node.func.attr == "fixture")
+                    )
+                )
             )
 
         for _fn_c in ast.walk(_tree_c):
@@ -3681,23 +4313,39 @@ async def handle_fix_tests(
                     _dup_decorator_lines_to_remove.append(_extra_dec.lineno - 1)  # 0-indexed
 
         if _dup_decorator_lines_to_remove:
-            await _emit(log_cb, "info",
-                f"Auto-fix C: removing {len(_dup_decorator_lines_to_remove)} duplicate @pytest.fixture decorator(s)...")
+            await _emit(
+                log_cb,
+                "info",
+                f"Auto-fix C: removing {len(_dup_decorator_lines_to_remove)} duplicate @pytest.fixture decorator(s)...",
+            )
             _lines_c_new = [l for i, l in enumerate(_lines_c) if i not in set(_dup_decorator_lines_to_remove)]
             _fixed_c = "\n".join(_lines_c_new)
             try:
                 ast.parse(_fixed_c)
                 test_path.write_text(_fixed_c, encoding="utf-8")
                 full_test_code = _fixed_c
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix C: removed duplicate @pytest.fixture from {len(_dup_decorator_lines_to_remove)} function(s) in {test_path.name}")
-                return {"status": "pass", "output": f"Auto-fixed duplicate @pytest.fixture decorator(s)"}
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix C: removed duplicate @pytest.fixture from {len(_dup_decorator_lines_to_remove)} function(s) in {test_path.name}",
+                )
+                return {
+                    "status": "pass",
+                    "output": "Auto-fixed duplicate @pytest.fixture decorator(s)",
+                }
             except SyntaxError as _se_c:
-                await _emit(log_cb, "warn",
-                    f"Auto-fix C produced syntax error ({_se_c}) — falling through to Gemini")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"Auto-fix C produced syntax error ({_se_c}) — falling through to Gemini",
+                )
                 test_path.write_text(full_test_code, encoding="utf-8")
     except Exception as _fix_exc_c:
-        await _emit(log_cb, "warn", f"Duplicate fixture auto-fix check failed ({_fix_exc_c}) — falling through to Gemini")
+        await _emit(
+            log_cb,
+            "warn",
+            f"Duplicate fixture auto-fix check failed ({_fix_exc_c}) — falling through to Gemini",
+        )
 
     # ── Auto-fix D: missing `import pytest` ─────────────────────────────────────────────────
     # Error: "NameError: name 'pytest' is not defined" or "name 'fixture' is not defined"
@@ -3705,19 +4353,19 @@ async def handle_fix_tests(
     # Fix:   prepend `import pytest` if the file uses pytest symbols but doesn't import it.
     try:
         _has_pytest_usage = (
-            "@pytest." in full_test_code or
-            "pytest.mark." in full_test_code or
-            "pytest.raises" in full_test_code or
-            "pytest.fixture" in full_test_code or
-            "@fixture" in full_test_code
+            "@pytest." in full_test_code
+            or "pytest.mark." in full_test_code
+            or "pytest.raises" in full_test_code
+            or "pytest.fixture" in full_test_code
+            or "@fixture" in full_test_code
         )
-        _has_pytest_import = bool(_re2.search(r'^\s*import pytest\b', full_test_code, _re2.MULTILINE))
+        _has_pytest_import = bool(_re2.search(r"^\s*import pytest\b", full_test_code, _re2.MULTILINE))
         if _has_pytest_usage and not _has_pytest_import:
             _lines_d = full_test_code.splitlines()
             # Insert after any __future__ imports or at very top
             _insert_at_d = 0
             for _i_d, _l_d in enumerate(_lines_d):
-                if _l_d.startswith("from __future__") or _l_d.startswith("# -*-"):
+                if _l_d.startswith(("from __future__", "# -*-")):
                     _insert_at_d = _i_d + 1
                 elif _l_d.strip() and not _l_d.startswith("#"):
                     break
@@ -3727,7 +4375,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_d)
                 test_path.write_text(_fixed_d, encoding="utf-8")
                 full_test_code = _fixed_d
-                await _emit(log_cb, "success", f"✅ Auto-fix D: added missing `import pytest` to {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix D: added missing `import pytest` to {test_path.name}",
+                )
             except SyntaxError:
                 pass  # don't apply broken fix
     except Exception as _fix_exc_d:
@@ -3760,11 +4412,8 @@ async def handle_fix_tests(
             if _has_asyncio_marker(_fn_e):
                 continue
             # Find where the first decorator or the def line starts
-            _dec_start_e = (
-                min(d.lineno for d in _fn_e.decorator_list) - 1
-                if _fn_e.decorator_list else _fn_e.lineno - 1
-            )
-            _indent_e = _re2.match(r'^(\s*)', _lines_e[_dec_start_e]).group(1)
+            _dec_start_e = min(d.lineno for d in _fn_e.decorator_list) - 1 if _fn_e.decorator_list else _fn_e.lineno - 1
+            _indent_e = _re2.match(r"^(\s*)", _lines_e[_dec_start_e]).group(1)
             _asyncio_inserts.append((_dec_start_e, _indent_e))
 
         if _asyncio_inserts:
@@ -3776,8 +4425,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_e)
                 test_path.write_text(_fixed_e, encoding="utf-8")
                 full_test_code = _fixed_e
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix E: added @pytest.mark.asyncio to {len(_asyncio_inserts)} async test(s) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix E: added @pytest.mark.asyncio to {len(_asyncio_inserts)} async test(s) in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_e:
@@ -3813,8 +4465,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_f)
                 test_path.write_text(_fixed_f, encoding="utf-8")
                 full_test_code = _fixed_f
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix F: renamed {len(_renames_f)} duplicate test function(s) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix F: renamed {len(_renames_f)} duplicate test function(s) in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_f:
@@ -3838,7 +4493,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_g)
                 test_path.write_text(_fixed_g, encoding="utf-8")
                 full_test_code = _fixed_g
-                await _emit(log_cb, "success", f"✅ Auto-fix G: converted tabs to spaces in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix G: converted tabs to spaces in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_g:
@@ -3856,14 +4515,14 @@ async def handle_fix_tests(
         _fixed_h_lines = []
         for _l_h in _lines_h:
             # Match: `from <pkg>.connector import X` or `from .<pkg> import connector`
-            _m_h1 = _re2.match(r'^(\s*)from\s+\w+\.connector\s+import\s+(.+)$', _l_h)
-            _m_h2 = _re2.match(r'^(\s*)from\s+\.\w*\s+import\s+connector\b', _l_h)
-            _m_h3 = _re2.match(r'^(\s*)import\s+\w+\.connector\b', _l_h)
+            _m_h1 = _re2.match(r"^(\s*)from\s+\w+\.connector\s+import\s+(.+)$", _l_h)
+            _m_h2 = _re2.match(r"^(\s*)from\s+\.\w*\s+import\s+connector\b", _l_h)
+            _m_h3 = _re2.match(r"^(\s*)import\s+\w+\.connector\b", _l_h)
             if _m_h1:
                 _fixed_h_lines.append(f"{_m_h1.group(1)}from connector import {_m_h1.group(2)}")
                 _changed_h = True
             elif _m_h2:
-                _fixed_h_lines.append(f"from connector import connector")
+                _fixed_h_lines.append("from connector import connector")
                 _changed_h = True
             elif _m_h3:
                 _fixed_h_lines.append(f"# import removed: {_l_h.strip()} — use `from connector import X` instead")
@@ -3876,7 +4535,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_h)
                 test_path.write_text(_fixed_h, encoding="utf-8")
                 full_test_code = _fixed_h
-                await _emit(log_cb, "success", f"✅ Auto-fix H: corrected connector import path(s) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix H: corrected connector import path(s) in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_h:
@@ -3890,7 +4553,7 @@ async def handle_fix_tests(
         _init_path = tests_dir / "__init__.py"
         if not _init_path.exists():
             _init_path.write_text("", encoding="utf-8")
-            await _emit(log_cb, "info", f"Auto-fix I: created empty tests/__init__.py")
+            await _emit(log_cb, "info", "Auto-fix I: created empty tests/__init__.py")
     except Exception as _fix_exc_i:
         await _emit(log_cb, "warn", f"Auto-fix I (__init__.py) failed: {_fix_exc_i}")
 
@@ -3908,10 +4571,17 @@ async def handle_fix_tests(
             _m_j = _re2.search(r'@pytest\.fixture\s*\(.*scope\s*=\s*["\'](\w+)["\']', _l_j)
             if _m_j and _m_j.group(1) not in _VALID_SCOPES:
                 _bad_scope = _m_j.group(1)
-                _fixed_j_lines.append(_l_j.replace(f'scope="{_bad_scope}"', 'scope="function"')
-                                         .replace(f"scope='{_bad_scope}'", 'scope="function"'))
+                _fixed_j_lines.append(
+                    _l_j.replace(f'scope="{_bad_scope}"', 'scope="function"').replace(
+                        f"scope='{_bad_scope}'", 'scope="function"'
+                    )
+                )
                 _changed_j = True
-                await _emit(log_cb, "info", f"Auto-fix J: replaced invalid scope='{_bad_scope}' with scope='function'")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"Auto-fix J: replaced invalid scope='{_bad_scope}' with scope='function'",
+                )
             else:
                 _fixed_j_lines.append(_l_j)
         if _changed_j:
@@ -3920,7 +4590,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_j)
                 test_path.write_text(_fixed_j, encoding="utf-8")
                 full_test_code = _fixed_j
-                await _emit(log_cb, "success", f"✅ Auto-fix J: fixed invalid fixture scope(s) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix J: fixed invalid fixture scope(s) in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_j:
@@ -3941,26 +4615,27 @@ async def handle_fix_tests(
                 continue
             # Check if function has @pytest.fixture decorator
             _is_fixture_k = any(
-                (isinstance(_d, ast.Name) and _d.id == "fixture") or
-                (isinstance(_d, ast.Attribute) and _d.attr == "fixture") or
-                (isinstance(_d, ast.Call) and (
-                    (isinstance(_d.func, ast.Name) and _d.func.id == "fixture") or
-                    (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
-                ))
+                (isinstance(_d, ast.Name) and _d.id == "fixture")
+                or (isinstance(_d, ast.Attribute) and _d.attr == "fixture")
+                or (
+                    isinstance(_d, ast.Call)
+                    and (
+                        (isinstance(_d.func, ast.Name) and _d.func.id == "fixture")
+                        or (isinstance(_d.func, ast.Attribute) and _d.func.attr == "fixture")
+                    )
+                )
                 for _d in _fn_k.decorator_list
             )
             if not _is_fixture_k:
                 continue
             # Does it contain both yield and return-with-value?
-            _has_yield_k = any(isinstance(_n, ast.Expr) and isinstance(_n.value, ast.Yield)
-                               for _n in ast.walk(_fn_k))
-            _return_nodes_k = [_n for _n in ast.walk(_fn_k)
-                               if isinstance(_n, ast.Return) and _n.value is not None]
+            _has_yield_k = any(isinstance(_n, ast.Expr) and isinstance(_n.value, ast.Yield) for _n in ast.walk(_fn_k))
+            _return_nodes_k = [_n for _n in ast.walk(_fn_k) if isinstance(_n, ast.Return) and _n.value is not None]
             if _has_yield_k and _return_nodes_k:
                 for _ret_k in _return_nodes_k:
                     _ret_line_k = _ret_k.lineno - 1  # 0-indexed
                     # Replace `return <expr>` → `yield <expr>` on that line
-                    _lines_k[_ret_line_k] = _re2.sub(r'\breturn\b', 'yield', _lines_k[_ret_line_k], count=1)
+                    _lines_k[_ret_line_k] = _re2.sub(r"\breturn\b", "yield", _lines_k[_ret_line_k], count=1)
                 _changed_k = True
 
         if _changed_k:
@@ -3969,8 +4644,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_k)
                 test_path.write_text(_fixed_k, encoding="utf-8")
                 full_test_code = _fixed_k
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix K: replaced `return` with `yield` in generator fixture(s) in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix K: replaced `return` with `yield` in generator fixture(s) in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_k:
@@ -4002,8 +4680,11 @@ async def handle_fix_tests(
                 ast.parse(_fixed_l)
                 test_path.write_text(_fixed_l, encoding="utf-8")
                 full_test_code = _fixed_l
-                await _emit(log_cb, "success",
-                    f"✅ Auto-fix L: renamed {len(_renames_l)} non-pytest test function(s) to test_* in {test_path.name}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ Auto-fix L: renamed {len(_renames_l)} non-pytest test function(s) to test_* in {test_path.name}",
+                )
             except SyntaxError:
                 pass
     except Exception as _fix_exc_l:
@@ -4035,15 +4716,16 @@ async def handle_fix_tests(
     _err_lower = error_details.lower()
     _force_full_file = any(p in _err_lower for p in _FULL_FILE_REQUIRED_PATTERNS)
 
-    if _force_full_file:
-        focused_code = full_test_code
-    else:
-        focused_code = _focused_test_code(full_test_code, error_details)
+    focused_code = full_test_code if _force_full_file else _focused_test_code(full_test_code, error_details)
     focused_line_count = len(focused_code.splitlines())
     is_focused = (not _force_full_file) and (focused_line_count < full_line_count)
 
     if is_focused:
-        await _emit(log_cb, "info", f"Focused fix: extracted {focused_line_count} lines from {full_line_count} total (targeting failing tests only)...")
+        await _emit(
+            log_cb,
+            "info",
+            f"Focused fix: extracted {focused_line_count} lines from {full_line_count} total (targeting failing tests only)...",
+        )
     else:
         await _emit(log_cb, "info", "Sending test code + error details to Claude for fix...")
 
@@ -4082,10 +4764,15 @@ async def handle_fix_tests(
         else "  (could not extract — treat ALL non-underscore methods in connector.py class body as valid)"
     )
     if _fix_valid_methods:
-        await _emit(log_cb, "info", f"Valid connector methods for fix: {', '.join(_fix_valid_methods)}")
+        await _emit(
+            log_cb,
+            "info",
+            f"Valid connector methods for fix: {', '.join(_fix_valid_methods)}",
+        )
 
     # Load TEST_CASE_WRITING_GUIDELINES.md for the fix path too — R2 → local fallback
     from integration.services.guidelines_service import get_test_case_writing_guidelines
+
     _fix_guidelines_content = await get_test_case_writing_guidelines()
     _fix_guidelines = ""
     if _fix_guidelines_content:
@@ -4117,24 +4804,26 @@ async def handle_fix_tests(
             )
 
     # ── Gather full connector context for Gemini ─────────────────────────────────────────────
-    _fix_provider_str   = context.get("provider", "unknown")
-    _fix_service_str    = context.get("service", context.get("service_slug", "unknown"))
-    _fix_conn_name      = context.get("connector_name", "") or _fix_service_str
-    _fix_auth_type      = context.get("auth_type", "unknown")
-    _fix_user_prompt    = context.get("user_prompt", "(not available)")
-    _fix_attempt_num    = context.get("fix_attempt", 1)
+    _fix_provider_str = context.get("provider", "unknown")
+    _fix_service_str = context.get("service", context.get("service_slug", "unknown"))
+    _fix_conn_name = context.get("connector_name", "") or _fix_service_str
+    _fix_auth_type = context.get("auth_type", "unknown")
+    _fix_user_prompt = context.get("user_prompt", "(not available)")
+    _fix_attempt_num = context.get("fix_attempt", 1)
 
     # Previous failed fix strategies (avoid repeating the same mistake)
-    _fix_prev_attempts  = context.get("previous_fix_summaries", [])
+    _fix_prev_attempts = context.get("previous_fix_summaries", [])
     _fix_prev_str = (
-        "\n".join(f"  Attempt {i+1}: {s}" for i, s in enumerate(_fix_prev_attempts))
+        "\n".join(f"  Attempt {i + 1}: {s}" for i, s in enumerate(_fix_prev_attempts))
         if _fix_prev_attempts
         else "  None — this is the first fix attempt."
     )
 
     # requirements.txt — installed packages Gemini can use for patching/mocking
     _req_path = out_dir / "requirements.txt"
-    _installed_pkgs = _req_path.read_text(encoding="utf-8").strip() if _req_path.exists() else "(requirements.txt not found)"
+    _installed_pkgs = (
+        _req_path.read_text(encoding="utf-8").strip() if _req_path.exists() else "(requirements.txt not found)"
+    )
 
     # connector.json — capabilities, auth config, feature list
     _conn_json_path = out_dir / "connector.json"
@@ -4142,15 +4831,13 @@ async def handle_fix_tests(
     if _conn_json_path.exists():
         try:
             import json as _json_ctx
+
             _conn_json_str = _json_ctx.dumps(_json_ctx.loads(_conn_json_path.read_text(encoding="utf-8")), indent=2)
         except Exception:
             _conn_json_str = _conn_json_path.read_text(encoding="utf-8")
 
     # BaseConnector interface — what's already inherited so Gemini doesn't redefine it
-    _base_iface_path = (
-        Path(__file__).resolve().parent.parent.parent
-        / "shared" / "base_connector.py"
-    )
+    _base_iface_path = Path(__file__).resolve().parent.parent.parent / "shared" / "base_connector.py"
     _base_iface_str = "(base_connector.py not found)"
     if _base_iface_path.exists():
         try:
@@ -4164,39 +4851,42 @@ async def handle_fix_tests(
                     for _bm in _bn.body:
                         if isinstance(_bm, (ast.FunctionDef, ast.AsyncFunctionDef)):
                             _sig_end = _bm.body[0].lineno - 1 if _bm.body else _bm.lineno
-                            _base_sigs.append("\n".join(_base_lines_ctx[_bm.lineno - 1:_sig_end]))
+                            _base_sigs.append("\n".join(_base_lines_ctx[_bm.lineno - 1 : _sig_end]))
             _base_iface_str = "\n".join(_base_sigs) if _base_sigs else _base_src[:3000]
         except Exception:
             _base_iface_str = _base_iface_path.read_text(encoding="utf-8")[:3000]
 
     _import_header = (
-        _fix_guidelines
-        + _fix_service_rules
-        + f"## ⚠️ MANDATORY IMPORT — DO NOT CHANGE:\n"
+        _fix_guidelines + _fix_service_rules + f"## ⚠️ MANDATORY IMPORT — DO NOT CHANGE:\n"
         f"from connector import {_fix_class_name}\n"
         f"from shared.base_connector import BaseConnector, ConnectorStatus, ConnectorHealth, AuthStatus, TokenInfo, NormalizedDocument, SyncResult, SyncStatus\n"
         f"## ANY other path (google_adsense_connector, client.connector, adsense_connector.connector, etc.) → ImportError → ALL tests fail.\n\n"
     )
+
     # Use SafeDict so unknown placeholders in R2-cached prompts (e.g. {date}) don't crash
     class _SafeDict(dict):
-        def __missing__(self, key): return "{" + key + "}"
-    system = _import_header + (await _get_prompt("FIX_TESTS_PROMPT", FIX_TESTS_PROMPT)).format_map(_SafeDict(
-        provider=_fix_provider_str,
-        service=_fix_service_str,
-        connector_name=_fix_conn_name,
-        auth_type=_fix_auth_type,
-        user_prompt=_fix_user_prompt,
-        fix_attempt=_fix_attempt_num,
-        previous_fix_summary=_fix_prev_str,
-        base_connector_interface=_base_iface_str,
-        installed_packages=_installed_pkgs,
-        connector_json=_conn_json_str,
-        current_test_code=focused_code,
-        connector_code=connector_code,
-        error_details=error_details,
-        valid_connector_methods=_valid_methods_str,
-        step_memory_summary=_build_step_memory_summary(context),
-    ))
+        def __missing__(self, key):
+            return "{" + key + "}"
+
+    system = _import_header + (await _get_prompt("FIX_TESTS_PROMPT", FIX_TESTS_PROMPT)).format_map(
+        _SafeDict(
+            provider=_fix_provider_str,
+            service=_fix_service_str,
+            connector_name=_fix_conn_name,
+            auth_type=_fix_auth_type,
+            user_prompt=_fix_user_prompt,
+            fix_attempt=_fix_attempt_num,
+            previous_fix_summary=_fix_prev_str,
+            base_connector_interface=_base_iface_str,
+            installed_packages=_installed_pkgs,
+            connector_json=_conn_json_str,
+            current_test_code=focused_code,
+            connector_code=connector_code,
+            error_details=error_details,
+            valid_connector_methods=_valid_methods_str,
+            step_memory_summary=_build_step_memory_summary(context),
+        )
+    )
     # Inject RAG knowledge context (uploaded guidelines, SDK docs, prior generated code)
     system = await _inject_rag_context(system, context)
 
@@ -4210,35 +4900,48 @@ async def handle_fix_tests(
             if _stype or _desc:
                 _fix_plan_lines.append(f"  Step {_i + 1} ({_stype}): {_desc}")
         if _fix_plan_lines:
-            system += (
-                "\n\n## CONNECTOR BUILD PLAN (the specification — what each method must implement)\n"
-                + "\n".join(_fix_plan_lines)
+            system += "\n\n## CONNECTOR BUILD PLAN (the specification — what each method must implement)\n" + "\n".join(
+                _fix_plan_lines
             )
 
     # When we only sent a focused subset, tell the LLM explicitly
     user_msg = (
         "Fix the failing tests and return ONLY the corrected test classes/functions shown above. "
         "Do NOT return the entire test file — return only the fixed portions shown."
-        if is_focused else
-        "Fix the errors in these tests and return the complete corrected file."
+        if is_focused
+        else "Fix the errors in these tests and return the complete corrected file."
     )
 
     messages = [{"role": "user", "content": user_msg}]
 
     try:
-        code = await call_llm_fix(messages, system=system, max_tokens=16384,
-                                   on_chunk=_make_gemini_progress_cb(log_cb, "Gemini test fix"))
+        code = await call_llm_fix(
+            messages,
+            system=system,
+            max_tokens=16384,
+            on_chunk=_make_gemini_progress_cb(log_cb, "Gemini test fix"),
+        )
         code = _clean_llm_code_response(code)
 
         # Phrases Claude CLI emits when blocked by --allowedTools "" and it wanted to write a file
-        _APPROVAL_PHRASES = ("please approve", "approve the write", "need permission",
-                             "write operation", "write the file", "apply all fixes")
+        _APPROVAL_PHRASES = (
+            "please approve",
+            "approve the write",
+            "need permission",
+            "write operation",
+            "write the file",
+            "apply all fixes",
+        )
         _is_approval = any(p in (code or "").lower() for p in _APPROVAL_PHRASES)
 
         # Guard: retry if non-Python or "please approve" style response
         if not code or len(code) < 50 or (not code.lstrip().startswith(_VALID_PYTHON_STARTS)) or _is_approval:
             reason = "approval-request" if _is_approval else "non-code response"
-            await _emit(log_cb, "warn", f"LLM returned {reason} — retrying with direct code-output prompt...")
+            await _emit(
+                log_cb,
+                "warn",
+                f"LLM returned {reason} — retrying with direct code-output prompt...",
+            )
             # On retry: use a minimal system + embed code inline in user message (avoids file-write confusion)
             retry_system = (
                 "Output only Python code. No prose. No explanation. No markdown. "
@@ -4257,19 +4960,34 @@ async def handle_fix_tests(
                     ),
                 },
             ]
-            code = await call_llm_fix(retry_messages, system=retry_system, max_tokens=16384,
-                                       on_chunk=_make_gemini_progress_cb(log_cb, "Gemini test retry"))
+            code = await call_llm_fix(
+                retry_messages,
+                system=retry_system,
+                max_tokens=16384,
+                on_chunk=_make_gemini_progress_cb(log_cb, "Gemini test retry"),
+            )
             code = _clean_llm_code_response(code)
 
         if not code or len(code) < 50 or (not code.lstrip().startswith(_VALID_PYTHON_STARTS)):
-            await _emit(log_cb, "error", f"LLM returned invalid response for test fix: {code[:120]}")
-            return {"status": "fail", "output": f"LLM fix did not return valid Python test code: {code[:200]}"}
+            await _emit(
+                log_cb,
+                "error",
+                f"LLM returned invalid response for test fix: {code[:120]}",
+            )
+            return {
+                "status": "fail",
+                "output": f"LLM fix did not return valid Python test code: {code[:200]}",
+            }
 
         # Validate syntax of the LLM response — do NOT write broken code to disk
         try:
             ast.parse(code)
         except SyntaxError as exc:
-            await _emit(log_cb, "error", f"Fixed test code has syntax error ({exc}) — retrying with explicit fix...")
+            await _emit(
+                log_cb,
+                "error",
+                f"Fixed test code has syntax error ({exc}) — retrying with explicit fix...",
+            )
             # Ask Gemini to fix the syntax error it just introduced
             syntax_retry_messages = [
                 {
@@ -4282,18 +5000,28 @@ async def handle_fix_tests(
                 },
             ]
             syntax_retry_system = (
-                "Output only Python code. No prose. No markdown. "
-                "First line must be an import, comment, or docstring."
+                "Output only Python code. No prose. No markdown. First line must be an import, comment, or docstring."
             )
-            code = await call_llm_fix(syntax_retry_messages, system=syntax_retry_system, max_tokens=16384,
-                                      on_chunk=_make_gemini_progress_cb(log_cb, "Gemini syntax retry"))
+            code = await call_llm_fix(
+                syntax_retry_messages,
+                system=syntax_retry_system,
+                max_tokens=16384,
+                on_chunk=_make_gemini_progress_cb(log_cb, "Gemini syntax retry"),
+            )
             code = _clean_llm_code_response(code)
             try:
                 ast.parse(code)
                 await _emit(log_cb, "success", "Syntax error fixed on retry")
             except SyntaxError as exc2:
-                await _emit(log_cb, "error", f"Syntax still broken after retry: {exc2} — original file preserved")
-                return {"status": "fail", "output": f"Fixed test code has syntax error: {exc2}"}
+                await _emit(
+                    log_cb,
+                    "error",
+                    f"Syntax still broken after retry: {exc2} — original file preserved",
+                )
+                return {
+                    "status": "fail",
+                    "output": f"Fixed test code has syntax error: {exc2}",
+                }
 
         # ── Truncation guard: reject responses shorter than 50% of original ──
         # Only applies for full-file rewrites — focused fixes return a subset by design,
@@ -4302,10 +5030,16 @@ async def handle_fix_tests(
             original_line_count = len(full_test_code.splitlines())
             fixed_line_count = len(code.splitlines())
             if original_line_count > 50 and fixed_line_count < original_line_count * 0.5:
-                await _emit(log_cb, "error",
-                            f"Gemini response looks truncated ({fixed_line_count} lines vs {original_line_count} original) — "
-                            f"preserving original file")
-                return {"status": "fail", "output": f"LLM returned truncated test file ({fixed_line_count} vs {original_line_count} lines)"}
+                await _emit(
+                    log_cb,
+                    "error",
+                    f"Gemini response looks truncated ({fixed_line_count} lines vs {original_line_count} original) — "
+                    f"preserving original file",
+                )
+                return {
+                    "status": "fail",
+                    "output": f"LLM returned truncated test file ({fixed_line_count} vs {original_line_count} lines)",
+                }
 
         # ── Post-process: fix connector import path + strip hallucinated names ────
         code = _fix_connector_import(code, _fix_class_name)
@@ -4319,7 +5053,7 @@ async def handle_fix_tests(
                 original_lines = full_test_code.splitlines()
 
                 # Build a name→new_source map from the LLM output
-                fixed_nodes: Dict[str, str] = {}
+                fixed_nodes: dict[str, str] = {}
                 code_lines = code.splitlines()
                 for node in ast.iter_child_nodes(fixed_tree):
                     if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -4347,13 +5081,21 @@ async def handle_fix_tests(
                     # Validate merged result
                     ast.parse(merged_code)
                     test_path.write_text(merged_code, encoding="utf-8")
-                    await _emit(log_cb, "success", f"Merged {len(fixed_nodes)} fixed test block(s) into {test_path.name}")
+                    await _emit(
+                        log_cb,
+                        "success",
+                        f"Merged {len(fixed_nodes)} fixed test block(s) into {test_path.name}",
+                    )
                 else:
                     # LLM returned something but no parseable nodes — write focused fix as-is
                     test_path.write_text(code, encoding="utf-8")
             except Exception as merge_exc:
                 # Merge failed — fall back to writing full LLM output
-                await _emit(log_cb, "warn", f"Merge failed ({merge_exc}) — writing LLM output directly")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"Merge failed ({merge_exc}) — writing LLM output directly",
+                )
                 test_path.write_text(code, encoding="utf-8")
         else:
             test_path.write_text(code, encoding="utf-8")
@@ -4362,19 +5104,31 @@ async def handle_fix_tests(
         # class-fixture patterns or empty function bodies Gemini re-introduced.
         try:
             from integration.services.code_quality import auto_fix_python_file as _aqf
+
             _aqf_result = _aqf(test_path)
             if _aqf_result.get("tools_applied"):
-                await _emit(log_cb, "success", f"Post-fix auto-fix applied: {_aqf_result['tools_applied']}")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"Post-fix auto-fix applied: {_aqf_result['tools_applied']}",
+                )
             elif not _aqf_result.get("clean", True):
                 # File still has syntax errors after auto-fix — log but continue
-                await _emit(log_cb, "warn",
-                    f"Post-fix: file still has syntax errors: {_aqf_result.get('syntax_error', 'unknown')}")
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"Post-fix: file still has syntax errors: {_aqf_result.get('syntax_error', 'unknown')}",
+                )
         except Exception:
             pass  # never block on auto-fix failure
 
         quality = analyze_file(str(test_path))
 
-        await _emit(log_cb, "success", f"Fixed tests written → {test_path.name} ({quality.get('line_count', 0)} lines)")
+        await _emit(
+            log_cb,
+            "success",
+            f"Fixed tests written → {test_path.name} ({quality.get('line_count', 0)} lines)",
+        )
         return {
             "status": "pass",
             "output": {
@@ -4391,11 +5145,12 @@ async def handle_fix_tests(
 
 # ── Syntax Check & Auto-Fix ───────────────────────────────────────────
 
+
 async def handle_syntax_check(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Check syntax of ALL generated Python files (connector + tests) and auto-fix with Gemini.
 
     Reads every .py file in the connector package including tests/, runs ast.parse()
@@ -4412,9 +5167,9 @@ async def handle_syntax_check(
 
     provider = context.get("provider", "unknown")
     service_name = context.get("service_name", "Unknown Service")
-    auth_type = context.get("auth_type", "unknown")
+    context.get("auth_type", "unknown")
 
-    def _collect_py_files() -> List[Path]:
+    def _collect_py_files() -> list[Path]:
         files = []
         for path in sorted(out_dir.rglob("*.py")):
             rel = path.relative_to(out_dir)
@@ -4425,7 +5180,7 @@ async def handle_syntax_check(
             files.append(path)
         return files
 
-    def _check_syntax(files: List[Path]) -> List[tuple]:
+    def _check_syntax(files: list[Path]) -> list[tuple]:
         """Return list of (path, SyntaxError) for files with errors."""
         errors = []
         for path in files:
@@ -4449,7 +5204,12 @@ async def handle_syntax_check(
     # Resolves unused imports, indentation, trailing commas, and style issues
     # in milliseconds — no LLM call needed for the majority of generation artefacts.
     from integration.services.code_quality import auto_fix_python_file
-    await _emit(log_cb, "info", "🔧 Running non-AI auto-fix pass (autoflake → ruff) on all files...")
+
+    await _emit(
+        log_cb,
+        "info",
+        "🔧 Running non-AI auto-fix pass (autoflake → ruff) on all files...",
+    )
     _auto_fixed_count = 0
     for _py_file in py_files:
         _r = auto_fix_python_file(_py_file)
@@ -4462,8 +5222,15 @@ async def handle_syntax_check(
     syntax_errors = _check_syntax(py_files)
 
     if not syntax_errors:
-        await _emit(log_cb, "success", f"✅ All {len(py_files)} file(s) have clean syntax — no fixes needed")
-        return {"status": "pass", "output": f"All {len(py_files)} files passed syntax check"}
+        await _emit(
+            log_cb,
+            "success",
+            f"✅ All {len(py_files)} file(s) have clean syntax — no fixes needed",
+        )
+        return {
+            "status": "pass",
+            "output": f"All {len(py_files)} files passed syntax check",
+        }
 
     # Report initial errors
     for path, exc in syntax_errors:
@@ -4472,7 +5239,11 @@ async def handle_syntax_check(
 
     # Auto-fix loop
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
-        await _emit(log_cb, "info", f"🔧 Fix attempt {attempt}/{MAX_FIX_ATTEMPTS} — sending {len(syntax_errors)} file(s) to Gemini...")
+        await _emit(
+            log_cb,
+            "info",
+            f"🔧 Fix attempt {attempt}/{MAX_FIX_ATTEMPTS} — sending {len(syntax_errors)} file(s) to Gemini...",
+        )
 
         for bad_path, exc in syntax_errors:
             rel = bad_path.relative_to(out_dir)
@@ -4496,17 +5267,30 @@ async def handle_syntax_check(
                 "Output ONLY the complete corrected Python code. No prose, no markdown fences. "
                 "The first line must be an import, comment, or docstring."
             )
-            fix_messages = [{"role": "user", "content": "Fix all syntax errors and return the complete corrected Python file."}]
+            fix_messages = [
+                {
+                    "role": "user",
+                    "content": "Fix all syntax errors and return the complete corrected Python file.",
+                }
+            ]
             # Test files can be large — use higher token limit
             fix_max_tokens = 60000 if is_test_file else 60000
 
             try:
-                fixed_code = await call_llm_fix(fix_messages, system=fix_system, max_tokens=fix_max_tokens,
-                                                on_chunk=_make_gemini_progress_cb(log_cb, "Gemini syntax fix"))
+                fixed_code = await call_llm_fix(
+                    fix_messages,
+                    system=fix_system,
+                    max_tokens=fix_max_tokens,
+                    on_chunk=_make_gemini_progress_cb(log_cb, "Gemini syntax fix"),
+                )
                 fixed_code = _clean_llm_code_response(fixed_code)
 
                 if not fixed_code or len(fixed_code) < 30 or not fixed_code.lstrip().startswith(_VALID_PYTHON_STARTS):
-                    await _emit(log_cb, "warn", f"  ⚠ Gemini returned non-code for {rel} — skipping")
+                    await _emit(
+                        log_cb,
+                        "warn",
+                        f"  ⚠ Gemini returned non-code for {rel} — skipping",
+                    )
                     continue
 
                 bad_path.write_text(fixed_code, encoding="utf-8")
@@ -4516,7 +5300,11 @@ async def handle_syntax_check(
                 if bad_path.name == "connector.py":
                     actual_class = _sync_init_with_connector(out_dir, context)
                     if actual_class:
-                        await _emit(log_cb, "info", f"  __init__.py synced with class: {actual_class}")
+                        await _emit(
+                            log_cb,
+                            "info",
+                            f"  __init__.py synced with class: {actual_class}",
+                        )
 
             except Exception as fix_exc:
                 await _emit(log_cb, "error", f"  Gemini fix failed for {rel}: {fix_exc}")
@@ -4545,7 +5333,11 @@ async def handle_syntax_check(
 
     # Still errors after all attempts
     remaining = [str(p.relative_to(out_dir)) for p, _ in syntax_errors]
-    await _emit(log_cb, "error", f"❌ {len(remaining)} file(s) still have syntax errors after {MAX_FIX_ATTEMPTS} attempts: {', '.join(remaining)}")
+    await _emit(
+        log_cb,
+        "error",
+        f"❌ {len(remaining)} file(s) still have syntax errors after {MAX_FIX_ATTEMPTS} attempts: {', '.join(remaining)}",
+    )
     return {
         "status": "fail",
         "output": f"{len(remaining)} file(s) still have syntax errors: {', '.join(remaining)}",
@@ -4786,23 +5578,23 @@ Write the FULL document. Minimum 5000 chars. No placeholders, no "TBD".
 
 
 async def handle_generate_implementation_plan(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate implementation_plan.md from API spec (via RAG) + scaffold context.
 
     Produces a SOC/OCP-compliant blueprint that write_connector uses as its specification.
     Stored locally at out_dir/implementation_plan.md and in R2.
     """
-    from integration.services import r2_service as _r2
     from integration.services import knowledge_service as _ks
+    from integration.services import r2_service as _r2
 
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
-    provider   = context.get("provider", "")
+    provider = context.get("provider", "")
     service_slug = context.get("service_slug", "")
     service_name = context.get("service_name", service_slug)
-    auth_type  = context.get("auth_type", "unknown")
+    auth_type = context.get("auth_type", "unknown")
     user_prompt = context.get("user_prompt", "")
 
     await _emit(log_cb, "info", f"📐 Generating implementation plan for {service_name}...")
@@ -4821,9 +5613,8 @@ async def handle_generate_implementation_plan(
             scaffold_ctx += f"\n### {fname}\n```python\n{content[:1500]}\n```"
 
     # Also list any sub-directories already scaffolded
-    existing_files = [str(f.relative_to(out_dir)) for f in sorted(out_dir.rglob("*.py"))
-                      if "__pycache__" not in str(f)]
-    scaffold_ctx += f"\n\n### Existing package files\n" + "\n".join(f"- {f}" for f in existing_files)
+    existing_files = [str(f.relative_to(out_dir)) for f in sorted(out_dir.rglob("*.py")) if "__pycache__" not in str(f)]
+    scaffold_ctx += "\n\n### Existing package files\n" + "\n".join(f"- {f}" for f in existing_files)
 
     # ── Query RAG for API spec knowledge (parallel) ───────────────────────────
     rag_context = ""
@@ -4835,11 +5626,18 @@ async def handle_generate_implementation_plan(
             f"{provider} {service_name} refund status webhook",
         ]
         import asyncio as _asyncio_rag
+
         rag_results = await _asyncio_rag.gather(
-            *[_ks.query_knowledge(
-                query=q, tenant_id=context.get("tenant_id", ""),
-                provider=provider, service=service_slug, top_k=4,
-            ) for q in queries],
+            *[
+                _ks.query_knowledge(
+                    query=q,
+                    tenant_id=context.get("tenant_id", ""),
+                    provider=provider,
+                    service=service_slug,
+                    top_k=4,
+                )
+                for q in queries
+            ],
             return_exceptions=True,
         )
         rag_parts = [r for r in rag_results if r and not isinstance(r, Exception)]
@@ -4850,7 +5648,10 @@ async def handle_generate_implementation_plan(
         await _emit(log_cb, "info", f"ℹ RAG query skipped: {_e}")
 
     import re as _re_impl
-    _clean_slug = _re_impl.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+
+    _clean_slug = (
+        _re_impl.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
+    )
     package_root = f"{_clean_slug}_connector"
     connector_name_ctx = context.get("connector_name", "") or service_name
 
@@ -4892,21 +5693,25 @@ async def handle_generate_implementation_plan(
     # implementation plan / surface; do NOT re-derive design choices from scratch.
     if context.get("is_enhance"):
         from integration.services.agentic_fix import _enhance_directive
-        user_message += _enhance_directive(out_dir, artifact="plan",
-                                           enhancement_ask=context.get("user_prompt", ""))
 
-    plan_content: Optional[str] = None
+        user_message += _enhance_directive(out_dir, artifact="plan", enhancement_ask=context.get("user_prompt", ""))
+
+    plan_content: str | None = None
     _min_chars = 5000
 
     # ── Gemini agentic path ───────────────────────────────────────────────────
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
-            from integration.services.agentic_fix import _gemini_agentic_loop, _PLAN_TOOLS, _r2_service as _agentic_r2
-            result = await _gemini_agentic_loop(
+            from integration.services.agentic_fix import (
+                _PLAN_TOOLS,
+                _gemini_agentic_loop,
+            )
+
+            await _gemini_agentic_loop(
                 out_dir,
                 system_prompt=_IMPL_PLAN_SYSTEM,
                 initial_message=user_message,
-                tools=_PLAN_TOOLS,   # read_file + write_file + done + search_knowledge only — no connector.py checks
+                tools=_PLAN_TOOLS,  # read_file + write_file + done + search_knowledge only — no connector.py checks
                 log_cb=log_cb,
                 max_iterations=3,  # single-shot: think → write_file → done
                 stop_on_done=True,
@@ -4919,7 +5724,11 @@ async def handle_generate_implementation_plan(
                 if len(raw.strip()) >= _min_chars:
                     plan_content = raw
         except Exception as _e:
-            await _emit(log_cb, "warn", f"Gemini impl plan gen failed ({_e}) — falling back to Claude")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Gemini impl plan gen failed ({_e}) — falling back to Claude",
+            )
 
     # ── Claude fallback (direct call, write file manually) ───────────────────
     if not plan_content:
@@ -4940,7 +5749,10 @@ async def handle_generate_implementation_plan(
             return {"status": "fail", "output": str(_e)}
 
     if not plan_content:
-        return {"status": "fail", "output": "Implementation plan generation produced no content"}
+        return {
+            "status": "fail",
+            "output": "Implementation plan generation produced no content",
+        }
 
     # ── Save locally ──────────────────────────────────────────────────────────
     impl_local = out_dir / "implementation_plan.md"
@@ -4967,14 +5779,21 @@ async def handle_generate_implementation_plan(
     async def _store_r2():
         try:
             await _r2.store_implementation_plan(provider, service_slug, plan_content)
-            await _emit(log_cb, "info", f"Stored in R2: {provider}/{service_slug}/implementation_plan.md")
+            await _emit(
+                log_cb,
+                "info",
+                f"Stored in R2: {provider}/{service_slug}/implementation_plan.md",
+            )
         except Exception as _e:
             await _emit(log_cb, "warn", f"R2 store skipped: {_e}")
 
     await _asyncio_save.gather(_ingest_rag(), _store_r2())
 
-    await _emit(log_cb, "success",
-        f"✅ Implementation plan ready ({len(plan_content)} chars) — write_connector will follow this spec")
+    await _emit(
+        log_cb,
+        "success",
+        f"✅ Implementation plan ready ({len(plan_content)} chars) — write_connector will follow this spec",
+    )
     return {
         "status": "pass",
         "output": {
@@ -4986,12 +5805,14 @@ async def handle_generate_implementation_plan(
 
 # ── Load implementation plan helper (used by write_connector) ─────────────
 
+
 async def _load_implementation_plan(out_dir: Path, provider: str, service_slug: str) -> str:
     """Load implementation_plan.md for this connector.
 
     Priority: local disk → R2. Returns empty string if not found or too short.
     """
     from integration.services import r2_service as _r2
+
     _MIN = 500
 
     local = out_dir / "implementation_plan.md"
@@ -5255,11 +6076,11 @@ async def _validate_and_patch_guidelines(
     This function reads the REAL source files, builds a ground-truth map, and does
     deterministic string-replacement corrections. No LLM needed — purely mechanical.
     """
-    import re as _re
     import ast as _ast
     import json as _json
+    import re as _re
 
-    corrections: List[str] = []
+    corrections: list[str] = []
 
     def _read(p: Path) -> str:
         try:
@@ -5311,7 +6132,7 @@ async def _validate_and_patch_guidelines(
     # ── 2. Find REAL exception class names ────────────────────────────────────
     # Extract all exception classes from connector.py + exceptions.py.
     # Only match classes that explicitly inherit from Exception/BaseException/Error lineage.
-    real_exception_names: Set[str] = set()
+    real_exception_names: set[str] = set()
     for src in (connector_src, exceptions_src):
         for line in src.splitlines():
             # Match: class FooError(SomeBaseException...) — must end in Error or Exception
@@ -5321,8 +6142,14 @@ async def _validate_and_patch_guidelines(
 
     # Known third-party exception names that are real but won't appear in connector source
     _KNOWN_EXTERNAL_EXCEPTIONS = {
-        "ConnectError", "TimeoutException", "RequestError", "HTTPStatusError",
-        "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout",
+        "ConnectError",
+        "TimeoutException",
+        "RequestError",
+        "HTTPStatusError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
     }
 
     if real_exception_names:
@@ -5330,9 +6157,17 @@ async def _validate_and_patch_guidelines(
         guideline_exc_names = set(_re.findall(r"\b(\w+(?:Error|Exception))\b", patched))
         for exc in guideline_exc_names:
             if exc in (
-                "Exception", "RuntimeError", "ValueError", "KeyError",
-                "TypeError", "ImportError", "AttributeError", "OSError",
-                "NotImplementedError", "StopIteration", "GeneratorExit",
+                "Exception",
+                "RuntimeError",
+                "ValueError",
+                "KeyError",
+                "TypeError",
+                "ImportError",
+                "AttributeError",
+                "OSError",
+                "NotImplementedError",
+                "StopIteration",
+                "GeneratorExit",
             ):
                 continue  # standard library — leave alone
             if exc in _KNOWN_EXTERNAL_EXCEPTIONS:
@@ -5344,7 +6179,7 @@ async def _validate_and_patch_guidelines(
                 # Try to find a real exception sharing the longest common prefix
                 for real_exc in sorted(real_exception_names):
                     common = 0
-                    for a, b in zip(exc, real_exc):
+                    for a, b in zip(exc, real_exc, strict=False):
                         if a == b:
                             common += 1
                         else:
@@ -5358,7 +6193,7 @@ async def _validate_and_patch_guidelines(
 
     # ── 3. Fix config fixture keys ────────────────────────────────────────────
     # Read install_fields from metadata/connector.json → these are the REAL config keys
-    real_install_keys: List[str] = []
+    real_install_keys: list[str] = []
     if metadata_src:
         try:
             meta = _json.loads(metadata_src)
@@ -5372,19 +6207,33 @@ async def _validate_and_patch_guidelines(
         fixture_keys_in_guidelines = set(_re.findall(r'"([a-z][a-z0-9_]+)":\s*"[^"]*"', patched))
         fixture_keys_in_guidelines |= set(_re.findall(r"'([a-z][a-z0-9_]+)':\s*'[^']*'", patched))
         # Identify keys that look like connector config (non-standard pytest/Python keys)
-        _standard_keys = {"role", "type", "label", "key", "default", "status", "url",
-                          "level", "message", "error", "id", "name", "path"}
+        _standard_keys = {
+            "role",
+            "type",
+            "label",
+            "key",
+            "default",
+            "status",
+            "url",
+            "level",
+            "message",
+            "error",
+            "id",
+            "name",
+            "path",
+        }
         config_looking_keys = {
-            k for k in fixture_keys_in_guidelines
-            if k not in _standard_keys and "_" in k or len(k) > 8
+            k for k in fixture_keys_in_guidelines if (k not in _standard_keys and "_" in k) or len(k) > 8
         }
         for wrong_key in config_looking_keys:
             if wrong_key not in real_install_keys:
                 # Find the closest real key by substring match
                 match = next(
-                    (rk for rk in real_install_keys
-                     if wrong_key in rk or rk in wrong_key or
-                     wrong_key.replace("_", "") == rk.replace("_", "")),
+                    (
+                        rk
+                        for rk in real_install_keys
+                        if wrong_key in rk or rk in wrong_key or wrong_key.replace("_", "") == rk.replace("_", "")
+                    ),
                     None,
                 )
                 if match:
@@ -5482,10 +6331,17 @@ async def _validate_and_patch_guidelines(
 
     # ── Report ────────────────────────────────────────────────────────────────
     if corrections:
-        await _emit(log_cb, "warn",
-                    f"⚠ Guidelines patched ({len(corrections)} corrections): {'; '.join(corrections)}")
+        await _emit(
+            log_cb,
+            "warn",
+            f"⚠ Guidelines patched ({len(corrections)} corrections): {'; '.join(corrections)}",
+        )
     else:
-        await _emit(log_cb, "info", "✓ Guidelines validated — all class/exception/config names correct")
+        await _emit(
+            log_cb,
+            "info",
+            "✓ Guidelines validated — all class/exception/config names correct",
+        )
 
     return patched
 
@@ -5496,7 +6352,8 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
     Returns a markdown block to inject at the TOP of the Gemini prompt as locked constraints
     that Gemini MUST follow exactly — prevents hallucination of class names, exceptions, keys.
     """
-    import ast as _ast, json as _json, re as _re
+    import ast as _ast
+    import json as _json
 
     def _read(p: Path) -> str:
         try:
@@ -5516,8 +6373,13 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
         for node in _ast.walk(tree):
             if isinstance(node, _ast.ClassDef):
                 for base in node.bases:
-                    base_name = (base.id if isinstance(base, _ast.Name) else
-                                 base.attr if isinstance(base, _ast.Attribute) else "")
+                    base_name = (
+                        base.id
+                        if isinstance(base, _ast.Name)
+                        else base.attr
+                        if isinstance(base, _ast.Attribute)
+                        else ""
+                    )
                     if "BaseConnector" in base_name:
                         connector_class = node.name
                         break
@@ -5550,9 +6412,7 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
         try:
             tree = _ast.parse(src)
             for node in _ast.walk(tree):
-                if isinstance(node, _ast.ClassDef) and (
-                    node.name.endswith("Error") or node.name.endswith("Exception")
-                ):
+                if isinstance(node, _ast.ClassDef) and (node.name.endswith("Error") or node.name.endswith("Exception")):
                     exception_names.append(node.name)
         except Exception:
             pass
@@ -5586,17 +6446,27 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
             "",
         ]
     if exception_names:
-        lines += [
-            "**Real exception classes (ONLY these exist — do not invent others):**",
-        ] + [f"  - `{e}`" for e in exception_names] + [""]
+        lines += (
+            [
+                "**Real exception classes (ONLY these exist — do not invent others):**",
+            ]
+            + [f"  - `{e}`" for e in exception_names]
+            + [""]
+        )
     if config_keys:
-        lines += [
-            "**Config fixture keys (from install_fields — use these EXACTLY):**",
-        ] + [f'  - `"{k}": "test_value"`' for k in config_keys] + [""]
+        lines += (
+            [
+                "**Config fixture keys (from install_fields — use these EXACTLY):**",
+            ]
+            + [f'  - `"{k}": "test_value"`' for k in config_keys]
+            + [""]
+        )
     if method_sigs:
         lines += [
             f"**Public methods on `{connector_class}` (copy signatures exactly):**",
-        ] + method_sigs + [""]
+            *method_sigs,
+            "",
+        ]
 
     # 5. Extract non-connector, non-exception classes (e.g. PaytmClient, HttpClient)
     client_classes = []
@@ -5659,6 +6529,7 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
     # These are config attributes on the connector INSTANCE — tests must use connector.<attr>
     # NOT connector.client.<attr> (self.client is a Mock and has no config attributes).
     import re as _re2
+
     instance_attrs = []
     if connector_src and connector_class:
         # Match patterns like: self.merchant_key = self.config.get("merchant_key", ...)
@@ -5668,18 +6539,21 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
         for match in attr_pattern.finditer(connector_src):
             attr_name, config_key = match.group(1), match.group(2)
             # Skip trivial attributes (not useful for assertions)
-            if attr_name not in ("config", "connector_id", "tenant_id", "connector_type"):
+            if attr_name not in (
+                "config",
+                "connector_id",
+                "tenant_id",
+                "connector_type",
+            ):
                 instance_attrs.append((attr_name, config_key))
         instance_attrs = list(dict.fromkeys(instance_attrs))  # deduplicate
 
     if instance_attrs:
         lines.append(
-            f"**Connector instance attributes from config (use `connector.<attr>` in assertions, NEVER `connector.client.<attr>`):**"
+            "**Connector instance attributes from config (use `connector.<attr>` in assertions, NEVER `connector.client.<attr>`):**"
         )
         for attr_name, config_key in instance_attrs:
-            lines.append(
-                f"  - `connector.{attr_name}` — set from `self.config.get(\"{config_key}\")` in __init__"
-            )
+            lines.append(f'  - `connector.{attr_name}` — set from `self.config.get("{config_key}")` in __init__')
         lines.append("")
         lines.append(
             "⚠️ `connector.client` is a MagicMock — it does NOT have these attributes. "
@@ -5695,10 +6569,10 @@ def _extract_connector_ground_truth(out_dir: Path) -> str:
 
 
 async def handle_generate_test_guidelines(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate connector-specific test guidelines by reading the actual connector code.
 
     Reads connector.py, client files, config.py, requirements.txt, and metadata.
@@ -5724,10 +6598,10 @@ async def handle_generate_test_guidelines(
         except Exception:
             return ""
 
-    connector_src = _read(connector_path)
+    _read(connector_path)
 
     # Read all .py files in the package recursively
-    package_files: Dict[str, str] = {}
+    package_files: dict[str, str] = {}
     for f in sorted(out_dir.rglob("*.py")):
         rel = f.relative_to(out_dir)
         # Skip test files and __pycache__
@@ -5747,16 +6621,26 @@ async def handle_generate_test_guidelines(
     base_connector_path = Path(__file__).parent.parent.parent / "shared" / "base_connector.py"
     base_src = _read(base_connector_path)
     # Only include the class signature and abstract methods — not full 800 lines
-    import re as _re
     base_summary_lines = []
     for line in base_src.splitlines():
         stripped = line.strip()
-        if any(kw in stripped for kw in [
-            "class BaseConnector", "class ConnectorStatus", "class ConnectorHealth",
-            "class AuthStatus", "class SyncResult", "class SyncStatus",
-            "class TokenInfo", "class NormalizedDocument",
-            "@abstractmethod", "async def ", "def __init__", "AUTH_TYPE",
-        ]):
+        if any(
+            kw in stripped
+            for kw in [
+                "class BaseConnector",
+                "class ConnectorStatus",
+                "class ConnectorHealth",
+                "class AuthStatus",
+                "class SyncResult",
+                "class SyncStatus",
+                "class TokenInfo",
+                "class NormalizedDocument",
+                "@abstractmethod",
+                "async def ",
+                "def __init__",
+                "AUTH_TYPE",
+            ]
+        ):
             base_summary_lines.append(line)
     base_summary = "\n".join(base_summary_lines[:150])  # cap at 150 lines
 
@@ -5816,7 +6700,10 @@ Provider: **{provider}**, Service slug: **{service_slug}**
 
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         try:
-            from integration.services.agentic_fix import gemini_agentic_generate_test_guidelines
+            from integration.services.agentic_fix import (
+                gemini_agentic_generate_test_guidelines,
+            )
+
             result = await asyncio.wait_for(
                 gemini_agentic_generate_test_guidelines(
                     out_dir,
@@ -5833,15 +6720,24 @@ Provider: **{provider}**, Service slug: **{service_slug}**
                     guidelines_content = guidelines_path.read_text(encoding="utf-8")
                 else:
                     guidelines_content = result.get("result", "")
-        except asyncio.TimeoutError:
-            await _emit(log_cb, "warn", f"Gemini guidelines gen timed out after {_GUIDELINES_TIMEOUT}s — falling back to Claude")
+        except TimeoutError:
+            await _emit(
+                log_cb,
+                "warn",
+                f"Gemini guidelines gen timed out after {_GUIDELINES_TIMEOUT}s — falling back to Claude",
+            )
         except Exception as e:
-            await _emit(log_cb, "warn", f"Gemini guidelines gen failed ({e}) — falling back to Claude")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Gemini guidelines gen failed ({e}) — falling back to Claude",
+            )
 
     if not guidelines_content:
         # Claude fallback — with its own timeout
         try:
             from integration.services.llm_client import call_llm
+
             system_prompt = await _get_prompt("TEST_GUIDELINES_SYSTEM", _TEST_GUIDELINES_SYSTEM)
             guidelines_content = await asyncio.wait_for(
                 call_llm(
@@ -5852,9 +6748,16 @@ Provider: **{provider}**, Service slug: **{service_slug}**
                 ),
                 timeout=_GUIDELINES_TIMEOUT,
             )
-        except asyncio.TimeoutError:
-            await _emit(log_cb, "error", f"Claude guidelines gen timed out after {_GUIDELINES_TIMEOUT}s")
-            return {"status": "fail", "output": f"Guidelines generation timed out after {_GUIDELINES_TIMEOUT}s — step failed"}
+        except TimeoutError:
+            await _emit(
+                log_cb,
+                "error",
+                f"Claude guidelines gen timed out after {_GUIDELINES_TIMEOUT}s",
+            )
+            return {
+                "status": "fail",
+                "output": f"Guidelines generation timed out after {_GUIDELINES_TIMEOUT}s — step failed",
+            }
         except Exception as e:
             await _emit(log_cb, "error", f"Claude guidelines gen failed: {e}")
             return {"status": "fail", "output": str(e)}
@@ -5866,9 +6769,7 @@ Provider: **{provider}**, Service slug: **{service_slug}**
     # Gemini often hallucinates class names, exception names, and config keys.
     # We read the real connector source and do deterministic string replacements
     # so the tests generated from these guidelines actually match the code.
-    guidelines_content = await _validate_and_patch_guidelines(
-        guidelines_content, out_dir, log_cb
-    )
+    guidelines_content = await _validate_and_patch_guidelines(guidelines_content, out_dir, log_cb)
 
     # ── Save to local file ────────────────────────────────────────────────────
     guidelines_local_path = out_dir / "test_guidelines.md"
@@ -5884,26 +6785,34 @@ Provider: **{provider}**, Service slug: **{service_slug}**
     # ── Store in R2 ───────────────────────────────────────────────────────────
     try:
         await r2_service.store_test_guidelines(provider, service_slug, guidelines_content)
-        await _emit(log_cb, "info", f"Stored in R2: {provider}/{service_slug}/test_guidelines.md")
+        await _emit(
+            log_cb,
+            "info",
+            f"Stored in R2: {provider}/{service_slug}/test_guidelines.md",
+        )
     except Exception as e:
         await _emit(log_cb, "warn", f"R2 store skipped: {e}")
 
-    await _emit(log_cb, "success", f"Test guidelines generated ({len(guidelines_content)} chars)")
+    await _emit(
+        log_cb,
+        "success",
+        f"Test guidelines generated ({len(guidelines_content)} chars)",
+    )
     return {
         "status": "pass",
         "output": {
             "path": str(guidelines_local_path),
             "chars": len(guidelines_content),
             "r2_key": f"{provider}/{service_slug}/test_guidelines.md",
-        }
+        },
     }
 
 
 async def handle_setup_instructions(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate connector-specific setup instructions (instructions/setup.md).
 
     Uses Gemini to research the connector's provider and produce a step-by-step
@@ -5925,8 +6834,13 @@ async def handle_setup_instructions(
 
     # ── Gemini agentic path ────────────────────────────────────────────
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
-        from integration.services.agentic_fix import gemini_agentic_generate_instructions
-        from integration.services.instructions_guidelines_service import get_instruction_guidelines
+        from integration.services.agentic_fix import (
+            gemini_agentic_generate_instructions,
+        )
+        from integration.services.instructions_guidelines_service import (
+            get_instruction_guidelines,
+        )
+
         guidelines = await get_instruction_guidelines()
         result = await gemini_agentic_generate_instructions(
             out_dir, context=context, guidelines=guidelines, log_cb=log_cb
@@ -5949,13 +6863,27 @@ async def handle_setup_instructions(
             # Store to disk-first cache (then R2) as fallback for fetch
             try:
                 await r2_service.store_setup_instructions(provider, service_slug, content)
-                await _emit(log_cb, "info", f"Stored in R2: {provider}/{service_slug}/setup_instructions.md")
+                await _emit(
+                    log_cb,
+                    "info",
+                    f"Stored in R2: {provider}/{service_slug}/setup_instructions.md",
+                )
             except Exception as _e:
                 await _emit(log_cb, "warn", f"R2 store skipped: {_e}")
-            await _emit(log_cb, "success", f"✅ instructions/setup.md generated in {result['iterations']} iteration(s)")
-            return {"status": "pass", "output": {"path": str(instructions_path), "chars": len(content)}}
-        else:
-            await _emit(log_cb, "warn", "Gemini agentic instructions gen incomplete — falling back to Claude")
+            await _emit(
+                log_cb,
+                "success",
+                f"✅ instructions/setup.md generated in {result['iterations']} iteration(s)",
+            )
+            return {
+                "status": "pass",
+                "output": {"path": str(instructions_path), "chars": len(content)},
+            }
+        await _emit(
+            log_cb,
+            "warn",
+            "Gemini agentic instructions gen incomplete — falling back to Claude",
+        )
 
     # ── Claude fallback ────────────────────────────────────────────────
     connector_source = connector_path.read_text(encoding="utf-8")
@@ -5987,7 +6915,7 @@ async def handle_setup_instructions(
         )
         raw = raw.strip()
         if raw.startswith("```markdown"):
-            raw = raw[len("```markdown"):].strip()
+            raw = raw[len("```markdown") :].strip()
         if raw.startswith("```"):
             raw = raw[3:].strip()
         if raw.endswith("```"):
@@ -6013,12 +6941,19 @@ async def handle_setup_instructions(
         # Store to disk-first cache (then R2) as fallback for fetch
         try:
             await r2_service.store_setup_instructions(provider, service_slug, raw)
-            await _emit(log_cb, "info", f"Stored in R2: {provider}/{service_slug}/setup_instructions.md")
+            await _emit(
+                log_cb,
+                "info",
+                f"Stored in R2: {provider}/{service_slug}/setup_instructions.md",
+            )
         except Exception as _e:
             await _emit(log_cb, "warn", f"R2 store skipped: {_e}")
 
         await _emit(log_cb, "success", f"instructions/setup.md written ({len(raw)} chars)")
-        return {"status": "pass", "output": {"path": str(instructions_path), "chars": len(raw)}}
+        return {
+            "status": "pass",
+            "output": {"path": str(instructions_path), "chars": len(raw)},
+        }
 
     except Exception as e:
         await _emit(log_cb, "error", f"setup_instructions failed: {e}")
@@ -6026,10 +6961,10 @@ async def handle_setup_instructions(
 
 
 async def handle_generate_metadata(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate metadata/connector.json from the built connector.py.
 
     Reads the generated connector source, calls the LLM to extract install fields
@@ -6064,6 +6999,7 @@ async def handle_generate_metadata(
     # ── Gemini agentic metadata generation ──────────────────────────────────
     if False:  # gemini path disabled — Claude is the only backend codegen runtime
         from integration.services.agentic_fix import gemini_agentic_generate_metadata
+
         result = await gemini_agentic_generate_metadata(
             out_dir,
             version=version,
@@ -6074,19 +7010,24 @@ async def handle_generate_metadata(
         if result["success"] and metadata_path.exists():
             try:
                 meta = json.loads(metadata_path.read_text(encoding="utf-8"))
-                await _emit(log_cb, "success", f"✅ connector.json generated (v{meta.get('version', version)}) in {result['iterations']} iteration(s)")
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"✅ connector.json generated (v{meta.get('version', version)}) in {result['iterations']} iteration(s)",
+                )
                 return {"status": "pass", "output": meta}
             except json.JSONDecodeError:
                 await _emit(log_cb, "warn", "Agentic metadata JSON invalid — falling back")
         else:
-            await _emit(log_cb, "warn", "Agentic metadata gen incomplete — falling back to Claude")
+            await _emit(
+                log_cb,
+                "warn",
+                "Agentic metadata gen incomplete — falling back to Claude",
+            )
         # Fall through to Claude below
 
     def _build_user_msg(source: str) -> str:
-        return (
-            f"Generate connector.json for this connector. Use version='{version}'.\n\n"
-            f"```python\n{source}\n```"
-        )
+        return f"Generate connector.json for this connector. Use version='{version}'.\n\n```python\n{source}\n```"
 
     def _extract_signatures(source: str) -> str:
         """Return only class-level lines + async def signatures to reduce token count on retry."""
@@ -6096,7 +7037,7 @@ async def handle_generate_metadata(
         for line in lines:
             stripped = line.strip()
             # Track docstrings to skip them
-            if stripped.startswith('"""') or stripped.startswith("'''"):
+            if stripped.startswith(('"""', "'''")):
                 if in_docstring:
                     in_docstring = False
                     continue
@@ -6109,13 +7050,17 @@ async def handle_generate_metadata(
                 continue
             # Keep class declarations, CONNECTOR_TYPE assignments, method signatures, config lines
             if (
-                stripped.startswith("class ")
-                or stripped.startswith("CONNECTOR_TYPE")
-                or stripped.startswith("async def ")
-                or stripped.startswith("def ")
+                stripped.startswith(
+                    (
+                        "class ",
+                        "CONNECTOR_TYPE",
+                        "async def ",
+                        "def ",
+                        "VERSION",
+                        "version",
+                    )
+                )
                 or "self.config" in stripped
-                or stripped.startswith("VERSION")
-                or stripped.startswith("version")
             ):
                 sig_lines.append(line)
         return "\n".join(sig_lines)
@@ -6159,8 +7104,11 @@ async def handle_generate_metadata(
             metadata = json.loads(raw)
         except json.JSONDecodeError as first_err:
             # JSON was truncated — retry with only method signatures to shrink prompt+response size.
-            await _emit(log_cb, "warn",
-                        f"First attempt produced invalid JSON ({first_err}) — retrying with condensed source…")
+            await _emit(
+                log_cb,
+                "warn",
+                f"First attempt produced invalid JSON ({first_err}) — retrying with condensed source…",
+            )
             condensed = _extract_signatures(connector_source)
             raw2 = await call_llm_fix(
                 [{"role": "user", "content": _build_user_msg(condensed)}],
@@ -6184,24 +7132,34 @@ async def handle_generate_metadata(
             # LLM is forced to add it rather than silently producing a broken artifact.
             service_slug = context.get("service_slug", "unknown")
             import re as _re_ct
-            _clean = _re_ct.sub(r'_connector$', '', service_slug) if service_slug.endswith('_connector') else service_slug
+
+            _clean = (
+                _re_ct.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
+            )
             await _emit(
-                log_cb, "error",
+                log_cb,
+                "error",
                 f"connector.py is missing the CONNECTOR_TYPE class attribute. "
                 f"The gateway uses this to register the connector — without it "
                 f"POST /connectors/deploy returns 404. "
-                f"Add this line inside the connector class: CONNECTOR_TYPE = \"{_clean}\". "
-                f"Fix connector.py and re-run this step."
+                f'Add this line inside the connector class: CONNECTOR_TYPE = "{_clean}". '
+                f"Fix connector.py and re-run this step.",
             )
-            return {"status": "fail", "output": "connector.py missing CONNECTOR_TYPE class attribute"}
+            return {
+                "status": "fail",
+                "output": "connector.py missing CONNECTOR_TYPE class attribute",
+            }
 
         metadata_dir.mkdir(parents=True, exist_ok=True)
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         install_field_count = len(metadata.get("install_fields", []))
         api_count = len(metadata.get("apis", []))
-        await _emit(log_cb, "success",
-                    f"metadata/connector.json written — {install_field_count} install fields, {api_count} APIs, version {version}")
+        await _emit(
+            log_cb,
+            "success",
+            f"metadata/connector.json written — {install_field_count} install fields, {api_count} APIs, version {version}",
+        )
 
         return {
             "status": "pass",
@@ -6223,11 +7181,12 @@ async def handle_generate_metadata(
 
 # ── smoke_test ───────────────────────────────────────────────────────
 
+
 async def handle_smoke_test(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the connector smoke test after all files have been generated.
 
     Imports connector.py in a subprocess with all network calls mocked and verifies:
@@ -6244,19 +7203,22 @@ async def handle_smoke_test(
         await _emit(log_cb, "error", "connector.py not found — run write_connector first")
         return {"status": "fail", "output": "connector.py missing"}
 
-    await _emit(log_cb, "info", "🔬 Running connector smoke test (import + install() with mocked network)...")
+    await _emit(
+        log_cb,
+        "info",
+        "🔬 Running connector smoke test (import + install() with mocked network)...",
+    )
 
     result = await run_connector_smoke_test(out_dir)
 
     if result.startswith("SMOKE TEST PASSED"):
         await _emit(log_cb, "success", f"✅ {result}")
         return {"status": "pass", "output": result}
-    else:
-        await _emit(log_cb, "error", result)
-        return {"status": "fail", "output": result}
+    await _emit(log_cb, "error", result)
+    return {"status": "fail", "output": result}
 
 
-def _try_recover_truncated_code(code: str, exc: SyntaxError) -> Optional[str]:
+def _try_recover_truncated_code(code: str, exc: SyntaxError) -> str | None:
     """Try to recover LLM output truncated mid-triple-quoted string.
 
     When max_tokens is hit mid-docstring the LLM stops inside a triple-quoted
@@ -6268,7 +7230,7 @@ def _try_recover_truncated_code(code: str, exc: SyntaxError) -> Optional[str]:
     stripped = code.rstrip()
     # Try closing with both quote types + indented pass (common: inside a method body)
     for close_q in ('"""', "'''"):
-        for tail in (f'\n    {close_q}\n    pass\n', f'\n{close_q}\n'):
+        for tail in (f"\n    {close_q}\n    pass\n", f"\n{close_q}\n"):
             candidate = stripped + tail
             try:
                 ast.parse(candidate)
@@ -6301,14 +7263,14 @@ def _fast_fix_smoke_imports(code: str) -> str:
     import re
 
     # Known local sub-module names generated connectors commonly produce
-    _LOCAL_MODS = r'(client|exceptions|helpers|utils|models|constants|auth|config|types|errors|api)'
+    _LOCAL_MODS = r"(client|exceptions|helpers|utils|models|constants|auth|config|types|errors|api)"
 
     # "from client import X"  →  "from .client import X"
     # "from client.sub import X" → "from .client.sub import X"
     # Negative lookbehind ensures we don't double-add the dot
     code = re.sub(
-        r'^(from )(?!\.)(' + _LOCAL_MODS + r')([\. ])',
-        r'\1.\2\3',
+        r"^(from )(?!\.)(" + _LOCAL_MODS + r")([\. ])",
+        r"\1.\2\3",
         code,
         flags=re.MULTILINE,
     )
@@ -6316,21 +7278,19 @@ def _fast_fix_smoke_imports(code: str) -> str:
     # Fix double-name pattern: "from .X.X import Y" → "from .X import Y"
     # Happens when LLM generates "from .client.client import PaytmClient" but
     # the file is just client.py at package root (no client/ subdirectory).
-    code = re.sub(
-        r'^(from \.)(\w+)\.\2( import)',
-        r'\1\2\3',
+    return re.sub(
+        r"^(from \.)(\w+)\.\2( import)",
+        r"\1\2\3",
         code,
         flags=re.MULTILINE,
     )
 
-    return code
-
 
 async def handle_fix_smoke_test(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fix connector.py when the smoke test fails.
 
     Phase 1  — deterministic fast-fix: converts absolute sub-package imports to
@@ -6341,8 +7301,9 @@ async def handle_fix_smoke_test(
     Phase 2  — LLM fix: if deterministic fixes don't resolve the failure, uses
                handle_fix_connector then verifies with a fresh smoke test.
     """
-    import re as _re
     import ast as _ast
+    import re as _re
+
     from integration.services.agentic_fix import run_connector_smoke_test
 
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
@@ -6370,13 +7331,13 @@ async def handle_fix_smoke_test(
     # Fixes patterns like "from .client.client import X" when client/ directory
     # doesn't exist on disk.  The generated code assumes a client/ subpackage but
     # only a flat client.py file was actually written.
-    _sub_import_re = _re.compile(r'^(from \.)(\w+)\.(\w+)( import)', _re.MULTILINE)
+    _sub_import_re = _re.compile(r"^(from \.)(\w+)\.(\w+)( import)", _re.MULTILINE)
     phase1b_changes: list = []
     phase1b_code = code
 
     for match in _sub_import_re.finditer(code):
         pkg_name = match.group(2)  # e.g. "client"
-        mod_name = match.group(3)  # e.g. "client" / "utils"
+        match.group(3)  # e.g. "client" / "utils"
         subdir = out_dir / pkg_name
         if not subdir.is_dir():
             # Sub-package directory does not exist → collapse to flat module import
@@ -6392,9 +7353,12 @@ async def handle_fix_smoke_test(
         try:
             _ast.parse(phase1b_code)
             connector_path.write_text(phase1b_code, encoding="utf-8")
-            await _emit(log_cb, "info",
-                f"Fast-fix Phase 1b: collapsed {len(phase1b_changes)} non-existent sub-package import(s):\n" +
-                "\n".join(phase1b_changes))
+            await _emit(
+                log_cb,
+                "info",
+                f"Fast-fix Phase 1b: collapsed {len(phase1b_changes)} non-existent sub-package import(s):\n"
+                + "\n".join(phase1b_changes),
+            )
             result = await run_connector_smoke_test(out_dir)
             if result.startswith("SMOKE TEST PASSED"):
                 await _emit(log_cb, "success", result)
@@ -6402,7 +7366,11 @@ async def handle_fix_smoke_test(
             await _emit(log_cb, "warn", "Phase 1b fix incomplete — handing to LLM fix")
             code = phase1b_code  # pass into LLM with already-partially-fixed code
         except SyntaxError as _se:
-            await _emit(log_cb, "warn", f"Phase 1b would introduce syntax error — skipping: {_se}")
+            await _emit(
+                log_cb,
+                "warn",
+                f"Phase 1b would introduce syntax error — skipping: {_se}",
+            )
 
     # ── Phase 2: LLM fix ─────────────────────────────────────────────────────
     error_details = context.get("error_details", "Smoke test failed — see output above")
@@ -6414,7 +7382,11 @@ async def handle_fix_smoke_test(
     if fix_result.get("status") != "pass":
         # LLM fix wrote bad code (syntax error) or failed entirely — try once more
         # by re-reading whatever is on disk (may still be phase-1b fixed version)
-        await _emit(log_cb, "warn", "LLM fix failed — running smoke test with current connector.py")
+        await _emit(
+            log_cb,
+            "warn",
+            "LLM fix failed — running smoke test with current connector.py",
+        )
         result = await run_connector_smoke_test(out_dir)
         if result.startswith("SMOKE TEST PASSED"):
             await _emit(log_cb, "success", result)
@@ -6427,27 +7399,28 @@ async def handle_fix_smoke_test(
     if result.startswith("SMOKE TEST PASSED"):
         await _emit(log_cb, "success", result)
         return {"status": "pass", "output": result}
-    else:
-        await _emit(log_cb, "error", result)
-        return {"status": "fail", "output": result}
+    await _emit(log_cb, "error", result)
+    return {"status": "fail", "output": result}
 
 
 # ── implement_persistence ─────────────────────────────────────────────
 
+
 async def handle_implement_persistence(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """For each api_response_persistent method:
     1. Reads entity builder config from R2.
     2. Generates a tenant-specific repository class under repository/.
     3. Verifies connector.py has the persistence helper already (apply-persistence ran).
     4. Runs the method's test cases to confirm persistence works.
     """
-    from integration.services.r2_service import get_entity_builder_config
-    from integration.db.database import sessions_collection as _sc
     from bson import ObjectId as _OId
+
+    from integration.db.database import sessions_collection as _sc
+    from integration.services.r2_service import get_entity_builder_config
 
     tenant_id = context["tenant_id"]
     provider = _get_ctx(context, "provider", "unknown")
@@ -6459,7 +7432,7 @@ async def handle_implement_persistence(
     await _emit(log_cb, "info", "Checking for api_response_persistent methods...")
 
     # Load method identities from session
-    persistent_methods: List[Dict] = []
+    persistent_methods: list[dict] = []
     if session_id:
         try:
             doc = await _sc().find_one(
@@ -6468,15 +7441,23 @@ async def handle_implement_persistence(
             )
             if doc:
                 persistent_methods = [
-                    mi for mi in (doc.get("method_identities") or [])
+                    mi
+                    for mi in (doc.get("method_identities") or [])
                     if mi.get("identity") == "api_response_persistent" and mi.get("entity_id")
                 ]
         except Exception as _e:
             await _emit(log_cb, "warn", f"Could not load method identities from session: {_e}")
 
     if not persistent_methods:
-        await _emit(log_cb, "info", "No api_response_persistent methods configured — step is a no-op")
-        return {"status": "pass", "output": {"skipped": True, "reason": "no persistent methods"}}
+        await _emit(
+            log_cb,
+            "info",
+            "No api_response_persistent methods configured — step is a no-op",
+        )
+        return {
+            "status": "pass",
+            "output": {"skipped": True, "reason": "no persistent methods"},
+        }
 
     repo_dir = out_dir / "repository"
     repo_dir.mkdir(exist_ok=True)
@@ -6486,7 +7467,7 @@ async def handle_implement_persistence(
     if not init_py.exists():
         init_py.write_text("", encoding="utf-8")
 
-    results: List[Dict] = []
+    results: list[dict] = []
 
     for mi in persistent_methods:
         method_name = mi["method_name"]
@@ -6497,7 +7478,11 @@ async def handle_implement_persistence(
         # Load entity builder config from R2
         eb_config = await get_entity_builder_config(provider, service_slug, method_name)
         if not eb_config:
-            await _emit(log_cb, "warn", f"No R2 entity builder config for {method_name} — using session data")
+            await _emit(
+                log_cb,
+                "warn",
+                f"No R2 entity builder config for {method_name} — using session data",
+            )
             eb_config = {
                 "method_name": method_name,
                 "entity_config": next(
@@ -6513,7 +7498,10 @@ async def handle_implement_persistence(
         field_mappings = eb_config.get("field_mappings", [])
 
         import re as _re2
-        _clean_slug = _re2.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
+
+        _clean_slug = (
+            _re2.sub(r"_connector$", "", service_slug) if service_slug.endswith("_connector") else service_slug
+        )
         connector_class_name = "".join(w.capitalize() for w in _clean_slug.replace("-", "_").split("_"))
         repo_class_name = eb_config.get("repo_class") or f"{connector_class_name}Repository"
         repo_module_name = eb_config.get("repo_module") or f"{_clean_slug}_repository"
@@ -6521,7 +7509,11 @@ async def handle_implement_persistence(
 
         if repo_file.exists():
             # Repository was already generated by apply-persistence — just verify
-            await _emit(log_cb, "info", f"Repository file already exists: {repo_file.name} — skipping regeneration")
+            await _emit(
+                log_cb,
+                "info",
+                f"Repository file already exists: {repo_file.name} — skipping regeneration",
+            )
         else:
             # Generate repository file (fallback: apply-persistence may not have run)
             mapping_lines = []
@@ -6533,7 +7525,7 @@ async def handle_implement_persistence(
                     mapping_lines.append(f'            "{entity_field}": {transform},')
                 else:
                     mapping_lines.append(f'            "{entity_field}": response.get("{resp_path}"),')
-            mappings_str = "\n".join(mapping_lines) if mapping_lines else '            **response,'
+            mappings_str = "\n".join(mapping_lines) if mapping_lines else "            **response,"
 
             repo_code = f'''"""Auto-generated repository for {_clean_slug} connector.
 
@@ -6569,17 +7561,44 @@ class {repo_class_name}(BaseRepository):
             has_helper = helper_name in source
             has_import = repo_class_name in source
             if has_helper and has_import:
-                await _emit(log_cb, "success",
-                    f"connector.py uses {repo_class_name} with {helper_name}() — persistence wired correctly")
-                results.append({"method": method_name, "status": "pass", "repository": str(repo_file)})
+                await _emit(
+                    log_cb,
+                    "success",
+                    f"connector.py uses {repo_class_name} with {helper_name}() — persistence wired correctly",
+                )
+                results.append(
+                    {
+                        "method": method_name,
+                        "status": "pass",
+                        "repository": str(repo_file),
+                    }
+                )
             elif has_helper:
-                await _emit(log_cb, "warn",
-                    f"connector.py has {helper_name}() but missing import of {repo_class_name}")
-                results.append({"method": method_name, "status": "warn", "repository": str(repo_file)})
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"connector.py has {helper_name}() but missing import of {repo_class_name}",
+                )
+                results.append(
+                    {
+                        "method": method_name,
+                        "status": "warn",
+                        "repository": str(repo_file),
+                    }
+                )
             else:
-                await _emit(log_cb, "warn",
-                    f"connector.py missing {helper_name}() — apply-persistence may not have run yet")
-                results.append({"method": method_name, "status": "warn", "repository": str(repo_file)})
+                await _emit(
+                    log_cb,
+                    "warn",
+                    f"connector.py missing {helper_name}() — apply-persistence may not have run yet",
+                )
+                results.append(
+                    {
+                        "method": method_name,
+                        "status": "warn",
+                        "repository": str(repo_file),
+                    }
+                )
         else:
             await _emit(log_cb, "error", "connector.py not found")
             results.append({"method": method_name, "status": "fail"})
@@ -6596,14 +7615,16 @@ class {repo_class_name}(BaseRepository):
 
 # ── write_integration_tests ──────────────────────────────────────────
 
+
 async def handle_write_integration_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Use LLM to generate tests/test_integration.py — real API calls with user credentials."""
-    from integration.prompts.codegen_prompt import INTEGRATION_TEST_SYSTEM_PROMPT
     import json as _json
+
+    from integration.prompts.codegen_prompt import INTEGRATION_TEST_SYSTEM_PROMPT
 
     out_dir = _output_dir(context["tenant_id"], context["service_slug"])
     connector_path = out_dir / "connector.py"
@@ -6637,11 +7658,13 @@ async def handle_write_integration_tests(
         try:
             _tree = ast.parse(connector_code)
             for _node in ast.walk(_tree):
-                if (isinstance(_node, ast.Call)
-                        and isinstance(getattr(_node.func, "attr", None), str)
-                        and _node.func.attr == "get"
-                        and isinstance(getattr(_node.func, "value", None), ast.Attribute)
-                        and _node.func.value.attr == "config"):
+                if (
+                    isinstance(_node, ast.Call)
+                    and isinstance(getattr(_node.func, "attr", None), str)
+                    and _node.func.attr == "get"
+                    and isinstance(getattr(_node.func, "value", None), ast.Attribute)
+                    and _node.func.value.attr == "config"
+                ):
                     if _node.args and isinstance(_node.args[0], ast.Constant):
                         _k = str(_node.args[0].value)
                         if _k not in install_fields:
@@ -6656,14 +7679,22 @@ async def handle_write_integration_tests(
     _cred_keys = [k for k in _field_keys if k not in _skip_keys]
 
     _env_example = " ".join(f'{k}="<your_{k}>"' for k in _cred_keys) if _cred_keys else 'api_key="<your_api_key>"'
-    _config_dict = "\n        ".join(
-        f'"{k}": os.environ.get("{k}", ""),' for k in _cred_keys
-    ) if _cred_keys else '"api_key": os.environ.get("api_key", ""),'
-    _fields_detail = "\n".join(
-        f"  - `{k}`" for k in _cred_keys
-    ) if _cred_keys else "  - (no install_fields found — check connector.json)"
+    _config_dict = (
+        "\n        ".join(f'"{k}": os.environ.get("{k}", ""),' for k in _cred_keys)
+        if _cred_keys
+        else '"api_key": os.environ.get("api_key", ""),'
+    )
+    _fields_detail = (
+        "\n".join(f"  - `{k}`" for k in _cred_keys)
+        if _cred_keys
+        else "  - (no install_fields found — check connector.json)"
+    )
 
-    await _emit(log_cb, "info", f"Generating integration tests via {_llm_label()} (class={class_name}, fields={_cred_keys})...")
+    await _emit(
+        log_cb,
+        "info",
+        f"Generating integration tests via {_llm_label()} (class={class_name}, fields={_cred_keys})...",
+    )
 
     system = (await _get_prompt("INTEGRATION_TEST_SYSTEM_PROMPT", INTEGRATION_TEST_SYSTEM_PROMPT)).format(
         connector_code=connector_code,
@@ -6680,7 +7711,10 @@ async def handle_write_integration_tests(
     )
 
     messages = [
-        {"role": "user", "content": "Output integration test code for tests/test_integration.py. Return ONLY raw Python — no prose, no markdown, no tool calls."},
+        {
+            "role": "user",
+            "content": "Output integration test code for tests/test_integration.py. Return ONLY raw Python — no prose, no markdown, no tool calls.",
+        },
     ]
 
     try:
@@ -6688,15 +7722,29 @@ async def handle_write_integration_tests(
         code = _clean_llm_code_response(code)
 
         if not code or len(code) < 50 or not code.lstrip().startswith(_VALID_PYTHON_STARTS):
-            await _emit(log_cb, "error", f"LLM returned invalid response for integration tests: {code[:120]}")
-            return {"status": "fail", "output": f"LLM did not return valid Python: {code[:200]}"}
+            await _emit(
+                log_cb,
+                "error",
+                f"LLM returned invalid response for integration tests: {code[:120]}",
+            )
+            return {
+                "status": "fail",
+                "output": f"LLM did not return valid Python: {code[:200]}",
+            }
 
         # Validate syntax
         try:
             ast.parse(code)
         except SyntaxError as exc:
-            await _emit(log_cb, "warn", f"Integration test syntax error at line {exc.lineno} — {exc}")
-            return {"status": "fail", "output": f"Generated integration test code has syntax error: {exc}"}
+            await _emit(
+                log_cb,
+                "warn",
+                f"Integration test syntax error at line {exc.lineno} — {exc}",
+            )
+            return {
+                "status": "fail",
+                "output": f"Generated integration test code has syntax error: {exc}",
+            }
 
         # Fix connector import path
         code = _fix_connector_import(code, class_name)
@@ -6705,7 +7753,11 @@ async def handle_write_integration_tests(
         tests_dir.mkdir(exist_ok=True)
         integ_path = tests_dir / "test_integration.py"
         integ_path.write_text(code, encoding="utf-8")
-        await _emit(log_cb, "success", f"✅ tests/test_integration.py written ({len(code.splitlines())} lines, fields: {_cred_keys})")
+        await _emit(
+            log_cb,
+            "success",
+            f"✅ tests/test_integration.py written ({len(code.splitlines())} lines, fields: {_cred_keys})",
+        )
 
         return {
             "status": "pass",
@@ -6722,15 +7774,20 @@ async def handle_write_integration_tests(
 
 # ── Handler dispatch map ─────────────────────────────────────────────
 
+
 async def handle_run_integration_tests(
-    config: Dict[str, Any],
-    context: Dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
     log_cb: LogCallback = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Integration tests are run from the UI with user-supplied credentials.
     The backend marks this step completed immediately so the build pipeline can continue.
     """
-    await _emit(log_cb, "info", "Integration tests are run from the UI — skipping in backend pipeline.")
+    await _emit(
+        log_cb,
+        "info",
+        "Integration tests are run from the UI — skipping in backend pipeline.",
+    )
     return {"status": "pass", "output": "skipped — run from UI with real credentials"}
 
 
@@ -6755,9 +7812,9 @@ STEP_HANDLERS = {
 # Fix handlers — keyed by step type, used by attempt_fix
 FIX_HANDLERS = {
     "write_connector": handle_fix_connector,
-    "write_tests": handle_fix_tests,           # structural test errors → fix test setup
+    "write_tests": handle_fix_tests,  # structural test errors → fix test setup
     "run_tests": handle_fix_connector_for_tests,  # TDD: test failures → fix the CONNECTOR
-    "smoke_test": handle_fix_smoke_test,       # import/instantiation errors → fast-fix then LLM
+    "smoke_test": handle_fix_smoke_test,  # import/instantiation errors → fast-fix then LLM
 }
 
 # Structural-only test fix (import errors, class name mismatches, collection errors)

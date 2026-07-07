@@ -6,21 +6,22 @@ Provides bidirectional WebSocket communication:
 """
 
 import asyncio
+import contextlib
 import json
 from datetime import datetime
-from bson import ObjectId
-from typing import Any, Dict, Optional
+from typing import Any
 
 import structlog
+from bson import ObjectId
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from integration.core.config import settings
 from integration.db.database import sessions_collection
 from integration.schemas.models import SessionStatus, StepStatus
-from integration.services.codegen_service import execute_plan, auto_run_session
-from integration.services.user_prompt_handler import handle_user_prompt
 from integration.services import r2_service
+from integration.services.codegen_service import auto_run_session, execute_plan
+from integration.services.user_prompt_handler import handle_user_prompt
 
 logger = structlog.get_logger(__name__)
 
@@ -37,7 +38,7 @@ class _SessionWsManager:
     """
 
     def __init__(self) -> None:
-        self._connections: Dict[str, set] = {}
+        self._connections: dict[str, set] = {}
 
     def register(self, session_id: str, ws: WebSocket) -> None:
         self._connections.setdefault(session_id, set()).add(ws)
@@ -49,7 +50,7 @@ class _SessionWsManager:
             if not bucket:
                 del self._connections[session_id]
 
-    async def broadcast(self, session_id: str, message: Dict[str, Any]) -> None:
+    async def broadcast(self, session_id: str, message: dict[str, Any]) -> None:
         """Send *message* to every live WebSocket watching *session_id*."""
         dead: set = set()
         for ws in list(self._connections.get(session_id, [])):
@@ -68,7 +69,7 @@ class _SessionWsManager:
 ws_manager = _SessionWsManager()
 
 
-def _parse_sse_event(sse_chunk: str) -> Optional[Dict[str, Any]]:
+def _parse_sse_event(sse_chunk: str) -> dict[str, Any] | None:
     """Parse an SSE string like 'event: X\\ndata: {...}\\n\\n' into a dict."""
     event_type = ""
     data_str = ""
@@ -145,9 +146,9 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         await websocket.close(code=4004, reason="Session not found")
         return
 
-    tenant_id   = (_sess_doc.get("tenant_id")   or "").strip()
+    tenant_id = (_sess_doc.get("tenant_id") or "").strip()
     tenant_name = (_sess_doc.get("tenant_name") or "").strip().lower()
-    app_id      = (_sess_doc.get("app_id")      or "").strip()
+    app_id = (_sess_doc.get("app_id") or "").strip()
 
     if not tenant_id:
         logger.warning("ws.session_missing_tenant_id", session_id=session_id)
@@ -156,20 +157,37 @@ async def ws_execute(websocket: WebSocket, session_id: str):
     if not tenant_name:
         tenant_name = websocket.query_params.get("tenant_name", "").strip().lower()
         if tenant_name:
-            logger.info("ws.tenant_name_from_query_param_fallback", session_id=session_id, tenant_name=tenant_name)
+            logger.info(
+                "ws.tenant_name_from_query_param_fallback",
+                session_id=session_id,
+                tenant_name=tenant_name,
+            )
 
     # Set R2 bucket context — priority: app_id bucket (preferred) → tenant_name (legacy fallback)
     if app_id:
         _app_bucket = r2_service.app_id_to_bucket(app_id)
         r2_service._app_bucket_ctx.set(_app_bucket)
-        logger.info("ws.bucket_ctx_set", session_id=session_id, bucket=_app_bucket, source="app_id")
+        logger.info(
+            "ws.bucket_ctx_set",
+            session_id=session_id,
+            bucket=_app_bucket,
+            source="app_id",
+        )
     if tenant_name:
         r2_service._tenant_bucket_ctx.set(tenant_name)
         if not app_id:
-            logger.info("ws.bucket_ctx_set", session_id=session_id, bucket=tenant_name, source="tenant_name")
+            logger.info(
+                "ws.bucket_ctx_set",
+                session_id=session_id,
+                bucket=tenant_name,
+                source="tenant_name",
+            )
     if not app_id and not tenant_name:
-        logger.warning("ws.bucket_unresolved", session_id=session_id,
-                       note="session has no app_id and no tenant_name — r2_service uses R2_BUCKET_NAME env fallback")
+        logger.warning(
+            "ws.bucket_unresolved",
+            session_id=session_id,
+            note="session has no app_id and no tenant_name — r2_service uses R2_BUCKET_NAME env fallback",
+        )
 
     logger.info("ws.connected", session_id=session_id, tenant_id=tenant_id)
     ws_manager.register(session_id, websocket)
@@ -178,12 +196,12 @@ async def ws_execute(websocket: WebSocket, session_id: str):
     phase = "idle"  # idle | executing | processing_prompt
     prompt_queue: asyncio.Queue[str] = asyncio.Queue()
     # Queue for outbound messages — decouples send from execution
-    outbound_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    outbound_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     shutdown_event = asyncio.Event()
     # Track the execution task so we can wait for it on disconnect
-    execution_task: Optional[asyncio.Task] = None
+    execution_task: asyncio.Task | None = None
 
-    async def send_event(event_type: str, data: Dict[str, Any]):
+    async def send_event(event_type: str, data: dict[str, Any]):
         """Queue a JSON message for sending to the client."""
         if not shutdown_event.is_set():
             await outbound_queue.put({"type": event_type, "data": data})
@@ -199,7 +217,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                     msg = await asyncio.wait_for(outbound_queue.get(), timeout=1.0)
                     if _ws_is_open(websocket):
                         await websocket.send_json(msg)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
                 except Exception as exc:
                     logger.warning("ws.send_error", error=str(exc))
@@ -230,7 +248,10 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                 if not _ws_is_open(websocket):
                     break
                 try:
-                    await send_event("keepalive", {"phase": phase, "timestamp": asyncio.get_event_loop().time()})
+                    await send_event(
+                        "keepalive",
+                        {"phase": phase, "timestamp": asyncio.get_event_loop().time()},
+                    )
                 except Exception:
                     break
         except asyncio.CancelledError:
@@ -258,7 +279,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         nonlocal phase
         phase = "executing"
         seen_completed: set[int] = set()
-        _MONITOR_TIMEOUT_S = 300   # 5 min with no progress → treat as crashed
+        _MONITOR_TIMEOUT_S = 300  # 5 min with no progress → treat as crashed
         _no_progress_since = asyncio.get_event_loop().time()
 
         # Fetch initial doc to send a proper execution_start so the frontend
@@ -266,17 +287,24 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         init_doc = await sessions_collection().find_one({"_id": session_oid})
         if init_doc:
             init_steps = init_doc.get("plan", {}).get("steps", [])
-            await send_event("execution_start", {
-                "session_id": str(session_oid),
-                "step_count": len(init_steps),
-                "service": init_doc.get("service", "service"),
-                "reconnected": True,
-            })
+            await send_event(
+                "execution_start",
+                {
+                    "session_id": str(session_oid),
+                    "step_count": len(init_steps),
+                    "service": init_doc.get("service", "service"),
+                    "reconnected": True,
+                },
+            )
 
-        await send_event("step_log", {
-            "step_index": -1, "level": "info",
-            "message": "Reconnected — attaching to running execution...",
-        })
+        await send_event(
+            "step_log",
+            {
+                "step_index": -1,
+                "level": "info",
+                "message": "Reconnected — attaching to running execution...",
+            },
+        )
         try:
             while not shutdown_event.is_set():
                 doc = await sessions_collection().find_one({"_id": session_oid})
@@ -288,58 +316,87 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                     if step.get("status") == StepStatus.COMPLETED.value and i not in seen_completed:
                         seen_completed.add(i)
                         progress_made = True
-                        await send_event("step_complete", {
-                            "step_index": i,
-                            "title": step.get("title", f"Step {i + 1}"),
-                            "status": "pass",
-                            "duration_ms": 0,
-                        })
+                        await send_event(
+                            "step_complete",
+                            {
+                                "step_index": i,
+                                "title": step.get("title", f"Step {i + 1}"),
+                                "status": "pass",
+                                "duration_ms": 0,
+                            },
+                        )
                     elif step.get("status") == StepStatus.FAILED.value and i not in seen_completed:
                         seen_completed.add(i)
                         progress_made = True
-                        await send_event("step_complete", {
-                            "step_index": i,
-                            "title": step.get("title", f"Step {i + 1}"),
-                            "status": "fail",
-                            "duration_ms": 0,
-                        })
+                        await send_event(
+                            "step_complete",
+                            {
+                                "step_index": i,
+                                "title": step.get("title", f"Step {i + 1}"),
+                                "status": "fail",
+                                "duration_ms": 0,
+                            },
+                        )
                 if progress_made:
                     _no_progress_since = asyncio.get_event_loop().time()
 
                 session_status = doc.get("status", "")
-                if session_status in (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
-                    await send_event("execution_complete", {
-                        "status": session_status,
-                        "message": f"Execution {session_status}",
-                    })
+                if session_status in (
+                    SessionStatus.COMPLETED.value,
+                    SessionStatus.FAILED.value,
+                ):
+                    await send_event(
+                        "execution_complete",
+                        {
+                            "status": session_status,
+                            "message": f"Execution {session_status}",
+                        },
+                    )
                     break
 
                 # Self-heal: if execution is still 'executing' but nothing has moved
                 # for _MONITOR_TIMEOUT_S, the server process that owned it is dead.
                 elapsed = asyncio.get_event_loop().time() - _no_progress_since
                 if elapsed > _MONITOR_TIMEOUT_S:
-                    logger.warning("ws.monitor_timeout", session_id=str(session_oid), elapsed_s=int(elapsed))
+                    logger.warning(
+                        "ws.monitor_timeout",
+                        session_id=str(session_oid),
+                        elapsed_s=int(elapsed),
+                    )
                     # Mark session failed in DB so future reconnects don't loop here again
                     try:
                         from datetime import datetime as _dt
+
                         await sessions_collection().update_one(
-                            {"_id": session_oid, "status": SessionStatus.EXECUTING.value},
-                            {"$set": {
-                                "status": SessionStatus.FAILED.value,
-                                "error": "Execution timed out — server may have restarted. Please re-run.",
-                                "updated_at": _dt.utcnow(),
-                            }},
+                            {
+                                "_id": session_oid,
+                                "status": SessionStatus.EXECUTING.value,
+                            },
+                            {
+                                "$set": {
+                                    "status": SessionStatus.FAILED.value,
+                                    "error": "Execution timed out — server may have restarted. Please re-run.",
+                                    "updated_at": _dt.utcnow(),
+                                }
+                            },
                         )
                     except Exception:
                         pass
-                    await send_event("step_log", {
-                        "step_index": -1, "level": "error",
-                        "message": "⚠ Execution appears to have crashed (no progress for 5 min). Use Re-Execute to restart.",
-                    })
-                    await send_event("execution_complete", {
-                        "status": "failed",
-                        "message": "Execution timed out — server crashed. Please re-run.",
-                    })
+                    await send_event(
+                        "step_log",
+                        {
+                            "step_index": -1,
+                            "level": "error",
+                            "message": "⚠ Execution appears to have crashed (no progress for 5 min). Use Re-Execute to restart.",
+                        },
+                    )
+                    await send_event(
+                        "execution_complete",
+                        {
+                            "status": "failed",
+                            "message": "Execution timed out — server crashed. Please re-run.",
+                        },
+                    )
                     break
 
                 await asyncio.sleep(2)
@@ -354,8 +411,12 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         nonlocal phase
         phase = "executing"
         try:
-            gen = execute_plan(session_id, tenant_id,
-                               from_step_index=from_step_index, force_restart=force_restart)
+            gen = execute_plan(
+                session_id,
+                tenant_id,
+                from_step_index=from_step_index,
+                force_restart=force_restart,
+            )
             await stream_sse_generator(gen)
         except asyncio.CancelledError:
             logger.info("ws.execution_cancelled", session_id=session_id)
@@ -406,7 +467,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
     # Queue for inbound messages — decouples receive_text() from message dispatch.
     # receive_text() runs in a dedicated task that is NEVER cancelled (cancelling
     # Starlette's receive_text() mid-flight corrupts WebSocket state and closes it).
-    inbound_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+    inbound_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def inbound_receiver():
         """Dedicated task that calls receive_text() and pushes results to inbound_queue.
@@ -441,7 +502,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
             while not shutdown_event.is_set():
                 try:
                     raw = await asyncio.wait_for(inbound_queue.get(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Queue empty for 5s — just check shutdown and loop
                     continue
 
@@ -467,9 +528,7 @@ async def ws_execute(websocket: WebSocket, session_id: str):
 
                         if force_restart:
                             # Re-Execute: always run fresh — bypass already_executing monitor
-                            execution_task = asyncio.create_task(
-                                run_execution(from_step_index=0, force_restart=True)
-                            )
+                            execution_task = asyncio.create_task(run_execution(from_step_index=0, force_restart=True))
                         else:
                             # Check if this session is already executing (e.g. WS reconnect after drop)
                             try:
@@ -484,7 +543,10 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                             else:
                                 execution_task = asyncio.create_task(run_execution(from_step_index=from_step))
                     else:
-                        await send_event("error", {"message": f"Cannot start execution — currently {phase}"})
+                        await send_event(
+                            "error",
+                            {"message": f"Cannot start execution — currently {phase}"},
+                        )
 
                 elif msg_type == "stop_execution":
                     # Immediately cancel any running execution/auto-run task
@@ -495,19 +557,19 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                         # task from being cancelled by its awaiter, which is the opposite
                         # of what we want. We want the CancelledError to propagate into
                         # the task so it can clean up (kill subprocesses, close streams).
-                        try:
+                        with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                             await asyncio.wait_for(execution_task, timeout=5.0)
-                        except (asyncio.CancelledError, asyncio.TimeoutError):
-                            pass
                         # Mark session as failed in MongoDB so reconnect doesn't re-attach
                         try:
                             oid = ObjectId(session_id)
                             await sessions_collection().update_one(
                                 {"_id": oid},
-                                {"$set": {
-                                    "status": SessionStatus.FAILED.value,
-                                    "updated_at": datetime.utcnow(),
-                                }},
+                                {
+                                    "$set": {
+                                        "status": SessionStatus.FAILED.value,
+                                        "updated_at": datetime.utcnow(),
+                                    }
+                                },
                             )
                         except Exception:
                             pass
@@ -517,23 +579,33 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                                 prompt_queue.get_nowait()
                             except asyncio.QueueEmpty:
                                 break
-                        await send_event("execution_complete", {
-                            "status": "failed",
-                            "message": "Execution stopped by user",
-                            "file_count": 0,
-                        })
+                        await send_event(
+                            "execution_complete",
+                            {
+                                "status": "failed",
+                                "message": "Execution stopped by user",
+                                "file_count": 0,
+                            },
+                        )
                         logger.info("ws.stop_requested", session_id=session_id)
                     else:
-                        await send_event("step_log", {
-                            "step_index": -1, "level": "info",
-                            "message": "No active execution to stop",
-                        })
+                        await send_event(
+                            "step_log",
+                            {
+                                "step_index": -1,
+                                "level": "info",
+                                "message": "No active execution to stop",
+                            },
+                        )
 
                 elif msg_type == "start_auto_run":
                     if phase == "idle":
                         execution_task = asyncio.create_task(run_auto_run())
                     else:
-                        await send_event("error", {"message": f"Cannot start auto-run — currently {phase}"})
+                        await send_event(
+                            "error",
+                            {"message": f"Cannot start auto-run — currently {phase}"},
+                        )
 
                 elif msg_type == "user_prompt":
                     prompt_text = msg.get("prompt", "").strip()
@@ -548,10 +620,13 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                     else:
                         # Queue for later — include prompt text so frontend can offer "Stop & Run"
                         await prompt_queue.put(prompt_text)
-                        await send_event("prompt_queued", {
-                            "message": "Prompt queued — execution is running. Use Stop to cancel and run now.",
-                            "prompt": prompt_text,
-                        })
+                        await send_event(
+                            "prompt_queued",
+                            {
+                                "message": "Prompt queued — execution is running. Use Stop to cancel and run now.",
+                                "prompt": prompt_text,
+                            },
+                        )
 
                 else:
                     await send_event("error", {"message": f"Unknown message type: {msg_type}"})
@@ -574,13 +649,11 @@ async def ws_execute(websocket: WebSocket, session_id: str):
                 # Wait up to 5s on disconnect — if execution is still running after that,
                 # cancel it. Users should use stop_execution to stop gracefully.
                 await asyncio.wait_for(execution_task, timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("ws.execution_timeout", session_id=session_id)
                 execution_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await execution_task
-                except asyncio.CancelledError:
-                    pass
             except Exception:
                 pass
 
@@ -593,16 +666,12 @@ async def ws_execute(websocket: WebSocket, session_id: str):
         sender_task.cancel()
         keepalive_task.cancel()
         for task in (receiver_task, sender_task, keepalive_task):
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
         if _ws_is_open(websocket):
-            try:
+            with contextlib.suppress(Exception):
                 await websocket.close(code=1000)
-            except Exception:
-                pass
 
         ws_manager.unregister(session_id, websocket)
         logger.info("ws.cleanup", session_id=session_id)

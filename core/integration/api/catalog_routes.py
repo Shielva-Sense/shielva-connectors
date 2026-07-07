@@ -1,16 +1,23 @@
 """Integration Builder — Catalog API routes (static + custom providers)."""
 
-import json
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from bson import ObjectId
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from integration.data.catalog import get_all_providers, get_provider_services, get_service_detail, SERVICE_CATALOG
-from integration.db.database import custom_providers_collection, static_provider_overrides_collection
+from integration.data.catalog import (
+    SERVICE_CATALOG,
+    get_all_providers,
+    get_provider_services,
+    get_service_detail,
+)
+from integration.db.database import (
+    custom_providers_collection,
+    static_provider_overrides_collection,
+)
 from integration.services import r2_service
 from integration.services.llm_client import call_llm_json
 
@@ -21,53 +28,54 @@ catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 # ── Pydantic models ───────────────────────────────────────────────────
 
+
 class ServiceInput(BaseModel):
     service_key: str
     display_name: str
     description: str
     auth_type: str = "api_key"
     category: str = "general"
-    logo_url: Optional[str] = ""
+    logo_url: str | None = ""
 
 
 class DependencyInput(BaseModel):
     name: str
-    version: Optional[str] = ""
-    reason: Optional[str] = ""
+    version: str | None = ""
+    reason: str | None = ""
     is_custom: bool = False
 
 
 class CreateCustomProviderRequest(BaseModel):
     display_name: str
     description: str
-    website_url: Optional[str] = ""
-    brand_color: Optional[str] = "#14B8A6"
-    logo_url: Optional[str] = ""
-    services: List[ServiceInput] = []
-    dependencies: List[DependencyInput] = []
+    website_url: str | None = ""
+    brand_color: str | None = "#14B8A6"
+    logo_url: str | None = ""
+    services: list[ServiceInput] = []
+    dependencies: list[DependencyInput] = []
 
 
 class UpdateCustomProviderRequest(BaseModel):
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    website_url: Optional[str] = None
-    brand_color: Optional[str] = None
-    logo_url: Optional[str] = None
-    services: Optional[List[ServiceInput]] = None
-    dependencies: Optional[List[DependencyInput]] = None
+    display_name: str | None = None
+    description: str | None = None
+    website_url: str | None = None
+    brand_color: str | None = None
+    logo_url: str | None = None
+    services: list[ServiceInput] | None = None
+    dependencies: list[DependencyInput] | None = None
 
 
 class SuggestServicesRequest(BaseModel):
     provider_name: str
     description: str
-    website_url: Optional[str] = ""
+    website_url: str | None = ""
 
 
 class SuggestDependenciesRequest(BaseModel):
     provider_name: str
-    services: List[Dict[str, str]]  # [{"display_name": "...", "auth_type": "..."}]
-    custom_prompt: Optional[str] = ""        # Free-form user instruction
-    attached_docs: Optional[List[str]] = []  # Markdown file contents provided by the user
+    services: list[dict[str, str]]  # [{"display_name": "...", "auth_type": "..."}]
+    custom_prompt: str | None = ""  # Free-form user instruction
+    attached_docs: list[str] | None = []  # Markdown file contents provided by the user
 
 
 class ValidatePackageRequest(BaseModel):
@@ -77,7 +85,8 @@ class ValidatePackageRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
-def _serialize(doc: Dict) -> Dict:
+
+def _serialize(doc: dict) -> dict:
     """Convert ObjectId fields to strings."""
     doc = dict(doc)
     if "_id" in doc:
@@ -93,6 +102,7 @@ def _provider_key(display_name: str) -> str:
 
 # ── Static catalog endpoints ──────────────────────────────────────────
 
+
 @catalog_router.get("/providers")
 async def list_providers():
     """Return all providers (static catalog + custom + static overrides) with service counts."""
@@ -104,7 +114,7 @@ async def list_providers():
     # Merge static provider overrides (super-admin edits of built-in providers)
     try:
         overrides = await static_provider_overrides_collection().find({}).to_list(None)
-        override_map: Dict[str, Dict] = {}
+        override_map: dict[str, dict] = {}
         for ov in overrides:
             ov = _serialize(ov)
             override_map[ov.get("provider_key", "")] = ov
@@ -135,19 +145,21 @@ async def list_providers():
         for c in customs:
             c = _serialize(c)
             services = c.get("services", [])
-            providers.append({
-                "provider": c.get("provider_key", _provider_key(c.get("display_name", ""))),
-                "display_name": c.get("display_name", ""),
-                "service_count": len(services),
-                "categories": list({s.get("category", "general") for s in services}),
-                "logo_url": c.get("logo_url", ""),
-                "is_custom": True,
-                "custom_id": c["id"],
-                "brand_color": c.get("brand_color", "#14B8A6"),
-                "description": c.get("description", ""),
-                "modified_by": c.get("modified_by", ""),
-                "modified_at": c.get("modified_at", ""),
-            })
+            providers.append(
+                {
+                    "provider": c.get("provider_key", _provider_key(c.get("display_name", ""))),
+                    "display_name": c.get("display_name", ""),
+                    "service_count": len(services),
+                    "categories": list({s.get("category", "general") for s in services}),
+                    "logo_url": c.get("logo_url", ""),
+                    "is_custom": True,
+                    "custom_id": c["id"],
+                    "brand_color": c.get("brand_color", "#14B8A6"),
+                    "description": c.get("description", ""),
+                    "modified_by": c.get("modified_by", ""),
+                    "modified_at": c.get("modified_at", ""),
+                }
+            )
     except Exception as exc:
         logger.warning("catalog.custom_providers_fetch_failed", error=str(exc))
 
@@ -176,6 +188,7 @@ async def list_services(provider: str):
     # the UI never shows mismatched values between a provider and its services.
     try:
         from integration.services import category_service as _catsvc
+
         cat_map = await _catsvc.get_provider_category_map()
         provider_category = cat_map.get(provider)
         if not provider_category:
@@ -195,10 +208,8 @@ async def list_services(provider: str):
     try:
         ov_doc = await static_provider_overrides_collection().find_one({"provider_key": provider})
         if ov_doc:
-            overrides_by_key: Dict[str, Dict[str, Any]] = {
-                ov.get("service_key", ""): ov
-                for ov in (ov_doc.get("service_overrides") or [])
-                if ov.get("service_key")
+            overrides_by_key: dict[str, dict[str, Any]] = {
+                ov.get("service_key", ""): ov for ov in (ov_doc.get("service_overrides") or []) if ov.get("service_key")
             }
             if overrides_by_key:
                 for s in services:
@@ -206,7 +217,13 @@ async def list_services(provider: str):
                     ov = overrides_by_key.get(key)
                     if not ov:
                         continue
-                    for f in ("display_name", "description", "auth_type", "category", "logo_url"):
+                    for f in (
+                        "display_name",
+                        "description",
+                        "auth_type",
+                        "category",
+                        "logo_url",
+                    ):
                         if ov.get(f) is not None:
                             s[f] = ov[f]
     except Exception as exc:
@@ -221,18 +238,20 @@ async def list_services(provider: str):
                 key = svc.get("service_key", "")
                 if not key or key in seen_keys:
                     continue
-                services.append({
-                    "provider": provider,
-                    "service": key,
-                    "service_key": key,
-                    "display_name": svc.get("display_name", ""),
-                    "description": svc.get("description", ""),
-                    "auth_type": svc.get("auth_type", "api_key"),
-                    "category": svc.get("category", "general"),
-                    "logo_url": svc.get("logo_url", ""),
-                    "sdk_package": sdk_pkg,
-                    "is_custom": True,
-                })
+                services.append(
+                    {
+                        "provider": provider,
+                        "service": key,
+                        "service_key": key,
+                        "display_name": svc.get("display_name", ""),
+                        "description": svc.get("description", ""),
+                        "auth_type": svc.get("auth_type", "api_key"),
+                        "category": svc.get("category", "general"),
+                        "logo_url": svc.get("logo_url", ""),
+                        "sdk_package": sdk_pkg,
+                        "is_custom": True,
+                    }
+                )
                 seen_keys.add(key)
     except Exception as exc:
         logger.warning("catalog.custom_service_fetch_failed", provider=provider, error=str(exc))
@@ -258,6 +277,7 @@ async def service_detail(provider: str, service: str):
 
 
 # ── Single provider GET/PATCH (works for both static and custom) ───────
+
 
 @catalog_router.get("/providers/{provider_key}/detail")
 async def get_provider_detail(provider_key: str):
@@ -312,37 +332,41 @@ async def get_provider_detail(provider_key: str):
                 "dependencies": doc.get("dependencies", []),
             }
     except Exception as exc:
-        logger.warning("catalog.provider_detail_custom_failed", provider=provider_key, error=str(exc))
+        logger.warning(
+            "catalog.provider_detail_custom_failed",
+            provider=provider_key,
+            error=str(exc),
+        )
 
     raise HTTPException(404, f"Provider '{provider_key}' not found")
 
 
 class UpdateAnyProviderRequest(BaseModel):
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    website_url: Optional[str] = None
-    brand_color: Optional[str] = None
-    logo_url: Optional[str] = None
-    extra_services: Optional[List[ServiceInput]] = None  # additional services for static providers
-    service_overrides: Optional[List[ServiceInput]] = None  # per-service field overrides for static catalog entries
-    services: Optional[List[ServiceInput]] = None        # full services list for custom providers
-    dependencies: Optional[List[DependencyInput]] = None
+    display_name: str | None = None
+    description: str | None = None
+    website_url: str | None = None
+    brand_color: str | None = None
+    logo_url: str | None = None
+    extra_services: list[ServiceInput] | None = None  # additional services for static providers
+    service_overrides: list[ServiceInput] | None = None  # per-service field overrides for static catalog entries
+    services: list[ServiceInput] | None = None  # full services list for custom providers
+    dependencies: list[DependencyInput] | None = None
 
 
 @catalog_router.patch("/providers/{provider_key}")
 async def update_any_provider(
     provider_key: str,
     body: UpdateAnyProviderRequest,
-    x_user_email: Optional[str] = Header(None),
+    x_user_email: str | None = Header(None),
 ):
     """Update any provider — static (creates/updates override) or custom."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     modified_by = x_user_email or "super-admin"
 
     # Check if static
     static_services = get_provider_services(provider_key)
     if static_services:
-        updates: Dict[str, Any] = {
+        updates: dict[str, Any] = {
             "provider_key": provider_key,
             "modified_by": modified_by,
             "modified_at": now,
@@ -364,13 +388,17 @@ async def update_any_provider(
         if body.dependencies is not None:
             updates["dependencies"] = [d.model_dump() for d in body.dependencies]
 
-        result = await static_provider_overrides_collection().update_one(
+        await static_provider_overrides_collection().update_one(
             {"provider_key": provider_key},
             {"$set": updates},
             upsert=True,
         )
         ov = await static_provider_overrides_collection().find_one({"provider_key": provider_key})
-        logger.info("catalog.static_provider_updated", provider=provider_key, modified_by=modified_by)
+        logger.info(
+            "catalog.static_provider_updated",
+            provider=provider_key,
+            modified_by=modified_by,
+        )
         return _serialize(ov)
 
     # Custom provider update
@@ -394,9 +422,7 @@ async def update_any_provider(
         if body.dependencies is not None:
             updates["dependencies"] = [d.model_dump() for d in body.dependencies]
 
-        await custom_providers_collection().update_one(
-            {"provider_key": provider_key}, {"$set": updates}
-        )
+        await custom_providers_collection().update_one({"provider_key": provider_key}, {"$set": updates})
         updated = await custom_providers_collection().find_one({"provider_key": provider_key})
         logger.info("catalog.custom_provider_updated_by_key", provider=provider_key)
         return _serialize(updated)
@@ -408,6 +434,7 @@ async def update_any_provider(
 
 
 # ── Custom provider CRUD ──────────────────────────────────────────────
+
 
 @catalog_router.post("/custom-providers")
 async def create_custom_provider(body: CreateCustomProviderRequest):
@@ -434,8 +461,8 @@ async def create_custom_provider(body: CreateCustomProviderRequest):
         "logo_url": body.logo_url or "",
         "services": [s.model_dump() for s in body.services],
         "dependencies": [d.model_dump() for d in body.dependencies],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
     result = await custom_providers_collection().insert_one(doc)
@@ -478,7 +505,7 @@ async def update_custom_provider(provider_id: str, body: UpdateCustomProviderReq
     except Exception:
         raise HTTPException(400, "Invalid provider ID")
 
-    updates: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    updates: dict[str, Any] = {"updated_at": datetime.now(UTC).isoformat()}
 
     if body.display_name is not None:
         updates["display_name"] = body.display_name
@@ -551,10 +578,7 @@ Limit to 4–8 packages. Prefer widely-used, well-maintained packages."""
 @catalog_router.post("/ai/suggest-services")
 async def suggest_services(body: SuggestServicesRequest):
     """Ask AI to suggest services for a new custom provider."""
-    prompt = (
-        f"Provider: {body.provider_name}\n"
-        f"Description: {body.description}\n"
-    )
+    prompt = f"Provider: {body.provider_name}\nDescription: {body.description}\n"
     if body.website_url:
         prompt += f"Website: {body.website_url}\n"
     prompt += "\nSuggest services for this provider. Return a JSON array."
@@ -569,7 +593,11 @@ async def suggest_services(body: SuggestServicesRequest):
         )
         # Result can be a list directly or {"services": [...]}
         services = result if isinstance(result, list) else result.get("services", result)
-        logger.info("catalog.ai_suggest_services", provider=body.provider_name, count=len(services))
+        logger.info(
+            "catalog.ai_suggest_services",
+            provider=body.provider_name,
+            count=len(services),
+        )
         return {"services": services}
     except Exception as exc:
         logger.error("catalog.ai_suggest_services_failed", error=str(exc))
@@ -622,14 +650,17 @@ async def validate_package(body: ValidatePackageRequest):
         'Return JSON: {"valid": true/false, "reason": "short explanation", "canonical_name": "correct pypi name if different"}'
     )
     try:
-        result = await call_llm_json(
+        return await call_llm_json(
             messages=[{"role": "user", "content": prompt}],
             system="You are a Python package expert. Answer concisely in JSON only.",
             max_tokens=256,
             temperature=0.1,
         )
-        return result
     except Exception as exc:
         logger.error("catalog.ai_validate_package_failed", error=str(exc))
         # Fail open — let the user use it
-        return {"valid": True, "reason": "Could not validate — proceeding.", "canonical_name": body.package_name}
+        return {
+            "valid": True,
+            "reason": "Could not validate — proceeding.",
+            "canonical_name": body.package_name,
+        }

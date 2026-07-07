@@ -4,18 +4,29 @@ import sys
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.encryption import EncryptionService
-from services.credentials import CredentialManager
 import asyncio
-import json
+
+import pytest
+
+from services.credentials import CredentialManager
+from services.encryption import EncryptionService
+
+# EncryptionService persists per-tenant DEK state in Redis (KeyManager → redis_service),
+# so this is an integration test that needs a reachable Redis. CI has none; opt in with
+# RUN_INTEGRATION=1 when Redis is up.
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_INTEGRATION") != "1",
+    reason="needs a reachable Redis for per-tenant DEK storage (set RUN_INTEGRATION=1)",
+)
+
 
 async def test_encryption():
     print("Testing EncryptionService...")
-    
+
     # Use a dummy key for testing (32 bytes hex)
     dummy_key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     service = EncryptionService(master_key=dummy_key)
-    
+
     original_text = '{"api_key": "secret-123"}'
     encrypted = await service.encrypt(original_text, "test-tenant")
     print(f"Encrypted (version-tagged envelope): {encrypted}")
@@ -35,24 +46,25 @@ async def test_encryption():
     assert int(re_encrypted.split(":", 1)[0]) == new_v, "new writes use rotated version"
     assert await service.decrypt(re_encrypted, "test-tenant") == original_text
     print(f"Encryption test PASSED (per-tenant DEK + rotation → active v{new_v})")
-    
+
     print("\nTesting CredentialManager...")
     manager = CredentialManager(service)
-    
+
     tenant_id = "test-tenant"
     connector_type = "slack"
     creds = {"bot_token": "xoxb-123", "signing_secret": "abc"}
-    
+
     # Store
     cred_id = await manager.store_credentials(tenant_id, connector_type, creds)
     print(f"Stored credential ID: {cred_id}")
-    
+
     # Retrieve
     retrieved = await manager.get_credentials(tenant_id, connector_type)
     print(f"Retrieved: {retrieved}")
-    
+
     assert retrieved == creds
     print("CredentialManager test PASSED")
+
 
 if __name__ == "__main__":
     asyncio.run(test_encryption())

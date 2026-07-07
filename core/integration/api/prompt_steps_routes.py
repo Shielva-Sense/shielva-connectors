@@ -13,7 +13,6 @@ import subprocess
 import uuid
 from datetime import datetime
 from functools import partial
-from typing import List, Optional
 
 import structlog
 from fastapi import APIRouter, Header, HTTPException
@@ -29,6 +28,7 @@ prompt_steps_router = APIRouter(prefix="/sessions", tags=["prompt-steps"])
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
+
 def _col():
     return get_db()["prompt_steps"]
 
@@ -40,19 +40,21 @@ def _prompt_execution_key(provider: str, service_slug: str) -> str:
 async def _sync_r2(session_id: str, provider: str, service_slug: str) -> None:
     """Persist full prompt_execution.json to R2 (fire-and-forget)."""
     import json
+
     try:
         col = _col()
-        docs = await col.find(
-            {"session_id": session_id}, {"_id": 0}
-        ).sort("created_at", 1).to_list(length=200)
+        docs = await col.find({"session_id": session_id}, {"_id": 0}).sort("created_at", 1).to_list(length=200)
 
-        payload = json.dumps({
-            "session_id": session_id,
-            "provider": provider,
-            "service_slug": service_slug,
-            "steps": docs,
-            "updated_at": datetime.utcnow().isoformat(),
-        }, indent=2)
+        payload = json.dumps(
+            {
+                "session_id": session_id,
+                "provider": provider,
+                "service_slug": service_slug,
+                "steps": docs,
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+            indent=2,
+        )
 
         key = _prompt_execution_key(provider, service_slug)
         if r2_service._use_local():
@@ -62,14 +64,21 @@ async def _sync_r2(session_id: str, provider: str, service_slug: str) -> None:
         client = r2_service._get_client()
         await loop.run_in_executor(
             None,
-            partial(r2_service._sync_write, client, r2_service._get_bucket(),
-                    key, payload, "application/json"),
+            partial(
+                r2_service._sync_write,
+                client,
+                r2_service._get_bucket(),
+                key,
+                payload,
+                "application/json",
+            ),
         )
     except Exception as exc:
         logger.warning("prompt_steps.r2_sync_failed", error=str(exc))
 
 
 # ── Pydantic models ────────────────────────────────────────────────────
+
 
 class PromptStepUpsert(BaseModel):
     step_id: str
@@ -79,17 +88,18 @@ class PromptStepUpsert(BaseModel):
 
 
 class PromptStepPatch(BaseModel):
-    status: Optional[str] = None
-    prompt: Optional[str] = None
+    status: str | None = None
+    prompt: str | None = None
 
 
 class ValidateStepRequest(BaseModel):
-    files: List[str] = []        # absolute paths to check existence + size
-    run_tests: bool = False       # if True, run pytest in connector_dir
-    connector_dir: str = ""       # working directory for pytest
+    files: list[str] = []  # absolute paths to check existence + size
+    run_tests: bool = False  # if True, run pytest in connector_dir
+    connector_dir: str = ""  # working directory for pytest
 
 
 # ── Routes ─────────────────────────────────────────────────────────────
+
 
 @prompt_steps_router.get("/{session_id}/prompt-steps")
 async def list_prompt_steps(session_id: str):
@@ -131,9 +141,12 @@ async def upsert_prompt_step(
     }
     await col.insert_one({**doc, "_id": doc["prompt_step_id"]})
 
-    logger.info("prompt_step.created",
-                session_id=session_id, step_id=body.step_id,
-                prompt_step_id=doc["prompt_step_id"])
+    logger.info(
+        "prompt_step.created",
+        session_id=session_id,
+        step_id=body.step_id,
+        prompt_step_id=doc["prompt_step_id"],
+    )
 
     if x_provider and x_service:
         asyncio.create_task(_sync_r2(session_id, x_provider, x_service))
@@ -167,8 +180,12 @@ async def patch_prompt_step(
     if not result:
         raise HTTPException(status_code=404, detail=f"Prompt step not found: {step_id}")
 
-    logger.info("prompt_step.patched",
-                session_id=session_id, step_id=step_id, fields=list(update.keys()))
+    logger.info(
+        "prompt_step.patched",
+        session_id=session_id,
+        step_id=step_id,
+        fields=list(update.keys()),
+    )
 
     if x_provider and x_service:
         asyncio.create_task(_sync_r2(session_id, x_provider, x_service))

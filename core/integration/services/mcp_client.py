@@ -17,12 +17,13 @@ Headers forwarded:
   X-Tenant-ID  — required by every MCP endpoint for tenant isolation
   X-User-ID    — "integration-builder" (internal service identity)
 """
+
 from __future__ import annotations
 
-import structlog
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
+import structlog
 
 from integration.core.config import settings
 
@@ -30,11 +31,11 @@ logger = structlog.get_logger(__name__)
 
 
 async def call_llm_via_mcp(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     system: str = "",
     tenant_id: str,
-    model: Optional[str] = None,
+    model: str | None = None,
     max_tokens: int = 8192,
     temperature: float = 0.3,
 ) -> str:
@@ -58,7 +59,7 @@ async def call_llm_via_mcp(
     """
     url = f"{settings.MCP_URL}/mcp/v1/codegen/complete"
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "messages": messages,
         "system": system,
         "max_tokens": max_tokens,
@@ -99,8 +100,7 @@ async def call_llm_via_mcp(
             tenant_id=tenant_id,
         )
         raise RuntimeError(
-            f"shielva-mcp codegen endpoint returned HTTP {exc.response.status_code}: "
-            f"{body_preview}"
+            f"shielva-mcp codegen endpoint returned HTTP {exc.response.status_code}: {body_preview}"
         ) from exc
 
     except httpx.RequestError as exc:
@@ -139,7 +139,7 @@ async def fix_code_via_mcp_agent(
     connector_class: str = "",
     user_prompt: str = "",
     step_memory_summary: str = "",
-    model: Optional[str] = None,
+    model: str | None = None,
     max_tokens: int = 16384,
     temperature: float = 0.2,
 ) -> str:
@@ -159,7 +159,7 @@ async def fix_code_via_mcp_agent(
     """
     url = f"{settings.MCP_URL}/mcp/v1/codegen/fix-agent"
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "broken_code": broken_code,
         "error_output": error_output,
         "connector_class": connector_class,
@@ -193,15 +193,15 @@ async def fix_code_via_mcp_agent(
             data = resp.json()
     except httpx.HTTPStatusError as exc:
         body_preview = exc.response.text[:300]
-        logger.error("mcp_client.fix_agent_http_error", status=exc.response.status_code, body=body_preview)
-        raise RuntimeError(
-            f"shielva-mcp fix-agent returned HTTP {exc.response.status_code}: {body_preview}"
-        ) from exc
+        logger.error(
+            "mcp_client.fix_agent_http_error",
+            status=exc.response.status_code,
+            body=body_preview,
+        )
+        raise RuntimeError(f"shielva-mcp fix-agent returned HTTP {exc.response.status_code}: {body_preview}") from exc
     except httpx.RequestError as exc:
         logger.error("mcp_client.fix_agent_connection_error", error=str(exc))
-        raise RuntimeError(
-            f"Cannot reach shielva-mcp fix-agent at {settings.MCP_URL}. Error: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot reach shielva-mcp fix-agent at {settings.MCP_URL}. Error: {exc}") from exc
 
     fixed_code: str = data.get("fixed_code", "")
     tools_called: list = data.get("tools_called", [])

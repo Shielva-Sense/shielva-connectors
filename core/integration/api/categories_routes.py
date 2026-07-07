@@ -10,11 +10,9 @@ updated resource so callers can stay in sync without a re-fetch.
 
 from __future__ import annotations
 
-from typing import Optional
-
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-import structlog
 
 from integration.services import category_service
 
@@ -28,14 +26,14 @@ categories_router = APIRouter(prefix="/api/v3/catalog", tags=["catalog-categorie
 
 class CategoryCreate(BaseModel):
     label: str = Field(..., min_length=1, max_length=80)
-    slug: Optional[str] = Field(None, min_length=1, max_length=64)
+    slug: str | None = Field(None, min_length=1, max_length=64)
     description: str = Field("", max_length=400)
 
 
 class CategoryUpdate(BaseModel):
-    label: Optional[str] = Field(None, min_length=1, max_length=80)
-    description: Optional[str] = Field(None, max_length=400)
-    sort_order: Optional[int] = None
+    label: str | None = Field(None, min_length=1, max_length=80)
+    description: str | None = Field(None, max_length=400)
+    sort_order: int | None = None
 
 
 class ProviderCategoryAssign(BaseModel):
@@ -45,15 +43,11 @@ class ProviderCategoryAssign(BaseModel):
 # ── Caller identity (best-effort) ────────────────────────────────────
 
 
-def _caller(request: Request) -> Optional[str]:
+def _caller(request: Request) -> str | None:
     """Pull the authenticated user from gateway-forwarded headers when
     present. Used only as `updated_by` audit metadata — failure is
     non-fatal."""
-    return (
-        request.headers.get("x-user-email")
-        or request.headers.get("x-user-id")
-        or None
-    )
+    return request.headers.get("x-user-email") or request.headers.get("x-user-id") or None
 
 
 # ── Categories ───────────────────────────────────────────────────────
@@ -68,9 +62,7 @@ async def list_categories():
 @categories_router.post("/categories", status_code=201)
 async def create_category(body: CategoryCreate):
     try:
-        created = await category_service.create_category(
-            body.label, slug=body.slug, description=body.description
-        )
+        created = await category_service.create_category(body.label, slug=body.slug, description=body.description)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("categories.created", slug=created["slug"])
@@ -110,9 +102,7 @@ async def delete_category(slug: str):
 
 
 @categories_router.put("/providers/{provider_key}/category")
-async def assign_provider_category(
-    provider_key: str, body: ProviderCategoryAssign, request: Request
-):
+async def assign_provider_category(provider_key: str, body: ProviderCategoryAssign, request: Request):
     try:
         result = await category_service.set_provider_category(
             provider_key, body.category_slug, updated_by=_caller(request)

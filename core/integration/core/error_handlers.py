@@ -16,6 +16,7 @@ Wire them in with ``install_exception_handlers(app)`` after ``app = FastAPI(...)
 SOC 2 C1.1 note: the generic Exception handler returns a static "internal error"
 string — raw exception messages are never forwarded to clients.
 """
+
 from __future__ import annotations
 
 import structlog
@@ -74,9 +75,7 @@ def install_exception_handlers(app: FastAPI) -> None:
         return _error_response(exc.status_code, "HTTP_ERROR", str(exc.detail))
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_handler(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         logger.info(
             "validation_error",
             path=str(request.url.path),
