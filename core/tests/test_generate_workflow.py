@@ -14,10 +14,19 @@ Run:
 """
 
 import json
+import os
 import time
 
 import httpx
 import pytest
+
+# This is a LIVE end-to-end harness: it hits a running server + real Gemini with a
+# fixed session id. It cannot run in CI (no server, no session). Opt in explicitly
+# with RUN_E2E=1 when a dev server is up.
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_E2E") != "1",
+    reason="live end-to-end test; requires a running server + Gemini (set RUN_E2E=1)",
+)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BASE_URL = "https://localhost:8055"
