@@ -1,0 +1,10 @@
+# Shielva CI overrides for shielva-connectors (core).
+#
+# audit.ignore — accept non-exploitable transitive advisories by PACKAGE NAME.
+audit:
+  ignore:
+    # ecdsa 0.19.2 PYSEC-2026-1325 — Minerva timing side-channel in ECDSA signing.
+    # No fixed version is available upstream (fix: none). ecdsa is a transitive dep
+    # (JWT/JOSE stack); this service does not perform ECDSA signing on attacker-timed
+    # inputs. Re-evaluate when a patched release ships.
+    - ecdsa
