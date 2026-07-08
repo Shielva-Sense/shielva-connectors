@@ -2726,7 +2726,12 @@ async def get_connector_docs(
     """
     import json as _json
     from pathlib import Path as _Path
-
+    # Wheels install ON-DEMAND (no longer baked into the image), so a connector
+    # the tenant hasn't installed isn't loaded yet — and its docs live inside the
+    # wheel. Lazily install+load it (from JFrog) so docs are visible for any
+    # catalog connector, matching the pre-on-demand behaviour where every
+    # connector's docs showed. Fail-soft: if install fails we fall through to 404.
+    await _ensure_connector_installed(connector_type)
     resolved = _resolve_connector_type(connector_type)
     cls = CONNECTOR_CLASSES.get(resolved)
     if cls is None:
