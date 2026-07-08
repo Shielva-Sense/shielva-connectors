@@ -37,6 +37,18 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --chown=appuser:appgroup . .
+# ── merge the connector-SDK `shared/*` into the ONE `shared` package ──────────
+# `shared` is a SINGLE top-level package split across two sources: the connector
+# SDK ships base_connector/oauth_handler/repository_service here in the repo, while
+# shielva-common ships discovery_client/correlation/__init__ via pip (into
+# site-packages/shared). Locally server.sh symlinks shielva-common's files INTO
+# core/shared/; in the image we fold the SDK modules INTO the pip-installed
+# `shared` package so a single top-level `shared` exposes BOTH. Without this the
+# two dirs (/app/shared without __init__, site-packages/shared regular pkg) shadow
+# each other and on-demand connector wheels (`from shared.base_connector import …`)
+# fail to import → no connector loads → /connectors/{type}/docs 404s.
+RUN cp /app/shared/base_connector.py /app/shared/oauth_handler.py /app/shared/repository_service.py \
+       /usr/local/lib/python3.12/site-packages/shared/
 # On-demand connector wheels install to a writable USER-site dir (base
 # site-packages stays root-owned/immutable). Python auto-adds the user site to
 # sys.path for the non-root user, so entry_points() discovers the new wheels.
