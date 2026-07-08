@@ -393,15 +393,25 @@ def write_manifest(src_root: Path, version: str, dest: Path) -> int:
 
 
 def publish(out_dir: Path) -> int:
-    """twine-upload every wheel in out_dir to the JFrog PyPI repo. Token from env."""
-    url = os.environ.get("JFROG_URL", "").rstrip("/")
-    repo = os.environ.get("JFROG_REPO", "")
-    user = os.environ.get("JFROG_USER", "")
-    token = os.environ.get("JFROG_TOKEN", "")
-    if not (url and repo and user and token):
-        print("✗ publish needs JFROG_URL, JFROG_REPO, JFROG_USER, JFROG_TOKEN in the env")
+    """twine-upload every wheel in out_dir to the PyPI repo. Creds from env.
+
+    Registry-agnostic: the on-prem Nexus is the source of truth — set
+    ``PYPI_PUBLISH_URL`` (e.g. https://nexus.shielva.ai/repository/shielva-pypi/)
+    + ``PYPI_USER``/``PYPI_TOKEN``. The legacy JFrog trial (JFROG_URL/JFROG_REPO
+    + JFROG_USER/JFROG_TOKEN) is kept as a fallback during migration.
+    """
+    user = os.environ.get("PYPI_USER") or os.environ.get("JFROG_USER", "")
+    token = os.environ.get("PYPI_TOKEN") or os.environ.get("JFROG_TOKEN", "")
+    publish_url = os.environ.get("PYPI_PUBLISH_URL", "").rstrip("/")
+    if not publish_url:
+        url = os.environ.get("JFROG_URL", "").rstrip("/")
+        repo = os.environ.get("JFROG_REPO", "")
+        if url and repo:
+            publish_url = f"{url}/artifactory/api/pypi/{repo}"
+    if not (publish_url and user and token):
+        print("✗ publish needs PYPI_PUBLISH_URL + PYPI_USER/PYPI_TOKEN (or JFROG_URL/JFROG_REPO/JFROG_USER/JFROG_TOKEN)")
         return 2
-    repo_url = f"{url}/artifactory/api/pypi/{repo}"
+    repo_url = publish_url
     wheels = [str(p) for p in sorted(out_dir.glob("*.whl"))]
     if not wheels:
         print("✗ no wheels to publish")

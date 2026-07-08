@@ -704,17 +704,37 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
     ver = _WHEEL_VERSIONS.get(suffix)
     pkg = f"shielva-connector-{suffix}" + (f"=={ver}" if ver else "")
 
-    token = os.getenv("JFROG_TOKEN") or os.getenv("JFROG_PASSWORD")
-    if not token:
-        logger.error("on-demand install: JFROG_TOKEN unset", connector_type=connector_type)
-        return False
-    user = os.getenv("JFROG_USER", "")
-    host = os.getenv("JFROG_INDEX_HOST", "trialrifms4.jfrog.io")
-    repo = os.getenv("JFROG_REPO", "shielva592-42")
+    # PyPI registry for on-demand connector wheels. Source of truth is the on-prem
+    # Nexus (nexus.shielva.svc); PYPI_* is the generic, registry-agnostic config.
+    # JFROG_* is kept as a fallback for the legacy JFrog trial during migration.
     import urllib.parse as _u
 
-    cred = f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
-    index_url = f"https://{cred}{host}/artifactory/api/pypi/{repo}/simple"
+    user = os.getenv("PYPI_USER") or os.getenv("JFROG_USER", "")
+    token = (
+        os.getenv("PYPI_TOKEN")
+        or os.getenv("PYPI_PASSWORD")
+        or os.getenv("JFROG_TOKEN")
+        or os.getenv("JFROG_PASSWORD")
+    )
+    if not token:
+        logger.error("on-demand install: PYPI_TOKEN/JFROG_TOKEN unset", connector_type=connector_type)
+        return False
+    cred = (
+        f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
+        if user
+        else f":{_u.quote(token, safe='')}@"
+    )
+    # PYPI_INDEX_URL is the full simple-index base (no creds), e.g.
+    #   http://nexus.shielva.svc:8081/repository/shielva-pypi/simple
+    # If unset, fall back to constructing the legacy JFrog URL from JFROG_*.
+    base = os.getenv("PYPI_INDEX_URL")
+    if base:
+        _scheme, _, _rest = base.partition("://")
+        index_url = f"{_scheme}://{cred}{_rest}"
+    else:
+        host = os.getenv("JFROG_INDEX_HOST", "trialrifms4.jfrog.io")
+        repo = os.getenv("JFROG_REPO", "shielva592-42")
+        index_url = f"https://{cred}{host}/artifactory/api/pypi/{repo}/simple"
 
     lock = _CONNECTOR_INSTALL_LOCKS.setdefault(suffix, asyncio.Lock())
     async with lock:
@@ -729,6 +749,10 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
             "PIP_INDEX_URL": index_url,
             "PIP_EXTRA_INDEX_URL": "https://pypi.org/simple/",
         }
+        # In-cluster Nexus is plain HTTP (http://nexus.shielva.svc:8081) — pip needs
+        # the host allow-listed or it refuses the insecure index.
+        if index_url.startswith("http://"):
+            env["PIP_TRUSTED_HOST"] = _u.urlparse(index_url).hostname or ""
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
