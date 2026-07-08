@@ -704,37 +704,24 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
     ver = _WHEEL_VERSIONS.get(suffix)
     pkg = f"shielva-connector-{suffix}" + (f"=={ver}" if ver else "")
 
-    # PyPI registry for on-demand connector wheels. Source of truth is the on-prem
-    # Nexus (nexus.shielva.svc); PYPI_* is the generic, registry-agnostic config.
-    # JFROG_* is kept as a fallback for the legacy JFrog trial during migration.
+    # PyPI registry for on-demand connector wheels — the on-prem Nexus
+    # (nexus.shielva.svc). PYPI_INDEX_URL is the full simple-index base (no creds),
+    # e.g. http://nexus.shielva.svc:8081/repository/shielva-pypi/simple.
     import urllib.parse as _u
 
-    user = os.getenv("PYPI_USER") or os.getenv("JFROG_USER", "")
-    token = (
-        os.getenv("PYPI_TOKEN")
-        or os.getenv("PYPI_PASSWORD")
-        or os.getenv("JFROG_TOKEN")
-        or os.getenv("JFROG_PASSWORD")
-    )
-    if not token:
-        logger.error("on-demand install: PYPI_TOKEN/JFROG_TOKEN unset", connector_type=connector_type)
+    user = os.getenv("PYPI_USER", "")
+    token = os.getenv("PYPI_TOKEN") or os.getenv("PYPI_PASSWORD")
+    base = os.getenv("PYPI_INDEX_URL")
+    if not (token and base):
+        logger.error("on-demand install: PYPI_INDEX_URL/PYPI_TOKEN unset", connector_type=connector_type)
         return False
     cred = (
         f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
         if user
         else f":{_u.quote(token, safe='')}@"
     )
-    # PYPI_INDEX_URL is the full simple-index base (no creds), e.g.
-    #   http://nexus.shielva.svc:8081/repository/shielva-pypi/simple
-    # If unset, fall back to constructing the legacy JFrog URL from JFROG_*.
-    base = os.getenv("PYPI_INDEX_URL")
-    if base:
-        _scheme, _, _rest = base.partition("://")
-        index_url = f"{_scheme}://{cred}{_rest}"
-    else:
-        host = os.getenv("JFROG_INDEX_HOST", "trialrifms4.jfrog.io")
-        repo = os.getenv("JFROG_REPO", "shielva592-42")
-        index_url = f"https://{cred}{host}/artifactory/api/pypi/{repo}/simple"
+    _scheme, _, _rest = base.partition("://")
+    index_url = f"{_scheme}://{cred}{_rest}"
 
     lock = _CONNECTOR_INSTALL_LOCKS.setdefault(suffix, asyncio.Lock())
     async with lock:

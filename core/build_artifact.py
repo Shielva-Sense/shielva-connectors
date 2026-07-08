@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Pre-generate connector ARTIFACTS and publish them to the JFrog PyPI repo.
+"""Pre-generate connector ARTIFACTS and publish them to the on-prem Nexus PyPI repo.
 
 Architecture (confirmed with the team):
 
     R2 (source of truth, modular connector source code)
         │  ── pre-generation (this script, run when connectors change) ──
         ▼
-    one versioned wheel per connector  ──►  JFrog Artifactory (PyPI repo)
+    one versioned wheel per connector  ──►  Nexus Repository (PyPI repo)
         │
         ▼
     shielva_connectors gateway  ──  pip install + importlib at runtime
@@ -32,11 +32,10 @@ Usage::
     # build only (wheels land in ./dist_connectors/)
     python core/build_artifact.py --src ~/Documents/client_dir
 
-    # build + publish to JFrog (token from env — never hard-coded)
-    export JFROG_URL=https://trialrifms4.jfrog.io
-    export JFROG_REPO=shielva592-42
-    export JFROG_USER=<you>          # your JFrog username / email
-    export JFROG_TOKEN=<identity-token>
+    # build + publish to Nexus (creds from env — never hard-coded)
+    export PYPI_PUBLISH_URL=https://nexus.shielva.ai/repository/shielva-pypi/
+    export PYPI_USER=shielva-ci
+    export PYPI_TOKEN=<nexus-ci-password>
     python core/build_artifact.py --src ~/Documents/client_dir --publish
 
     # single connector (fast iteration)
@@ -395,21 +394,15 @@ def write_manifest(src_root: Path, version: str, dest: Path) -> int:
 def publish(out_dir: Path) -> int:
     """twine-upload every wheel in out_dir to the PyPI repo. Creds from env.
 
-    Registry-agnostic: the on-prem Nexus is the source of truth — set
-    ``PYPI_PUBLISH_URL`` (e.g. https://nexus.shielva.ai/repository/shielva-pypi/)
-    + ``PYPI_USER``/``PYPI_TOKEN``. The legacy JFrog trial (JFROG_URL/JFROG_REPO
-    + JFROG_USER/JFROG_TOKEN) is kept as a fallback during migration.
+    Publishes to the on-prem Nexus: set ``PYPI_PUBLISH_URL``
+    (e.g. https://nexus.shielva.ai/repository/shielva-pypi/) + ``PYPI_USER`` +
+    ``PYPI_TOKEN``.
     """
-    user = os.environ.get("PYPI_USER") or os.environ.get("JFROG_USER", "")
-    token = os.environ.get("PYPI_TOKEN") or os.environ.get("JFROG_TOKEN", "")
+    user = os.environ.get("PYPI_USER", "")
+    token = os.environ.get("PYPI_TOKEN", "")
     publish_url = os.environ.get("PYPI_PUBLISH_URL", "").rstrip("/")
-    if not publish_url:
-        url = os.environ.get("JFROG_URL", "").rstrip("/")
-        repo = os.environ.get("JFROG_REPO", "")
-        if url and repo:
-            publish_url = f"{url}/artifactory/api/pypi/{repo}"
     if not (publish_url and user and token):
-        print("✗ publish needs PYPI_PUBLISH_URL + PYPI_USER/PYPI_TOKEN (or JFROG_URL/JFROG_REPO/JFROG_USER/JFROG_TOKEN)")
+        print("✗ publish needs PYPI_PUBLISH_URL + PYPI_USER + PYPI_TOKEN (Nexus)")
         return 2
     repo_url = publish_url
     wheels = [str(p) for p in sorted(out_dir.glob("*.whl"))]
