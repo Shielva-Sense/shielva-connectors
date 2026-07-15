@@ -297,8 +297,12 @@ async def lifespan(app: FastAPI):
     logger.info("integration_builder.starting", port=settings.INTEGRATION_PORT)
     await connect_db()
     r2_service.ensure_bucket()
-    # Set up shared Python 3.13 venv with common deps pre-installed
-    await setup_shared_venv_async()
+    # Set up shared venv with common deps pre-installed. Run in the BACKGROUND
+    # — creating the venv + pip-installing deps takes long enough to blow past
+    # the liveness probe and crash-loop the pod on cold start. It isn't needed
+    # to serve /health; connector build ops fall back to sys.executable until
+    # the venv is ready (see shared_venv.get_venv_python).
+    asyncio.create_task(setup_shared_venv_async())
     # Recover sessions stuck in 'executing' from a previous crash
     await _recover_stale_sessions()
     await seed_default_guidelines()  # seeds CODE_EXECUTION_GUIDELINES on first boot
