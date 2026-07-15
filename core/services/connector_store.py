@@ -54,7 +54,10 @@ def _mongo_db():
                 _mongo_unavailable = True
                 logger.warning("connector_store.mongo_unset", detail="MONGODB_URL not set — Redis-only fallback")
                 return None
-            _mongo_client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
+            # 10s server-selection so a cold first connect (DNS + handshake to the
+            # in-cluster mongo) doesn't spuriously time out — the app's own client
+            # uses the 30s default; 5s was too tight and fell back to Redis-only.
+            _mongo_client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=10000)
         return _mongo_client[os.getenv("MONGODB_DB", "integration_builder")]
     except Exception as exc:  # motor missing / bad URI — degrade to Redis-only
         _mongo_unavailable = True
@@ -74,7 +77,12 @@ def _encryptor():
         try:
             from .encryption import EncryptionService
 
-            _encryption = EncryptionService()
+            # KeyManager reads MASTER_KEY, but the deployment provides the KEK under
+            # ENCRYPTION_MASTER_KEY / MASTER_ENCRYPTION_KEY — pass whichever is set
+            # explicitly so token encryption actually activates (otherwise it
+            # fails-closed and tokens silently stay Redis-only).
+            key = os.getenv("MASTER_KEY") or os.getenv("ENCRYPTION_MASTER_KEY") or os.getenv("MASTER_ENCRYPTION_KEY")
+            _encryption = EncryptionService(master_key=key)
         except Exception as exc:
             logger.warning("connector_store.encryption_unavailable", error=str(exc))
             _encryption = False  # sentinel: tried and failed
