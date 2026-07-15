@@ -80,7 +80,13 @@ from integration.services.shared_venv import setup_shared_venv_async
 # LOG_LEVEL from config — NEVER "debug"/"trace" in production (SOC 2 CC7.2 / C1.1).
 
 LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # /app is root-owned for the non-root runtime user — fall back to a writable
+    # dir instead of 500-ing the whole service at import time.
+    LOG_DIR = Path("/tmp/integration-logs")  # noqa: S108 — container-local, non-secret log dir
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configure stdlib routing so uvicorn / third-party loggers write via structlog.
 logging.basicConfig(

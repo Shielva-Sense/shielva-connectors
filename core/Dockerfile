@@ -56,6 +56,11 @@ ENV PYTHONUSERBASE=/opt/conn
 # Pre-create the user-site dir so site.py adds it to sys.path at startup (then
 # on-demand-installed wheels are importable without a re-exec).
 RUN mkdir -p /opt/conn/lib/python3.12/site-packages && chown -R appuser:appgroup /opt/conn
+# integration.main writes a relative `logs/` dir (LOG_DIR = Path("logs")) at
+# import time; /app is root-owned after COPY, so a fresh build 500s on boot
+# ("Permission denied: 'logs'") the moment it runs as appuser. Pre-create the
+# dir and make /app writable by appuser so relative writes (logs, tmp) succeed.
+RUN mkdir -p /app/logs && chown appuser:appgroup /app /app/logs
 USER appuser
 EXPOSE 8003
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
