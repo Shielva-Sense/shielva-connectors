@@ -747,7 +747,7 @@ async def _get_redis():
     """Lazy Redis connection."""
     import redis.asyncio as aioredis
 
-    return await aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+    return await aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
 
 
 # ── Version helpers ───────────────────────────────────────────────────

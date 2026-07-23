@@ -722,7 +722,7 @@ async def _get_redis():
     import redis.asyncio as aioredis
 
     url = settings.REDIS_URL
-    return await aioredis.from_url(url, encoding="utf-8", decode_responses=True)
+    return await aioredis.from_url(url, encoding="utf-8", decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
 
 
 def _metadata_collection():
