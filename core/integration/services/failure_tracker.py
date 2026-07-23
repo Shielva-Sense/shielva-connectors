@@ -162,7 +162,7 @@ async def _redis():
     """Return a connected Redis client (lazy, per-call)."""
     import redis.asyncio as aioredis
 
-    return aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+    return aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
 
 
 async def _redis_get(key: str) -> str | None:

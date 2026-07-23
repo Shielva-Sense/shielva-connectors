@@ -91,7 +91,7 @@ def main():
 
     # Connect to Redis
     try:
-        r = redis.from_url(REDIS_URL, decode_responses=True)
+        r = redis.from_url(REDIS_URL, decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
         r.ping()
         print("\n  Redis connected OK")
     except Exception as e:
@@ -217,7 +217,7 @@ def main():
             print("  Redis connection lost — reconnecting in 5s...")
             time.sleep(5)
             try:
-                r = redis.from_url(REDIS_URL, decode_responses=True)
+                r = redis.from_url(REDIS_URL, decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
                 r.ping()
                 print("  Reconnected to Redis")
             except Exception:

@@ -1089,7 +1089,7 @@ class BaseConnector(ABC):
 
         try:
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-            r = redis.from_url(redis_url, decode_responses=True)
+            r = redis.from_url(redis_url, decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
 
             channel = f"kb_events:{kb_id}"
             event = {"type": event_type, "payload": payload}

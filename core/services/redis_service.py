@@ -23,7 +23,7 @@ class RedisService:
     async def connect(self):
         """Initialize Redis connection."""
         if not self.client:
-            self.client = redis.from_url(self.redis_url, decode_responses=True)
+            self.client = redis.from_url(self.redis_url, decode_responses=True, health_check_interval=30, socket_keepalive=True, socket_connect_timeout=5)
             try:
                 await self.client.ping()
                 logger.info("Connected to Redis", url=self.redis_url)
