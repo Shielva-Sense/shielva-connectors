@@ -689,6 +689,43 @@ def _load_wheel_versions() -> None:
         logger.warning("connectors-requirements.txt missing — on-demand install cannot pin versions")
 
 
+def _apply_wheel_versions_from_snapshot(payload: dict) -> int:
+    """Overlay fresh install versions from a catalog snapshot onto _WHEEL_VERSIONS
+    (fresh wins). Lets an UPGRADED connector install its new version and a BRAND-NEW
+    connector become installable — with no image rebuild. Baked entries absent from
+    the snapshot are left intact, so this only ever adds/updates, never removes."""
+    count = 0
+    for c in payload.get("connectors", []) or []:
+        ctype = c.get("connector_type") or c.get("type")
+        ver = c.get("version")
+        if ctype and ver:
+            _WHEEL_VERSIONS[_norm_dist(str(ctype))] = str(ver)
+            count += 1
+    return count
+
+
+async def _catalog_refresh_loop() -> None:
+    """Periodically pull the CD-published catalog snapshot from Nexus → re-seed the
+    ACP catalog (Mongo) + refresh install-version pins, so new/upgraded connectors
+    reflect without an image rebuild. The first pass runs immediately at startup.
+    Every error is swallowed (the baked snapshot stays authoritative) — this task
+    can never take the gateway down."""
+    interval = max(30, int(os.getenv("CATALOG_REFRESH_SECONDS", "120")))
+    from services.connector_catalog import fetch_remote_snapshot, load_snapshot, seed_catalog_if_needed
+
+    while True:
+        try:
+            payload = await fetch_remote_snapshot() or load_snapshot()
+            if payload and isinstance(payload.get("connectors"), list):
+                applied = _apply_wheel_versions_from_snapshot(payload)
+                seeded = await seed_catalog_if_needed(payload)
+                if seeded.get("seeded"):
+                    logger.info("catalog_refresh_applied", versions=applied, seeded=seeded.get("seeded"))
+        except Exception as exc:  # noqa: BLE001 — never let a refresh error break the pod
+            logger.warning("catalog_refresh_loop_error", error=str(exc)[:200])
+        await asyncio.sleep(interval)
+
+
 async def _ensure_connector_installed(connector_type: str) -> bool:
     """If the connector class isn't loaded, pip-install its wheel from JFrog at
     runtime then re-scan entry-points. Returns True if the class is available."""
@@ -1132,10 +1169,13 @@ async def lifespan(app: FastAPI):
     _load_installed_connectors()
     # Load AI-generated connectors dynamically
     _load_generated_connectors()
-    # NOTE: the advanced-connector catalog seed lives in `integration.main`'s
-    # lifespan (the actually-deployed entrypoint), not here. gateway.py runs
-    # locally / in SAD, never as the prod pod, so seeding from here would never
-    # touch prod Mongo.
+    # Keep the advanced-connector catalog (Mongo) + on-demand install-version pins
+    # fresh from the CD-published snapshot in Nexus, so new/upgraded connectors reflect
+    # in ACP without an image rebuild. The baked snapshot + connectors-requirements.txt
+    # remain the fallback (connector_catalog.fetch_remote_snapshot returns None → baked),
+    # so with no remote configured this is a no-op and behaviour is unchanged.
+    _load_wheel_versions()  # baked manifest as the base; the loop overlays fresh versions
+    app.state.catalog_refresh = asyncio.create_task(_catalog_refresh_loop())
 
     # HA: subscribe to the cluster-wide connector-reload channel so a deploy/reload
     # on any pod fans out to this one (no stale/404 connectors across replicas).

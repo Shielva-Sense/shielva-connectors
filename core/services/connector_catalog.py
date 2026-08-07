@@ -41,6 +41,52 @@ _COLL_NAME = os.getenv("CATALOG_COLLECTION", "advanced_connector_catalog")
 _META_ID = "__catalog_meta__"
 
 
+def _remote_snapshot_url() -> str:
+    """URL of the live catalog snapshot the connector CD publishes to Nexus
+    (raw repo `shielva-connectors-meta`). Explicit override via CONNECTORS_META_URL,
+    else derived from the same Nexus origin as PYPI_INDEX_URL (already in the pod
+    env for on-demand wheel installs). Empty string disables remote refresh — the
+    baked snapshot is then the only source (exactly the pre-existing behaviour)."""
+    override = os.getenv("CONNECTORS_META_URL", "").strip()
+    if override:
+        return override
+    index = os.getenv("PYPI_INDEX_URL", "").strip()
+    if not index or "/repository/" not in index:
+        return ""
+    base = index.split("/repository/", 1)[0]
+    return f"{base}/repository/shielva-connectors-meta/latest/shielva_connectors.json"
+
+
+async def fetch_remote_snapshot() -> dict | None:
+    """Fetch the latest catalog snapshot published by the connector CD to Nexus.
+
+    Returns the parsed payload, or None on ANY problem (URL unset, network error,
+    bad JSON, empty connectors) so every caller transparently falls back to the
+    baked snapshot. This is what makes new/upgraded connectors reflect in ACP
+    without an image rebuild — the CD PUTs a fresh snapshot, the runtime re-seeds."""
+    url = _remote_snapshot_url()
+    if not url:
+        return None
+    try:
+        import httpx
+
+        user = os.getenv("PYPI_USER", "")
+        token = os.getenv("PYPI_TOKEN") or os.getenv("PYPI_PASSWORD") or ""
+        auth = (user, token) if token else None
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, auth=auth)
+        if resp.status_code != 200:
+            logger.info("connector_catalog.remote_absent", status=resp.status_code)
+            return None
+        payload = resp.json()
+        if isinstance(payload, dict) and isinstance(payload.get("connectors"), list) and payload["connectors"]:
+            return payload
+        logger.warning("connector_catalog.remote_malformed")
+    except Exception as exc:  # noqa: BLE001 — never let a remote hiccup break the seed
+        logger.warning("connector_catalog.remote_fetch_failed", error=str(exc)[:200])
+    return None
+
+
 def _snapshot_hash(payload: dict) -> str:
     """Stable content hash over the connector list (order-independent)."""
     items = payload.get("connectors", []) or []
@@ -65,9 +111,15 @@ def load_snapshot() -> dict | None:
         return None
 
 
-async def seed_catalog_if_needed() -> dict:
-    """Run at gateway startup. Idempotent + hash-gated."""
-    payload = load_snapshot()
+async def seed_catalog_if_needed(payload: dict | None = None) -> dict:
+    """Run at startup + on a periodic refresh. Idempotent + hash-gated.
+
+    Source precedence: an explicitly-passed payload > the live snapshot the CD
+    publishes to Nexus > the baked snapshot. The remote-preferred order is what
+    lets new/upgraded connectors reflect without an image rebuild; if the remote
+    is unset/unreachable it degrades to the baked snapshot (pre-existing behaviour)."""
+    if payload is None:
+        payload = await fetch_remote_snapshot() or load_snapshot()
     if not payload:
         return {"seeded": 0, "skipped": "snapshot_missing"}
 
