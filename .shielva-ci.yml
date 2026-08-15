@@ -1,0 +1,32 @@
+# Accepted advisories, with the reason each is non-exploitable HERE.
+audit:
+  ignore:
+    # pip 25.0.1 — five advisories, all against the CI BUILD container's own pip,
+    # not the service's.
+    #
+    # This needed care rather than a blanket exemption, because pip is not merely
+    # build tooling in this project: the gateway shells out to it at RUNTIME to
+    # install connector wheels on demand, with an index URL carrying registry
+    # credentials. That copy IS on the request path, and it is fixed properly —
+    # core/Dockerfile's runtime stage now installs pip>=26.1.2 and
+    # setuptools>=83.0.0. The audit run against the built image confirms it:
+    # 85 dependencies, no pip advisory.
+    #
+    # What remains is the 29-dependency environment the pipeline assembles to RUN
+    # the audit. Its pip builds nothing we ship and serves no request; upgrading
+    # it belongs to the shared CI image, not to this repo, which has no way to
+    # reach it.
+    #
+    # Excluded by ADVISORY ID, not package name, so a future pip advisory still
+    # blocks CI and gets the same judgement rather than inheriting this one.
+    - PYSEC-2026-196
+    - PYSEC-2026-1795
+    - PYSEC-2026-1796
+    - PYSEC-2026-2875
+    - PYSEC-2026-2876
+    # ecdsa 0.19.2 — timing side-channel on SIGNING, fix: none upstream.
+    # Transitive via python-jose; this service verifies gateway-issued tokens
+    # rather than signing with ECDSA. Already accepted by the pipeline's own
+    # exclusions; recorded here so the reason travels with the repo.
+    - PYSEC-2026-1325
+    # Review all: 2026-Q4.
