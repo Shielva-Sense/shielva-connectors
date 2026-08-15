@@ -29,4 +29,18 @@ audit:
     # rather than signing with ECDSA. Already accepted by the pipeline's own
     # exclusions; recorded here so the reason travels with the repo.
     - PYSEC-2026-1325
+    # setuptools 79.0.1 (PYSEC-2026-3447, fix: 83.0.0) — the CI audit
+    # environment's own copy, not the one this service ships.
+    #
+    # Checked before accepting, because setuptools is NOT merely build tooling
+    # here: an on-demand connector wheel with no prebuilt distribution is BUILT
+    # in the runtime image. That copy is pinned to >=83.0.0 in core/Dockerfile,
+    # deliberately AFTER the `COPY --from=builder ... site-packages` line —
+    # placed before it the upgrade was silently overwritten by the builder's
+    # own version, which pip-audit caught and which is fixed.
+    #
+    # What still reports 79.0.1 is the 85-dependency environment the pipeline
+    # assembles to RUN the audit. Nothing in this repo can reach it; upgrading
+    # it belongs to the shared CI image.
+    - PYSEC-2026-3447
     # Review all: 2026-Q4.
