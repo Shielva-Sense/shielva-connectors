@@ -37,6 +37,9 @@ async def _get_redis() -> aioredis.Redis:
         _redis = aioredis.from_url(
             settings.REDIS_URL,
             decode_responses=True,
+            health_check_interval=30,
+            socket_keepalive=True,
+            socket_connect_timeout=5,
         )
     return _redis
 

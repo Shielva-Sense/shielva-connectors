@@ -282,6 +282,85 @@ include = ["{pkg_dir_name}", "{pkg_dir_name}.*"]
 """
 
 
+def _synthesize_docs(src_pkg: Path, meta: dict) -> dict:
+    """Build a ``{title, sections}`` doc tree from a connector's metadata +
+    instructions/setup.md, for connectors that ship no authored
+    ``.shielva/docs/connector_docs.json``. Deterministic (no LLM): Overview from
+    the description, Setup from setup.md, Authentication from install_fields, and an
+    API reference from the declared apis. Matches the shape the docs viewer renders."""
+    name = meta.get("display_name") or meta.get("name") or meta.get("connector_type") or "Connector"
+    desc = (meta.get("description") or "").strip()
+    cats = ", ".join(str(c) for c in (meta.get("categories") or []))
+    secs: list[dict] = [
+        {
+            "id": "overview",
+            "title": "Overview",
+            "content": f"**{name}**" + (f"\n\n{desc}" if desc else "") + (f"\n\n**Category:** {cats}" if cats else ""),
+        }
+    ]
+    setup_path = src_pkg / "instructions" / "setup.md"
+    if setup_path.exists():
+        try:
+            body = setup_path.read_text(encoding="utf-8").strip()
+            if body:
+                secs.append({"id": "setup", "title": "Setup Guide", "content": body})
+        except OSError:
+            pass
+    fields = meta.get("install_fields") or []
+    if fields:
+        lines = []
+        for f in fields:
+            req = " *(required)*" if f.get("required") else ""
+            ln = f"- **{f.get('label') or f.get('key')}** (`{f.get('key')}`, {f.get('type', 'text')}){req}"
+            if f.get("help"):
+                ln += f" — {f['help']}"
+            lines.append(ln)
+        secs.append(
+            {
+                "id": "authentication",
+                "title": "Authentication",
+                "content": f"This connector authenticates via **{meta.get('auth_type', 'api_key')}**.\n\n"
+                "Fields provided when installing:\n\n" + "\n".join(lines),
+            }
+        )
+    apis = meta.get("apis") or []
+    if apis:
+        kids = []
+        for a in apis:
+            params = a.get("params") or []
+            pmd = (
+                "\n".join(
+                    f"- `{p.get('key')}` ({p.get('type', 'text')})"
+                    + (" *(required)*" if p.get("required") else "")
+                    + (f" — {p['label']}" if p.get("label") else "")
+                    for p in params
+                )
+                or "_No parameters._"
+            )
+            kids.append(
+                {
+                    "id": f"api-{(a.get('id') or str(a.get('name', '')).lower().replace(' ', '-'))}",
+                    "title": a.get("name") or a.get("id") or "Operation",
+                    "content": f"{a.get('description', '')}\n\n**HTTP method:** `{a.get('method', 'GET')}`\n\n"
+                    f"**Parameters:**\n\n{pmd}",
+                }
+            )
+        secs.append(
+            {
+                "id": "api-methods",
+                "title": "API Methods",
+                "content": f"This connector exposes **{len(apis)}** operation(s).",
+                "children": kids,
+            }
+        )
+    return {
+        "title": f"{name} Documentation",
+        "generated_by": "build_artifact:metadata-synthesis",
+        "prompt_source": "connector.json + instructions/setup.md",
+        "sections": secs,
+    }
+
+
 def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | None:
     """Build a single connector wheel. Returns (dist_name, wheel_path) or None."""
     connector_py = src_pkg / "connector.py"
@@ -311,6 +390,20 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
         _docs_src = src_pkg / ".shielva" / "docs" / "connector_docs.json"
         if _docs_src.exists():
             shutil.copy2(_docs_src, pkg_dst / "_shielva_docs.json")
+        else:
+            # No AUTHORED docs → synthesize a {title, sections} tree from the
+            # connector's own metadata + instructions/setup.md so every connector
+            # serves useful documentation (GET /connectors/{type}/docs) instead of
+            # "No documentation available". Deterministic, no LLM.
+            import json as _dj
+
+            try:
+                _meta = _dj.loads((src_pkg / "metadata" / "connector.json").read_text(encoding="utf-8"))
+                (pkg_dst / "_shielva_docs.json").write_text(
+                    _dj.dumps(_synthesize_docs(src_pkg, _meta), indent=2), encoding="utf-8"
+                )
+            except (OSError, ValueError, KeyError):
+                pass
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )
@@ -377,14 +470,14 @@ def write_manifest(src_root: Path, version: str, dest: Path) -> int:
     """Write a pip requirements manifest of every connector artifact.
 
     The gateway image installs the connector library by ``pip install -r`` this file
-    from the JFrog index, so it must be committed and kept in sync with the published
+    from the Nexus PyPI index, so it must be committed and kept in sync with the published
     wheels. Derived by scanning source (no build needed) so it's cheap to regenerate.
     """
     chosen, _ = _discover(src_root)
     lines = sorted(f"shielva-connector-{key}=={version}" for key in chosen)
     dest.write_text(
         "# Auto-generated by core/build_artifact.py — connector artifact manifest.\n"
-        "# Installed by the gateway image from the JFrog PyPI index. Do not hand-edit.\n" + "\n".join(lines) + "\n",
+        "# Installed by the gateway image from the Nexus PyPI index. Do not hand-edit.\n" + "\n".join(lines) + "\n",
         encoding="utf-8",
     )
     print(f"→ wrote manifest ({len(lines)} connectors) → {dest}")
@@ -404,14 +497,21 @@ def publish(out_dir: Path) -> int:
     if not (publish_url and user and token):
         print("✗ publish needs PYPI_PUBLISH_URL + PYPI_USER + PYPI_TOKEN (Nexus)")
         return 2
-    repo_url = publish_url
+    # Keep a trailing slash: Nexus 400s a twine POST to `…/repository/shielva-pypi`
+    # but accepts `…/shielva-pypi/`. (publish_url was rstrip("/")-ed above.)
+    repo_url = publish_url + "/"
     wheels = [str(p) for p in sorted(out_dir.glob("*.whl"))]
     if not wheels:
         print("✗ no wheels to publish")
         return 2
     print(f"→ publishing {len(wheels)} wheels to {repo_url}")
-    # NB: this JFrog PyPI repo rejects twine's --skip-existing. Re-publishing an
-    # existing version will error per-repo policy — bump CONNECTOR_VERSION to re-push.
+    # NB: the Nexus `shielva-pypi` repo is currently writePolicy=ALLOW (redeploy
+    # permitted), so re-uploading an existing version SUCCEEDS (overwrites) rather
+    # than erroring like the old JFrog repo did. BUT still bump CONNECTOR_VERSION for
+    # any fix: pip's cache + the gateway's pinned installs won't re-pull an unchanged
+    # version string, so a same-version overwrite won't reach running pods. (If you
+    # want the registry to *enforce* immutability, set the repo to ALLOW_ONCE.)
+    # See docs/CONNECTOR_PUBLISH_RUNBOOK.md.
     proc = subprocess.run(
         [
             sys.executable,
@@ -449,7 +549,7 @@ def main() -> int:
         help="artifact version stamped on every wheel",
     )
     ap.add_argument("--only", default="", help="build only this connector type (fast iteration)")
-    ap.add_argument("--publish", action="store_true", help="twine-upload to JFrog after building")
+    ap.add_argument("--publish", action="store_true", help="twine-upload to Nexus after building")
     ap.add_argument(
         "--manifest",
         default=str(Path(__file__).resolve().parent / "connectors-requirements.txt"),
