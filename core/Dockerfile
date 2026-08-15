@@ -38,8 +38,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 25.0.1, which pip-audit flags with six advisories; the builder stage upgrades
 # its own copy but this stage starts from a fresh base, so the pip that actually
 # runs was the unpatched one. Upgrading here fixes the process doing the work,
-# which is why this is a version bump rather than an audit exemption.
-RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" \
+# setuptools rides the same path: an on-demand wheel that needs building is
+# built by setuptools in this image, so its advisory is on the request path too.
+# Both are version bumps rather than audit exemptions for that reason.
+RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" "setuptools>=83.0.0" \
     && rm -rf /root/.cache/pip
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 WORKDIR /app
