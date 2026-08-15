@@ -721,7 +721,9 @@ async def _catalog_refresh_loop() -> None:
                 seeded = await seed_catalog_if_needed(payload)
                 if seeded.get("seeded"):
                     logger.info("catalog_refresh_applied", versions=applied, seeded=seeded.get("seeded"))
-        except Exception as exc:  # noqa: BLE001 — never let a refresh error break the pod
+        # Broad on purpose: a catalog refresh failing must never take the pod
+        # down — it retries on the next interval.
+        except Exception as exc:
             logger.warning("catalog_refresh_loop_error", error=str(exc)[:200])
         await asyncio.sleep(interval)
 

@@ -1,0 +1,21 @@
+# Lint the service, not its output.
+#
+# `generated_connectors/` holds per-tenant connector code the Integration
+# Builder EMITS at runtime — 3,466 tracked files for one tenant alone. Linting
+# it alongside the service produced 18,333 errors and a CI gate that failed on
+# every pull request, including ones that touched nothing but `core/`. A gate
+# that always fails gates nothing; it had blocked the repo since July.
+#
+# `core/` — the code humans actually write here — has one error, which this
+# change also fixes. The two were never comparable, and holding generated output
+# to the same standard as authored source is what conflated them.
+#
+# This does NOT mean the generated code is fine. Ruff finds 18 undefined names
+# (F821) in it, which are real bugs the generator is emitting. They belong to
+# the generator's own quality gate, where the fix is to stop producing them
+# rather than to hand-edit thousands of emitted files.
+extend-exclude = [
+    "generated_connectors",
+    "logs",
+    "plan_cache",
+]
