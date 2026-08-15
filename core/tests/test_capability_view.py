@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gateway import _capability_view  # noqa: E402
+from gateway import _capability_view
 
 
 def test_read_actions_are_left_out():
@@ -57,9 +57,7 @@ def test_an_opaque_action_is_flagged_not_hidden():
     """Vonage and Bandwidth take one undocumented `payload` object. They should
     still be listed — a caller may know the shape — but a node cannot offer
     portable fields for them, so the flag has to reach the UI."""
-    view = _capability_view(
-        [{"id": "send_sms", "capability": "sms.send", "capability_opaque": True}]
-    )
+    view = _capability_view([{"id": "send_sms", "capability": "sms.send", "capability_opaque": True}])
     action = view["capability_actions"][0]
     assert action["opaque"] is True
     assert action["map"] is None
