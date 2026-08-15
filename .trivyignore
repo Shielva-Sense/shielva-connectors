@@ -15,3 +15,16 @@
 # fix that actually holds is to stop committing 3,466 files of one tenant's
 # runtime output into the service repo; each exclusion is a symptom patch.
 stripe-secret-token
+
+# A literal placeholder, not a token.
+#
+# trivy flags `hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` as a CRITICAL HuggingFace
+# access token. It is the `"placeholder"` value in the HuggingFace connector's
+# install-form metadata — the greyed-out hint showing a user the SHAPE of the
+# token they need to paste. It is x's. Checked the actual value rather than
+# trusting the rule name.
+#
+# It appears in the generated connector's metadata and in core/shielva_connectors.json,
+# the baked catalog snapshot built from it, so it is reachable from `core/` too —
+# which is why this needs a rule exclusion and not just a path one.
+hugging-face-access-token
