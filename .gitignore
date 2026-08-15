@@ -70,3 +70,4 @@ generated_connectors/**/.shielva/step_*.md
 generated_connectors/**/.shielva/master_prompt.md
 generated_connectors/**/.shielva/builder_prefs.json
 generated_connectors/**/.shielva/.keep
+coverage.xml
