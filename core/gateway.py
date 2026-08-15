@@ -754,11 +754,7 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
     if not (token and base):
         logger.error("on-demand install: PYPI_INDEX_URL/PYPI_TOKEN unset", connector_type=connector_type)
         return False
-    cred = (
-        f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
-        if user
-        else f":{_u.quote(token, safe='')}@"
-    )
+    cred = f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@" if user else f":{_u.quote(token, safe='')}@"
     _scheme, _, _rest = base.partition("://")
     index_url = f"{_scheme}://{cred}{_rest}"
 
@@ -1569,11 +1565,7 @@ async def list_connector_types():
                 # the chosen one can render its form and stay swappable —
                 # without a second request per connector.
                 "capabilities": sorted(
-                    {
-                        a["capability"]
-                        for a in (c.get("apis") or [])
-                        if isinstance(a, dict) and a.get("capability")
-                    }
+                    {a["capability"] for a in (c.get("apis") or []) if isinstance(a, dict) and a.get("capability")}
                 ),
                 "capability_actions": [
                     {
@@ -2812,6 +2804,7 @@ async def get_connector_docs(
     """
     import json as _json
     from pathlib import Path as _Path
+
     # Wheels install ON-DEMAND (no longer baked into the image), so a connector
     # the tenant hasn't installed isn't loaded yet — and its docs live inside the
     # wheel. Lazily install+load it (from JFrog) so docs are visible for any
