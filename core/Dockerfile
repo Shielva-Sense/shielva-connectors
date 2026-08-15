@@ -32,21 +32,25 @@ FROM python:3.12-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
-# pip is not just build tooling in this image — the gateway shells out to it at
-# RUNTIME to install connector wheels on demand (see `_ensure_wheel_installed`),
-# with an index URL that carries registry credentials. The base image ships pip
-# 25.0.1, which pip-audit flags with six advisories; the builder stage upgrades
-# its own copy but this stage starts from a fresh base, so the pip that actually
-# runs was the unpatched one. Upgrading here fixes the process doing the work,
-# setuptools rides the same path: an on-demand wheel that needs building is
-# built by setuptools in this image, so its advisory is on the request path too.
-# Both are version bumps rather than audit exemptions for that reason.
-RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" "setuptools>=83.0.0" \
-    && rm -rf /root/.cache/pip
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+# pip and setuptools, upgraded AFTER the builder's site-packages land.
+#
+# This has to come after the COPY above, not before it: that COPY replaces the
+# whole site-packages tree, so an upgrade run earlier is silently overwritten by
+# the builder's own versions. Done in the wrong order first, and pip-audit
+# caught it — the image still reported setuptools 79.0.1 with the pin visibly
+# present in this file.
+#
+# Neither is merely build tooling here. The gateway shells out to pip at RUNTIME
+# to install connector wheels on demand (`_ensure_wheel_installed`), with an
+# index URL carrying registry credentials, and a wheel with no prebuilt
+# distribution is BUILT in this image by setuptools. Both are on the request
+# path, which is why these are version bumps and not audit exemptions.
+RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" "setuptools>=83.0.0" \
+    && rm -rf /root/.cache/pip
 COPY --chown=appuser:appgroup . .
 # ── merge the connector-SDK `shared/*` into the ONE `shared` package ──────────
 # `shared` is a SINGLE top-level package split across two sources: the connector
