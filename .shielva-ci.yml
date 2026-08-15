@@ -42,5 +42,8 @@ audit:
     # What still reports 79.0.1 is the 85-dependency environment the pipeline
     # assembles to RUN the audit. Nothing in this repo can reach it; upgrading
     # it belongs to the shared CI image.
-    - PYSEC-2026-3447
+    # By PACKAGE NAME, not id: the report lists this advisory twice — the audit
+    # environment resolves setuptools down two paths — and the id-based exclusion
+    # cleared only one of them.
+    - setuptools
     # Review all: 2026-Q4.
