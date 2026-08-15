@@ -1509,6 +1509,40 @@ async def list_tenant_connectors(
     return result
 
 
+def _capability_view(apis: list | None) -> dict:
+    """What a connector can DO, projected for the catalog listing.
+
+    Two fields, because the designer's SMS / Mail / Calendar / CRM nodes ask two
+    different questions: `capabilities` answers "which connectors can send an
+    SMS" for the picker, and `capability_actions` carries the param schema and
+    field map so the chosen one renders its form and stays swappable — without a
+    request per connector, which a picker over 213 of them cannot afford.
+
+    Only actions that DECLARE a capability are carried. Projecting the whole
+    `apis` array would multiply a 263KB response by the ~20 read actions each
+    connector has, for data no caller wants.
+
+    A pure function on purpose: it is the part with rules worth testing, and the
+    endpoint around it needs a seeded Mongo catalog to exercise at all.
+    """
+    actions = [a for a in (apis or []) if isinstance(a, dict) and a.get("capability")]
+    return {
+        "capabilities": sorted({a["capability"] for a in actions}),
+        "capability_actions": [
+            {
+                "capability": a["capability"],
+                "action": a.get("id"),
+                "label": a.get("name") or a.get("id"),
+                "method": a.get("method"),
+                "map": a.get("capability_map"),
+                "opaque": bool(a.get("capability_opaque")),
+                "params": a.get("params") or [],
+            }
+            for a in actions
+        ],
+    }
+
+
 @app.get("/connectors/types")
 async def list_connector_types():
     """List available connector types — rich metadata from the seeded catalog.
@@ -1551,35 +1585,7 @@ async def list_connector_types():
                 "oauth_scopes": c.get("oauth_scopes"),
                 "install_fields": c.get("install_fields"),
                 "features": c.get("features"),
-                # What this connector can actually DO, and how to drive it.
-                #
-                # The catalog doc carries the whole `apis` array, but projecting
-                # all of it here would multiply a 263KB response by the ~20
-                # read actions each connector has, for data the caller does not
-                # want. Only the actions that DECLARE a capability are carried,
-                # which is a handful across the catalog.
-                #
-                # Both parts are needed and neither is enough alone: the flat
-                # list answers "which connectors can send an SMS" for the
-                # picker, and the actions carry the param schema + field map so
-                # the chosen one can render its form and stay swappable —
-                # without a second request per connector.
-                "capabilities": sorted(
-                    {a["capability"] for a in (c.get("apis") or []) if isinstance(a, dict) and a.get("capability")}
-                ),
-                "capability_actions": [
-                    {
-                        "capability": a["capability"],
-                        "action": a.get("id"),
-                        "label": a.get("name") or a.get("id"),
-                        "method": a.get("method"),
-                        "map": a.get("capability_map"),
-                        "opaque": bool(a.get("capability_opaque")),
-                        "params": a.get("params") or [],
-                    }
-                    for a in (c.get("apis") or [])
-                    if isinstance(a, dict) and a.get("capability")
-                ],
+                **_capability_view(c.get("apis")),
             }
         )
     # Fallback: any class loaded in this pod but missing from the seeded catalog.
