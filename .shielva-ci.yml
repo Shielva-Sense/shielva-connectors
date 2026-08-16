@@ -46,4 +46,8 @@ audit:
     # environment resolves setuptools down two paths — and the id-based exclusion
     # cleared only one of them.
     - setuptools
+    # BOTH forms, deliberately. The package-name entry alone did not clear this
+    # and neither did the id alone; the audit reports the same advisory twice,
+    # which suggests two resolution paths and only one of them matching.
+    - PYSEC-2026-3447
     # Review all: 2026-Q4.
