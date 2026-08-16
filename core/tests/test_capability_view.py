@@ -5,7 +5,8 @@ decides which connectors appear in each picker, and what the chosen one's form
 looks like. Getting it wrong is not a visual bug — a dropped `map` silently
 makes a provider un-swappable, which is the whole reason the field exists.
 
-Imported from services.capability_view, NOT from gateway. gateway pulls in
+Imported from capability_view at the top of core/ — not from gateway, and not
+from services/. gateway pulls in
 FastAPI, redis and motor, and CI's coverage stage installs only pytest and its
 plugins — so importing it there fails, this file is never collected, and Sonar
 reports 0% coverage on new code. That reads as "untested" when the real cause is
@@ -19,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.capability_view import capability_view as _capability_view
+from capability_view import capability_view as _capability_view
 
 
 def test_read_actions_are_left_out():

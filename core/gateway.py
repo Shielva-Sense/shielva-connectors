@@ -1512,7 +1512,7 @@ async def list_tenant_connectors(
 # Re-exported so this module keeps one name for it; the implementation lives in
 # services/capability_view.py, which imports nothing and is therefore testable
 # without standing up FastAPI — see that module for why that matters to CI.
-from services.capability_view import capability_view as _capability_view
+from capability_view import capability_view as _capability_view
 
 
 @app.get("/connectors/types")
