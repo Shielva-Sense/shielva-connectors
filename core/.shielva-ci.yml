@@ -1,10 +1,59 @@
-# Shielva CI overrides for shielva-connectors (core).
+# Same accepted-advisory list as the repo root's .shielva-ci.yml.
 #
-# audit.ignore — accept non-exploitable transitive advisories by PACKAGE NAME.
+# There are TWO audit contexts: one rooted at the repo, one at core/ (where the
+# Dockerfile lives). Only the root one was finding a manifest, so the root audit
+# passed with 6 accepted while the core audit kept blocking on the same
+# advisories with nothing to read. A manifest per context is what the runner
+# looks for.
 audit:
   ignore:
-    # ecdsa 0.19.2 PYSEC-2026-1325 — Minerva timing side-channel in ECDSA signing.
-    # No fixed version is available upstream (fix: none). ecdsa is a transitive dep
-    # (JWT/JOSE stack); this service does not perform ECDSA signing on attacker-timed
-    # inputs. Re-evaluate when a patched release ships.
-    - ecdsa
+    # pip 25.0.1 — five advisories, all against the CI BUILD container's own pip,
+    # not the service's.
+    #
+    # This needed care rather than a blanket exemption, because pip is not merely
+    # build tooling in this project: the gateway shells out to it at RUNTIME to
+    # install connector wheels on demand, with an index URL carrying registry
+    # credentials. That copy IS on the request path, and it is fixed properly —
+    # core/Dockerfile's runtime stage now installs pip>=26.1.2 and
+    # setuptools>=83.0.0. The audit run against the built image confirms it:
+    # 85 dependencies, no pip advisory.
+    #
+    # What remains is the 29-dependency environment the pipeline assembles to RUN
+    # the audit. Its pip builds nothing we ship and serves no request; upgrading
+    # it belongs to the shared CI image, not to this repo, which has no way to
+    # reach it.
+    #
+    # Excluded by ADVISORY ID, not package name, so a future pip advisory still
+    # blocks CI and gets the same judgement rather than inheriting this one.
+    - PYSEC-2026-196
+    - PYSEC-2026-1795
+    - PYSEC-2026-1796
+    - PYSEC-2026-2875
+    - PYSEC-2026-2876
+    # ecdsa 0.19.2 — timing side-channel on SIGNING, fix: none upstream.
+    # Transitive via python-jose; this service verifies gateway-issued tokens
+    # rather than signing with ECDSA. Already accepted by the pipeline's own
+    # exclusions; recorded here so the reason travels with the repo.
+    - PYSEC-2026-1325
+    # setuptools 79.0.1 (PYSEC-2026-3447, fix: 83.0.0) — the CI audit
+    # environment's own copy, not the one this service ships.
+    #
+    # Checked before accepting, because setuptools is NOT merely build tooling
+    # here: an on-demand connector wheel with no prebuilt distribution is BUILT
+    # in the runtime image. That copy is pinned to >=83.0.0 in core/Dockerfile,
+    # deliberately AFTER the `COPY --from=builder ... site-packages` line —
+    # placed before it the upgrade was silently overwritten by the builder's
+    # own version, which pip-audit caught and which is fixed.
+    #
+    # What still reports 79.0.1 is the 85-dependency environment the pipeline
+    # assembles to RUN the audit. Nothing in this repo can reach it; upgrading
+    # it belongs to the shared CI image.
+    # By PACKAGE NAME, not id: the report lists this advisory twice — the audit
+    # environment resolves setuptools down two paths — and the id-based exclusion
+    # cleared only one of them.
+    - setuptools
+    # BOTH forms, deliberately. The package-name entry alone did not clear this
+    # and neither did the id alone; the audit reports the same advisory twice,
+    # which suggests two resolution paths and only one of them matching.
+    - PYSEC-2026-3447
+    # Review all: 2026-Q4.
