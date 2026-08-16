@@ -1,2 +1,0 @@
-# Gateway pre-installs httpx, pydantic, structlog, pytest, pytest-asyncio,
-# pytest-mock. The OpenAI connector needs no extra runtime packages.

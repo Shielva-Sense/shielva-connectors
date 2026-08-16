@@ -1,1 +1,0 @@
-"""Domo connector helpers package."""

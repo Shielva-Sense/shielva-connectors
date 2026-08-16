@@ -1,2 +1,0 @@
-PyJWT[crypto]>=2.8
-cryptography>=42.0

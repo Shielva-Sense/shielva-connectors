@@ -1,1 +1,0 @@
-"""Datadog connector test suite."""

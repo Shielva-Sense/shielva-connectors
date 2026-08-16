@@ -1,1 +1,0 @@
-"""OpenAI connector test package."""

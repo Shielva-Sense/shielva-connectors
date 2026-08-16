@@ -1,1 +1,0 @@
-# HubSpot connector test package

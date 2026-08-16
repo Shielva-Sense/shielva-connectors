@@ -1,1 +1,0 @@
-"""Workday connector test package."""

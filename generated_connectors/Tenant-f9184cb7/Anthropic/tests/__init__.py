@@ -1,1 +1,0 @@
-"""Anthropic connector unit tests."""

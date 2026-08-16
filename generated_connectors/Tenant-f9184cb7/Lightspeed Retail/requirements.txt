@@ -1,2 +1,0 @@
-# All baseline packages (httpx, pydantic, structlog, pytest, pytest-asyncio, pytest-mock, respx)
-# are pre-installed by the shared connector venv. No connector-specific runtime libs required.

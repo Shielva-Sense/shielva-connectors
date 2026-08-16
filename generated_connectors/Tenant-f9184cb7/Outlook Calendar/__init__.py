@@ -1,1 +1,0 @@
-"""Outlook Calendar connector package."""

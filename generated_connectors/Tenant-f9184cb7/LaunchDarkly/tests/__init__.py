@@ -1,1 +1,0 @@
-"""LaunchDarkly connector test package."""
