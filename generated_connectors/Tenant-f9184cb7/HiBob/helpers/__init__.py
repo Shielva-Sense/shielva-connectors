@@ -1,1 +1,0 @@
-"""HiBob connector helpers package."""

@@ -1,1 +1,0 @@
-"""Miro connector test package."""
