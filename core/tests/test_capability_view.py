@@ -5,8 +5,11 @@ decides which connectors appear in each picker, and what the chosen one's form
 looks like. Getting it wrong is not a visual bug — a dropped `map` silently
 makes a provider un-swappable, which is the whole reason the field exists.
 
-Tested as a pure function because the endpoint around it needs a seeded Mongo
-catalog before it will return anything at all.
+Imported from services.capability_view, NOT from gateway. gateway pulls in
+FastAPI, redis and motor, and CI's coverage stage installs only pytest and its
+plugins — so importing it there fails, this file is never collected, and Sonar
+reports 0% coverage on new code. That reads as "untested" when the real cause is
+a missing dependency, so the function lives somewhere importable on its own.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gateway import _capability_view
+from services.capability_view import capability_view as _capability_view
 
 
 def test_read_actions_are_left_out():

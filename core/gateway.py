@@ -1509,38 +1509,10 @@ async def list_tenant_connectors(
     return result
 
 
-def _capability_view(apis: list | None) -> dict:
-    """What a connector can DO, projected for the catalog listing.
-
-    Two fields, because the designer's SMS / Mail / Calendar / CRM nodes ask two
-    different questions: `capabilities` answers "which connectors can send an
-    SMS" for the picker, and `capability_actions` carries the param schema and
-    field map so the chosen one renders its form and stays swappable — without a
-    request per connector, which a picker over 213 of them cannot afford.
-
-    Only actions that DECLARE a capability are carried. Projecting the whole
-    `apis` array would multiply a 263KB response by the ~20 read actions each
-    connector has, for data no caller wants.
-
-    A pure function on purpose: it is the part with rules worth testing, and the
-    endpoint around it needs a seeded Mongo catalog to exercise at all.
-    """
-    actions = [a for a in (apis or []) if isinstance(a, dict) and a.get("capability")]
-    return {
-        "capabilities": sorted({a["capability"] for a in actions}),
-        "capability_actions": [
-            {
-                "capability": a["capability"],
-                "action": a.get("id"),
-                "label": a.get("name") or a.get("id"),
-                "method": a.get("method"),
-                "map": a.get("capability_map"),
-                "opaque": bool(a.get("capability_opaque")),
-                "params": a.get("params") or [],
-            }
-            for a in actions
-        ],
-    }
+# Re-exported so this module keeps one name for it; the implementation lives in
+# services/capability_view.py, which imports nothing and is therefore testable
+# without standing up FastAPI — see that module for why that matters to CI.
+from services.capability_view import capability_view as _capability_view
 
 
 @app.get("/connectors/types")
