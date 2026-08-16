@@ -1,10 +1,4 @@
-# Same accepted-advisory list as the repo root's .shielva-ci.yml.
-#
-# There are TWO audit contexts: one rooted at the repo, one at core/ (where the
-# Dockerfile lives). Only the root one was finding a manifest, so the root audit
-# passed with 6 accepted while the core audit kept blocking on the same
-# advisories with nothing to read. A manifest per context is what the runner
-# looks for.
+# Accepted advisories, with the reason each is non-exploitable HERE.
 audit:
   ignore:
     # pip 25.0.1 — five advisories, all against the CI BUILD container's own pip,

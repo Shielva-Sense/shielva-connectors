@@ -1,1 +1,0 @@
-"""Smartsheet connector tests."""

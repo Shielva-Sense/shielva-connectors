@@ -1,1 +1,0 @@
-# Figma connector — helpers package

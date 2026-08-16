@@ -1,1 +1,0 @@
-"""ClickUp connector — helpers package."""

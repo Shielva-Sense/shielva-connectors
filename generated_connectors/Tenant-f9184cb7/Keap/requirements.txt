@@ -1,2 +1,0 @@
-PyJWT>=2.8
-tenacity>=8.2

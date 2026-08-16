@@ -1,1 +1,0 @@
-# Zendesk connector test package

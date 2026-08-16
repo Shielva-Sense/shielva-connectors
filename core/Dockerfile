@@ -36,6 +36,31 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+# pip and setuptools, upgraded AFTER the builder's site-packages land.
+#
+# This has to come after the COPY above, not before it: that COPY replaces the
+# whole site-packages tree, so an upgrade run earlier is silently overwritten by
+# the builder's own versions. Done in the wrong order first, and pip-audit
+# caught it — the image still reported setuptools 79.0.1 with the pin visibly
+# present in this file.
+#
+# Neither is merely build tooling here. The gateway shells out to pip at RUNTIME
+# to install connector wheels on demand (`_ensure_wheel_installed`), with an
+# index URL carrying registry credentials, and a wheel with no prebuilt
+# distribution is BUILT in this image by setuptools. Both are on the request
+# path, which is why these are version bumps and not audit exemptions.
+# The COPY above brings the BUILDER's site-packages wholesale, including
+# setuptools' dist-info. A plain `pip install --upgrade` then installs the new
+# version but leaves the old metadata directory behind, and pip-audit reads
+# metadata — so the image kept reporting setuptools 79.0.1 with 83.0.0 actually
+# installed. Clearing the stale dist-info first is what makes the upgrade
+# visible to anything that inspects the environment rather than imports it.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
+           /usr/local/lib/python3.12/site-packages/setuptools \
+    && pip install --no-cache-dir --upgrade --force-reinstall \
+         "pip>=26.1.2" "setuptools>=83.0.0" \
+    && python -c "import setuptools, sys; v=setuptools.__version__; sys.exit(0 if int(v.split('.')[0])>=83 else 1)" \
+    && rm -rf /root/.cache/pip
 COPY --chown=appuser:appgroup . .
 # ── merge the connector-SDK `shared/*` into the ONE `shared` package ──────────
 # `shared` is a SINGLE top-level package split across two sources: the connector

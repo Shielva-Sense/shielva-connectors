@@ -82,7 +82,9 @@ async def fetch_remote_snapshot() -> dict | None:
         if isinstance(payload, dict) and isinstance(payload.get("connectors"), list) and payload["connectors"]:
             return payload
         logger.warning("connector_catalog.remote_malformed")
-    except Exception as exc:  # noqa: BLE001 — never let a remote hiccup break the seed
+    # Broad on purpose: a remote hiccup must never break the seed — the caller
+    # falls back to the baked snapshot.
+    except Exception as exc:
         logger.warning("connector_catalog.remote_fetch_failed", error=str(exc)[:200])
     return None
 

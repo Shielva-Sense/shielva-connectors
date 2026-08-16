@@ -721,7 +721,9 @@ async def _catalog_refresh_loop() -> None:
                 seeded = await seed_catalog_if_needed(payload)
                 if seeded.get("seeded"):
                     logger.info("catalog_refresh_applied", versions=applied, seeded=seeded.get("seeded"))
-        except Exception as exc:  # noqa: BLE001 — never let a refresh error break the pod
+        # Broad on purpose: a catalog refresh failing must never take the pod
+        # down — it retries on the next interval.
+        except Exception as exc:
             logger.warning("catalog_refresh_loop_error", error=str(exc)[:200])
         await asyncio.sleep(interval)
 
@@ -752,11 +754,7 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
     if not (token and base):
         logger.error("on-demand install: PYPI_INDEX_URL/PYPI_TOKEN unset", connector_type=connector_type)
         return False
-    cred = (
-        f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@"
-        if user
-        else f":{_u.quote(token, safe='')}@"
-    )
+    cred = f"{_u.quote(user, safe='')}:{_u.quote(token, safe='')}@" if user else f":{_u.quote(token, safe='')}@"
     _scheme, _, _rest = base.partition("://")
     index_url = f"{_scheme}://{cred}{_rest}"
 
@@ -1511,6 +1509,12 @@ async def list_tenant_connectors(
     return result
 
 
+# Re-exported so this module keeps one name for it; the implementation lives in
+# services/capability_view.py, which imports nothing and is therefore testable
+# without standing up FastAPI — see that module for why that matters to CI.
+from capability_view import capability_view as _capability_view
+
+
 @app.get("/connectors/types")
 async def list_connector_types():
     """List available connector types — rich metadata from the seeded catalog.
@@ -1553,6 +1557,7 @@ async def list_connector_types():
                 "oauth_scopes": c.get("oauth_scopes"),
                 "install_fields": c.get("install_fields"),
                 "features": c.get("features"),
+                **_capability_view(c.get("apis")),
             }
         )
     # Fallback: any class loaded in this pod but missing from the seeded catalog.
@@ -2777,6 +2782,7 @@ async def get_connector_docs(
     """
     import json as _json
     from pathlib import Path as _Path
+
     # Wheels install ON-DEMAND (no longer baked into the image), so a connector
     # the tenant hasn't installed isn't loaded yet — and its docs live inside the
     # wheel. Lazily install+load it (from JFrog) so docs are visible for any

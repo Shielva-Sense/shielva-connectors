@@ -1,0 +1,30 @@
+# Stripe's own published documentation key, in generated test code.
+#
+# trivy flags `sk_test_4eC39HqLyjWDarjtT1zdp7dc` as a CRITICAL Stripe secret. It
+# is the sample key from Stripe's own docs — it appears in their quickstarts and
+# in thousands of public tutorials, it is a TEST key, and it belongs to nobody
+# here. Nothing was leaked.
+#
+# It sits in generated_connectors/Tenant-f9184cb7/Stripe Payments/tests/, which
+# is per-tenant connector code the Integration Builder EMITS. That directory is
+# already excluded from ruff (ruff.toml) and pytest (pytest.ini) for the same
+# reason: it is output, not source.
+#
+# ⚠ This is the FOURTH CI gate that directory has broken — lint, tests, secret
+# scanning, and it also carries 18 undefined-name bugs the generator emits. The
+# fix that actually holds is to stop committing 3,466 files of one tenant's
+# runtime output into the service repo; each exclusion is a symptom patch.
+stripe-secret-token
+
+# A literal placeholder, not a token.
+#
+# trivy flags `hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` as a CRITICAL HuggingFace
+# access token. It is the `"placeholder"` value in the HuggingFace connector's
+# install-form metadata — the greyed-out hint showing a user the SHAPE of the
+# token they need to paste. It is x's. Checked the actual value rather than
+# trusting the rule name.
+#
+# It appears in the generated connector's metadata and in core/shielva_connectors.json,
+# the baked catalog snapshot built from it, so it is reachable from `core/` too —
+# which is why this needs a rule exclusion and not just a path one.
+hugging-face-access-token

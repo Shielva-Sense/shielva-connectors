@@ -1,1 +1,0 @@
-"""Marketo connector test suite."""
