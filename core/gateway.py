@@ -1730,8 +1730,41 @@ async def install_connector(
         logger.error("Failed to instantiate connector", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to initialize connector: {e!s}")
 
-    # Install connector
+    # Install connector — this is where credentials are actually exercised.
     status = await connector.install()
+
+    # 🚨 The result of that install used to be ignored completely: the connector
+    # was registered, its config persisted, and a 200 returned no matter what
+    # install() reported. Paste any string as a Slack token and the UI showed
+    # "Connected", because nothing had ever looked. The first sign of trouble
+    # was a sync or a send failing later, far from the screen that accepted it.
+    #
+    # PENDING is the one non-authenticated status that is legitimate: an OAuth
+    # connector cannot be authenticated until the user has been through consent,
+    # and the authorization URL is returned below for exactly that.
+    # 🚨 Compared by VALUE, not by enum identity. A connector falls back to its
+    # own local AuthStatus when the shared SDK is not importable, so
+    # `status.auth_status is AuthStatus.CONNECTED` is False for exactly the
+    # connectors that need checking most — and the gate would pass everything.
+    _auth = getattr(status.auth_status, "value", str(status.auth_status))
+    if _auth not in {"connected", "authenticated", "pending"}:
+        logger.warning(
+            "connector_install_rejected",
+            connector_type=connector_type,
+            tenant_id=tenant_id,
+            auth_status=_auth,
+            health=getattr(status.health, "value", str(status.health)),
+        )
+        # Nothing is registered and nothing is persisted, so a failed install
+        # leaves no half-configured connector behind to be found later and
+        # mistaken for a working one.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                status.message
+                or f"{connector_type}: credentials rejected ({_auth})"
+            ),
+        )
 
     # Register connector
     registry.register(connector_id, connector)
