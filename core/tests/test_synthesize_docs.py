@@ -58,17 +58,22 @@ def test_an_empty_setup_md_is_not_a_section(tmp_path: Path) -> None:
 
 def test_an_unreadable_setup_md_does_not_fail_the_build(tmp_path: Path) -> None:
     """Docs are a nice-to-have; the artifact is valid without them. Raising here
-    would fail a connector build over a file permission."""
+    would fail a connector build over an unreadable file.
+
+    🚨 The OSError is provoked by making setup.md a DIRECTORY, not by chmod 000.
+    CI runs as root, and root bypasses file permissions entirely — a chmod-based
+    version of this test passes locally and fails in CI, having proved nothing
+    either way.
+    """
     (tmp_path / "instructions").mkdir()
-    p = tmp_path / "instructions" / "setup.md"
-    p.write_text("x", encoding="utf-8")
-    p.chmod(0o000)
-    try:
-        doc = _synthesize_docs(tmp_path, {})
-    finally:
-        p.chmod(0o644)
+    # A directory where a file is expected: open() raises IsADirectoryError,
+    # which is an OSError, for root and everyone else alike.
+    (tmp_path / "instructions" / "setup.md").mkdir()
+
+    doc = _synthesize_docs(tmp_path, {})
 
     assert "setup" not in _ids(doc)
+    assert _ids(doc) == ["overview"], "the rest of the doc tree still builds"
 
 
 def test_install_fields_render_with_required_and_help(tmp_path: Path) -> None:
