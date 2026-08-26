@@ -8,6 +8,7 @@ be read being a missing section rather than a failed build.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -132,3 +133,49 @@ def test_section_order_is_stable(tmp_path: Path) -> None:
     doc = _synthesize_docs(tmp_path, {"install_fields": [{"key": "k"}], "apis": [{"id": "a"}]})
 
     assert _ids(doc) == ["overview", "setup", "authentication", "api-methods"]
+
+
+# ── writing the file ─────────────────────────────────────────────────────────
+
+
+def test_docs_are_written_next_to_the_package(tmp_path: Path) -> None:
+    from build_artifact import _write_synthesized_docs
+
+    src = tmp_path / "src"
+    (src / "metadata").mkdir(parents=True)
+    (src / "metadata" / "connector.json").write_text(
+        '{"display_name": "Slack", "apis": [{"id": "ping"}]}', encoding="utf-8"
+    )
+    dst = tmp_path / "dst"
+    dst.mkdir()
+
+    assert _write_synthesized_docs(src, dst) is True
+
+    written = json.loads((dst / "_shielva_docs.json").read_text(encoding="utf-8"))
+    assert written["title"] == "Slack Documentation"
+    assert "api-methods" in [s["id"] for s in written["sections"]]
+
+
+def test_missing_metadata_is_not_a_build_failure(tmp_path: Path) -> None:
+    """🚨 Quiet on purpose. Docs are a nice-to-have; a connector with no
+    metadata still produces a valid wheel, and failing the build over
+    documentation would take out the artifact for it."""
+    from build_artifact import _write_synthesized_docs
+
+    dst = tmp_path / "dst"
+    dst.mkdir()
+
+    assert _write_synthesized_docs(tmp_path / "nowhere", dst) is False
+    assert not (dst / "_shielva_docs.json").exists()
+
+
+def test_malformed_metadata_is_not_a_build_failure(tmp_path: Path) -> None:
+    from build_artifact import _write_synthesized_docs
+
+    src = tmp_path / "src"
+    (src / "metadata").mkdir(parents=True)
+    (src / "metadata" / "connector.json").write_text("{not json", encoding="utf-8")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+
+    assert _write_synthesized_docs(src, dst) is False

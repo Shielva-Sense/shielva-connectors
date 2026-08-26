@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import shutil
@@ -364,6 +365,28 @@ def _api_section(meta: dict) -> dict | None:
     }
 
 
+def _write_synthesized_docs(src_pkg: Path, pkg_dst: Path) -> bool:
+    """Write `_shielva_docs.json` from the connector's own metadata.
+
+    For connectors that ship no authored `.shielva/docs/connector_docs.json`, so
+    that every connector serves useful documentation instead of "No
+    documentation available".
+
+    Returns whether anything was written. Failure is deliberately quiet: docs
+    are a nice-to-have, and a connector whose metadata is missing or malformed
+    still produces a valid wheel — failing the build over it would take out the
+    artifact for a documentation problem.
+    """
+    try:
+        meta = json.loads((src_pkg / "metadata" / "connector.json").read_text(encoding="utf-8"))
+        (pkg_dst / "_shielva_docs.json").write_text(
+            json.dumps(_synthesize_docs(src_pkg, meta), indent=2), encoding="utf-8"
+        )
+        return True
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def _synthesize_docs(src_pkg: Path, meta: dict) -> dict:
     """Build a ``{title, sections}`` doc tree from a connector's metadata +
     instructions/setup.md, for connectors that ship no authored
@@ -425,15 +448,7 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
             # connector's own metadata + instructions/setup.md so every connector
             # serves useful documentation (GET /connectors/{type}/docs) instead of
             # "No documentation available". Deterministic, no LLM.
-            import json as _dj
-
-            try:
-                _meta = _dj.loads((src_pkg / "metadata" / "connector.json").read_text(encoding="utf-8"))
-                (pkg_dst / "_shielva_docs.json").write_text(
-                    _dj.dumps(_synthesize_docs(src_pkg, _meta), indent=2), encoding="utf-8"
-                )
-            except (OSError, ValueError, KeyError):
-                pass
+            _write_synthesized_docs(src_pkg, pkg_dst)
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )
