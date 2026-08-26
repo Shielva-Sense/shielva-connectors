@@ -2808,7 +2808,7 @@ async def reauthorize_connector(
     prompt=consent for Google, so this run yields a refresh token). The FE opens it
     in the OAuth popup and exchanges the code via /connectors/{id}/callback.
     """
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -2873,6 +2873,24 @@ async def get_connector_docs(
     raise HTTPException(status_code=404, detail="No documentation bundled for this connector")
 
 
+def _resolve_for_tenant(connector_id: str, tenant_id: str):
+    """A connector by instance id, or by TYPE for this tenant.
+
+    🚨 The registry is keyed by INSTANCE id — `canonical_slack_Tenant-90de08d4`
+    — but a connector is addressed by TYPE everywhere a human or an action
+    schema names one, and the Connectors page asks for `/connectors/slack/...`.
+    Looking up by id alone meant a card that had just installed successfully
+    rendered "Connected" and "Connector not found" at the same time.
+
+    Tenant scoping stays intact: the type path resolves only within the caller's
+    own tenant, and the id path is still checked by the caller.
+    """
+    found = registry.get(connector_id)
+    if found is not None:
+        return found
+    return registry.find_authorized(tenant_id, connector_id)
+
+
 @app.get("/connectors/{connector_id}/apis")
 async def list_connector_apis(
     connector_id: str,
@@ -2882,7 +2900,7 @@ async def list_connector_apis(
 
     Falls back to introspecting the connector class if connector.json is missing.
     """
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -3207,7 +3225,7 @@ async def get_connector_metadata(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Return the full connector.json metadata for a deployed connector."""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -3627,7 +3645,7 @@ async def clear_connector_auth(
 ):
     """Clear stored OAuth tokens and auth hash for a connector so the next
     Check Connection forces a fresh OAuth popup."""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
