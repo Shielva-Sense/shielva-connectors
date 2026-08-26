@@ -29,11 +29,19 @@ import os
 # Env var per connector type. Only these keys are ever injected — an unknown
 # connector type gets nothing, rather than a partial config that fails later
 # with a confusing error.
+# 🚨 Slack is NOT here, and that is not an oversight.
+#
+# The Slack connector declares AUTH_TYPE = "oauth2" but implements no OAuth
+# exchange — no get_oauth_url, no authorize — and REQUIRED_CONFIG_KEYS is
+# ["bot_token"]. Injecting a client_id/client_secret would therefore do
+# nothing: the connector never reads them, there is no consent screen to send
+# anyone to, and install would still fail asking for a bot token.
+#
+# Listing it here would make the UI show a Connect button that leads nowhere,
+# which is worse than the token form it replaces. One-click Slack needs the
+# OAuth v2 flow implemented in the connector first (authorize → exchange code →
+# store bot_token); until then Slack shows the form, honestly.
 _PLATFORM_APPS: dict[str, dict[str, str]] = {
-    "slack": {
-        "client_id": "SLACK_APP_CLIENT_ID",
-        "client_secret": "SLACK_APP_CLIENT_SECRET",
-    },
     "microsoft_teams": {
         "client_id": "TEAMS_APP_CLIENT_ID",
         "client_secret": "TEAMS_APP_CLIENT_SECRET",
