@@ -1760,10 +1760,7 @@ async def install_connector(
         # mistaken for a working one.
         raise HTTPException(
             status_code=400,
-            detail=(
-                status.message
-                or f"{connector_type}: credentials rejected ({_auth})"
-            ),
+            detail=(status.message or f"{connector_type}: credentials rejected ({_auth})"),
         )
 
     # Register connector
