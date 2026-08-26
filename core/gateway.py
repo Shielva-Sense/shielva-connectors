@@ -28,6 +28,7 @@ load_dotenv(override=False)
 
 from services import credential_manager
 from services.connector_store import connector_store
+from services.install_gate import install_auth_ok
 
 logger = structlog.configure(
     processors=[
@@ -1671,7 +1672,20 @@ async def get_credential_values(connector_type: str, tenant_id: str = Depends(ge
     return {"exists": True, "values": public_values}
 
 
-@app.post("/connectors/{connector_type}/install", response_model=ConnectorInstallResponse)
+@app.post(
+    "/connectors/{connector_type}/install",
+    response_model=ConnectorInstallResponse,
+    responses={
+        400: {
+            "description": (
+                "The connector type is unknown, or install() reported that the "
+                "supplied credentials were rejected. Nothing is registered or "
+                "persisted in either case."
+            )
+        },
+        500: {"description": "The connector class could not be instantiated from the config."},
+    },
+)
 async def install_connector(
     connector_type: str,
     request: ConnectorInstallRequest,
@@ -1747,7 +1761,7 @@ async def install_connector(
     # `status.auth_status is AuthStatus.CONNECTED` is False for exactly the
     # connectors that need checking most — and the gate would pass everything.
     _auth = getattr(status.auth_status, "value", str(status.auth_status))
-    if _auth not in {"connected", "authenticated", "pending"}:
+    if not install_auth_ok(status.auth_status):
         logger.warning(
             "connector_install_rejected",
             connector_type=connector_type,

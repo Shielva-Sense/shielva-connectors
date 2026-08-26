@@ -49,9 +49,19 @@ class _Result:
 
 
 def _gate(result: _Result) -> bool:
-    """The gateway's decision, isolated from FastAPI wiring."""
-    auth = getattr(result.auth_status, "value", str(result.auth_status))
-    return auth in {"connected", "authenticated", "pending"}
+    """The gateway's ACTUAL decision function.
+
+    🚨 Imported, not reimplemented. The first version of this test copied the
+    comparison into the test file, which meant it could keep passing while the
+    real gate drifted underneath it — and it left the gate itself uncovered, so
+    the quality gate read 0% on the change that mattered most.
+
+    It lives in services.install_gate rather than gateway so that reaching it
+    does not mean importing the whole application.
+    """
+    from services.install_gate import install_auth_ok
+
+    return install_auth_ok(result.auth_status)
 
 
 @pytest.mark.parametrize(
