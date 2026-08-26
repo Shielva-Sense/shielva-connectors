@@ -29,6 +29,7 @@ load_dotenv(override=False)
 from services import credential_manager
 from services.connector_store import connector_store
 from services.install_gate import install_auth_ok
+from services.platform_apps import apply_platform_app, platform_app_available
 
 logger = structlog.configure(
     processors=[
@@ -1516,6 +1517,17 @@ async def list_tenant_connectors(
 from capability_view import capability_view as _capability_view
 
 
+@app.get("/connectors/platform-apps")
+async def list_platform_apps():
+    """Connector types a customer can connect in one click.
+
+    The UI asks before rendering: an unregistered platform app must show the
+    credential form, not a Connect button that leads to a broken consent screen.
+    Returns only booleans — never the credentials themselves.
+    """
+    return {"available": [t for t in ("microsoft_teams", "whatsapp") if platform_app_available(t)]}
+
+
 @app.get("/connectors/types")
 async def list_connector_types():
     """List available connector types — rich metadata from the seeded catalog.
@@ -1713,6 +1725,13 @@ async def install_connector(
 
     # 1. Fetch stored credentials
     stored_creds = await credential_manager.get_credentials(tenant_id, connector_type)
+
+    # 1b. Fall back to the PLATFORM app, so a customer can connect Slack or
+    # Teams without registering a developer app of their own. Their values win
+    # if they supplied any — an enterprise that must use its own registration
+    # keeps it. Unregistered platform app = no-op, and install asks for
+    # credentials exactly as before.
+    request.config = apply_platform_app(connector_type, request.config or {})
 
     # 2. Merge credentials into config
     # stored_creds take precedence over request.config if both exist for security?
