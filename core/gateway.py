@@ -1525,7 +1525,7 @@ async def list_platform_apps():
     credential form, not a Connect button that leads to a broken consent screen.
     Returns only booleans — never the credentials themselves.
     """
-    return {"available": [t for t in ("microsoft_teams", "whatsapp") if platform_app_available(t)]}
+    return {"available": [t for t in ("slack", "microsoft_teams", "whatsapp") if platform_app_available(t)]}
 
 
 @app.get("/connectors/types")

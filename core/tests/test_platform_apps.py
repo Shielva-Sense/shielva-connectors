@@ -34,15 +34,23 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv(v, raising=False)
 
 
-def test_slack_is_never_one_click_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    """🚨 The Slack connector implements no OAuth exchange — it wants a
-    bot_token. Injecting a client_id/secret would do nothing and the Connect
-    button would lead nowhere, which is worse than the token form."""
+def test_slack_is_one_click_once_the_app_is_registered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slack implements OAuth v2 now, so the platform app reaches it.
+
+    It was excluded while REQUIRED_CONFIG_KEYS was ["bot_token"] and there was
+    no exchange — a Connect button then led nowhere.
+    """
     monkeypatch.setenv("SLACK_APP_CLIENT_ID", "cid")
     monkeypatch.setenv("SLACK_APP_CLIENT_SECRET", "sec")
 
+    assert platform_app_available("slack") is True
+    assert apply_platform_app("slack", {}) == {"client_id": "cid", "client_secret": "sec"}
+
+
+def test_slack_without_env_is_not_one_click() -> None:
     assert platform_app_available("slack") is False
-    assert apply_platform_app("slack", {"bot_token": "x"}) == {"bot_token": "x"}
 
 
 def test_teams_without_env_is_not_one_click() -> None:
