@@ -1,0 +1,24 @@
+# Development / test dependencies — and the reason this file is at the ROOT.
+#
+# 🚨 shielva/ci runs its Sonar coverage stage from the repository root:
+#
+#     WORKDIR /src ; COPY . .
+#     pip install -e .                  → no setup.py/pyproject here, fails
+#     pip install -r requirements.txt   → this repo's are in core/, fails
+#     [ -f requirements-dev.txt ] && pip install -r requirements-dev.txt
+#     python -m pytest --cov ... || true
+#
+# Every install step above this line was a no-op for this layout, so the suite
+# could not import fastapi and collected nothing. The `|| true` swallowed it,
+# no coverage.xml was written, and Sonar scored the project 0% — failing
+# new_coverage>=80 on every PR regardless of what the PR changed. The tell was
+# uncovered_lines equalling lines_to_cover exactly (20977 = 20977): that is an
+# absent report, not untested code.
+#
+# This file is the one name that stage looks for at the root, so it is where the
+# real requirements get pulled in from.
+-r core/requirements.txt
+
+# What writes coverage.xml. The stage installs it too, but declaring it here
+# means a plain `pytest --cov` works for anyone who runs it locally.
+pytest-cov>=4.1.0

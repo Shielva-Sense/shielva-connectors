@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import shutil
@@ -282,82 +283,134 @@ include = ["{pkg_dir_name}", "{pkg_dir_name}.*"]
 """
 
 
+def _overview_section(name: str, meta: dict) -> dict:
+    """Always present — the one section that needs no data to exist."""
+    desc = (meta.get("description") or "").strip()
+    cats = ", ".join(str(c) for c in (meta.get("categories") or []))
+    return {
+        "id": "overview",
+        "title": "Overview",
+        "content": f"**{name}**" + (f"\n\n{desc}" if desc else "") + (f"\n\n**Category:** {cats}" if cats else ""),
+    }
+
+
+def _setup_section(src_pkg: Path) -> dict | None:
+    """The connector's authored setup.md, when it ships one.
+
+    An unreadable file is not a build failure: docs are a nice-to-have and the
+    artifact is still valid without this section.
+    """
+    setup_path = src_pkg / "instructions" / "setup.md"
+    if not setup_path.exists():
+        return None
+    try:
+        body = setup_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return {"id": "setup", "title": "Setup Guide", "content": body} if body else None
+
+
+def _auth_section(meta: dict) -> dict | None:
+    """What the installer will be asked for, from install_fields."""
+    fields = meta.get("install_fields") or []
+    if not fields:
+        return None
+    lines = []
+    for f in fields:
+        req = " *(required)*" if f.get("required") else ""
+        ln = f"- **{f.get('label') or f.get('key')}** (`{f.get('key')}`, {f.get('type', 'text')}){req}"
+        if f.get("help"):
+            ln += f" — {f['help']}"
+        lines.append(ln)
+    return {
+        "id": "authentication",
+        "title": "Authentication",
+        "content": f"This connector authenticates via **{meta.get('auth_type', 'api_key')}**.\n\n"
+        "Fields provided when installing:\n\n" + "\n".join(lines),
+    }
+
+
+def _api_params_md(api: dict) -> str:
+    params = api.get("params") or []
+    return (
+        "\n".join(
+            f"- `{p.get('key')}` ({p.get('type', 'text')})"
+            + (" *(required)*" if p.get("required") else "")
+            + (f" — {p['label']}" if p.get("label") else "")
+            for p in params
+        )
+        or "_No parameters._"
+    )
+
+
+def _api_section(meta: dict) -> dict | None:
+    """One child per declared operation, so the viewer can nest them."""
+    apis = meta.get("apis") or []
+    if not apis:
+        return None
+    kids = [
+        {
+            "id": f"api-{(a.get('id') or str(a.get('name', '')).lower().replace(' ', '-'))}",
+            "title": a.get("name") or a.get("id") or "Operation",
+            "content": f"{a.get('description', '')}\n\n**HTTP method:** `{a.get('method', 'GET')}`\n\n"
+            f"**Parameters:**\n\n{_api_params_md(a)}",
+        }
+        for a in apis
+    ]
+    return {
+        "id": "api-methods",
+        "title": "API Methods",
+        "content": f"This connector exposes **{len(apis)}** operation(s).",
+        "children": kids,
+    }
+
+
+def _write_synthesized_docs(src_pkg: Path, pkg_dst: Path) -> bool:
+    """Write `_shielva_docs.json` from the connector's own metadata.
+
+    For connectors that ship no authored `.shielva/docs/connector_docs.json`, so
+    that every connector serves useful documentation instead of "No
+    documentation available".
+
+    Returns whether anything was written. Failure is deliberately quiet: docs
+    are a nice-to-have, and a connector whose metadata is missing or malformed
+    still produces a valid wheel — failing the build over it would take out the
+    artifact for a documentation problem.
+    """
+    try:
+        meta = json.loads((src_pkg / "metadata" / "connector.json").read_text(encoding="utf-8"))
+        (pkg_dst / "_shielva_docs.json").write_text(
+            json.dumps(_synthesize_docs(src_pkg, meta), indent=2), encoding="utf-8"
+        )
+        return True
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def _synthesize_docs(src_pkg: Path, meta: dict) -> dict:
     """Build a ``{title, sections}`` doc tree from a connector's metadata +
     instructions/setup.md, for connectors that ship no authored
     ``.shielva/docs/connector_docs.json``. Deterministic (no LLM): Overview from
     the description, Setup from setup.md, Authentication from install_fields, and an
-    API reference from the declared apis. Matches the shape the docs viewer renders."""
+    API reference from the declared apis. Matches the shape the docs viewer renders.
+
+    Each section is built by its own function and returns None when it has
+    nothing to say. Inline, the four of them made one 76-line body whose
+    cognitive complexity was 35 — and the four are entirely independent, so the
+    only thing the single function bought was the nesting.
+    """
     name = meta.get("display_name") or meta.get("name") or meta.get("connector_type") or "Connector"
-    desc = (meta.get("description") or "").strip()
-    cats = ", ".join(str(c) for c in (meta.get("categories") or []))
-    secs: list[dict] = [
-        {
-            "id": "overview",
-            "title": "Overview",
-            "content": f"**{name}**" + (f"\n\n{desc}" if desc else "") + (f"\n\n**Category:** {cats}" if cats else ""),
-        }
+    built = [
+        _overview_section(name, meta),
+        _setup_section(src_pkg),
+        _auth_section(meta),
+        _api_section(meta),
     ]
-    setup_path = src_pkg / "instructions" / "setup.md"
-    if setup_path.exists():
-        try:
-            body = setup_path.read_text(encoding="utf-8").strip()
-            if body:
-                secs.append({"id": "setup", "title": "Setup Guide", "content": body})
-        except OSError:
-            pass
-    fields = meta.get("install_fields") or []
-    if fields:
-        lines = []
-        for f in fields:
-            req = " *(required)*" if f.get("required") else ""
-            ln = f"- **{f.get('label') or f.get('key')}** (`{f.get('key')}`, {f.get('type', 'text')}){req}"
-            if f.get("help"):
-                ln += f" — {f['help']}"
-            lines.append(ln)
-        secs.append(
-            {
-                "id": "authentication",
-                "title": "Authentication",
-                "content": f"This connector authenticates via **{meta.get('auth_type', 'api_key')}**.\n\n"
-                "Fields provided when installing:\n\n" + "\n".join(lines),
-            }
-        )
-    apis = meta.get("apis") or []
-    if apis:
-        kids = []
-        for a in apis:
-            params = a.get("params") or []
-            pmd = (
-                "\n".join(
-                    f"- `{p.get('key')}` ({p.get('type', 'text')})"
-                    + (" *(required)*" if p.get("required") else "")
-                    + (f" — {p['label']}" if p.get("label") else "")
-                    for p in params
-                )
-                or "_No parameters._"
-            )
-            kids.append(
-                {
-                    "id": f"api-{(a.get('id') or str(a.get('name', '')).lower().replace(' ', '-'))}",
-                    "title": a.get("name") or a.get("id") or "Operation",
-                    "content": f"{a.get('description', '')}\n\n**HTTP method:** `{a.get('method', 'GET')}`\n\n"
-                    f"**Parameters:**\n\n{pmd}",
-                }
-            )
-        secs.append(
-            {
-                "id": "api-methods",
-                "title": "API Methods",
-                "content": f"This connector exposes **{len(apis)}** operation(s).",
-                "children": kids,
-            }
-        )
     return {
         "title": f"{name} Documentation",
         "generated_by": "build_artifact:metadata-synthesis",
         "prompt_source": "connector.json + instructions/setup.md",
-        "sections": secs,
+        "sections": [s for s in built if s],
     }
 
 
@@ -395,15 +448,7 @@ def build_one(src_pkg: Path, out_dir: Path, version: str) -> tuple[str, str] | N
             # connector's own metadata + instructions/setup.md so every connector
             # serves useful documentation (GET /connectors/{type}/docs) instead of
             # "No documentation available". Deterministic, no LLM.
-            import json as _dj
-
-            try:
-                _meta = _dj.loads((src_pkg / "metadata" / "connector.json").read_text(encoding="utf-8"))
-                (pkg_dst / "_shielva_docs.json").write_text(
-                    _dj.dumps(_synthesize_docs(src_pkg, _meta), indent=2), encoding="utf-8"
-                )
-            except (OSError, ValueError, KeyError):
-                pass
+            _write_synthesized_docs(src_pkg, pkg_dst)
         (tmp_path / "pyproject.toml").write_text(
             _pyproject(dist, version, src_pkg.name, ctype, cls, deps), encoding="utf-8"
         )

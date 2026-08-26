@@ -1,0 +1,22 @@
+[run]
+# Relative, because Sonar matches report paths against the project root and the
+# CI stage runs from /src while a developer runs from anywhere.
+relative_files = true
+
+# The service, not the code it generates. `--cov` with no argument measures the
+# whole rootdir, which here would mean generated_connectors/ — thousands of
+# per-tenant files the Integration Builder emits, whose coverage says nothing
+# about this service. Same boundary pytest.ini, ruff.toml and sonar-project
+# each had to draw.
+source = core
+
+omit =
+    core/tests/*
+    */__init__.py
+    */.venv/*
+    */.connector-venv/*
+    core/dist_connectors/*
+    core/legacy_integration_service/*
+
+[report]
+show_missing = true

@@ -28,6 +28,7 @@ load_dotenv(override=False)
 
 from services import credential_manager
 from services.connector_store import connector_store
+from services.install_gate import install_auth_ok
 
 logger = structlog.configure(
     processors=[
@@ -1671,7 +1672,20 @@ async def get_credential_values(connector_type: str, tenant_id: str = Depends(ge
     return {"exists": True, "values": public_values}
 
 
-@app.post("/connectors/{connector_type}/install", response_model=ConnectorInstallResponse)
+@app.post(
+    "/connectors/{connector_type}/install",
+    response_model=ConnectorInstallResponse,
+    responses={
+        400: {
+            "description": (
+                "The connector type is unknown, or install() reported that the "
+                "supplied credentials were rejected. Nothing is registered or "
+                "persisted in either case."
+            )
+        },
+        500: {"description": "The connector class could not be instantiated from the config."},
+    },
+)
 async def install_connector(
     connector_type: str,
     request: ConnectorInstallRequest,
@@ -1730,8 +1744,38 @@ async def install_connector(
         logger.error("Failed to instantiate connector", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to initialize connector: {e!s}")
 
-    # Install connector
+    # Install connector — this is where credentials are actually exercised.
     status = await connector.install()
+
+    # 🚨 The result of that install used to be ignored completely: the connector
+    # was registered, its config persisted, and a 200 returned no matter what
+    # install() reported. Paste any string as a Slack token and the UI showed
+    # "Connected", because nothing had ever looked. The first sign of trouble
+    # was a sync or a send failing later, far from the screen that accepted it.
+    #
+    # PENDING is the one non-authenticated status that is legitimate: an OAuth
+    # connector cannot be authenticated until the user has been through consent,
+    # and the authorization URL is returned below for exactly that.
+    # 🚨 Compared by VALUE, not by enum identity. A connector falls back to its
+    # own local AuthStatus when the shared SDK is not importable, so
+    # `status.auth_status is AuthStatus.CONNECTED` is False for exactly the
+    # connectors that need checking most — and the gate would pass everything.
+    _auth = getattr(status.auth_status, "value", str(status.auth_status))
+    if not install_auth_ok(status.auth_status):
+        logger.warning(
+            "connector_install_rejected",
+            connector_type=connector_type,
+            tenant_id=tenant_id,
+            auth_status=_auth,
+            health=getattr(status.health, "value", str(status.health)),
+        )
+        # Nothing is registered and nothing is persisted, so a failed install
+        # leaves no half-configured connector behind to be found later and
+        # mistaken for a working one.
+        raise HTTPException(
+            status_code=400,
+            detail=(status.message or f"{connector_type}: credentials rejected ({_auth})"),
+        )
 
     # Register connector
     registry.register(connector_id, connector)

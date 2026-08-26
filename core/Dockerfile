@@ -58,7 +58,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 RUN rm -rf /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
            /usr/local/lib/python3.12/site-packages/setuptools \
     && pip install --no-cache-dir --upgrade --force-reinstall \
-         "pip>=26.1.2" "setuptools>=83.0.0" \
+         "pip>=26.2" "setuptools>=83.0.0" \
     && python -c "import setuptools, sys; v=setuptools.__version__; sys.exit(0 if int(v.split('.')[0])>=83 else 1)" \
     && rm -rf /root/.cache/pip
 COPY --chown=appuser:appgroup . .

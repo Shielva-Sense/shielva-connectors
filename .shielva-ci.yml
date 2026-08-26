@@ -1,7 +1,7 @@
 # Accepted advisories, with the reason each is non-exploitable HERE.
 audit:
   ignore:
-    # pip 25.0.1 — five advisories, all against the CI BUILD container's own pip,
+    # pip 25.0.1 — six advisories, all against the CI BUILD container's own pip,
     # not the service's.
     #
     # This needed care rather than a blanket exemption, because pip is not merely
@@ -24,6 +24,20 @@ audit:
     - PYSEC-2026-1796
     - PYSEC-2026-2875
     - PYSEC-2026-2876
+    # PYSEC-2026-3721 — the "future pip advisory" the note above anticipated,
+    # given the same judgement rather than inheriting the old one.
+    #
+    # pip mishandles doubly-encoded URLs FROM AN INDEX, writing files to
+    # arbitrary paths. It needs a malicious package index to exploit; malicious
+    # packages alone cannot. The runtime copy — the one the gateway shells out
+    # to on the request path — is not covered by this exemption: core/Dockerfile
+    # now floors it at pip>=26.2, above the fix, because >=26.1.2 could resolve
+    # BELOW it and that copy talks to a real index with registry credentials.
+    #
+    # What is accepted is the audit environment's own pip, which installs
+    # nothing we ship, serves no request, and belongs to the shared CI image
+    # this repo has no way to reach.
+    - PYSEC-2026-3721
     # ecdsa 0.19.2 — timing side-channel on SIGNING, fix: none upstream.
     # Transitive via python-jose; this service verifies gateway-issued tokens
     # rather than signing with ECDSA. Already accepted by the pipeline's own
