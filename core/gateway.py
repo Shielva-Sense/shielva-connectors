@@ -3106,7 +3106,7 @@ async def test_connector_method(
     import dataclasses
     import inspect
 
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         # The action-schema bridge (and live bot actions) reference a connector by
         # TYPE slug (e.g. "google_gmail_connector"), not by the deployed-instance id
@@ -3355,7 +3355,7 @@ async def oauth_callback(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Handle OAuth callback"""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3494,7 +3494,7 @@ async def sync_connector(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Trigger connector sync"""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3571,7 +3571,7 @@ async def sync_connector(
 @app.get("/connectors/{connector_id}/status", response_model=ConnectorStatusResponse)
 async def get_connector_status(connector_id: str, tenant_id: str = Depends(get_tenant_id)):
     """Get connector status"""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3632,9 +3632,16 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
 @app.delete("/connectors/{connector_id}")
 async def delete_connector(connector_id: str, tenant_id: str = Depends(get_tenant_id)):
     """Delete a connector"""
-    connector = registry.get(connector_id)
+    # 🚨 Resolve the SAME way every other route does. This one looked the id up
+    # in the registry and then in the store, both keyed by INSTANCE id, so an
+    # uninstall addressed by the catalogue name ("teams") found neither and
+    # answered "Connector not found" for a connector plainly sitting there.
+    connector = _resolve_for_tenant(connector_id, tenant_id)
 
-    # Connector may not be in registry after server restart — look up from store
+    # The id the registry and the store actually know it by. Deleting under the
+    # requested alias would remove nothing and still report success.
+    target_id = str(getattr(connector, "connector_id", "") or "") if connector else connector_id
+
     if not connector:
         stored = await connector_store.get_connector(connector_id)
         if not stored:
@@ -3650,10 +3657,10 @@ async def delete_connector(connector_id: str, tenant_id: str = Depends(get_tenan
         if hasattr(connector, "close"):
             await connector.close()
         # Remove from registry
-        registry.remove(connector_id)
+        registry.remove(target_id)
 
     # Remove from persistence
-    await connector_store.delete_connector(connector_id)
+    await connector_store.delete_connector(target_id)
 
     # Delete stored credentials so the form starts fresh on next install
     if connector_type_for_creds:
@@ -3732,7 +3739,7 @@ async def start_schedule(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Start auto-sync schedule"""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
@@ -3774,7 +3781,7 @@ async def stop_schedule(
 ):
     """Stop auto-sync schedule"""
     # Verify ownership
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         # If connector logic is gone but job remains?
         # We should allow stopping even if connector instance missing (e.g. restart)
@@ -3805,7 +3812,7 @@ async def stop_schedule(
 @app.get("/connectors/{connector_id}/schedule")
 async def get_schedule(connector_id: str, tenant_id: str = Depends(get_tenant_id)):
     """Get schedule status"""
-    connector = registry.get(connector_id)
+    connector = _resolve_for_tenant(connector_id, tenant_id)
     if connector and connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
