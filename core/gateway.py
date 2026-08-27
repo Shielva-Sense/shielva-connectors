@@ -2888,7 +2888,38 @@ def _resolve_for_tenant(connector_id: str, tenant_id: str):
     found = registry.get(connector_id)
     if found is not None:
         return found
-    return registry.find_authorized(tenant_id, connector_id)
+    by_type = registry.find_authorized(tenant_id, connector_id)
+    if by_type is not None:
+        return by_type
+
+    # 🚨 Two identifier spaces for one connector. The ACP catalogue calls it
+    # "teams"; the runtime package declares CONNECTOR_TYPE "microsoft_teams".
+    # The card therefore asks the runtime about a connector it has never heard
+    # of, and renders "Connected" and "Connector not found" at once.
+    #
+    # Match a vendor-prefixed type by its trailing segment, but ONLY when the
+    # tenant has exactly one candidate — an ambiguous alias must 404 rather
+    # than silently return somebody else's connector.
+    suffix = f"_{connector_id}"
+    candidates = [
+        inst
+        for inst in registry._connectors.values()
+        if getattr(inst, "tenant_id", None) == tenant_id and str(getattr(inst, "CONNECTOR_TYPE", "")).endswith(suffix)
+    ]
+    if len(candidates) == 1:
+        logger.info(
+            "connector_gateway.resolved_by_type_alias",
+            requested=connector_id,
+            resolved=str(getattr(candidates[0], "CONNECTOR_TYPE", "")),
+        )
+        return candidates[0]
+    if len(candidates) > 1:
+        logger.warning(
+            "connector_gateway.ambiguous_type_alias",
+            requested=connector_id,
+            matches=[str(getattr(c, "CONNECTOR_TYPE", "")) for c in candidates],
+        )
+    return None
 
 
 @app.get("/connectors/{connector_id}/apis")
