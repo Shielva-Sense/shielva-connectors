@@ -29,7 +29,7 @@ load_dotenv(override=False)
 from services import credential_manager
 from services.connector_store import connector_store
 from services.install_gate import install_auth_ok
-from services.platform_apps import apply_platform_app, platform_app_available
+from services.platform_apps import apply_platform_app, platform_app_available, platform_app_fields
 
 logger = structlog.configure(
     processors=[
@@ -1525,7 +1525,11 @@ async def list_platform_apps():
     credential form, not a Connect button that leads to a broken consent screen.
     Returns only booleans — never the credentials themselves.
     """
-    return {"available": [t for t in ("slack", "microsoft_teams", "whatsapp") if platform_app_available(t)]}
+    available = [t for t in ("slack", "microsoft_teams", "whatsapp") if platform_app_available(t)]
+    # Which fields we already hold, per type. Without this the UI can only
+    # guess the names, and a wrong guess asks the customer for a credential
+    # the platform already has.
+    return {"available": available, "fields": {t: platform_app_fields(t) for t in available}}
 
 
 @app.get("/connectors/types")
