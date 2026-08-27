@@ -85,3 +85,16 @@ def apply_platform_app(connector_type: str, config: dict) -> dict:
         if not str(merged.get(field, "")).strip():
             merged[field] = value
     return merged
+
+
+def platform_app_fields(connector_type: str) -> list[str]:
+    """Which install fields the platform app supplies for this type.
+
+    The UI must not ask a customer for a credential we already hold — that is
+    how someone ends up registering their own Azure app to use ours. It also
+    must not guess the field NAMES: slack and teams use client_id/client_secret,
+    whatsapp uses app_id/app_secret. So the mapping answers, not the caller.
+    """
+    if not platform_app_available(connector_type):
+        return []
+    return sorted(_PLATFORM_APPS.get(connector_type, {}).keys())
