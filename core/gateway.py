@@ -26,6 +26,19 @@ from pydantic import BaseModel
 
 load_dotenv(override=False)
 
+# Decrypt vault:v1: sealed secrets BEFORE config reads env (VAULT_ENVELOPE_DIRECT
+# → AppRole-login + transit-decrypt against shielva-vault). No-op when unset.
+#
+# 🚨 This has to happen here, between load_dotenv and the service imports below.
+# dotenv puts the values in os.environ; the singletons underneath read them at
+# import time. Only integration/main.py bootstrapped, so this process — the one
+# that serves /connectors/* and reads the platform OAuth app credentials — could
+# never hold a sealed value: it would have handed the provider the literal
+# "vault:v1:..." string. That is why those credentials sat in plaintext.
+from shielva_common.envelope import bootstrap as _envelope_bootstrap
+
+_envelope_bootstrap()
+
 from services import credential_manager
 from services.connector_store import connector_store
 from services.install_gate import install_auth_ok
