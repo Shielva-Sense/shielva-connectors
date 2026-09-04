@@ -1628,6 +1628,12 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "company": "company_name",
+            "first_name": "first_name",
+            "last_name": "last_name"
+          },
           "description": "Creates a new Aircall CRM contact with name, optional company, phone numbers, and emails.",
           "id": "create_contact",
           "method": "POST",
@@ -1883,7 +1889,7 @@
       "name": "AircallConnector",
       "provider": "aircall",
       "service": "aircall",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -3329,7 +3335,7 @@
       "name": "AsanaConnector",
       "provider": "asana",
       "service": "asana",
-      "version": "1.0.0"
+      "version": "1.0.4"
     },
     {
       "apis": [
@@ -4963,14 +4969,55 @@
           "returns": "SyncResult"
         },
         {
+          "capability": "sms.send",
+          "capability_map": {
+            "body": "text",
+            "from": "from_",
+            "media_url": "media",
+            "to": "to"
+          },
           "description": "POST /users/{accountId}/messages \u2014 send SMS or MMS.",
           "id": "send_message",
           "method": "POST",
           "name": "Send Message",
           "params": [
             {
-              "key": "payload",
+              "help": "E.164. Sent as a list; a single value is fine.",
+              "key": "to",
+              "label": "To",
               "required": true,
+              "type": "string"
+            },
+            {
+              "key": "text",
+              "label": "Message",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "A Bandwidth number you own.",
+              "key": "from_",
+              "label": "From",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "application_id",
+              "label": "Application ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Attach media to send an MMS.",
+              "key": "media",
+              "label": "Media URLs",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "payload",
+              "label": "Extra fields",
+              "required": false,
               "type": "object"
             }
           ],
@@ -5328,7 +5375,7 @@
       "name": "BandwidthConnector",
       "provider": "bandwidth",
       "service": "bandwidth",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "api_base": "https://3.basecampapi.com/{account_id}",
@@ -6950,6 +6997,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_opaque": true,
           "description": "POST crm.lead.add.json \u2014 body: {fields: {...}}.",
           "id": "create_lead",
           "method": "POST",
@@ -6964,6 +7013,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.update_lead",
+          "capability_opaque": true,
           "description": "POST crm.lead.update.json \u2014 body: {id, fields}.",
           "id": "update_lead",
           "method": "POST",
@@ -7188,6 +7239,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_opaque": true,
           "description": "POST crm.deal.add.json.",
           "id": "create_deal",
           "method": "POST",
@@ -7536,7 +7589,7 @@
       "name": "Bitrix24Connector",
       "provider": "bitrix24",
       "service": "bitrix24",
-      "version": "2.0.0"
+      "version": "2.1.0"
     },
     {
       "apis": [
@@ -11352,6 +11405,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "chat.send",
+          "capability_map": {
+            "body": "content",
+            "to": "session_id"
+          },
           "description": "POST /website/{wid}/conversation/{sid}/message \u2014 send a message into a Crisp conversation. The Python parameter from_ is renamed to 'from' on the wire.",
           "id": "send_message",
           "method": "POST",
@@ -11601,7 +11659,7 @@
       "name": "CrispConnector",
       "provider": "crisp",
       "service": "crisp",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -12633,6 +12691,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "chat.send",
+          "capability_map": {
+            "body": "content",
+            "to": "channel_id"
+          },
           "description": "POST /channels/{channel_id}/messages.",
           "id": "send_message",
           "method": "POST",
@@ -12939,7 +13002,7 @@
       "name": "DiscordConnector",
       "provider": "discord",
       "service": "discord",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -16216,6 +16279,12 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "expected_value",
+            "name": "name",
+            "stage": "milestone"
+          },
           "description": "POST /deals.",
           "id": "create_deal",
           "method": "POST",
@@ -16302,6 +16371,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.log_note",
+          "capability_map": {
+            "body": "note",
+            "record_id": "contact_id"
+          },
           "description": "POST /contacts/{id}/note \u2014 attach a free-text note to a contact.",
           "id": "add_note",
           "method": "POST",
@@ -16388,7 +16462,7 @@
       "name": "EngageBayConnector",
       "provider": "engagebay",
       "service": "engagebay",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -19011,6 +19085,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_opaque": true,
           "description": "POST /contacts/ \u2014 locationId is injected from install field if absent.",
           "id": "create_contact",
           "method": "POST",
@@ -19101,6 +19177,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_opaque": true,
           "description": "POST /opportunities/.",
           "id": "create_opportunity",
           "method": "POST",
@@ -19172,6 +19250,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "chat.send",
+          "capability_opaque": true,
           "description": "POST /conversations/messages \u2014 SMS/Email/IG/FB. conversationId is injected.",
           "id": "send_message",
           "method": "POST",
@@ -19321,7 +19401,7 @@
       "name": "GoHighLevelConnector",
       "provider": "gohighlevel",
       "service": "gohighlevel",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "apis": [
@@ -19808,6 +19888,284 @@
             }
           ],
           "returns": "Dict"
+        },
+        {
+          "capability": "calendar.create_event",
+          "capability_map": {
+            "attendees": "attendees",
+            "calendar_id": "calendar_id",
+            "description": "description",
+            "end": "end",
+            "location": "location",
+            "start": "start",
+            "timezone": "timezone",
+            "title": "summary"
+          },
+          "description": "Creates a calendar event and returns the created event object. Pass event_id to make the create idempotent \u2014 a retry resolves to the same event instead of booking a second meeting. Attendees are only emailed when send_updates says so.",
+          "id": "create_event",
+          "method": "POST",
+          "name": "Create Event",
+          "params": [
+            {
+              "help": "Event title shown on the calendar.",
+              "key": "summary",
+              "label": "Title",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "RFC 3339 datetime. Either carry a UTC offset (2026-06-20T14:00:00-07:00) or pass wall-clock time (2026-06-20T14:00:00) together with an explicit timezone. For all_day, a YYYY-MM-DD date.",
+              "key": "start",
+              "label": "Start",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "Same format as start. For all_day the end date is EXCLUSIVE \u2014 a one-day event on 2026-07-04 ends 2026-07-05.",
+              "key": "end",
+              "label": "End",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "IANA timezone name, e.g. America/Los_Angeles. REQUIRED whenever start/end carry no UTC offset. Abbreviations (PST) and Windows names are rejected.",
+              "key": "timezone",
+              "label": "Timezone",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Target calendar. Defaults to 'primary'.",
+              "key": "calendar_id",
+              "label": "Calendar ID",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Event body text.",
+              "key": "description",
+              "label": "Description",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Free-text location.",
+              "key": "location",
+              "label": "Location",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Comma-separated email addresses to invite.",
+              "key": "attendees",
+              "label": "Attendees",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "One of: none (default \u2014 nobody is emailed), all, externalOnly. Always sent explicitly, never inherited from the API default.",
+              "key": "send_updates",
+              "label": "Send Invitations",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Ask Google to mint a Meet link. The join URL comes back on conferenceData.entryPoints.",
+              "key": "add_conference",
+              "label": "Add Google Meet Link",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "help": "Idempotency key for the Meet link. Defaults to one derived from event_id so a retry reuses the same conference.",
+              "key": "conference_request_id",
+              "label": "Conference Request ID",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Client-supplied event id: 5-1024 chars of a-v and 0-9 (base32hex) \u2014 e.g. a UUID with its hyphens removed. Makes a retried booking resolve to the same event.",
+              "key": "event_id",
+              "label": "Client Event ID (idempotency key)",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Treat start/end as YYYY-MM-DD dates instead of datetimes.",
+              "key": "all_day",
+              "label": "All-day Event",
+              "required": false,
+              "type": "boolean"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "Partially updates an existing event (HTTP PATCH) and returns the updated event. Fields you omit are left untouched; attendees, if sent, replace the whole roster.",
+          "id": "update_event",
+          "method": "PATCH",
+          "name": "Update Event",
+          "params": [
+            {
+              "help": "Id of the event to update.",
+              "key": "event_id",
+              "label": "Event ID",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "Calendar holding the event. Defaults to 'primary'.",
+              "key": "calendar_id",
+              "label": "Calendar ID",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "New event title.",
+              "key": "summary",
+              "label": "Title",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "New start. Must be supplied together with end.",
+              "key": "start",
+              "label": "Start",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "New end. Must be supplied together with start.",
+              "key": "end",
+              "label": "End",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "IANA timezone name. REQUIRED when the new start/end carry no UTC offset.",
+              "key": "timezone",
+              "label": "Timezone",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "New event body text.",
+              "key": "description",
+              "label": "Description",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "New location.",
+              "key": "location",
+              "label": "Location",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Comma-separated emails. REPLACES the existing attendee list \u2014 send the full roster.",
+              "key": "attendees",
+              "label": "Attendees",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "One of: none (default), all, externalOnly. Controls whether attendees are emailed about the change.",
+              "key": "send_updates",
+              "label": "Send Updates",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Attach a Meet link to the existing event.",
+              "key": "add_conference",
+              "label": "Add Google Meet Link",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "help": "Idempotency key for the Meet link. Defaults to one derived from event_id.",
+              "key": "conference_request_id",
+              "label": "Conference Request ID",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "Treat the new start/end as YYYY-MM-DD dates.",
+              "key": "all_day",
+              "label": "All-day Event",
+              "required": false,
+              "type": "boolean"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "Cancels an event. Returns {deleted, already_deleted, event_id, calendar_id}. Deleting an event that is already gone reports already_deleted rather than failing, so a retried cancellation is safe.",
+          "id": "delete_event",
+          "method": "DELETE",
+          "name": "Delete Event",
+          "params": [
+            {
+              "help": "Id of the event to cancel.",
+              "key": "event_id",
+              "label": "Event ID",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "Calendar holding the event. Defaults to 'primary'.",
+              "key": "calendar_id",
+              "label": "Calendar ID",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "One of: none (default \u2014 attendees are not emailed), all, externalOnly.",
+              "key": "send_updates",
+              "label": "Send Cancellations",
+              "required": false,
+              "type": "text"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "Returns busy intervals for one or more calendars in a time window \u2014 the read that makes booking possible. Per-calendar errors mean that calendar was unreadable, so an empty busy list there means 'unknown', not 'free'.",
+          "id": "freebusy_query",
+          "method": "POST",
+          "name": "Free/Busy Query",
+          "params": [
+            {
+              "help": "RFC 3339 datetime WITH a UTC offset, e.g. 2026-06-20T09:00:00-07:00 or 2026-06-20T16:00:00Z. A free/busy window is an absolute instant, so a naive datetime is rejected.",
+              "key": "time_min",
+              "label": "Window Start",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "RFC 3339 datetime WITH a UTC offset.",
+              "key": "time_max",
+              "label": "Window End",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "help": "Comma-separated calendar ids (max 50). Defaults to 'primary'.",
+              "key": "calendar_ids",
+              "label": "Calendar IDs",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "help": "IANA timezone the response is expressed in. Defaults to UTC.",
+              "key": "timezone",
+              "label": "Response Timezone",
+              "required": false,
+              "type": "text"
+            }
+          ],
+          "returns": "Dict"
         }
       ],
       "auth_type": "oauth2",
@@ -19817,7 +20175,7 @@
         "httpx>=0.27.0",
         "structlog>=24.0.0"
       ],
-      "description": "Sync Google Calendar events and meeting metadata into the Shielva knowledge base.",
+      "description": "Read and write Google Calendar: sync events into the knowledge base, check free/busy, and create, update or cancel meetings.",
       "display_name": "Google Calendar",
       "install_fields": [
         {
@@ -19848,12 +20206,13 @@
       "name": "Google Calendar",
       "oauth_auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
       "oauth_scopes": [
-        "https://www.googleapis.com/auth/calendar.readonly"
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events"
       ],
       "oauth_token_url": "https://oauth2.googleapis.com/token",
       "provider": "google",
       "service": "calendar",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "apis": [
@@ -20181,6 +20540,16 @@
           "returns": "Dict"
         },
         {
+          "capability": "mail.send",
+          "capability_map": {
+            "bcc": "bcc",
+            "body": "body",
+            "cc": "cc",
+            "html": "html_body",
+            "reply_to": "reply_to",
+            "subject": "subject",
+            "to": "to"
+          },
           "description": "Sends an email via the Gmail API. Builds a base64url-encoded RFC 2822 MIME message and POSTs to /users/me/messages/send. Requires gmail.send scope.",
           "id": "send_email",
           "method": "POST",
@@ -20213,6 +20582,41 @@
             },
             {
               "key": "html_body",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Address replies are routed to. Enables VERP reply-token addressing (reply+<token>@your-domain).",
+              "key": "reply_to",
+              "label": "Reply-To",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "RFC 5322 Message-ID of the message being answered. Without it a follow-up starts a new thread.",
+              "key": "in_reply_to",
+              "label": "In-Reply-To",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Full ancestry chain of Message-IDs. Defaults to In-Reply-To when omitted.",
+              "key": "references",
+              "label": "References",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Extra RFC 5322 headers, e.g. List-Unsubscribe. Reserved headers are ignored.",
+              "key": "headers",
+              "label": "Additional headers",
+              "required": false,
+              "type": "object"
+            },
+            {
+              "help": "Gmail's own grouping hint. Send alongside In-Reply-To/References, not instead \u2014 Gmail rejects a mismatch.",
+              "key": "thread_id",
+              "label": "Gmail thread id",
               "required": false,
               "type": "string"
             }
@@ -20390,7 +20794,7 @@
       "name": "GmailConnector",
       "provider": "google",
       "service": "gmail",
-      "version": "1.1.0"
+      "version": "1.3.0"
     },
     {
       "apis": [
@@ -23351,6 +23755,178 @@
     {
       "apis": [
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "company": "company",
+            "email": "email",
+            "extra": "properties",
+            "first_name": "firstname",
+            "last_name": "lastname",
+            "phone": "phone",
+            "stage": "lifecyclestage"
+          },
+          "description": "Create a contact. HubSpot has no separate Lead object \u2014 a lead is a contact with a lifecycle stage.",
+          "id": "create_contact",
+          "method": "POST",
+          "name": "Create Contact (Lead)",
+          "params": [
+            {
+              "help": "HubSpot dedupes on this.",
+              "key": "email",
+              "label": "Email",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "firstname",
+              "label": "First name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "lastname",
+              "label": "Last name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "phone",
+              "label": "Phone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "company",
+              "label": "Company",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "e.g. lead, marketingqualifiedlead.",
+              "key": "lifecyclestage",
+              "label": "Lifecycle stage",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "properties",
+              "label": "Custom properties",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "capability": "crm.update_lead",
+          "capability_map": {
+            "extra": "properties",
+            "id": "contact_id"
+          },
+          "description": "Update a contact by id.",
+          "id": "update_contact",
+          "method": "PATCH",
+          "name": "Update Contact",
+          "params": [
+            {
+              "key": "contact_id",
+              "label": "Contact ID",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "properties",
+              "label": "Properties",
+              "required": true,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "amount",
+            "close_date": "closedate",
+            "extra": "properties",
+            "name": "dealname",
+            "stage": "dealstage"
+          },
+          "description": "Create a deal / opportunity.",
+          "id": "create_deal",
+          "method": "POST",
+          "name": "Create Deal",
+          "params": [
+            {
+              "key": "dealname",
+              "label": "Deal name",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "amount",
+              "label": "Amount",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "help": "Stage ID, not its label.",
+              "key": "dealstage",
+              "label": "Stage ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "pipeline",
+              "label": "Pipeline",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "closedate",
+              "label": "Close date",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "properties",
+              "label": "Custom properties",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "capability": "crm.log_note",
+          "capability_map": {
+            "body": "body",
+            "record_id": "contact_id"
+          },
+          "description": "Log a note, optionally against a contact.",
+          "id": "create_note",
+          "method": "POST",
+          "name": "Log Note",
+          "params": [
+            {
+              "key": "body",
+              "label": "Note",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "contact_id",
+              "label": "Contact ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Defaults to now; HubSpot requires one.",
+              "key": "timestamp",
+              "label": "Timestamp",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
           "description": "Sync contacts, companies, deals, and tickets from HubSpot.",
           "id": "sync",
           "method": "GET",
@@ -23521,7 +24097,7 @@
       },
       "provider": "hubspot",
       "service": "crm",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -24692,6 +25268,13 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "company": "company",
+            "email": "email",
+            "first_name": "first_name",
+            "last_name": "last_name"
+          },
           "description": "Creates a new lead in the configured account.",
           "id": "create_lead",
           "method": "POST",
@@ -24860,7 +25443,7 @@
       "name": "HunterConnector",
       "provider": "hunter",
       "service": "hunter",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -25133,6 +25716,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "opportunity_value",
+            "name": "opportunity_name"
+          },
           "description": "POST /Opportunities.",
           "id": "create_opportunity",
           "method": "POST",
@@ -25228,6 +25816,12 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "email": "email",
+            "first_name": "first_name",
+            "last_name": "last_name"
+          },
           "description": "POST /Leads.",
           "id": "create_lead",
           "method": "POST",
@@ -25257,6 +25851,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.update_lead",
+          "capability_map": {
+            "extra": "fields",
+            "id": "lead_id"
+          },
           "description": "PUT /Leads/{id}.",
           "id": "update_lead",
           "method": "PUT",
@@ -25609,7 +26208,7 @@
       "name": "InsightlyConnector",
       "provider": "insightly",
       "service": "insightly",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -27415,6 +28014,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "first_name": "given_name",
+            "last_name": "family_name"
+          },
           "description": "POST /contacts \u2014 create a new contact. Accepts given_name, family_name, email_addresses, and phone_numbers per Keap's schema.",
           "id": "create_contact",
           "method": "POST",
@@ -27496,6 +28100,12 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "projected_revenue",
+            "name": "opportunity_title",
+            "stage": "stage_id"
+          },
           "description": "POST /opportunities \u2014 create a new sales opportunity for a contact at a given stage.",
           "id": "create_opportunity",
           "method": "POST",
@@ -27687,7 +28297,7 @@
       "name": "KeapConnector",
       "provider": "keap",
       "service": "keap",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -27936,6 +28546,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_opaque": true,
           "description": "POST /leads \u2014 body MUST be an array (Kommo bulk semantics).",
           "id": "create_lead",
           "method": "POST",
@@ -27950,6 +28562,8 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.update_lead",
+          "capability_opaque": true,
           "description": "PATCH /leads/{id} with the supplied fields.",
           "id": "update_lead",
           "method": "PATCH",
@@ -28466,7 +29080,7 @@
       "name": "KommoConnector",
       "provider": "kommo",
       "service": "kommo",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -32465,14 +33079,14 @@
       ],
       "name": "Microsoft Teams",
       "oauth": {
-        "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "authorize_url": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
         "scopes": [
           "https://graph.microsoft.com/Team.ReadBasic.All",
           "https://graph.microsoft.com/Channel.ReadBasic.All",
           "https://graph.microsoft.com/ChannelMessage.Read.All",
           "offline_access"
         ],
-        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        "token_url": "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
       },
       "provider": "microsoft",
       "service": "teams",
@@ -34976,6 +35590,8 @@
           "returns": "List[Dict]"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_opaque": true,
           "description": "Create a new lead. The body follows Nutshell's lead schema (description, primaryAccount, contacts[], value).",
           "id": "create_lead",
           "method": "POST",
@@ -35094,7 +35710,7 @@
       "name": "NutshellConnector",
       "provider": "nutshell",
       "service": "nutshell",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -35249,6 +35865,12 @@
           "returns": "List[Dict]"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "amount": "expected_revenue",
+            "email": "email_from",
+            "name": "name"
+          },
           "description": "Creates a crm.lead via execute_kw('crm.lead', 'create', [values]). Returns the new lead id.",
           "id": "create_lead",
           "method": "POST",
@@ -35501,7 +36123,7 @@
       "name": "OdooConnector",
       "provider": "odoo",
       "service": "odoo",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -37492,6 +38114,78 @@
     {
       "apis": [
         {
+          "capability": "calendar.create_event",
+          "capability_map": {
+            "attendees": "attendees",
+            "calendar_id": "calendar_id",
+            "description": "body",
+            "end": "end",
+            "location": "location",
+            "start": "start",
+            "timezone": "timezone",
+            "title": "subject"
+          },
+          "description": "Create an event on an Outlook calendar.",
+          "id": "create_event",
+          "method": "POST",
+          "name": "Create Event",
+          "params": [
+            {
+              "key": "subject",
+              "label": "Title",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Local ISO time, e.g. 2026-03-01T10:00:00 \u2014 no offset; set the timezone below.",
+              "key": "start",
+              "label": "Start",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Local ISO time.",
+              "key": "end",
+              "label": "End",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "IANA or Windows zone name. Defaults to UTC.",
+              "key": "timezone",
+              "label": "Timezone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Leave blank for the default calendar.",
+              "key": "calendar_id",
+              "label": "Calendar",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "body",
+              "label": "Description",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "location",
+              "label": "Location",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Email addresses.",
+              "key": "attendees",
+              "label": "Attendees",
+              "required": false,
+              "type": "array"
+            }
+          ]
+        },
+        {
           "description": "Sync upcoming events (next 30 days) via /me/calendarView with pagination.",
           "id": "sync",
           "method": "GET",
@@ -37639,7 +38333,7 @@
       ],
       "service": "outlook_calendar",
       "token_uri": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -37727,6 +38421,15 @@
           "returns": "Dict"
         },
         {
+          "capability": "mail.send",
+          "capability_map": {
+            "attachments": "attachments",
+            "bcc": "bcc",
+            "body": "body",
+            "cc": "cc",
+            "subject": "subject",
+            "to": "to"
+          },
           "description": "Sends mail via /me/sendMail. Returns {} on 202 Accepted. Requires Mail.Send.",
           "id": "send_mail",
           "method": "POST",
@@ -38021,7 +38724,7 @@
       "name": "OutlookMailConnector",
       "provider": "microsoft",
       "service": "outlook_mail",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -41148,6 +41851,12 @@
           "returns": "Dict"
         },
         {
+          "capability": "sms.send",
+          "capability_map": {
+            "body": "text",
+            "from": "src",
+            "to": "dst"
+          },
           "description": "Sends an SMS or MMS via the Plivo Message API.",
           "id": "send_sms",
           "method": "POST",
@@ -41594,6 +42303,13 @@
           "returns": "Dict"
         },
         {
+          "capability": "sms.send",
+          "capability_map": {
+            "body": "text",
+            "from": "src",
+            "media_url": "url",
+            "to": "dst"
+          },
           "description": "Sends an MMS via the Plivo Message API (wraps send_sms with type=mms).",
           "id": "send_mms",
           "method": "POST",
@@ -41821,7 +42537,7 @@
       "name": "PlivoConnector",
       "provider": "plivo",
       "service": "plivo",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -42310,6 +43026,16 @@
           "returns": "Dict"
         },
         {
+          "capability": "mail.send",
+          "capability_map": {
+            "bcc": "bcc",
+            "body": "text_body",
+            "cc": "cc",
+            "from": "from_email",
+            "html": "html_body",
+            "subject": "subject",
+            "to": "to"
+          },
           "description": "POST /email \u2014 send a single transactional message. Requires at least one of html_body or text_body. Inactive recipients raise PostmarkInactiveRecipient.",
           "id": "send_email",
           "method": "POST",
@@ -42774,7 +43500,7 @@
       "name": "PostmarkConnector",
       "provider": "postmark",
       "service": "postmark",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "api_base": "https://api.powerbi.com/v1.0/myorg/",
@@ -46275,6 +47001,337 @@
               "type": "number"
             }
           ]
+        },
+        {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "company": "company",
+            "email": "email",
+            "first_name": "first_name",
+            "last_name": "last_name",
+            "phone": "phone",
+            "stage": "status"
+          },
+          "description": "Create a Lead. Supply external_id_field + external_id to upsert by External Id instead, so a replayed sync updates rather than duplicating.",
+          "id": "create_lead",
+          "method": "POST",
+          "name": "Create Lead",
+          "params": [
+            {
+              "key": "last_name",
+              "label": "Last Name",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "company",
+              "label": "Company",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "first_name",
+              "label": "First Name",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "phone",
+              "label": "Phone",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "status",
+              "label": "Status",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "lead_source",
+              "label": "Lead Source",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "owner_id",
+              "label": "Owner Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id_field",
+              "label": "External Id Field",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id",
+              "label": "External Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "fields",
+              "label": "Additional Fields",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "capability": "crm.update_lead",
+          "capability_map": {
+            "extra": "fields",
+            "id": "lead_id"
+          },
+          "description": "Update an existing Lead by record id. Fields uses Salesforce API field names, so org-specific custom fields work unchanged.",
+          "id": "update_lead",
+          "method": "PATCH",
+          "name": "Update Lead",
+          "params": [
+            {
+              "key": "lead_id",
+              "label": "Lead Id",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "fields",
+              "label": "Fields",
+              "required": true,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "description": "Idempotently create-or-update a Contact keyed on an External Id field. Calling it twice with the same key yields one record; the returned created flag says which branch ran.",
+          "id": "upsert_contact",
+          "method": "PATCH",
+          "name": "Upsert Contact",
+          "params": [
+            {
+              "key": "external_id_field",
+              "label": "External Id Field",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "external_id",
+              "label": "External Id",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "last_name",
+              "label": "Last Name",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "first_name",
+              "label": "First Name",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "phone",
+              "label": "Phone",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "title",
+              "label": "Title",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "account_id",
+              "label": "Account Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "fields",
+              "label": "Additional Fields",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "description": "Log a Task (activity). who_id is the Lead/Contact it is about; what_id is the related Account/Opportunity/Case; activity_date is date-only YYYY-MM-DD.",
+          "id": "create_task",
+          "method": "POST",
+          "name": "Create Task",
+          "params": [
+            {
+              "key": "subject",
+              "label": "Subject",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "who_id",
+              "label": "Who Id (Lead / Contact)",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "what_id",
+              "label": "What Id (Account / Opportunity / Case)",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "activity_date",
+              "label": "Activity Date (YYYY-MM-DD)",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "status",
+              "label": "Status",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "priority",
+              "label": "Priority",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "description",
+              "label": "Description",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "owner_id",
+              "label": "Owner Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id_field",
+              "label": "External Id Field",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id",
+              "label": "External Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "fields",
+              "label": "Additional Fields",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "amount",
+            "close_date": "close_date",
+            "name": "name",
+            "stage": "stage_name"
+          },
+          "description": "Create an Opportunity. Name, stage_name and close_date (YYYY-MM-DD) are required by Salesforce; stage_name must match a picklist value configured in the target org.",
+          "id": "create_opportunity",
+          "method": "POST",
+          "name": "Create Opportunity",
+          "params": [
+            {
+              "key": "name",
+              "label": "Name",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "stage_name",
+              "label": "Stage Name",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "close_date",
+              "label": "Close Date (YYYY-MM-DD)",
+              "required": true,
+              "type": "text"
+            },
+            {
+              "key": "account_id",
+              "label": "Account Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "amount",
+              "label": "Amount",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "key": "probability",
+              "label": "Probability",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "key": "lead_source",
+              "label": "Lead Source",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "owner_id",
+              "label": "Owner Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "description",
+              "label": "Description",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id_field",
+              "label": "External Id Field",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "external_id",
+              "label": "External Id",
+              "required": false,
+              "type": "text"
+            },
+            {
+              "key": "fields",
+              "label": "Additional Fields",
+              "required": false,
+              "type": "object"
+            }
+          ]
         }
       ],
       "auth_type": "oauth2",
@@ -46287,10 +47344,15 @@
         "list_accounts",
         "list_opportunities",
         "list_leads",
-        "list_cases"
+        "list_cases",
+        "create_lead",
+        "update_lead",
+        "upsert_contact",
+        "create_task",
+        "create_opportunity"
       ],
       "connector_type": "salesforce",
-      "description": "Sync contacts, accounts, opportunities, leads, and cases from Salesforce CRM.",
+      "description": "Sync contacts, accounts, opportunities, leads, and cases from Salesforce CRM, and write leads, contacts, tasks, and opportunities back.",
       "display_name": "Salesforce",
       "features": [
         "retry",
@@ -46298,7 +47360,9 @@
         "circuit_breaker",
         "normalizer",
         "rate_limiting",
-        "error_handling"
+        "error_handling",
+        "writes",
+        "idempotent_writes"
       ],
       "install_fields": [
         {
@@ -46393,6 +47457,41 @@
           "endpoint": "GET /services/data/v58.0/query?q=SELECT ... FROM Case",
           "id": "list_cases",
           "name": "List Cases"
+        },
+        {
+          "category": "leads",
+          "description": "Create a Lead, or upsert it when an External Id key is supplied.",
+          "endpoint": "POST /services/data/v58.0/sobjects/Lead",
+          "id": "create_lead",
+          "name": "Create Lead"
+        },
+        {
+          "category": "leads",
+          "description": "Update an existing Lead by record id.",
+          "endpoint": "PATCH /services/data/v58.0/sobjects/Lead/{id}",
+          "id": "update_lead",
+          "name": "Update Lead"
+        },
+        {
+          "category": "contacts",
+          "description": "Idempotently create-or-update a Contact keyed on an External Id field.",
+          "endpoint": "PATCH /services/data/v58.0/sobjects/Contact/{externalIdField}/{externalId}",
+          "id": "upsert_contact",
+          "name": "Upsert Contact"
+        },
+        {
+          "category": "activities",
+          "description": "Log a Task (activity) against a Lead, Contact, Account, or Opportunity.",
+          "endpoint": "POST /services/data/v58.0/sobjects/Task",
+          "id": "create_task",
+          "name": "Create Task"
+        },
+        {
+          "category": "opportunities",
+          "description": "Create an Opportunity, or upsert it when an External Id key is supplied.",
+          "endpoint": "POST /services/data/v58.0/sobjects/Opportunity",
+          "id": "create_opportunity",
+          "name": "Create Opportunity"
         }
       ],
       "name": "Salesforce",
@@ -46408,7 +47507,7 @@
       "provider": "salesforce",
       "service": "salesforce",
       "service_slug": "salesforce",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "apis": [
@@ -46787,6 +47886,87 @@
     {
       "apis": [
         {
+          "capability": "mail.send",
+          "capability_map": {
+            "bcc": "bcc",
+            "body": "text_body",
+            "cc": "cc",
+            "from": "from_email",
+            "html": "html_body",
+            "reply_to": "reply_to",
+            "subject": "subject",
+            "to": "to"
+          },
+          "description": "Send a transactional email through SendGrid.",
+          "id": "send_email",
+          "method": "POST",
+          "name": "Send Email",
+          "params": [
+            {
+              "help": "Recipient address, or a list.",
+              "key": "to",
+              "label": "To",
+              "required": true,
+              "type": "array"
+            },
+            {
+              "key": "subject",
+              "label": "Subject",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Must be a verified sender.",
+              "key": "from_email",
+              "label": "From",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "text_body",
+              "label": "Body (text)",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "html_body",
+              "label": "Body (HTML)",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "cc",
+              "label": "Cc",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "bcc",
+              "label": "Bcc",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "reply_to",
+              "label": "Reply-To",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "template_id",
+              "label": "Template ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "dynamic_template_data",
+              "label": "Template data",
+              "required": false,
+              "type": "object"
+            }
+          ]
+        },
+        {
           "description": "Sync SendGrid marketing contacts and templates into the knowledge base.",
           "id": "sync",
           "method": "GET",
@@ -46920,7 +48100,7 @@
       "name": "SendGridConnector",
       "provider": "sendgrid",
       "service": "sendgrid",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -47276,6 +48456,801 @@
     {
       "apis": [
         {
+          "description": "Validates that access_key_id and secret_access_key are present and stores config. Makes no AWS call, so multi-tenant provisioning stays fast.",
+          "id": "install",
+          "method": "INTERNAL",
+          "name": "Install Connector",
+          "params": [],
+          "returns": "ConnectorStatus"
+        },
+        {
+          "description": "Calls GetAccount. HEALTHY when production access is granted and sending is enabled; DEGRADED when the account is still in the SES sandbox or sending is disabled; EXPIRED on invalid credentials; OFFLINE when the AWS account is suspended.",
+          "id": "health_check",
+          "method": "GET",
+          "name": "Health Check",
+          "params": [],
+          "returns": "ConnectorStatus"
+        },
+        {
+          "description": "Returns sandbox flag, production access, sending enabled, enforcement status, 24-hour quota, max send rate and messages sent in the last 24 hours.",
+          "id": "get_account",
+          "method": "GET",
+          "name": "Get Account",
+          "params": [],
+          "returns": "Dict"
+        },
+        {
+          "capability": "mail.send",
+          "capability_map": {
+            "bcc": "bcc",
+            "body": "text_body",
+            "cc": "cc",
+            "from": "from_email",
+            "html": "html_body",
+            "subject": "subject",
+            "to": "to"
+          },
+          "description": "SendEmail with either a raw RFC 5322 MIME message (preferred \u2014 In-Reply-To, References, Reply-To, List-Unsubscribe and custom headers are transmitted byte-for-byte) or simple subject/text/html content. configuration_set is a per-call parameter so each tenant's reputation stays isolated.",
+          "id": "send_email",
+          "method": "POST",
+          "name": "Send Email",
+          "params": [
+            {
+              "key": "raw_message",
+              "label": "Raw MIME Message",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "to",
+              "label": "To",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "subject",
+              "label": "Subject",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "text_body",
+              "label": "Plain-text Body",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "html_body",
+              "label": "HTML Body",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "from_email",
+              "label": "From Address",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "cc",
+              "label": "Cc",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "bcc",
+              "label": "Bcc",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "reply_to",
+              "label": "Reply-To",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "headers",
+              "label": "Custom Headers",
+              "required": false,
+              "type": "object"
+            },
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "email_tags",
+              "label": "Email Tags",
+              "required": false,
+              "type": "object"
+            },
+            {
+              "key": "feedback_forwarding_email",
+              "label": "Feedback Forwarding Address",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "from_identity_arn",
+              "label": "From Identity ARN",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "contact_list_name",
+              "label": "Contact List Name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "contact_list_topic",
+              "label": "Contact List Topic",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "SendBulkEmail \u2014 one SES template fanned out to up to 50 recipients per call, each with its own replacement template data and tags. Returns a per-recipient result list plus accepted/failed counts: SES returns HTTP 200 even when individual entries fail.",
+          "id": "send_bulk_email",
+          "method": "POST",
+          "name": "Send Bulk Email",
+          "params": [
+            {
+              "key": "template_name",
+              "label": "Template Name",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "entries",
+              "label": "Recipient Entries",
+              "required": true,
+              "type": "array"
+            },
+            {
+              "key": "from_email",
+              "label": "From Address",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "default_template_data",
+              "label": "Default Template Data (JSON)",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "template_arn",
+              "label": "Template ARN",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "reply_to",
+              "label": "Reply-To",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "default_email_tags",
+              "label": "Default Email Tags",
+              "required": false,
+              "type": "object"
+            },
+            {
+              "key": "feedback_forwarding_email",
+              "label": "Feedback Forwarding Address",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "from_identity_arn",
+              "label": "From Identity ARN",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "CreateEmailIdentity \u2014 begin verifying a customer domain or a single email address. Domain identities return the DKIM CNAME tokens to publish. Supply dkim_signing_selector + dkim_signing_private_key to provision with BYODKIM instead of Easy DKIM.",
+          "id": "create_email_identity",
+          "method": "POST",
+          "name": "Create Email Identity",
+          "params": [
+            {
+              "key": "identity",
+              "label": "Domain or Email Address",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "dkim_signing_selector",
+              "label": "BYODKIM Selector",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "dkim_signing_private_key",
+              "label": "BYODKIM Private Key (PKCS#8)",
+              "required": false,
+              "type": "secret"
+            },
+            {
+              "key": "next_signing_key_length",
+              "label": "Easy DKIM Key Length",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "tags",
+              "label": "Tags",
+              "required": false,
+              "type": "object"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "GetEmailIdentity \u2014 verification status, DKIM attributes and tokens, custom MAIL FROM attributes, attached configuration set, policies and tags.",
+          "id": "get_email_identity",
+          "method": "GET",
+          "name": "Get Email Identity",
+          "params": [
+            {
+              "key": "identity",
+              "label": "Domain or Email Address",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "DeleteEmailIdentity \u2014 revokes verification. WARNING: every subsequent send from that domain fails with MessageRejected. DNS records published by the customer are not removed.",
+          "id": "delete_email_identity",
+          "method": "DELETE",
+          "name": "Delete Email Identity",
+          "params": [
+            {
+              "key": "identity",
+              "label": "Domain or Email Address",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "ListEmailIdentities \u2014 every domain and address this account can send from, with verification and sending status. Token-paginated.",
+          "id": "list_email_identities",
+          "method": "GET",
+          "name": "List Email Identities",
+          "params": [
+            {
+              "key": "page_size",
+              "label": "Page Size",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "key": "next_token",
+              "label": "Next Token",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "PutEmailIdentityDkimSigningAttributes \u2014 switch or rotate DKIM signing. AWS_SES = Easy DKIM (AWS generates the key pair; publish the returned CNAME tokens; set next_signing_key_length to rotate). EXTERNAL = BYODKIM (requires selector + PKCS#8 private key; the key is write-only and never logged or returned).",
+          "id": "put_email_identity_dkim_signing_attributes",
+          "method": "PUT",
+          "name": "Put DKIM Signing Attributes",
+          "params": [
+            {
+              "key": "identity",
+              "label": "Domain or Email Address",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "signing_attributes_origin",
+              "label": "Signing Origin (AWS_SES | EXTERNAL)",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "dkim_signing_selector",
+              "label": "BYODKIM Selector",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "dkim_signing_private_key",
+              "label": "BYODKIM Private Key (PKCS#8)",
+              "required": false,
+              "type": "secret"
+            },
+            {
+              "key": "next_signing_key_length",
+              "label": "Easy DKIM Key Length (RSA_1024_BIT | RSA_2048_BIT)",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "PutEmailIdentityMailFromAttributes \u2014 set a custom MAIL FROM (Return-Path) subdomain so SPF aligns with the customer's own domain instead of amazonses.com, which strict DMARC requires. behavior_on_mx_failure is USE_DEFAULT_VALUE (keep sending, lose alignment) or REJECT_MESSAGE (fail closed). Pass an empty mail_from_domain to clear it.",
+          "id": "put_email_identity_mail_from_attributes",
+          "method": "PUT",
+          "name": "Put MAIL FROM Attributes",
+          "params": [
+            {
+              "key": "identity",
+              "label": "Domain or Email Address",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "mail_from_domain",
+              "label": "MAIL FROM Subdomain",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "behavior_on_mx_failure",
+              "label": "Behavior On MX Failure",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "CreateConfigurationSet \u2014 provision a tenant's reputation boundary. Create one per tenant at onboarding and pass its name on every send. reputation_metrics_enabled defaults to true so per-set bounce and complaint rates are measurable.",
+          "id": "create_configuration_set",
+          "method": "POST",
+          "name": "Create Configuration Set",
+          "params": [
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set Name",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "tls_policy",
+              "label": "TLS Policy (REQUIRE | OPTIONAL)",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "sending_pool_name",
+              "label": "Dedicated IP Pool",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "reputation_metrics_enabled",
+              "label": "Enable Reputation Metrics",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "sending_enabled",
+              "label": "Sending Enabled",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "suppressed_reasons",
+              "label": "Suppressed Reasons",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "custom_redirect_domain",
+              "label": "Custom Click-Tracking Domain",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "tags",
+              "label": "Tags",
+              "required": false,
+              "type": "object"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "GetConfigurationSet \u2014 delivery, reputation, sending, suppression and tracking options for one set.",
+          "id": "get_configuration_set",
+          "method": "GET",
+          "name": "Get Configuration Set",
+          "params": [
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set Name",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "ListConfigurationSets \u2014 token-paginated list of configuration set NAMES in this region. Call get_configuration_set for details.",
+          "id": "list_configuration_sets",
+          "method": "GET",
+          "name": "List Configuration Sets",
+          "params": [
+            {
+              "key": "page_size",
+              "label": "Page Size",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "key": "next_token",
+              "label": "Next Token",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "PutConfigurationSetSuppressionOptions \u2014 per-set suppression policy. suppressed_reasons is a full REPLACEMENT, not a merge: ['BOUNCE','COMPLAINT'] opts the set into the account suppression list, [] opts it out entirely.",
+          "id": "put_configuration_set_suppression_options",
+          "method": "PUT",
+          "name": "Put Configuration Set Suppression Options",
+          "params": [
+            {
+              "key": "configuration_set",
+              "label": "Configuration Set Name",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "suppressed_reasons",
+              "label": "Suppressed Reasons (BOUNCE | COMPLAINT)",
+              "required": true,
+              "type": "array"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "GetSuppressedDestination \u2014 is this address suppressed, and why (BOUNCE or COMPLAINT), and when. AWS answers 'not suppressed' with a 404, which this method translates into {suppressed: false} so it is usable as a pre-send check without try/except.",
+          "id": "get_suppressed_destination",
+          "method": "GET",
+          "name": "Get Suppressed Destination",
+          "params": [
+            {
+              "key": "email_address",
+              "label": "Email Address",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "PutSuppressedDestination \u2014 add an address to the account-level suppression list with reason BOUNCE or COMPLAINT. Use it to import an existing suppression list at migration time.",
+          "id": "put_suppressed_destination",
+          "method": "PUT",
+          "name": "Put Suppressed Destination",
+          "params": [
+            {
+              "key": "email_address",
+              "label": "Email Address",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "key": "reason",
+              "label": "Reason (BOUNCE | COMPLAINT)",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "DeleteSuppressedDestination \u2014 remove an address from the account suppression list. Only do this on a verified re-opt-in; re-mailing a hard bounce is how a sending domain gets blocked.",
+          "id": "delete_suppressed_destination",
+          "method": "DELETE",
+          "name": "Delete Suppressed Destination",
+          "params": [
+            {
+              "key": "email_address",
+              "label": "Email Address",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        },
+        {
+          "description": "ListSuppressedDestinations \u2014 token-paginated account suppression list, filterable by reason and date range.",
+          "id": "list_suppressed_destinations",
+          "method": "GET",
+          "name": "List Suppressed Destinations",
+          "params": [
+            {
+              "key": "reasons",
+              "label": "Reasons (BOUNCE | COMPLAINT)",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "key": "start_date",
+              "label": "Start Date",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "end_date",
+              "label": "End Date",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "page_size",
+              "label": "Page Size",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "key": "next_token",
+              "label": "Next Token",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "returns": "Dict"
+        }
+      ],
+      "auth_type": "api_key",
+      "capabilities": [
+        "send_email",
+        "raw_mime",
+        "bulk_send",
+        "domain_identities",
+        "dkim",
+        "byodkim",
+        "custom_mail_from",
+        "configuration_sets",
+        "suppression_list"
+      ],
+      "categories": [
+        "auth",
+        "health",
+        "email",
+        "outbound",
+        "transactional",
+        "deliverability",
+        "domains",
+        "suppression"
+      ],
+      "connector_type": "ses",
+      "dependencies": [
+        "aiobotocore>=2.0",
+        "botocore>=1.34"
+      ],
+      "description": "Connects to Amazon SES v2 for multi-tenant outbound email: send raw RFC 5322 MIME (threading, Reply-To and List-Unsubscribe headers preserved byte-for-byte) or simple content, fan out templated bulk sends, manage customer domain identities with Easy DKIM or BYODKIM and a custom MAIL FROM / Return-Path, provision per-tenant configuration sets for reputation isolation, and administer the account suppression list. Uses aiobotocore + AWS Signature V4 \u2014 never rolls its own signing.",
+      "display_name": "AWS SES",
+      "features": [
+        "retry",
+        "throttle_backoff",
+        "pagination",
+        "normalizer",
+        "error_handling",
+        "secret_redaction",
+        "per_tenant_isolation"
+      ],
+      "install_fields": [
+        {
+          "help": "20-character access key ID issued by AWS IAM. Found in IAM Console \u2192 Users \u2192 Security credentials \u2192 Access keys. Use a dedicated IAM user with the least-privilege SES policy from the setup guide \u2014 never an admin key.",
+          "key": "access_key_id",
+          "label": "AWS Access Key ID",
+          "placeholder": "AKIAIOSFODNN7EXAMPLE",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "help": "40-character secret access key paired with the access key ID. Stored encrypted and never logged or returned. AWS shows it only once at creation time.",
+          "key": "secret_access_key",
+          "label": "AWS Secret Access Key",
+          "placeholder": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+          "required": true,
+          "type": "secret"
+        },
+        {
+          "default": "us-east-1",
+          "help": "The SES region to send from (e.g. us-east-1, eu-west-1, ap-south-1). SES identities, configuration sets and suppression lists are REGIONAL \u2014 a domain verified in us-east-1 cannot send from eu-west-1.",
+          "key": "region",
+          "label": "AWS Region",
+          "placeholder": "us-east-1",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "help": "Optional single-tenant fallback only. For multi-tenant sending, pass configuration_set on each send instead \u2014 that is what keeps one tenant's bounce and complaint rates off every other tenant's sender reputation.",
+          "key": "default_configuration_set",
+          "label": "Default Configuration Set",
+          "placeholder": "tenant-acme-outbound",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "help": "Optional fallback From address for SIMPLE-content sends. It is deliberately NOT applied to raw MIME sends, because SES's FromEmailAddress parameter overrides the message's own From header.",
+          "key": "default_from_email",
+          "label": "Default From Address",
+          "placeholder": "hello@yourdomain.com",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "help": "Optional. Required only when using temporary credentials from AWS STS, AssumeRole, IAM Identity Center, or federated identity. Leave blank for long-lived IAM access keys.",
+          "key": "session_token",
+          "label": "STS Session Token",
+          "placeholder": "FQoDYXdzE\u2026",
+          "required": false,
+          "type": "secret"
+        },
+        {
+          "help": "Optional. Point the connector at a VPC endpoint, a FIPS endpoint, or a local test double. Leave blank to use the public regional SES endpoint.",
+          "key": "endpoint_url",
+          "label": "Endpoint URL Override",
+          "placeholder": "https://email-fips.us-east-1.amazonaws.com",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "methods": [
+        {
+          "category": "auth",
+          "description": "Validate and store AWS credentials without an AWS round-trip.",
+          "id": "install",
+          "name": "Install Connector"
+        },
+        {
+          "category": "health",
+          "description": "GetAccount probe; DEGRADED while the account is in the SES sandbox.",
+          "id": "health_check",
+          "name": "Health Check"
+        },
+        {
+          "category": "health",
+          "description": "Sandbox flag, sending quota, enforcement status.",
+          "id": "get_account",
+          "name": "Get Account"
+        },
+        {
+          "category": "outbound",
+          "description": "Raw RFC 5322 MIME or simple content, with a per-call configuration set.",
+          "id": "send_email",
+          "name": "Send Email"
+        },
+        {
+          "category": "outbound",
+          "description": "Templated fan-out with per-recipient results.",
+          "id": "send_bulk_email",
+          "name": "Send Bulk Email"
+        },
+        {
+          "category": "domains",
+          "description": "Verify a customer domain or address; Easy DKIM or BYODKIM.",
+          "id": "create_email_identity",
+          "name": "Create Email Identity"
+        },
+        {
+          "category": "domains",
+          "description": "Verification status, DKIM tokens, MAIL FROM attributes.",
+          "id": "get_email_identity",
+          "name": "Get Email Identity"
+        },
+        {
+          "category": "domains",
+          "description": "Revoke verification for a domain or address.",
+          "id": "delete_email_identity",
+          "name": "Delete Email Identity"
+        },
+        {
+          "category": "domains",
+          "description": "Enumerate verified domains and addresses.",
+          "id": "list_email_identities",
+          "name": "List Email Identities"
+        },
+        {
+          "category": "domains",
+          "description": "Switch between Easy DKIM and BYODKIM, or rotate the key.",
+          "id": "put_email_identity_dkim_signing_attributes",
+          "name": "Put DKIM Signing Attributes"
+        },
+        {
+          "category": "domains",
+          "description": "Custom Return-Path subdomain for SPF/DMARC alignment.",
+          "id": "put_email_identity_mail_from_attributes",
+          "name": "Put MAIL FROM Attributes"
+        },
+        {
+          "category": "deliverability",
+          "description": "Provision a per-tenant reputation boundary.",
+          "id": "create_configuration_set",
+          "name": "Create Configuration Set"
+        },
+        {
+          "category": "deliverability",
+          "description": "Read one set's delivery, reputation and suppression options.",
+          "id": "get_configuration_set",
+          "name": "Get Configuration Set"
+        },
+        {
+          "category": "deliverability",
+          "description": "Enumerate configuration sets in the region.",
+          "id": "list_configuration_sets",
+          "name": "List Configuration Sets"
+        },
+        {
+          "category": "deliverability",
+          "description": "Set which bounce/complaint reasons this set suppresses.",
+          "id": "put_configuration_set_suppression_options",
+          "name": "Put Configuration Set Suppression Options"
+        },
+        {
+          "category": "suppression",
+          "description": "Pre-send check: is this address suppressed, and why.",
+          "id": "get_suppressed_destination",
+          "name": "Get Suppressed Destination"
+        },
+        {
+          "category": "suppression",
+          "description": "Add an address to the account suppression list.",
+          "id": "put_suppressed_destination",
+          "name": "Put Suppressed Destination"
+        },
+        {
+          "category": "suppression",
+          "description": "Remove an address after a verified re-opt-in.",
+          "id": "delete_suppressed_destination",
+          "name": "Delete Suppressed Destination"
+        },
+        {
+          "category": "suppression",
+          "description": "Page through the account suppression list.",
+          "id": "list_suppressed_destinations",
+          "name": "List Suppressed Destinations"
+        }
+      ],
+      "name": "SesConnector",
+      "provider": "aws",
+      "service": "sesv2",
+      "version": "1.1.0"
+    },
+    {
+      "apis": [
+        {
           "description": "Sync drive items from the signed-in user's OneDrive root.",
           "id": "sync",
           "method": "GET",
@@ -47447,13 +49422,13 @@
       ],
       "name": "Microsoft SharePoint",
       "oauth": {
-        "auth_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "auth_url": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
         "scopes": [
           "https://graph.microsoft.com/Files.Read",
           "https://graph.microsoft.com/Sites.Read.All",
           "offline_access"
         ],
-        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        "token_url": "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
       },
       "provider": "microsoft",
       "service": "sharepoint",
@@ -50718,6 +52693,13 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_lead",
+          "capability_map": {
+            "email": "email",
+            "first_name": "first_name",
+            "last_name": "last_name",
+            "phone": "phone_work"
+          },
           "description": "Create a new contact. Email is rendered as the SugarCRM email array (primary_address=true).",
           "id": "create_contact",
           "method": "POST",
@@ -50818,6 +52800,13 @@
           "returns": "Dict"
         },
         {
+          "capability": "crm.create_deal",
+          "capability_map": {
+            "amount": "amount",
+            "close_date": "date_closed",
+            "name": "name",
+            "stage": "sales_stage"
+          },
           "description": "Create a new opportunity. When date_closed is omitted it defaults to 30 days from today to satisfy the SugarCRM required-field constraint.",
           "id": "create_opportunity",
           "method": "POST",
@@ -50998,7 +52987,7 @@
       "name": "SugarCRMConnector",
       "provider": "sugarcrm",
       "service": "sugarcrm",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -51966,6 +53955,11 @@
           "returns": "Dict"
         },
         {
+          "capability": "chat.send",
+          "capability_map": {
+            "body": "text",
+            "to": "chat_id"
+          },
           "description": "Sends a text message to a chat. Supports HTML / MarkdownV2 / Markdown parse modes and inline keyboards via reply_markup.",
           "id": "send_message",
           "method": "POST",
@@ -52417,7 +54411,7 @@
       "name": "TelegramConnector",
       "provider": "telegram",
       "service": "telegram",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "api_base": "https://api.tidio.co",
@@ -53051,6 +55045,63 @@
     {
       "apis": [
         {
+          "capability": "sms.send",
+          "capability_map": {
+            "body": "body",
+            "from": "from_",
+            "media_url": "media_url",
+            "to": "to"
+          },
+          "description": "Send an SMS or MMS from a Twilio number or messaging service.",
+          "id": "send_sms",
+          "method": "POST",
+          "name": "Send SMS",
+          "params": [
+            {
+              "help": "Destination in E.164, e.g. +14155551234.",
+              "key": "to",
+              "label": "To",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Text to send.",
+              "key": "body",
+              "label": "Message",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "A Twilio number you own. Required unless a messaging service is used.",
+              "key": "from_",
+              "label": "From",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Use a messaging service instead of a fixed From number.",
+              "key": "messaging_service_sid",
+              "label": "Messaging Service SID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "help": "Attach media to send an MMS.",
+              "key": "media_url",
+              "label": "Media URL",
+              "required": false,
+              "type": "array"
+            },
+            {
+              "help": "Webhook for delivery status.",
+              "key": "status_callback",
+              "label": "Status Callback",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
           "description": "Sync Twilio SMS messages and voice calls into the knowledge base.",
           "id": "sync",
           "method": "GET",
@@ -53201,7 +55252,7 @@
       "name": "TwilioConnector",
       "provider": "twilio",
       "service": "twilio",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "apis": [
@@ -53777,14 +55828,42 @@
           "returns": "object"
         },
         {
+          "capability": "sms.send",
+          "capability_map": {
+            "body": "text",
+            "from": "from_",
+            "to": "to"
+          },
           "description": "POST /sms/json \u2014 send an SMS. Payload includes from, to, text, type?. Envelope-checked.",
           "id": "send_sms",
           "method": "POST",
           "name": "Send SMS",
           "params": [
             {
-              "key": "payload",
+              "help": "Destination in E.164 without '+', e.g. 447700900000.",
+              "key": "to",
+              "label": "To",
               "required": true,
+              "type": "string"
+            },
+            {
+              "key": "text",
+              "label": "Message",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Your Vonage number or an approved sender id.",
+              "key": "from_",
+              "label": "From",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "help": "Merged last; for anything not named above.",
+              "key": "payload",
+              "label": "Extra fields",
+              "required": false,
               "type": "object"
             }
           ],
@@ -54247,7 +56326,7 @@
       "name": "VonageConnector",
       "provider": "vonage",
       "service": "vonage",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "apis": [
@@ -59278,6 +61357,6 @@
       "version": "1.0.0"
     }
   ],
-  "count": 212,
-  "version": "1.0.3"
+  "count": 213,
+  "version": "1.0.5"
 }
