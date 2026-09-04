@@ -26,8 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from services.connector_store import ConnectorStore  # noqa: E402
-
+from services.connector_store import ConnectorStore
 
 CLEARTEXT = '{"connector_id":"c1","tenant_id":"Tenant-1","config":{"client_secret":"s3cr3t"}}'
 SEALED = "v1:Gi9iB4kKgtpbPnbOFbYJKS19O4190pJpGE0VApSH9yZRskYjhOuoujwld24gMs4="

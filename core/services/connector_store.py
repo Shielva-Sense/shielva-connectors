@@ -382,8 +382,7 @@ class ConnectorStore:
         enc = _encryptor()
         if enc is None:
             raise RuntimeError(
-                "connector config encryption unavailable — refusing to persist "
-                "install credentials in cleartext"
+                "connector config encryption unavailable — refusing to persist install credentials in cleartext"
             )
         scope = tenant_id or await self._tenant_for(connector_id)
         return await enc.encrypt(plaintext, scope)
