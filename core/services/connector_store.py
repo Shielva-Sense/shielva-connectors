@@ -154,6 +154,13 @@ class ConnectorStore:
         )
         payload = connector_config.json()
 
+        # 🚨 The config IS credentials. Whatever the customer typed into the
+        # install form lands here — client_secret, api_key, bot_token — so this
+        # payload is sealed before it reaches either store. Tokens were already
+        # encrypted at rest; config was not, and it was going to Mongo AND to
+        # Redis (which is AOF+RDB-persistent in prod) in the clear.
+        envelope = await self._seal_config(connector_id, tenant_id, payload)
+
         db = _mongo_db()
         if db is not None:
             try:
@@ -163,9 +170,14 @@ class ConnectorStore:
                         "$set": {
                             "connector_id": connector_id,
                             "tenant_id": tenant_id,
-                            "payload": payload,
+                            "enc_scope": tenant_id or connector_id,
+                            "encrypted": envelope,
                             "updated_at": now,
                         },
+                        # Drop the legacy cleartext field: re-saving a connector
+                        # that predates sealing must not leave the old plaintext
+                        # sitting beside the new envelope.
+                        "$unset": {"payload": ""},
                         "$setOnInsert": {"created_at": now},
                     },
                     upsert=True,
@@ -173,8 +185,8 @@ class ConnectorStore:
             except Exception as exc:
                 logger.error("connector_store.config_mongo_write_failed", connector_id=connector_id, error=str(exc))
 
-        await redis_service.set(self._get_redis_key(connector_id), payload)
-        logger.info("connector_store.config_saved", connector_id=connector_id, durable=db is not None)
+        await redis_service.set(self._get_redis_key(connector_id), envelope)
+        logger.info("connector_store.config_saved", connector_id=connector_id, durable=db is not None, sealed=True)
 
     async def get_connector(self, connector_id: str) -> ConnectorConfig | None:
         """Cache-aside read: Redis hit → return; miss → Mongo → repopulate."""
@@ -183,10 +195,11 @@ class ConnectorStore:
         key = self._get_redis_key(connector_id)
         data = await redis_service.get(key)
         if data:
-            cfg = self._parse_config(data, connector_id)
+            clear = await self._open_config(data, "", connector_id)
+            cfg = self._parse_config(clear, connector_id) if clear else None
             if cfg is not None:
                 # Self-heal: back-fill Mongo if this predates the durable store.
-                await self._ensure_config_durable(connector_id, cfg.tenant_id, data)
+                await self._ensure_config_durable(connector_id, cfg.tenant_id, clear)
                 return cfg
 
         db = _mongo_db()
@@ -196,9 +209,14 @@ class ConnectorStore:
             except Exception as exc:
                 logger.error("connector_store.config_mongo_read_failed", connector_id=connector_id, error=str(exc))
                 doc = None
-            if doc and doc.get("payload"):
-                await redis_service.set(key, doc["payload"])  # repopulate cache
-                return self._parse_config(doc["payload"], connector_id)
+            # `encrypted` is the sealed field; `payload` is the legacy cleartext
+            # one, still read so rows written before sealing keep working.
+            stored = (doc or {}).get("encrypted") or (doc or {}).get("payload")
+            if stored:
+                clear = await self._open_config(stored, (doc or {}).get("enc_scope") or "", connector_id)
+                if clear:
+                    await redis_service.set(key, stored)  # cache it exactly as stored
+                    return self._parse_config(clear, connector_id)
         return None
 
     async def list_connectors(self) -> list[ConnectorConfig]:
@@ -211,11 +229,14 @@ class ConnectorStore:
             try:
                 out: list[ConnectorConfig] = []
                 async for doc in db[_CONFIG_COLLECTION].find({}):
-                    cfg = self._parse_config(doc.get("payload", ""), doc.get("connector_id", ""))
+                    cid = doc.get("connector_id", "")
+                    stored = doc.get("encrypted") or doc.get("payload") or ""
+                    clear = await self._open_config(stored, doc.get("enc_scope") or "", cid)
+                    cfg = self._parse_config(clear, cid) if clear else None
                     if cfg is not None:
                         out.append(cfg)
                         # keep the cache warm for the runtime hot path
-                        await redis_service.set(self._get_redis_key(cfg.connector_id), doc["payload"])
+                        await redis_service.set(self._get_redis_key(cfg.connector_id), stored)
                 return out
             except Exception as exc:
                 logger.error("connector_store.list_mongo_failed", error=str(exc))
@@ -225,7 +246,11 @@ class ConnectorStore:
         connectors = []
         for key in keys:
             data = await redis_service.get(key)
-            cfg = self._parse_config(data, key) if data else None
+            if not data:
+                continue
+            cid = key.rsplit(":", 1)[-1]
+            clear = await self._open_config(data, "", cid)
+            cfg = self._parse_config(clear, key) if clear else None
             if cfg is not None:
                 connectors.append(cfg)
         return connectors
@@ -319,17 +344,63 @@ class ConnectorStore:
             return None
 
     async def _tenant_for(self, connector_id: str) -> str:
-        """Encryption scope for a connector's tokens — its tenant_id, or the
-        connector_id itself as a stable fallback (must match on decrypt)."""
-        cfg = None
-        try:
-            from .redis_service import redis_service
+        """Encryption scope for a connector — its tenant_id, or the connector_id
+        itself as a stable fallback (must match on decrypt).
 
-            raw = await redis_service.get(self._get_redis_key(connector_id))
-            cfg = self._parse_config(raw, connector_id) if raw else None
-        except Exception:
-            cfg = None
-        return (cfg.tenant_id if cfg and cfg.tenant_id else None) or connector_id
+        🚨 Read from Mongo, where tenant_id is a plain indexed field, NOT by
+        parsing the cached config. The config payload is now sealed, so parsing
+        it here would fail and silently downgrade every scope to connector_id —
+        including the scope this returns for TOKEN encryption, which would then
+        no longer match the scope existing tokens were sealed under.
+        """
+        db = _mongo_db()
+        if db is not None:
+            try:
+                doc = await db[_CONFIG_COLLECTION].find_one(
+                    {"connector_id": connector_id}, {"tenant_id": 1, "enc_scope": 1}
+                )
+                scope = (doc or {}).get("tenant_id") or (doc or {}).get("enc_scope")
+                if scope:
+                    return str(scope)
+            except Exception:
+                pass
+        return connector_id
+
+    # ── connector config sealing (AES-GCM, per-tenant DEK — same as tokens) ──
+    #
+    # A stored value is either a sealed envelope or legacy cleartext. Cleartext
+    # is always the serialised model, so it always starts with "{" — that is the
+    # discriminator, and it lets rows written before sealing still be read.
+    @staticmethod
+    def _is_sealed(value: str) -> bool:
+        return bool(value) and not value.lstrip().startswith("{")
+
+    async def _seal_config(self, connector_id: str, tenant_id: str, plaintext: str) -> str:
+        """Seal a config payload. Raises rather than falling back to cleartext:
+        this payload carries the customer's credentials, so failing the install
+        loudly is correct where silently storing them readable is not."""
+        enc = _encryptor()
+        if enc is None:
+            raise RuntimeError(
+                "connector config encryption unavailable — refusing to persist "
+                "install credentials in cleartext"
+            )
+        scope = tenant_id or await self._tenant_for(connector_id)
+        return await enc.encrypt(plaintext, scope)
+
+    async def _open_config(self, value: str, scope: str, connector_id: str) -> str | None:
+        """Return cleartext for a stored config, sealed or legacy."""
+        if not self._is_sealed(value):
+            return value  # pre-sealing row; re-sealed on its next save
+        enc = _encryptor()
+        if enc is None:
+            logger.error("connector_store.config_unseal_unavailable", connector_id=connector_id)
+            return None
+        try:
+            return await enc.decrypt(value, scope or await self._tenant_for(connector_id))
+        except Exception as exc:
+            logger.error("connector_store.config_unseal_failed", connector_id=connector_id, error=str(exc))
+            return None
 
     async def _persist_tokens_mongo(self, connector_id: str, plaintext: str) -> bool:
         db = _mongo_db()
@@ -384,13 +455,17 @@ class ConnectorStore:
             if existing:
                 return
             now = datetime.utcnow()
+            # Back-fill seals too — this path exists to make a Redis-only config
+            # durable, and durable must not mean readable.
+            envelope = await self._seal_config(connector_id, tenant_id, payload)
             await db[_CONFIG_COLLECTION].update_one(
                 {"connector_id": connector_id},
                 {
                     "$set": {
                         "connector_id": connector_id,
                         "tenant_id": tenant_id,
-                        "payload": payload,
+                        "enc_scope": tenant_id or connector_id,
+                        "encrypted": envelope,
                         "updated_at": now,
                     },
                     "$setOnInsert": {"created_at": now},
