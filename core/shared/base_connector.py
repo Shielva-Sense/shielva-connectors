@@ -132,6 +132,103 @@ class SyncResult:
     message: str | None = None
 
 
+# ── OAuth endpoint discovery ──────────────────────────────────────────────
+#
+# 🚨 Connectors declare their OAuth endpoints under many different names.
+#
+# A survey of the published catalogue found 40 OAuth connectors of which only 7
+# could build a consent URL. The rest were not missing the endpoint — they had
+# it, under a name this resolver did not look for: `_OAUTH_AUTHORIZE_URL`,
+# `OAUTH_AUTHORIZE_URL`, `_OAUTH_AUTH_URL`, `_WEBFLOW_AUTH_URL`, or only in the
+# packaged metadata. Each one installed, reported itself connected, and then
+# failed every call with 401 and no token — which reads as a broken integration
+# rather than a consent step that was never possible.
+#
+# Editing 34 packages to rename a constant would fix them one at a time and
+# regress the moment a generated connector picks a 35th spelling. Looking for
+# what they already declare fixes them at once, and keeps working for
+# connectors nobody has written yet.
+#
+# Order is deliberate: an explicit class attribute always wins, so a connector
+# that states its endpoint is never second-guessed by a guess about a name.
+_AUTH_URI_ALIASES = (
+    "AUTH_URI",
+    "AUTH_URL",
+    "AUTHORIZE_URL",
+    "AUTHORIZATION_URL",
+    "OAUTH_AUTHORIZE_URL",
+    "OAUTH_AUTH_URL",
+    "OAUTH_AUTHORIZATION_URL",
+    "_OAUTH_AUTHORIZE_URL",
+    "_OAUTH_AUTH_URL",
+    "_OAUTH_AUTHORIZATION_URL",
+    "_AUTH_URI",
+    "_AUTH_URL",
+    "_AUTHORIZE_URL",
+)
+_TOKEN_URI_ALIASES = (
+    "TOKEN_URI",
+    "TOKEN_URL",
+    "OAUTH_TOKEN_URL",
+    "OAUTH_TOKEN_URI",
+    "_OAUTH_TOKEN_URL",
+    "_OAUTH_TOKEN_URI",
+    "_TOKEN_URI",
+    "_TOKEN_URL",
+)
+
+
+def _discover_endpoint(connector, aliases: tuple, meta_keys: tuple) -> "str | None":
+    """Find an OAuth endpoint the connector already declares, wherever it put it.
+
+    Searched in order: the class, its module (including provider-prefixed names
+    like `_WEBFLOW_AUTH_URL`), then the packaged `metadata/connector.json`.
+    Returns None rather than guessing — an endpoint that does not exist must
+    surface as a clear error, never as a plausible-looking wrong URL.
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    cls = connector.__class__
+    module = sys.modules.get(cls.__module__)
+
+    for name in aliases:
+        for holder in (cls, module):
+            val = getattr(holder, name, None)
+            if isinstance(val, str) and val.startswith("http"):
+                return val
+
+    # Provider-prefixed module constants — `_WEBFLOW_AUTH_URL` and friends —
+    # which no fixed alias list can enumerate.
+    if module is not None:
+        for name, val in vars(module).items():
+            if not isinstance(val, str) or not val.startswith("http"):
+                continue
+            upper = name.upper()
+            if any(upper.endswith(a.lstrip("_")) for a in aliases):
+                return val
+
+    # Finally the metadata shipped inside the wheel, which is where several
+    # connectors record the endpoint and nowhere else.
+    try:
+        meta_path = Path(module.__file__).parent / "metadata" / "connector.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            for key in meta_keys:
+                val = meta.get(key)
+                if isinstance(val, str) and val.startswith("http"):
+                    return val
+            for field in meta.get("install_fields") or []:
+                if str(field.get("key", "")).lower() in meta_keys:
+                    default = field.get("default")
+                    if isinstance(default, str) and default.startswith("http"):
+                        return default
+    except Exception:  # metadata is a bonus, never a hard dependency
+        pass
+    return None
+
+
 class BaseConnector(ABC):
     """
     Abstract base class for all Shielva Connectors.
@@ -383,6 +480,8 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "AUTH_URI", None)
             # fall back to module-level constant in the connector's module
             or getattr(sys.modules.get(self.__class__.__module__, None), "AUTH_URI", None)
+            # …then wherever else this connector actually declared it.
+            or _discover_endpoint(self, _AUTH_URI_ALIASES, ("authorization_url", "auth_uri", "authorize_url"))
         )
         if not auth_uri:
             raise ValueError(
@@ -478,6 +577,7 @@ class BaseConnector(ABC):
             self.config.get("token_uri")
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
         )
         if not token_uri:
             # No TOKEN_URI — can't probe; let gateway fall through to the OAuth popup
@@ -612,6 +712,7 @@ class BaseConnector(ABC):
             self.config.get("token_uri")
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
         )
         if not token_uri:
             raise ValueError(f"TOKEN_URI not set for connector '{self.CONNECTOR_TYPE}'")
@@ -670,6 +771,7 @@ class BaseConnector(ABC):
             self.config.get("token_uri")
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
         )
         username = self.config.get("username") or self.config.get("email")
         password = self.config.get("password")
@@ -778,6 +880,7 @@ class BaseConnector(ABC):
             self.config.get("token_uri")
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
         )
         client_id = (
             self.config.get("client_id")
@@ -886,6 +989,7 @@ class BaseConnector(ABC):
             or key_info.get("token_uri")
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
         )
         private_key = key_info.get("private_key") or self.config.get("private_key")
         client_email = key_info.get("client_email") or self.config.get("client_email") or self.config.get("iss")
