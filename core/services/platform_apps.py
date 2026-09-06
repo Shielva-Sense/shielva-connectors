@@ -63,6 +63,19 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
 }
 
 
+def platform_app_types() -> list[str]:
+    """Every connector type that CAN have a platform app.
+
+    🚨 Exists because the /connectors/platform-apps endpoint carried its own
+    literal ("slack", "microsoft_teams", "whatsapp"). That is a second copy of
+    this module's keys, and it drifted the moment the calendars were added here:
+    the map said they were platform apps, the endpoint never asked about them,
+    and the UI went on demanding client_id and client_secret from customers with
+    nothing to show that anything was wrong.
+    """
+    return sorted(_PLATFORM_APPS)
+
+
 def platform_app_available(connector_type: str) -> bool:
     """Whether a customer can connect this type with one click.
 

@@ -42,7 +42,12 @@ _envelope_bootstrap()
 from services import credential_manager
 from services.connector_store import connector_store
 from services.install_gate import install_auth_ok
-from services.platform_apps import apply_platform_app, platform_app_available, platform_app_fields
+from services.platform_apps import (
+    apply_platform_app,
+    platform_app_available,
+    platform_app_fields,
+    platform_app_types,
+)
 
 logger = structlog.configure(
     processors=[
@@ -1601,7 +1606,10 @@ async def list_platform_apps():
     credential form, not a Connect button that leads to a broken consent screen.
     Returns only booleans — never the credentials themselves.
     """
-    available = [t for t in ("slack", "microsoft_teams", "whatsapp") if platform_app_available(t)]
+    # Derived from the platform-app map, never a literal beside it — see
+    # platform_app_types(). A hardcoded tuple here silently ignored every type
+    # added to that map.
+    available = [t for t in platform_app_types() if platform_app_available(t)]
     # Which fields we already hold, per type. Without this the UI can only
     # guess the names, and a wrong guess asks the customer for a credential
     # the platform already has.

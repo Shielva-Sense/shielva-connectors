@@ -22,6 +22,7 @@ from services.platform_apps import (
     apply_platform_app,
     platform_app_available,
     platform_app_fields,
+    platform_app_types,
     platform_credentials,
 )
 
@@ -198,3 +199,34 @@ def test_half_a_credential_pair_is_not_used(monkeypatch) -> None:
     monkeypatch.delenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", raising=False)
     assert platform_app_available("google_calendar") is False
     assert apply_platform_app("google_calendar", {}) == {}
+
+
+def test_the_endpoint_list_is_derived_from_the_map_not_a_literal() -> None:
+    """🚨 The bug this pins, which cost a whole build cycle.
+
+    /connectors/platform-apps carried its own tuple —
+    ("slack", "microsoft_teams", "whatsapp") — a second copy of this module's
+    keys. Adding the calendars to the map therefore changed nothing the UI could
+    see: the map said they were platform apps, the endpoint never asked about
+    them, and customers were still required to supply client_id and
+    client_secret with nothing to indicate anything was wrong.
+    """
+    import re
+    from pathlib import Path
+
+    gateway = Path(__file__).resolve().parents[1] / "gateway.py"
+    body = gateway.read_text()
+    handler = body[body.index('@app.get("/connectors/platform-apps")') : body.index('@app.get("/connectors/types")')]
+    assert "platform_app_types()" in handler
+    # No literal tuple of connector names left beside it.
+    assert not re.search(r'\(\s*"slack"\s*,', handler)
+
+
+def test_every_mapped_type_is_offered_once_registered(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "id")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "secret")
+    types = platform_app_types()
+    assert "google_calendar" in types
+    assert "outlook_calendar" in types
+    assert "slack" in types
+    assert [t for t in types if platform_app_available(t)] == ["google_calendar"]
