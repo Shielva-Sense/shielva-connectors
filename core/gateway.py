@@ -44,6 +44,7 @@ from services.connector_store import connector_store
 from services.install_gate import install_auth_ok
 from services.platform_apps import (
     apply_platform_app,
+    credential_mode,
     platform_app_available,
     platform_app_fields,
     platform_app_types,
@@ -1340,6 +1341,25 @@ async def _provider_of(connector_type: str) -> str | None:
     return _PROVIDER_CACHE.get(connector_type) or None
 
 
+def _redirect_for(supplied: str, default: str, mode: str) -> str:
+    """The redirect URI to use, given who owns the OAuth app.
+
+    🚨 On a MANAGED install the redirect belongs to Shielva's app, so a value
+    from the customer is not a choice they get to make — it is ignored, not
+    rejected. Validating it instead produced a 400 on a field the console
+    itself suggests: the install form shows a redirect URI placeholder, someone
+    reasonably types it, and the guard refuses the very thing the UI proposed.
+
+    On a `self` install it genuinely is theirs, and the validation below is what
+    stops it pointing at a handler that knows nothing about connectors.
+    """
+    from services.platform_apps import MODE_SELF
+
+    if mode != MODE_SELF:
+        return default
+    return _validated_redirect(supplied, default)
+
+
 def _validated_redirect(supplied: str, default: str) -> str:
     """A caller-supplied redirect_uri, or a 400 saying why it cannot be used.
 
@@ -2033,8 +2053,6 @@ async def check_connector_connection(
     config = body.get("config", {})
     _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
-    redirect_uri = _validated_redirect(body.get("redirect_uri") or config.get("redirect_uri") or "", _default_redirect)
-
     _load_generated_connectors()
     connector_type = _resolve_connector_type(connector_type)
     # 🚨 The platform app has to be applied HERE too, not only on install.
@@ -2045,7 +2063,13 @@ async def check_connector_connection(
     # client_id and client_secret we already hold, which is the exact thing the
     # platform app exists to stop. Resolved AFTER _resolve_connector_type, so an
     # alias reaches the same entry as install does.
-    config = apply_platform_app(connector_type, config or {}, await _provider_of(connector_type))
+    _provider = await _provider_of(connector_type)
+    config = apply_platform_app(connector_type, config or {}, _provider)
+    redirect_uri = _redirect_for(
+        body.get("redirect_uri") or config.get("redirect_uri") or "",
+        _default_redirect,
+        credential_mode(connector_type, config, _provider),
+    )
 
     if connector_type not in CONNECTOR_CLASSES:
         return {
@@ -2929,7 +2953,11 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # re-authorization. Non-OAuth connectors simply ignore the value.
     _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
-    redirect_uri = _validated_redirect(final_config.get("redirect_uri") or "", _default_redirect)
+    redirect_uri = _redirect_for(
+        final_config.get("redirect_uri") or "",
+        _default_redirect,
+        credential_mode(connector_type, final_config, await _provider_of(connector_type)),
+    )
     connector.config["redirect_uri"] = redirect_uri
 
     # Generate the consent URL whenever the connector is not already connected, so any

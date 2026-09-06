@@ -118,6 +118,25 @@ def credential_mode(connector_type: str, config: dict, provider: str | None = No
         return MODE_SELF
     if chosen == MODE_MANAGED:
         return MODE_MANAGED
+
+    # 🚨 An install that already carries its own credentials predates this field
+    # — it was made when supplying them was the only option. Calling it managed
+    # would overwrite a customer's own OAuth app with ours on their next
+    # re-auth: a silent change of identity on their workspace, and the exact
+    # harm the self mode exists to prevent.
+    #
+    # Safe as an inference only because managed installs no longer persist these
+    # fields (see strip_platform_credentials); their presence therefore means a
+    # human supplied them.
+    # ANY, not all. A client_id from their app paired with a client_secret from
+    # ours is not a credential — the two halves belong to different OAuth apps
+    # and can never authenticate. Completing a partial config was the old
+    # behaviour and it produced exactly that, so anyone who supplies one of
+    # these fields is bringing their own app and should be told which field is
+    # missing.
+    supplied = platform_app_fields(connector_type, provider)
+    if supplied and any(str((config or {}).get(k) or "").strip() for k in supplied):
+        return MODE_SELF
     return default_credential_mode(connector_type, provider)
 
 
@@ -199,10 +218,11 @@ def platform_credentials(connector_type: str, provider: str | None = None) -> di
 def apply_platform_app(connector_type: str, config: dict, provider: str | None = None) -> dict:
     """Fill in the platform app's credentials for anything the caller omitted.
 
-    🚨 The caller's own values always win. A tenant that brings its own app
-    registration — which some enterprises require for audit — must keep it, and
-    quietly substituting ours would be a silent change of identity on their
-    workspace.
+    🚨 In MANAGED mode the platform app is authoritative — it overwrites, it does
+    not merely fill gaps. Filling gaps was why a rotation did not take: install
+    had copied our client_id and secret into the tenant's stored config, that
+    copy was then "already set", and every later re-auth kept using the retired
+    secret and failed at the provider with nothing to explain it.
 
     Skipped entirely when the install is marked `self`: an organisation that has
     chosen its own app must get an error naming the credential it forgot, not
@@ -214,11 +234,26 @@ def apply_platform_app(connector_type: str, config: dict, provider: str | None =
     creds = platform_credentials(connector_type, provider)
     if not creds:
         return config
-    merged = dict(config)
-    for field, value in creds.items():
-        if not str(merged.get(field, "")).strip():
-            merged[field] = value
-    return merged
+    return {**(config or {}), **creds}
+
+
+def strip_platform_credentials(connector_type: str, config: dict, provider: str | None = None) -> dict:
+    """The config minus anything the platform app supplies, ready to persist.
+
+    🚨 Our client secret must not be duplicated into every tenant's stored
+    credentials. It was, and that had two costs: the secret existed in as many
+    places as there were installs, and a rotation reached none of them — the
+    stale copy won at re-auth because the merge only filled blanks.
+
+    Nothing is lost by dropping them: the platform app is re-applied wherever a
+    connector is built or a consent URL is made, so a managed install always uses
+    the CURRENT credentials. A `self` install is untouched — those really are the
+    customer's to keep.
+    """
+    if credential_mode(connector_type, config or {}, provider) == MODE_SELF:
+        return dict(config or {})
+    supplied = set(platform_credentials(connector_type, provider))
+    return {k: v for k, v in (config or {}).items() if k not in supplied}
 
 
 def platform_app_fields(connector_type: str, provider: str | None = None) -> list[str]:

@@ -105,16 +105,23 @@ def test_a_tenants_own_app_is_never_overridden(monkeypatch: pytest.MonkeyPatch) 
     assert out == {"client_id": "theirs", "client_secret": "theirs-secret"}
 
 
-def test_a_partially_supplied_config_is_completed_not_replaced(
+def test_a_partial_config_is_never_completed_from_the_platform_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """🚨 This used to complete the pair, and the result could not authenticate.
+
+    A client_id from the customer's app paired with a client_secret from ours is
+    not a credential — the halves belong to different OAuth apps. Supplying one
+    of these fields now means "I am bringing my own", so the config is left
+    alone and the provider reports the field that is actually missing.
+    """
     monkeypatch.setenv("TEAMS_APP_CLIENT_ID", "platform")
     monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "platform-secret")
 
     out = apply_platform_app("microsoft_teams", {"client_id": "theirs"})
 
     assert out["client_id"] == "theirs", "what they gave stands"
-    assert out["client_secret"] == "platform-secret", "what they omitted is filled"
+    assert "client_secret" not in out, "half of our app must never be paired with half of theirs"
 
 
 def test_other_config_keys_survive(monkeypatch: pytest.MonkeyPatch) -> None:

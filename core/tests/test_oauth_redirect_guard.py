@@ -52,3 +52,36 @@ def test_a_trailing_slash_is_still_the_callback() -> None:
 def test_a_non_absolute_or_non_http_url_is_refused(bad: str) -> None:
     with pytest.raises(HTTPException):
         _validated_redirect(bad, DEFAULT)
+
+
+# ── who owns the redirect ────────────────────────────────────────────────────
+
+
+def test_a_managed_install_ignores_a_supplied_redirect() -> None:
+    """🚨 The 400 this removes. The install form shows a redirect URI field with
+    a placeholder, somebody reasonably types it, and the guard refused the very
+    value the console had proposed — a request rejected for following the UI.
+
+    On a managed install the redirect belongs to Shielva's app, so a value from
+    the customer is not a choice they get to make. Ignored, not rejected.
+    """
+    from core.gateway import _redirect_for
+
+    for supplied in (
+        "https://app.shielva.ai/connectors/callback",  # the placeholder
+        "https://localhost:8000/connectors/oauth/callback",
+        "https://api.shielva.ai/auth/oidc/google/callback",  # the SSO callback
+        "",
+    ):
+        assert _redirect_for(supplied, DEFAULT, "managed") == DEFAULT
+
+
+def test_a_self_install_still_owns_and_is_checked() -> None:
+    """It genuinely is theirs, so a wrong path must still be refused — that is
+    what stops consent landing on a handler that knows nothing about it."""
+    from core.gateway import _redirect_for
+
+    own = "https://connect.acme.example/connectors/oauth/callback"
+    assert _redirect_for(own, DEFAULT, "self") == own
+    with pytest.raises(HTTPException):
+        _redirect_for("https://api.shielva.ai/auth/oidc/google/callback", DEFAULT, "self")
