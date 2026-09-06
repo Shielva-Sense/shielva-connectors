@@ -378,17 +378,35 @@ def test_an_empty_entry_means_use_the_provider_app(monkeypatch) -> None:
         assert apply_platform_app(connector, {}, "google")["client_id"] == "shared-id"
 
 
-def test_the_two_teams_spellings_are_both_managed(monkeypatch) -> None:
-    """`teams` and `microsoft_teams` are separate catalogue types for the same
-    product and the same Azure app; only one used to be listed, so which
-    spelling a customer clicked decided whether they were asked for
-    credentials."""
-    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "ms-id")
-    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "ms-secret")
-    monkeypatch.setenv("TEAMS_APP_CLIENT_ID", "teams-id")
-    monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "teams-secret")
-    assert platform_app_available("teams", "microsoft") is True
-    assert platform_app_available("microsoft_teams", "microsoft") is True
+def test_the_eight_console_connectors_are_all_managed(monkeypatch) -> None:
+    """Every connector the console offers connects in one click once its app is
+    registered. The point is the absence of odd ones out: a catalogue where
+    seven connect instantly and the eighth demands a Google Cloud project reads
+    as broken, not as a considered distinction.
+    """
+    for env in (
+        "GOOGLE_APP_CLIENT_ID",
+        "GOOGLE_APP_CLIENT_SECRET",
+        "MICROSOFT_APP_CLIENT_ID",
+        "MICROSOFT_APP_CLIENT_SECRET",
+        "CALENDLY_APP_CLIENT_ID",
+        "CALENDLY_APP_CLIENT_SECRET",
+        "SLACK_APP_CLIENT_ID",
+        "SLACK_APP_CLIENT_SECRET",
+    ):
+        monkeypatch.setenv(env, "x")
+    console = [
+        ("google_calendar", "google"),
+        ("google_drive", "google"),
+        ("google_gmail_connector", "google"),
+        ("microsoft_teams", "microsoft"),
+        ("outlook_calendar", "microsoft"),
+        ("outlook_mail", "microsoft"),
+        ("calendly", "calendly"),
+        ("slack", "slack"),
+    ]
+    unmanaged = [t for t, prov in console if not platform_app_available(t, prov)]
+    assert unmanaged == []
 
 
 def test_self_mode_still_wins_over_a_provider_app(monkeypatch) -> None:
