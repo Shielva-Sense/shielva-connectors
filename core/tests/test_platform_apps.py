@@ -19,7 +19,11 @@ if str(_CORE) not in sys.path:
     sys.path.insert(0, str(_CORE))
 
 from services.platform_apps import (
+    CREDENTIAL_MODE_KEY,
+    MODE_MANAGED,
+    MODE_SELF,
     apply_platform_app,
+    credential_mode,
     platform_app_available,
     platform_app_fields,
     platform_app_types,
@@ -255,3 +259,55 @@ def test_every_path_that_needs_credentials_applies_the_platform_app() -> None:
 
     install = _handler('@app.post(\n    "/connectors/{connector_type}/install"', "async def check_connector_connection")
     assert "apply_platform_app(" in install
+
+
+# ── managed vs self ──────────────────────────────────────────────────────────
+# 🚨 The override was correct but unreachable. "The caller's values win" only
+# helps if the caller can type them, and as soon as a platform app existed the
+# UI stopped rendering the credential fields at all — so an organisation that
+# MUST use its own registration (app inventory, admin-consent policy, API quota)
+# had nowhere to put them.
+
+
+def test_managed_is_the_default_where_we_have_an_app(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "pid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "psec")
+    assert credential_mode("google_calendar", {}) == MODE_MANAGED
+    assert apply_platform_app("google_calendar", {})["client_id"] == "pid"
+
+
+def test_self_is_the_only_option_where_we_have_none(monkeypatch) -> None:
+    monkeypatch.delenv("GOOGLE_CALENDAR_APP_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", raising=False)
+    assert credential_mode("google_calendar", {}) == MODE_SELF
+
+
+def test_choosing_self_never_substitutes_our_app(monkeypatch) -> None:
+    """🚨 The whole point. An org that chose its own app must get an error
+    naming the field it forgot — not a consent screen carrying our name."""
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "pid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "psec")
+    out = apply_platform_app("google_calendar", {CREDENTIAL_MODE_KEY: MODE_SELF})
+    assert "client_id" not in out
+    assert "client_secret" not in out
+
+
+def test_self_keeps_the_organisations_own_values(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "pid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "psec")
+    out = apply_platform_app(
+        "google_calendar", {CREDENTIAL_MODE_KEY: MODE_SELF, "client_id": "theirs", "client_secret": "also-theirs"}
+    )
+    assert out["client_id"] == "theirs"
+    assert out["client_secret"] == "also-theirs"
+
+
+def test_an_unknown_mode_falls_back_rather_than_failing(monkeypatch) -> None:
+    """Every install that predates this field has no mode at all; rejecting an
+    unrecognised value would break them, and the cost of guessing wrong here is
+    a consent screen, not a data leak."""
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "pid")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "psec")
+    assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: "nonsense"}) == MODE_MANAGED
+    assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: ""}) == MODE_MANAGED
+    assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: "SELF"}) == MODE_SELF

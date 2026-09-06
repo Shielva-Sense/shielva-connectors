@@ -63,6 +63,40 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
 }
 
 
+#: How a connector's OAuth credentials are sourced. Stored on the connector's
+#: config so a later re-auth or deploy cannot silently switch identity.
+MODE_MANAGED = "managed"
+MODE_SELF = "self"
+CREDENTIAL_MODE_KEY = "credential_mode"
+
+
+def default_credential_mode(connector_type: str) -> str:
+    """Managed wherever we have an app, self everywhere else."""
+    return MODE_MANAGED if platform_app_available(connector_type) else MODE_SELF
+
+
+def credential_mode(connector_type: str, config: dict) -> str:
+    """Which app this install uses — ours or the customer's.
+
+    🚨 An explicit choice, because the implicit one was unreachable. The rule
+    used to be "the caller's values win", which is correct but invisible: as
+    soon as a platform app existed the UI stopped rendering the credential
+    fields at all, so an organisation that MUST use its own registration — for
+    app-inventory, admin-consent policy or API quota reasons — had nowhere to
+    type them.
+
+    An unknown value is treated as managed rather than rejected: the failure
+    mode of guessing wrong here is a consent screen, not a data leak, and a
+    hard error would break every install that predates this field.
+    """
+    chosen = str(config.get(CREDENTIAL_MODE_KEY) or "").strip().lower()
+    if chosen == MODE_SELF:
+        return MODE_SELF
+    if chosen == MODE_MANAGED:
+        return MODE_MANAGED
+    return default_credential_mode(connector_type)
+
+
 def platform_app_types() -> list[str]:
     """Every connector type that CAN have a platform app.
 
@@ -107,7 +141,14 @@ def apply_platform_app(connector_type: str, config: dict) -> dict:
     registration — which some enterprises require for audit — must keep it, and
     quietly substituting ours would be a silent change of identity on their
     workspace.
+
+    Skipped entirely when the install is marked `self`: an organisation that has
+    chosen its own app must get an error naming the credential it forgot, not
+    ours quietly standing in for it. That is the difference between "you missed a
+    field" and a consent screen carrying the wrong company's name.
     """
+    if credential_mode(connector_type, config or {}) == MODE_SELF:
+        return config
     creds = platform_credentials(connector_type)
     if not creds:
         return config
