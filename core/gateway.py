@@ -1221,10 +1221,18 @@ async def lifespan(app: FastAPI):
             # We assume stored config has everything needed (including secrets from install time)
             # Or waits, does install() need credentials? Yes.
             # If config has them, good.
-            await connector.install()
+            # 🚨 Keep what install() reported, exactly as the install endpoint
+            # does. Fixing only that endpoint left this path discarding it, so
+            # every token-authenticated connector reverted to `pending` on the
+            # next pod restart — a Slack card that read Connected until a deploy
+            # rolled the pods, then went back to "Ready To Connect" on its own.
+            _restored_status = await connector.install()
 
             # Initialize (load tokens from Redis)
             await connector.initialize()
+
+            with suppress(Exception):
+                connector._status = _restored_status
 
             registry.register(config.connector_id, connector)
 
@@ -2901,6 +2909,11 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to initialize connector: {e}")
 
     status = await connector.install()
+    # Same rule as the install endpoint and the startup restore: get_status()
+    # answers from `_status`, so a status that is not written back is a status
+    # that never existed.
+    with suppress(Exception):
+        connector._status = status
     registry.register(connector_id, connector)
 
     await connector_store.save_connector(
