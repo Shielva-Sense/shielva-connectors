@@ -1955,6 +1955,18 @@ async def install_connector(
         )
 
     # Register connector
+    # 🚨 Keep what install() reported. get_status() returns a cached `_status`,
+    # and nothing was writing install's result back to it — so a connector
+    # authenticated by a STATIC credential (a Slack bot token, an API key)
+    # reported CONNECTED from install() and then answered `pending` forever,
+    # because `_status` still held its initial value.
+    #
+    # OAuth connectors hid the bug: set_token() updates `_status` as a side
+    # effect of the consent exchange, so only token-auth connectors were left
+    # permanently "Ready To Connect" on a card that had just installed fine.
+    with suppress(Exception):
+        connector._status = status  # the object's own reported status
+
     registry.register(connector_id, connector)
 
     # Persist Connector Configuration (including merged credentials)
