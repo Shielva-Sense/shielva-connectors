@@ -76,9 +76,14 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
     "google_analytics": {},
     "outlook_mail": {},
     "sharepoint": {},
-    # 🚨 A separate type from microsoft_teams, and it was the odd one out: same
-    # product, same Azure app, but only the other spelling was managed.
-    "teams": {},
+    # No provider app covers Calendly, so this one keeps its own pair. Listed
+    # for the same reason as the rest: a console where seven connectors connect
+    # in one click and the eighth demands a developer registration reads as
+    # broken rather than as a considered distinction.
+    "calendly": {
+        "client_id": "CALENDLY_APP_CLIENT_ID",
+        "client_secret": "CALENDLY_APP_CLIENT_SECRET",
+    },
 }
 
 
