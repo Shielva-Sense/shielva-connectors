@@ -101,6 +101,25 @@ CREDENTIAL_MODE_KEY = "credential_mode"
 #: fall back to that provider's well-known OAuth endpoints.
 PROVIDER_KEY = "provider"
 
+#: The Azure directory the Microsoft app signs users into.
+#:
+#: 🚨 `organizations` is the right default for a multi-tenant product, but it is
+#: not always reachable: a Conditional Access policy can block token issuance on
+#: that authority while the SAME app and secret work against the directory's own
+#: authority. Seen live — Microsoft answered AADSTS53003 for /organizations/ and
+#: issued a token for /<tenant>/ in the same second, and the user's sign-in said
+#: "You don't have the required permissions to access this org".
+#:
+#: So the authority is configuration, not a constant. Unset keeps `organizations`.
+AUTHORITY_KEY = "azure_authority"
+_PROVIDER_AUTHORITY_ENV = {"microsoft": "MICROSOFT_APP_TENANT_ID"}
+
+
+def provider_authority(provider: str | None) -> str:
+    """The authority segment for this provider's OAuth endpoints."""
+    env = _PROVIDER_AUTHORITY_ENV.get((provider or "").strip().lower())
+    return (os.getenv(env, "").strip() if env else "") or "organizations"
+
 
 def default_credential_mode(connector_type: str, provider: str | None = None) -> str:
     """Managed wherever we have an app, self everywhere else."""
@@ -300,7 +319,18 @@ def apply_platform_app(connector_type: str, config: dict, provider: str | None =
     # sheets and analytics; each connector re-declaring it is what let sheets
     # ship declaring it nowhere, and 500 on install with "auth_uri is not set".
     # A name, not a secret — it is the catalogue's own field.
-    hint = {PROVIDER_KEY: provider} if provider else {}
+    hint: dict[str, str] = {PROVIDER_KEY: provider} if provider else {}
+    if provider and (authority := provider_authority(provider)) != "organizations":
+        # The three keys the Microsoft connectors each read for the same fact.
+        # They mean one thing; which name a given connector chose is an accident
+        # of when it was generated, and the caller should not have to know.
+        hint.update(
+            {
+                AUTHORITY_KEY: authority,
+                "azure_tenant": authority,
+                "tenant_hint": authority,
+            }
+        )
     if mode == MODE_SELF:
         return {**(config or {}), **hint, CREDENTIAL_MODE_KEY: MODE_SELF} if decided else config
     creds = platform_credentials(connector_type, provider)

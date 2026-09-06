@@ -196,16 +196,30 @@ _PROVIDER_ENDPOINTS: "dict[str, dict[str, str]]" = {
         # `organizations`, not `common`: a work/school directory. `common` also
         # admits personal Microsoft accounts, which Graph then refuses with
         # "personal account not allowed" AFTER the user has signed in.
-        "auth": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
-        "token": "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+        #
+        # {authority} is substituted from the config — see _provider_endpoint. A
+        # Conditional Access policy can block /organizations/ while the same app
+        # and secret work against the directory's own authority, so this is the
+        # default rather than the rule.
+        "auth": "https://login.microsoftonline.com/{authority}/oauth2/v2.0/authorize",
+        "token": "https://login.microsoftonline.com/{authority}/oauth2/v2.0/token",
     },
 }
 
 
 def _provider_endpoint(connector, kind: str) -> "str | None":
     """The provider's well-known endpoint for a connector that declares none."""
-    provider = str((getattr(connector, "config", None) or {}).get("provider") or "").strip().lower()
-    return _PROVIDER_ENDPOINTS.get(provider, {}).get(kind)
+    config = getattr(connector, "config", None) or {}
+    provider = str(config.get("provider") or "").strip().lower()
+    url = _PROVIDER_ENDPOINTS.get(provider, {}).get(kind)
+    if not url:
+        return None
+    if "{authority}" in url:
+        authority = str(
+            config.get("azure_authority") or config.get("azure_tenant") or config.get("tenant_hint") or "organizations"
+        ).strip()
+        url = url.replace("{authority}", authority or "organizations")
+    return url
 
 
 def _discover_endpoint(connector, aliases: tuple, meta_keys: tuple) -> "str | None":

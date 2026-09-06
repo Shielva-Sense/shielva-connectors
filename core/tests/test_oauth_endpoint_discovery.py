@@ -92,3 +92,41 @@ def test_the_connectors_own_endpoint_still_wins_over_the_provider_default() -> N
     c = _OutlookLike(azure_tenant="9f00a0de-0000-0000-0000-000000000000")
     c.config = {"provider": "microsoft"}
     assert "9f00a0de" in _discover_endpoint(c, _AUTH_URI_ALIASES, _META)
+
+
+def test_the_microsoft_authority_is_configurable(monkeypatch) -> None:
+    """🚨 Microsoft answered AADSTS53003 for /organizations/ and issued a token
+    for the directory's own authority in the same second — a Conditional Access
+    policy blocking the multi-tenant path. The user's sign-in read "You don't
+    have the required permissions to access this org", which names neither the
+    policy nor the authority."""
+    from shared.base_connector import _provider_endpoint
+
+    class _Pinned:
+        config = {"provider": "microsoft", "azure_authority": "629c248d-a791-4921-9590-db05e5863356"}
+
+    assert "629c248d-a791-4921-9590-db05e5863356" in _provider_endpoint(_Pinned(), "auth")
+    assert "/organizations/" not in _provider_endpoint(_Pinned(), "token")
+
+
+def test_the_default_authority_is_still_multi_tenant() -> None:
+    """Unset means `organizations`: a work/school directory, and never `common`,
+    which admits personal accounts that Graph refuses only after sign-in."""
+    from shared.base_connector import _provider_endpoint
+
+    class _Default:
+        config = {"provider": "microsoft"}
+
+    assert "/organizations/" in _provider_endpoint(_Default(), "auth")
+
+
+def test_a_connector_that_names_its_own_azure_tenant_is_honoured() -> None:
+    """outlook_mail calls it azure_tenant, sharepoint calls it tenant_hint. They
+    mean one thing; which name a connector chose is an accident of when it was
+    generated."""
+    from shared.base_connector import _provider_endpoint
+
+    class _ByTenantHint:
+        config = {"provider": "microsoft", "tenant_hint": "contoso.onmicrosoft.com"}
+
+    assert "contoso.onmicrosoft.com" in _provider_endpoint(_ByTenantHint(), "auth")
