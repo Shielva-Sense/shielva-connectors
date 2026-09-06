@@ -1747,11 +1747,24 @@ async def list_tenant_connectors(
     if connector_type:
         tenant_connectors = [c for c in tenant_connectors if c.connector_type == connector_type]
 
+    # 🚨 Connected is a fact about the stored TOKEN, not about which objects
+    # happen to be in this process.
+    #
+    # This read `connector_id in registry._connectors` — in-memory membership —
+    # so anything that emptied the registry made a working connector report
+    # itself unconnected: a pod restart, a rescheduled replica, or a wheel
+    # upgrade evicting instances of the class it replaced. Publishing 31
+    # connector versions turned every card in the console back to "Ready To
+    # Connect" while every token was still valid in Mongo, and the only
+    # connector that kept its badge was the one whose wheel had not changed.
+    #
+    # The registry is a cache. The token is the truth, so ask the store.
     result = []
     for c in tenant_connectors:
-        # Check if this connector is in the live registry (meaning it's connected/healthy)
-        live = c.connector_id in registry._connectors if hasattr(registry, "_connectors") else False
-        status = "connected" if live else "configured"
+        token = None
+        with suppress(Exception):
+            token = await connector_store.get_connector_tokens(c.connector_id)
+        status = "connected" if token and token.access_token else "configured"
 
         result.append(
             {
@@ -3123,7 +3136,7 @@ async def reauthorize_connector(
     prompt=consent for Google, so this run yields a refresh token). The FE opens it
     in the OAuth popup and exchanges the code via /connectors/{id}/callback.
     """
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -3208,7 +3221,69 @@ async def get_connector_docs(
     raise HTTPException(status_code=404, detail="No documentation bundled for this connector")
 
 
-def _resolve_for_tenant(connector_id: str, tenant_id: str):
+async def _rehydrate_connector(config) -> "Any | None":
+    """Rebuild one connector instance from its stored config and register it.
+
+    🚨 The registry is a CACHE and nothing treated it as one. `_resolve_for_tenant`
+    looked only in memory, so anything that emptied it — a pod restart before
+    restore finished, a replica that never restored, a wheel upgrade evicting
+    instances of the class it replaced — turned a working connector into
+    "Connector not found" until the process was restarted.
+
+    Same steps the startup restore runs, in one place so the two cannot drift:
+    install() to set up the auth handler, initialize() to load the stored token,
+    and keep what install() reported rather than letting get_status() answer
+    `pending` forever.
+    """
+    with suppress(Exception):
+        await _ensure_connector_installed(config.connector_type)
+    ConnectorClass = CONNECTOR_CLASSES.get(config.connector_type)
+    if ConnectorClass is None:
+        return None
+    try:
+        connector = ConnectorClass(
+            tenant_id=config.tenant_id,
+            connector_id=config.connector_id,
+            config=config.config,
+        )
+        restored = await connector.install()
+        await connector.initialize()
+        with suppress(Exception):
+            connector._status = restored
+        registry.register(config.connector_id, connector)
+        return connector
+    except Exception as exc:
+        logger.warning(
+            "rehydrate_failed",
+            connector_id=getattr(config, "connector_id", None),
+            error=str(exc)[:160],
+        )
+        return None
+
+
+async def _rehydrate_for_tenant(connector_id: str, tenant_id: str) -> "Any | None":
+    """Rebuild a connector this tenant owns, addressed by instance id OR type."""
+    from services.connector_store import connector_store
+
+    try:
+        stored = await connector_store.list_connectors()
+    except Exception:
+        return None
+    mine = [c for c in stored if c.tenant_id == tenant_id]
+    exact = [c for c in mine if c.connector_id == connector_id]
+    # By type, and by a vendor-prefixed type's trailing segment — the same two
+    # identifier spaces _resolve_for_tenant already reconciles ("teams" vs
+    # "microsoft_teams"). Ambiguity resolves to nothing, never to somebody
+    # else's connector.
+    by_type = [c for c in mine if c.connector_type == connector_id]
+    by_suffix = [c for c in mine if str(c.connector_type).endswith(f"_{connector_id}")]
+    for candidates in (exact, by_type, by_suffix):
+        if len(candidates) == 1:
+            return await _rehydrate_connector(candidates[0])
+    return None
+
+
+async def _resolve_for_tenant(connector_id: str, tenant_id: str):
     """A connector by instance id, or by TYPE for this tenant.
 
     🚨 The registry is keyed by INSTANCE id — `canonical_slack_Tenant-90de08d4`
@@ -3249,12 +3324,19 @@ def _resolve_for_tenant(connector_id: str, tenant_id: str):
         )
         return candidates[0]
     if len(candidates) > 1:
+        # Ambiguous stays a miss — never guess between two of the tenant's own.
         logger.warning(
             "connector_gateway.ambiguous_type_alias",
             requested=connector_id,
             matches=[str(getattr(c, "CONNECTOR_TYPE", "")) for c in candidates],
         )
-    return None
+        return None
+
+    # 🚨 Last resort: rebuild it. The registry is a cache of this process, and
+    # treating a cache miss as "does not exist" is what turned a wheel upgrade —
+    # or a plain pod restart — into "Connector not found" for a connector whose
+    # config and token were both sitting in the store.
+    return await _rehydrate_for_tenant(connector_id, tenant_id)
 
 
 @app.get("/connectors/{connector_id}/apis")
@@ -3266,7 +3348,7 @@ async def list_connector_apis(
 
     Falls back to introspecting the connector class if connector.json is missing.
     """
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -3441,7 +3523,7 @@ async def test_connector_method(
     import dataclasses
     import inspect
 
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         # The action-schema bridge (and live bot actions) reference a connector by
         # TYPE slug (e.g. "google_gmail_connector"), not by the deployed-instance id
@@ -3591,7 +3673,7 @@ async def get_connector_metadata(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Return the full connector.json metadata for a deployed connector."""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -3711,7 +3793,7 @@ async def oauth_callback(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Handle OAuth callback"""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3865,7 +3947,7 @@ async def sync_connector(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Trigger connector sync"""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3942,7 +4024,7 @@ async def sync_connector(
 @app.get("/connectors/{connector_id}/status", response_model=ConnectorStatusResponse)
 async def get_connector_status(connector_id: str, tenant_id: str = Depends(get_tenant_id)):
     """Get connector status"""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
 
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -4007,7 +4089,7 @@ async def delete_connector(connector_id: str, tenant_id: str = Depends(get_tenan
     # in the registry and then in the store, both keyed by INSTANCE id, so an
     # uninstall addressed by the catalogue name ("teams") found neither and
     # answered "Connector not found" for a connector plainly sitting there.
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
 
     # The id the registry and the store actually know it by. Deleting under the
     # requested alias would remove nothing and still report success.
@@ -4054,7 +4136,7 @@ async def clear_connector_auth(
 ):
     """Clear stored OAuth tokens and auth hash for a connector so the next
     Check Connection forces a fresh OAuth popup."""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     if connector.tenant_id != tenant_id:
@@ -4110,7 +4192,7 @@ async def start_schedule(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """Start auto-sync schedule"""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
@@ -4152,7 +4234,7 @@ async def stop_schedule(
 ):
     """Stop auto-sync schedule"""
     # Verify ownership
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         # If connector logic is gone but job remains?
         # We should allow stopping even if connector instance missing (e.g. restart)
@@ -4183,7 +4265,7 @@ async def stop_schedule(
 @app.get("/connectors/{connector_id}/schedule")
 async def get_schedule(connector_id: str, tenant_id: str = Depends(get_tenant_id)):
     """Get schedule status"""
-    connector = _resolve_for_tenant(connector_id, tenant_id)
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
     if connector and connector.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
