@@ -20212,7 +20212,7 @@
       "oauth_token_url": "https://oauth2.googleapis.com/token",
       "provider": "google",
       "service": "calendar",
-      "version": "1.2.0"
+      "version": "1.2.1"
     },
     {
       "apis": [
@@ -20395,7 +20395,7 @@
       "oauth_token_url": "https://oauth2.googleapis.com/token",
       "provider": "google",
       "service": "drive",
-      "version": "1.0.0"
+      "version": "1.2.1"
     },
     {
       "apis": [
