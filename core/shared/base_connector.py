@@ -7,7 +7,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -464,24 +464,101 @@ class BaseConnector(ABC):
         """
 
     async def authorize(self, auth_code: str, state: str = None) -> TokenInfo:
-        """
-        Complete OAuth authorization.
+        """Exchange an authorization code for tokens. Standard RFC 6749, no override needed.
 
-        Only required for oauth2_code / oauth2_pkce auth types — override in those connectors.
-        For api_key, bearer, basic_auth, hmac, service_account, and client_credentials,
-        the base class handles authentication automatically and this method is never called.
+        🚨 The two halves of OAuth were not symmetrical, and that asymmetry is
+        the whole bug. get_oauth_url() has always been generic — any provider,
+        no override — while THIS half raised NotImplementedError and left every
+        connector to reimplement the same form POST. Most never did, so the
+        console could send a user to consent and then had nothing to receive
+        them with: the callback failed and the connector sat on `pending`
+        forever, with no way to tell that from a provider outage.
+
+        The exchange is the same request for every provider that follows the
+        spec, so it belongs here, where the endpoint resolution and the token
+        store already live. A connector with a genuinely non-standard exchange
+        still overrides it — but it must now do so deliberately rather than by
+        omission.
 
         Args:
-            auth_code: OAuth authorization code
-            state: OAuth state parameter
+            auth_code: the `code` from the OAuth callback
+            state: the `state` echoed back by the provider
 
         Returns:
-            TokenInfo with access token
+            TokenInfo with the access token, already persisted via set_token().
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not implement OAuth authorize(). "
-            "This method is only required for oauth2_code / oauth2_pkce auth types."
+        import sys
+
+        if not auth_code:
+            raise ValueError(
+                f"{self.__class__.__name__}.authorize() needs the authorization code from the OAuth callback."
+            )
+
+        token_uri = (
+            self.config.get("token_uri")
+            or self.config.get("token_url")
+            or getattr(self.__class__, "TOKEN_URI", None)
+            or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
+            or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
+        if not token_uri:
+            raise ValueError(
+                f"token_uri is not set for connector '{self.CONNECTOR_TYPE}'. "
+                "Add TOKEN_URI as a class attribute or pass it in config."
+            )
+
+        client_id = self.config.get("client_id") or getattr(self, "client_id", "") or ""
+        client_secret = self.config.get("client_secret") or getattr(self, "client_secret", "") or ""
+        # 🚨 The SAME redirect_uri the consent URL carried. Providers compare the
+        # two and reject a mismatch with `redirect_uri_mismatch` — which reads
+        # like a misconfigured OAuth app rather than an inconsistency on our side.
+        redirect_uri = self.config.get("redirect_uri", "")
+
+        payload = {
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        }
+        verifier = self.config.get("code_verifier")
+        if verifier:  # PKCE: the secret may legitimately be absent
+            payload["code_verifier"] = verifier
+
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.post(
+                token_uri,
+                data=payload,
+                headers={"Accept": "application/json"},
+            )
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+
+        if resp.status_code >= 400 or "access_token" not in body:
+            # 🚨 The provider's own words. `error` alone is a machine code —
+            # "invalid_grant" reads the same for an expired code, a wrong
+            # redirect URI and a revoked secret — and the reason is in the
+            # sibling `error_description` (where Microsoft puts its AADSTS code).
+            code = body.get("error") or f"HTTP {resp.status_code}"
+            description = body.get("error_description") or (resp.text or "")[:200]
+            raise ValueError(
+                f"Token exchange failed for {self.CONNECTOR_TYPE}: {code}" + (f": {description}" if description else "")
+            )
+
+        expires_in = int(body.get("expires_in") or 3600)
+        scope = body.get("scope") or ""
+        token_info = TokenInfo(
+            access_token=body["access_token"],
+            refresh_token=body.get("refresh_token"),
+            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+            token_type=body.get("token_type", "Bearer"),
+            scopes=scope.split() if scope else list(getattr(self.__class__, "REQUIRED_SCOPES", []) or []),
+        )
+        await self.set_token(token_info)
+        return token_info
 
     # ── OAuth2 class-level constants — override in subclasses ─────────────
     # These allow the base get_oauth_url() to work without any override.

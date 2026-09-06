@@ -760,6 +760,26 @@ def _installed_wheel_version(suffix: str) -> "str | None":
         return None
 
 
+async def _install_with(connector, config: dict):
+    """Run install() after putting `config` where the connector reads it.
+
+    🚨 `install()` takes no arguments — that is the SDK contract, and nine of the
+    eleven call sites honour it. Two passed the config as a positional, which
+    every conforming connector rejects with
+
+        install() takes 1 positional argument but 2 were given
+
+    On the test path that failure was CAUGHT and logged as a warning, so the
+    method then ran against an unhydrated connector and reported `401
+    Unauthorized: {}` — an authentication error for a connector whose token was
+    stored and valid. The config belongs on `connector.config`, which is where
+    install() and every request path already look.
+    """
+    if config:
+        connector.config = {**(connector.config or {}), **config}
+    return await connector.install()
+
+
 async def _ensure_connector_installed(connector_type: str) -> bool:
     """Make sure the connector's wheel is present AND at the pinned version.
 
@@ -870,7 +890,15 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
             prefix = f"{suffix}_connector"
             for name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
                 sys.modules.pop(name, None)
-            CONNECTOR_CLASSES.pop(_resolve_connector_type(connector_type), None)
+            resolved = _resolve_connector_type(connector_type)
+            CONNECTOR_CLASSES.pop(resolved, None)
+            # Live instances were built from the class we just replaced — see
+            # Registry.evict_type. They are rebuilt from stored config on the
+            # next resolve, so dropping them costs nothing and leaving them
+            # means the upgrade only reaches connectors nobody had installed.
+            evicted = registry.evict_type(resolved)
+            if evicted:
+                logger.info("evicted stale connector instances", connector_type=resolved, count=evicted)
             importlib.invalidate_caches()
 
         _load_installed_connectors()
@@ -1170,6 +1198,27 @@ class ConnectorRegistry:
     def register(self, connector_id: str, connector):
         """Register a connector instance"""
         self._connectors[connector_id] = connector
+
+    def evict_type(self, connector_type: str) -> int:
+        """Drop live instances of a type. Returns how many were dropped.
+
+        🚨 Upgrading a wheel replaces the CLASS; it does nothing to the objects
+        already built from the old one. A connector installed before the upgrade
+        stayed registered as an instance of the replaced class, so consent then
+        came back to a stale object and died with
+
+            authorize() got an unexpected keyword argument 'auth_code'
+
+        while the freshly installed wheel — the one whose whole purpose was to
+        accept that argument — sat one import away. Nothing is lost by dropping
+        them: an instance is rebuilt from its stored config on the next resolve.
+        """
+        stale = [
+            cid for cid, inst in self._connectors.items() if str(getattr(inst, "CONNECTOR_TYPE", "")) == connector_type
+        ]
+        for cid in stale:
+            self._connectors.pop(cid, None)
+        return len(stale)
 
     def get(self, connector_id: str):
         """Get connector by ID"""
@@ -2204,7 +2253,7 @@ async def check_connector_connection(
         ):
             # No token exchange needed — validate directly via install() + health_check()
             # Pass config explicitly so generated connectors that check the parameter (not self.config) work correctly.
-            status = await connector.install(config)
+            status = await _install_with(connector, config)
             if status.auth_status.value in (
                 "missing_credentials",
                 "invalid_credentials",
@@ -3447,7 +3496,7 @@ async def test_connector_method(
     try:
         _stored = await credential_manager.get_credentials(tenant_id, connector.CONNECTOR_TYPE)
         if _stored:
-            await connector.install(_stored)
+            await _install_with(connector, _stored)
     except Exception as _hydrate_err:
         logger.warning(
             "test_method.hydrate_failed",
