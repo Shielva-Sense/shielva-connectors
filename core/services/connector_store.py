@@ -23,8 +23,10 @@ Public method signatures are unchanged, so callers (gateway, base_connector,
 scheduler) need no edits.
 """
 
+import contextlib
+import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -289,12 +291,80 @@ class ConnectorStore:
         await redis_service.set(self._get_token_redis_key(connector_id), plaintext)
 
         durable = await self._persist_tokens_mongo(connector_id, plaintext)
+        # A successful save is the credential working again — clear any recorded
+        # refresh failure, or a connector that re-authorised would keep showing
+        # "needs sign-in" forever.
+        await self.clear_refresh_failure(connector_id)
         logger.info(
             "connector_store.tokens_saved",
             connector_id=connector_id,
             has_refresh_token=bool(token_data.refresh_token),
             durable=durable,
         )
+
+    async def mark_refresh_failed(self, connector_id: str, reason: str) -> None:
+        """Record that the provider rejected this connector's refresh token.
+
+        🚨 A refresh token is not a permanent credential and its PRESENCE proves
+        nothing. Google expires them after seven days while an app is in Testing,
+        Microsoft after ninety days idle, and either can be revoked by an admin
+        at any moment. Deriving "connected" from the field being non-empty
+        therefore reports a dead credential as working — indefinitely, because
+        nothing ever revisits it.
+
+        The rejection is a FACT, not derivable from anything we hold, so it is
+        the one piece of connection state worth persisting. Before this it was
+        written to `self._status` in memory and lost on the next pod restart:
+        the card went back to Connected on its own, having learned nothing.
+        """
+        from .redis_service import redis_service
+
+        payload = json.dumps({"reason": reason[:200], "at": datetime.now(UTC).isoformat()})
+        with contextlib.suppress(Exception):
+            await redis_service.set(self._refresh_failure_key(connector_id), payload)
+        db = _mongo_db()
+        if db is not None:
+            with contextlib.suppress(Exception):
+                await db[_TOKEN_COLLECTION].update_one(
+                    {"connector_id": connector_id},
+                    {"$set": {"refresh_failed": payload}},
+                    upsert=True,
+                )
+        logger.warning(
+            "connector_store.refresh_failed_recorded",
+            connector_id=connector_id,
+            reason=reason[:120],
+        )
+
+    async def clear_refresh_failure(self, connector_id: str) -> None:
+        """Forget a recorded rejection — the credential works again."""
+        from .redis_service import redis_service
+
+        with contextlib.suppress(Exception):
+            await redis_service.delete(self._refresh_failure_key(connector_id))
+        db = _mongo_db()
+        if db is not None:
+            with contextlib.suppress(Exception):
+                await db[_TOKEN_COLLECTION].update_one(
+                    {"connector_id": connector_id}, {"$unset": {"refresh_failed": ""}}
+                )
+
+    async def refresh_failed(self, connector_id: str) -> bool:
+        """Whether the provider has rejected this connector's refresh token."""
+        from .redis_service import redis_service
+
+        with contextlib.suppress(Exception):
+            if await redis_service.get(self._refresh_failure_key(connector_id)):
+                return True
+        db = _mongo_db()
+        if db is not None:
+            with contextlib.suppress(Exception):
+                doc = await db[_TOKEN_COLLECTION].find_one({"connector_id": connector_id}, {"refresh_failed": 1})
+                return bool(doc and doc.get("refresh_failed"))
+        return False
+
+    def _refresh_failure_key(self, connector_id: str) -> str:
+        return f"connectors:refresh_failed:{connector_id}"
 
     async def get_connector_tokens(self, connector_id: str) -> TokenInfo | None:
         """Cache-aside: Redis hit → return; miss → Mongo (decrypt) → repopulate."""

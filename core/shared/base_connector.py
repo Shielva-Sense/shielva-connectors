@@ -3,6 +3,7 @@ Shielva Connectors - Base Connector Abstract Class
 All connectors inherit from this base class.
 """
 
+import contextlib
 import os
 import re
 from abc import ABC, abstractmethod
@@ -206,6 +207,28 @@ _PROVIDER_ENDPOINTS: "dict[str, dict[str, str]]" = {
         "token": "https://login.microsoftonline.com/{authority}/oauth2/v2.0/token",
     },
 }
+
+
+#: What the provider says when a refresh token is dead rather than when the
+#: network misbehaved. Matched on the OAuth error codes (RFC 6749 §5.2) and the
+#: provider-specific text that carries them, because the exception type varies
+#: per connector — each generates its own error classes.
+_CREDENTIAL_REJECTIONS = (
+    "invalid_grant",
+    "invalid_client",
+    "unauthorized_client",
+    "invalid_request",
+    "token has been expired or revoked",
+    "aadsts70008",  # refresh token expired
+    "aadsts700082",  # refresh token expired due to inactivity
+    "aadsts50173",  # credentials changed; token revoked
+)
+
+
+def _is_credential_rejection(exc: Exception) -> bool:
+    """True when the provider rejected the credential, not the request."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in _CREDENTIAL_REJECTIONS)
 
 
 def _pin_authority(connector, url: "str | None") -> "str | None":
@@ -1616,6 +1639,23 @@ class BaseConnector(ABC):
                         error=str(e),
                     )
                     self._status.auth_status = AuthStatus.FAILED
+                    # 🚨 Persist the REJECTION, not just the in-memory status.
+                    #
+                    # A refresh token is not permanent: Google expires them after
+                    # seven days while an app is in Testing, Microsoft after
+                    # ninety days idle, and either can be revoked. Recording the
+                    # failure only on `self._status` meant the next pod restart
+                    # forgot it, and a card whose credential the provider had
+                    # rejected went back to reading Connected on its own.
+                    #
+                    # Only a REJECTION is recorded. A timeout or a DNS blip is
+                    # not evidence the credential is dead, and marking it would
+                    # send someone through consent to fix a network problem.
+                    if _is_credential_rejection(e):
+                        with contextlib.suppress(Exception):
+                            from services.connector_store import connector_store
+
+                            await connector_store.mark_refresh_failed(self.connector_id, str(e)[:200])
                     raise RefreshError("Token refresh failed") from e
             else:
                 logger.error(

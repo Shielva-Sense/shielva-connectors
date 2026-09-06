@@ -40,6 +40,7 @@ from shielva_common.envelope import bootstrap as _envelope_bootstrap
 _envelope_bootstrap()
 
 from services import credential_manager
+from services.connection_state import EXPIRED, connection_state, is_connected
 from services.connector_store import connector_store
 from services.install_gate import (
     install_auth_ok,
@@ -1771,13 +1772,15 @@ async def list_tenant_connectors(
         token = None
         with suppress(Exception):
             token = await connector_store.get_connector_tokens(c.connector_id)
-        connected = bool(token and token.access_token)
-        if not connected:
-            live = registry.get(c.connector_id)
-            if live is not None:
-                with suppress(Exception):
-                    connected = install_auth_status(live.get_status()) in ("connected", "authenticated")
-        status = "connected" if connected else "configured"
+        live_status = None
+        live = registry.get(c.connector_id)
+        if live is not None:
+            with suppress(Exception):
+                live_status = install_auth_status(live.get_status())
+        rejected = False
+        with suppress(Exception):
+            rejected = await connector_store.refresh_failed(c.connector_id)
+        status = "connected" if is_connected(token, live_status, rejected) else "configured"
 
         result.append(
             {
@@ -4091,15 +4094,25 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
         # to the token rather than to a shrug.
         health, auth = "unknown", "unknown"
         conn = registry.get(cid)
+        live_status = None
         if conn:
             status = conn.get_status()
             health, auth = install_health(status), install_auth_status(status)
+            live_status = auth
         if auth not in ("connected", "authenticated"):
-            token = None
+            token, rejected = None, False
             with suppress(Exception):
                 token = await connector_store.get_connector_tokens(cid)
-            if token and getattr(token, "access_token", None):
+            with suppress(Exception):
+                rejected = await connector_store.refresh_failed(cid)
+            state = connection_state(token, live_status, rejected)
+            if state == "connected":
                 health, auth = "healthy", "connected"
+            elif state == EXPIRED:
+                # Named, not folded into `pending`: "connected once, and the
+                # credential aged out" is a different thing to say than "never
+                # signed in", and only one of them is the user's fault.
+                health, auth = "degraded", EXPIRED
         connectors.append(
             {
                 "connector_id": cid,
