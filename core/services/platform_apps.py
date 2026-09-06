@@ -60,6 +60,25 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
         "client_id": "OUTLOOK_CALENDAR_APP_CLIENT_ID",
         "client_secret": "OUTLOOK_CALENDAR_APP_CLIENT_SECRET",
     },
+    # The rest of each provider's family. No per-type env of their own: they
+    # resolve through _PROVIDER_APPS, so one Google client and one Azure
+    # registration cover all of them and a rotation is one edit.
+    #
+    # 🚨 google_gmail_connector is the one with a price attached. Gmail's scopes
+    # are RESTRICTED, not merely sensitive, so a public app using them needs
+    # Google's verification AND an annual third-party security assessment — paid
+    # for by whoever owns the app, which is now us rather than each customer.
+    # Listed because the alternative is a console where Calendar connects in one
+    # click and Gmail demands a Google Cloud project, which reads as broken.
+    "google_gmail_connector": {},
+    "google_drive": {},
+    "google_sheets": {},
+    "google_analytics": {},
+    "outlook_mail": {},
+    "sharepoint": {},
+    # 🚨 A separate type from microsoft_teams, and it was the odd one out: same
+    # product, same Azure app, but only the other spelling was managed.
+    "teams": {},
 }
 
 
@@ -162,8 +181,12 @@ def platform_credentials(connector_type: str, provider: str | None = None) -> di
     here, is the same mistake as the endpoint that kept its own copy of this
     module's keys and silently drifted from it.
     """
+    # 🚨 `is None`, not falsiness. An entry with an EMPTY map is the marker for
+    # "managed, credentials come from the provider app" — and `if not keys`
+    # treated that as "not registered at all", so every connector added that way
+    # silently stayed unmanaged.
     keys = _PLATFORM_APPS.get(connector_type)
-    if not keys:
+    if keys is None:
         return {}
     return _read(keys) or _read(_PROVIDER_APPS.get((provider or "").strip().lower(), {}))
 

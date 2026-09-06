@@ -341,15 +341,54 @@ def test_a_per_type_app_overrides_the_provider_one(monkeypatch) -> None:
 
 
 def test_a_provider_app_does_not_enable_an_unlisted_connector(monkeypatch) -> None:
-    """🚨 The decision this protects. Auto-enabling everything a provider covers
-    would turn Gmail into a platform app the moment a Google app was registered
-    — and Gmail's scopes are RESTRICTED, meaning an annual third-party security
-    assessment taken on by whoever owns the app. That must be deliberate.
+    """Listing is what enables a connector; a provider app only supplies the
+    credentials. Otherwise registering one Google app would quietly turn every
+    Google connector in the catalogue into a platform app."""
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    # Not in _PLATFORM_APPS at all.
+    assert platform_app_available("dropbox", "dropbox") is False
+    assert apply_platform_app("dropbox", {}, "dropbox") == {}
+
+
+def test_gmail_is_managed_and_that_carries_a_cost(monkeypatch) -> None:
+    """🚨 Recorded deliberately, because it is a commitment rather than a config
+    line. Gmail's scopes are RESTRICTED — not merely sensitive — so a public app
+    using them needs Google's verification AND an annual third-party security
+    assessment, paid by whoever owns the app. That is now us rather than each
+    customer.
+
+    It is listed because the alternative was worse: a console where Calendar
+    connects in one click and Gmail demands a Google Cloud project reads as
+    broken, and customers do not know which scopes Google considers restricted.
     """
     monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
     monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
-    assert platform_app_available("google_gmail_connector", "google") is False
-    assert apply_platform_app("google_gmail_connector", {}, "google") == {}
+    assert platform_app_available("google_gmail_connector", "google") is True
+
+
+def test_an_empty_entry_means_use_the_provider_app(monkeypatch) -> None:
+    """🚨 The sentinel that nearly did nothing. An entry with an empty map means
+    "managed, credentials from the provider" — and the lookup guarded on
+    falsiness, so every connector added that way read as unregistered."""
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    for connector in ("google_drive", "google_sheets", "google_analytics"):
+        assert platform_app_available(connector, "google") is True
+        assert apply_platform_app(connector, {}, "google")["client_id"] == "shared-id"
+
+
+def test_the_two_teams_spellings_are_both_managed(monkeypatch) -> None:
+    """`teams` and `microsoft_teams` are separate catalogue types for the same
+    product and the same Azure app; only one used to be listed, so which
+    spelling a customer clicked decided whether they were asked for
+    credentials."""
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "ms-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "ms-secret")
+    monkeypatch.setenv("TEAMS_APP_CLIENT_ID", "teams-id")
+    monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "teams-secret")
+    assert platform_app_available("teams", "microsoft") is True
+    assert platform_app_available("microsoft_teams", "microsoft") is True
 
 
 def test_self_mode_still_wins_over_a_provider_app(monkeypatch) -> None:

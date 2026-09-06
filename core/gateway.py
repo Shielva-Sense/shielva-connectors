@@ -1389,7 +1389,21 @@ def _app_origins() -> list[str]:
         origins = json.loads(os.getenv("CORS_ORIGINS", "") or "[]")
     except (TypeError, ValueError):
         origins = []
-    return [o for o in origins if isinstance(o, str) and o.strip() and o != "*"] or _DEFAULT_ORIGINS
+    usable = [o for o in origins if isinstance(o, str) and o.strip() and o != "*"]
+    if usable:
+        return usable
+    # 🚨 Say so. These defaults are localhost, and they are also the OAuth
+    # callback's postMessage targets — so on a public deployment the
+    # authorization code is posted to origins nobody is listening on, the popup
+    # closes on its own timer, and the console reports "Authorization window was
+    # closed" with nothing connecting that to a missing env var. Silent before;
+    # this is the line that would have named it.
+    logger.warning(
+        "cors_origins_unset_using_localhost_defaults",
+        affects="OAuth callback postMessage targets",
+        defaults=len(_DEFAULT_ORIGINS),
+    )
+    return _DEFAULT_ORIGINS
 
 
 app.add_middleware(
