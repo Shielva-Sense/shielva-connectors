@@ -230,3 +230,28 @@ def test_every_mapped_type_is_offered_once_registered(monkeypatch) -> None:
     assert "outlook_calendar" in types
     assert "slack" in types
     assert [t for t in types if platform_app_available(t)] == ["google_calendar"]
+
+
+def test_every_path_that_needs_credentials_applies_the_platform_app() -> None:
+    """🚨 install had it; check and deploy did not.
+
+    /connectors/check is the endpoint the UI calls FIRST — it is what turns
+    Connect into a consent URL. With the fill only on install, a customer
+    clicking Connect got "Missing or invalid credentials" and was asked for a
+    client_id and client_secret the platform already holds, which is the exact
+    thing platform apps exist to prevent. Deploy needs it for the same reason:
+    it regenerates the consent URL for anything not yet connected.
+    """
+    from pathlib import Path
+
+    body = (Path(__file__).resolve().parents[1] / "gateway.py").read_text()
+
+    def _handler(start_marker: str, end_marker: str) -> str:
+        start = body.index(start_marker)
+        return body[start : body.index(end_marker, start)]
+
+    check = _handler('@app.post("/connectors/check")', '@app.post("/connectors/check/device-poll")')
+    assert "apply_platform_app(" in check
+
+    install = _handler('@app.post(\n    "/connectors/{connector_type}/install"', "async def check_connector_connection")
+    assert "apply_platform_app(" in install

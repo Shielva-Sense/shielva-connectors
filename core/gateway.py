@@ -1987,6 +1987,15 @@ async def check_connector_connection(
 
     _load_generated_connectors()
     connector_type = _resolve_connector_type(connector_type)
+    # 🚨 The platform app has to be applied HERE too, not only on install.
+    #
+    # This is the endpoint the UI calls FIRST — it is what turns Connect into a
+    # consent URL. Filling the credentials in only on install meant a customer
+    # clicking Connect got "Missing or invalid credentials" and was asked for a
+    # client_id and client_secret we already hold, which is the exact thing the
+    # platform app exists to stop. Resolved AFTER _resolve_connector_type, so an
+    # alias reaches the same entry as install does.
+    config = apply_platform_app(connector_type, config or {})
 
     if connector_type not in CONNECTOR_CLASSES:
         return {
@@ -2784,6 +2793,12 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
         for k, v in stored_creds.items():
             if k not in final_config:
                 final_config[k] = v
+    # Platform app LAST, filling only what is still missing — so the request's
+    # values win, then anything this tenant stored, then ours. Deploy needs it
+    # for the same reason check does: it re-generates the consent URL for any
+    # connector that is not yet connected, and without credentials there is no
+    # URL to generate.
+    final_config = apply_platform_app(connector_type, final_config)
 
     # ONE instance per (tenant, connector type) — see install_connector. Reusing the
     # canonical id makes deploy / re-auth idempotent (replaces the token in place; no
