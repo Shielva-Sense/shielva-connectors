@@ -3714,6 +3714,19 @@ async def oauth_callback(
                 healthy=test_healthy,
                 message=health.message,
             )
+            # 🚨 A live API call just succeeded with these tokens — record it.
+            #
+            # The comment above assumes set_token() ran inside authorize() and
+            # updated `_status`. That is true for connectors whose exchange
+            # returns a TokenInfo and stores it; the ones that return raw token
+            # data never touch `_status`, so consent completed, the API answered,
+            # and the card still read "Ready To Connect".
+            #
+            # get_status() answers from `_status`, and a health probe that
+            # reached the provider is the strongest evidence there is.
+            if test_healthy:
+                with suppress(Exception):
+                    connector._status = health
         except Exception as _health_err:
             logger.warning(
                 "callback.test_api_failed",
