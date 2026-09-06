@@ -44,7 +44,7 @@ def test_a_wheel_upgrade_drops_live_instances_of_the_old_class() -> None:
     on the very argument the new wheel was published to accept."""
     assert "def evict_type(" in _SRC
     start = _SRC.index("async def _ensure_connector_installed(")
-    body = _SRC[start : start + 6000]
+    body = _SRC[start : start + 9000]
     assert "registry.evict_type(" in body, (
         "the upgrade path must drop live instances of the replaced class, "
         "or the new wheel only reaches connectors nobody had installed"

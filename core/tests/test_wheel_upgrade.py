@@ -59,3 +59,30 @@ def test_the_race_inside_the_lock_checks_the_version_too() -> None:
         "two requests racing an upgrade must not let the second one conclude the "
         "work is done while the old wheel is still installed"
     )
+
+
+def test_a_stale_pin_can_never_downgrade_a_loaded_connector() -> None:
+    """🚨 Seen live: outlook_mail 1.1.1 rolled back to the baked 1.0.5.
+
+    The pinned version has two sources — the manifest baked into the image and
+    the catalog snapshot that overlays it at startup. Until the overlay lands
+    the baked one is authoritative, and it lags. Using "different version" as
+    the trigger therefore undid the very fix the newer wheel had been published
+    to deliver, in the window where nothing was watching.
+    """
+    from services.wheel_version import is_newer
+
+    assert is_newer("1.1.1", "1.0.5")
+    assert not is_newer("1.0.5", "1.1.1")
+    assert not is_newer("1.1.1", "1.1.1")
+    # A double-digit segment must not lose to a single-digit one on string order.
+    assert is_newer("1.0.10", "1.0.9")
+    assert not is_newer("1.0.9", "1.0.10")
+
+
+def test_the_installer_refuses_an_older_pin() -> None:
+    # Read as text, never imported: importing the gateway pulls in the CI-only
+    # dependency set, which is what made the version rule untestable and sent it
+    # into its own module in the first place.
+    body = _body("_ensure_connector_installed")
+    assert "is_newer(" in body, "the installer must compare versions, not merely detect a difference"

@@ -56,6 +56,7 @@ from services.platform_apps import (
     platform_app_fields,
     platform_app_types,
 )
+from services.wheel_version import is_newer
 
 logger = structlog.configure(
     processors=[
@@ -806,6 +807,27 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
     if loaded:
         current = _installed_wheel_version(suffix) if suffix else None
         if not ver or not current or current == ver:
+            return True
+        # 🚨 Upgrade only. Never install a pin that is OLDER than what is loaded.
+        #
+        # The pinned version has two sources: the manifest baked into the image
+        # and the catalog snapshot that overlays it at startup. Until that
+        # overlay lands the baked one is authoritative, and it lags — so
+        # "different version" as the trigger meant a connector was silently
+        # DOWNGRADED in that window, undoing the very fix the newer wheel had
+        # been published to deliver. Seen live: outlook_mail 1.1.1 rolled back
+        # to the baked 1.0.5.
+        #
+        # A deliberate rollback is a rebuild, not something a stale manifest
+        # should be able to do by itself. It is logged so it is visible either
+        # way.
+        if not is_newer(ver, current):
+            logger.info(
+                "connector wheel pin is older than what is installed — keeping the newer one",
+                connector_type=connector_type,
+                installed=current,
+                pinned=ver,
+            )
             return True
         logger.info(
             "connector wheel out of date — upgrading",
