@@ -54,11 +54,22 @@ def parse_master_key(key: str) -> bytes:
 class KeyManager:
     """Manages per-tenant, versioned DEKs wrapped by the master KEK."""
 
+    #: The same three names connector_store accepts. 🚨 They disagreed: the store
+    #: read MASTER_KEY / ENCRYPTION_MASTER_KEY / MASTER_ENCRYPTION_KEY, this read
+    #: only the first — and production sets the other two. So configs sealed
+    #: fine while every credential save failed closed with "MASTER_KEY is not
+    #: configured", which surfaced as an OAuth flow that completed, reported the
+    #: API reachable, and left the connector on `pending` forever.
+    _KEY_ENV_NAMES = ("MASTER_KEY", "ENCRYPTION_MASTER_KEY", "MASTER_ENCRYPTION_KEY")
+
     def __init__(self, master_key: str = None):
-        raw = master_key or os.getenv("MASTER_KEY")
+        raw = master_key or next((v for v in (os.getenv(n) for n in self._KEY_ENV_NAMES) if v), None)
         self._kek_bytes = parse_master_key(raw) if raw else None
         if not self._kek_bytes:
-            logger.warning("MASTER_KEY not set — credential key manager will fail-closed.")
+            logger.warning(
+                "no master key — credential key manager will fail-closed",
+                looked_for=list(self._KEY_ENV_NAMES),
+            )
 
     def _kek(self) -> AESGCM:
         if not self._kek_bytes:
