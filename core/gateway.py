@@ -750,19 +750,49 @@ async def _catalog_refresh_loop() -> None:
         await asyncio.sleep(interval)
 
 
+def _installed_wheel_version(suffix: str) -> "str | None":
+    """The version of a connector wheel already present in this process."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(f"shielva-connector-{suffix}")
+    except PackageNotFoundError:
+        return None
+
+
 async def _ensure_connector_installed(connector_type: str) -> bool:
-    """If the connector class isn't loaded, pip-install its wheel from JFrog at
-    runtime then re-scan entry-points. Returns True if the class is available."""
-    if _resolve_connector_type(connector_type) in CONNECTOR_CLASSES:
-        return True
+    """Make sure the connector's wheel is present AND at the pinned version.
+
+    🚨 "Already loaded" is not the same as "current". The image bakes a set of
+    wheels at build time, and this returned True the moment the class existed —
+    so a connector that ships in the image could NEVER be upgraded by publishing
+    a new wheel. A fix published to the registry reached brand-new connectors
+    and silently skipped every baked one, which is the more important half: the
+    baked ones are the connectors people actually use.
+
+    The pinned version comes from the catalog snapshot the CD pipeline
+    publishes, so that snapshot is the single number that decides, and the baked
+    copy is only a warm start.
+    """
     suffix = _resolve_wheel_suffix(connector_type)
+    loaded = _resolve_connector_type(connector_type) in CONNECTOR_CLASSES
+    ver = _WHEEL_VERSIONS.get(suffix) if suffix else None
+    if loaded:
+        current = _installed_wheel_version(suffix) if suffix else None
+        if not ver or not current or current == ver:
+            return True
+        logger.info(
+            "connector wheel out of date — upgrading",
+            connector_type=connector_type,
+            installed=current,
+            pinned=ver,
+        )
     if not suffix:
         logger.error(
             "on-demand install: no wheel in manifest for connector",
             connector_type=connector_type,
         )
         return False
-    ver = _WHEEL_VERSIONS.get(suffix)
     pkg = f"shielva-connector-{suffix}" + (f"=={ver}" if ver else "")
 
     # PyPI registry for on-demand connector wheels — the on-prem Nexus
@@ -782,8 +812,12 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
 
     lock = _CONNECTOR_INSTALL_LOCKS.setdefault(suffix, asyncio.Lock())
     async with lock:
-        # Another request may have installed it while we waited for the lock.
-        if _resolve_connector_type(connector_type) in CONNECTOR_CLASSES:
+        # Another request may have installed it while we waited for the lock —
+        # but only skip when it also landed on the version we are pinning to,
+        # otherwise two requests racing an upgrade leave the old wheel in place.
+        if _resolve_connector_type(connector_type) in CONNECTOR_CLASSES and (
+            not ver or _installed_wheel_version(suffix) == ver
+        ):
             return True
         logger.info("on-demand installing connector wheel", pkg=pkg)
         # Pass index URLs (which carry the token) via env, NOT argv — keeps the
@@ -825,6 +859,20 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
         if usersite and usersite not in sys.path:
             site.addsitedir(usersite)
         importlib.invalidate_caches()
+
+        # 🚨 On an UPGRADE the old module is already in sys.modules, and Python
+        # will not re-import it — so the new wheel would sit on disk while the
+        # process kept serving the code it replaced. That is worse than not
+        # upgrading at all: the version reported and the code running disagree.
+        # Dropping the connector's own modules makes the re-scan import the new
+        # ones; nothing else imports them, so nothing else holds a stale class.
+        if loaded:
+            prefix = f"{suffix}_connector"
+            for name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
+                sys.modules.pop(name, None)
+            CONNECTOR_CLASSES.pop(_resolve_connector_type(connector_type), None)
+            importlib.invalidate_caches()
+
         _load_installed_connectors()
         ok = _resolve_connector_type(connector_type) in CONNECTOR_CLASSES
         if not ok:
