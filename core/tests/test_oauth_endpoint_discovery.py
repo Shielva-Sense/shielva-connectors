@@ -171,3 +171,58 @@ def test_only_microsoft_login_urls_are_touched() -> None:
 
     url = "https://accounts.google.com/o/oauth2/v2/auth"
     assert _pin_authority(_Google(), url) == url
+
+
+def test_scopes_are_found_wherever_the_connector_declared_them() -> None:
+    """🚨 A consent URL with no `scope` is not a smaller request — it is an empty
+    one. Google returns a token granting nothing, so the connector authorises
+    successfully and then fails every call with a permission error naming no
+    scope: it reads like a broken integration rather than a missing declaration.
+
+    google_sheets declared OAUTH_SCOPES and google_analytics declared
+    ANALYTICS_READONLY_SCOPE, while the SDK read only REQUIRED_SCOPES. Both
+    asked Google for nothing at all.
+    """
+    import sys as _sys
+    import types
+
+    from shared.base_connector import _discover_scopes
+
+    mod = types.ModuleType("fake_sheets_connector")
+    mod.OAUTH_SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    _sys.modules[mod.__name__] = mod
+
+    class _Sheets:
+        __module__ = mod.__name__
+
+    assert _discover_scopes(_Sheets()) == mod.OAUTH_SCOPES
+
+
+def test_a_provider_prefixed_scope_constant_is_found() -> None:
+    """ANALYTICS_READONLY_SCOPE — a single string under a name no fixed alias
+    list can enumerate."""
+    import sys as _sys
+    import types
+
+    from shared.base_connector import _discover_scopes
+
+    mod = types.ModuleType("fake_analytics_connector")
+    mod.ANALYTICS_READONLY_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
+    _sys.modules[mod.__name__] = mod
+
+    class _Analytics:
+        __module__ = mod.__name__
+
+    assert _discover_scopes(_Analytics()) == [mod.ANALYTICS_READONLY_SCOPE]
+
+
+def test_the_declared_name_still_wins() -> None:
+    from shared.base_connector import _discover_scopes
+
+    class _Declared:
+        REQUIRED_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+    assert _discover_scopes(_Declared()) == _Declared.REQUIRED_SCOPES

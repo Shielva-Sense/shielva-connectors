@@ -231,6 +231,64 @@ def _is_credential_rejection(exc: Exception) -> bool:
     return any(marker in text for marker in _CREDENTIAL_REJECTIONS)
 
 
+#: Where connectors put their OAuth scopes. Same problem as the endpoints: the
+#: SDK reads one name and each generated connector picked its own.
+_SCOPE_ALIASES = (
+    "REQUIRED_SCOPES",
+    "SCOPES",
+    "OAUTH_SCOPES",
+    "DEFAULT_SCOPES",
+    "_SCOPES",
+    "_OAUTH_SCOPES",
+    "_DEFAULT_SCOPES",
+)
+
+
+def _discover_scopes(connector) -> list[str]:
+    """Every OAuth scope this connector declares, wherever it declared it.
+
+    🚨 A consent URL with no `scope` is not a smaller request — it is an empty
+    one. Google returns a token that grants nothing, so the connector authorises
+    successfully and then fails every call with a permission error that names no
+    scope, which reads like a broken integration rather than a missing
+    declaration.
+
+    google_sheets declared OAUTH_SCOPES, google_analytics declared
+    ANALYTICS_READONLY_SCOPE, and the SDK read REQUIRED_SCOPES — so both asked
+    Google for nothing at all. Searched in the same order as the endpoints: the
+    instance, the class, then the module, including provider-prefixed names.
+    """
+    import sys
+
+    def _as_list(value) -> list[str]:
+        if isinstance(value, str):
+            return [v for v in value.split() if v.startswith("http") or ":" in v or "." in v]
+        if isinstance(value, (list, tuple, set)):
+            return [str(v) for v in value if isinstance(v, str) and v]
+        return []
+
+    cls = connector.__class__
+    module = sys.modules.get(cls.__module__)
+
+    for name in _SCOPE_ALIASES:
+        for holder in (connector, cls, module):
+            found = _as_list(getattr(holder, name, None))
+            if found:
+                return found
+
+    # Provider-prefixed module constants — ANALYTICS_READONLY_SCOPE and friends,
+    # which no fixed alias list can enumerate.
+    if module is not None:
+        for name, value in vars(module).items():
+            upper = name.upper()
+            if not upper.endswith(("SCOPE", "SCOPES")):
+                continue
+            found = _as_list(value)
+            if found:
+                return found
+    return []
+
+
 def _pin_authority(connector, url: "str | None") -> "str | None":
     """Point a Microsoft login URL at the directory the operator configured.
 
@@ -706,6 +764,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
         scope_str = " ".join(scopes) if scopes else ""
 
         # ── build base params ─────────────────────────────────────────
@@ -795,6 +855,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
 
         payload = {
             "grant_type": "authorization_code",
@@ -934,6 +996,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
 
         payload = {
             "grant_type": "client_credentials",
@@ -985,6 +1049,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
 
         payload = {
             "grant_type": "password",
@@ -1046,6 +1112,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
 
         payload = {"client_id": client_id}
         if scopes:
@@ -1151,6 +1219,8 @@ class BaseConnector(ABC):
         scopes = self.config.get("scopes") or getattr(self.__class__, "REQUIRED_SCOPES", [])
         if isinstance(scopes, str):
             scopes = scopes.split()
+        if not scopes:
+            scopes = _discover_scopes(self)
         if not scopes:
             raise ValueError("scopes are required for service_account auth")
 
