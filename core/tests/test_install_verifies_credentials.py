@@ -107,3 +107,39 @@ def test_a_plain_string_status_is_handled() -> None:
     """Not every connector returns an enum."""
     assert not _gate(_Result("invalid_credentials"))
     assert _gate(_Result("connected"))
+
+
+def test_a_connector_with_its_own_install_result_does_not_500() -> None:
+    """🚨 sharepoint returned 500 on a SUCCESSFUL install.
+
+    Several connectors define their own InstallResult in the connector's
+    models.py — sharepoint's carries success / message / install_fields /
+    connector_type and no auth status — and the gateway read `.auth_status`
+    straight off it. The user saw an opaque 500 for a connector that had
+    validated its fields correctly and was ready for consent.
+    """
+    from services.install_gate import install_auth_ok, install_auth_status
+
+    class _SharepointStyleResult:
+        def __init__(self, success: bool) -> None:
+            self.success = success
+            self.message = "client_id and client_secret are required."
+            self.connector_type = "sharepoint"
+
+    assert install_auth_status(_SharepointStyleResult(True)) == "pending"
+    assert install_auth_ok(install_auth_status(_SharepointStyleResult(True)))
+    assert install_auth_status(_SharepointStyleResult(False)) == "failed"
+    assert not install_auth_ok(install_auth_status(_SharepointStyleResult(False)))
+
+
+def test_a_real_auth_status_still_wins() -> None:
+    from services.install_gate import install_auth_status
+
+    class _Enumish:
+        value = "connected"
+
+    class _SdkResult:
+        auth_status = _Enumish()
+        success = False  # must not be consulted when a status is present
+
+    assert install_auth_status(_SdkResult()) == "connected"

@@ -31,3 +31,23 @@ def install_auth_ok(auth_status: Any) -> bool:
     A plain string is accepted too: not every connector returns an enum.
     """
     return getattr(auth_status, "value", str(auth_status)) in INSTALLABLE_AUTH
+
+
+def install_auth_status(result: Any) -> str:
+    """The auth status an install() result means, whatever shape it came in.
+
+    🚨 `result.auth_status` is not guaranteed. Several connectors define their
+    OWN InstallResult in the connector's models.py — sharepoint's carries
+    success / message / install_fields / connector_type and no auth status at
+    all — so reading the attribute directly raised AttributeError and turned a
+    perfectly successful install into a 500 with no clue in it for the user.
+
+    A result with no auth status still says what happened: it succeeded, and for
+    an OAuth connector a successful install with no token yet IS `pending` —
+    those connectors validate fields locally and leave the network round trip to
+    consent. A failure maps to `failed`, which the gate below rejects.
+    """
+    auth = getattr(result, "auth_status", None)
+    if auth is not None:
+        return getattr(auth, "value", str(auth))
+    return "pending" if getattr(result, "success", True) else "failed"

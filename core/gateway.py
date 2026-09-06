@@ -41,7 +41,7 @@ _envelope_bootstrap()
 
 from services import credential_manager
 from services.connector_store import connector_store
-from services.install_gate import install_auth_ok
+from services.install_gate import install_auth_ok, install_auth_status
 from services.platform_apps import (
     apply_platform_app,
     credential_mode,
@@ -1952,8 +1952,8 @@ async def install_connector(
     # own local AuthStatus when the shared SDK is not importable, so
     # `status.auth_status is AuthStatus.CONNECTED` is False for exactly the
     # connectors that need checking most — and the gate would pass everything.
-    _auth = getattr(status.auth_status, "value", str(status.auth_status))
-    if not install_auth_ok(status.auth_status):
+    _auth = install_auth_status(status)
+    if not install_auth_ok(_auth):
         logger.warning(
             "connector_install_rejected",
             connector_type=connector_type,
@@ -2007,7 +2007,7 @@ async def install_connector(
 
     # Get OAuth URL
     oauth_url = None
-    if status.auth_status.value == "pending":
+    if _auth == "pending":
         # redirect_uri is the platform's deterministic public OAuth callback. Mirror
         # the /connectors/check default so an OAuth install returns a COMPLETE
         # authorization URL — an empty redirect_uri makes Google reject the consent.
@@ -2022,7 +2022,7 @@ async def install_connector(
     return ConnectorInstallResponse(
         connector_id=connector_id,
         connector_type=connector_type,
-        status=status.auth_status.value,
+        status=_auth,
         oauth_url=oauth_url,
     )
 
