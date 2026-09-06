@@ -575,3 +575,34 @@ def test_an_explicit_choice_still_wins(monkeypatch) -> None:
 
     pinned = {"client_id": "our-app-id", CREDENTIAL_MODE_KEY: MODE_SELF}
     assert credential_mode("microsoft_teams", pinned, "microsoft") == MODE_SELF
+
+
+def test_a_per_type_app_naming_the_same_registration_is_ignored(monkeypatch) -> None:
+    """🚨 The live AADSTS7000215.
+
+    TEAMS_APP_* and MICROSOFT_APP_* carried the same client_id and two different
+    secrets. The per-type entry won, its secret was the stale one, and every
+    Teams consent failed while the working secret sat one lookup away. A
+    per-type app that names the SAME registration is not an override — it is a
+    duplicate, and duplicates drift.
+    """
+    monkeypatch.setenv("TEAMS_APP_CLIENT_ID", "shared-app-id")
+    monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "stale-secret")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "shared-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "current-secret")
+
+    creds = platform_credentials("microsoft_teams", "microsoft")
+    assert creds["client_secret"] == "current-secret"
+
+
+def test_a_per_type_app_for_a_different_registration_still_wins(monkeypatch) -> None:
+    """That is what the override is FOR — a separate registration, e.g. its own
+    Google project for a heavier API quota."""
+    monkeypatch.setenv("TEAMS_APP_CLIENT_ID", "its-own-app")
+    monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "its-own-secret")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "shared-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "shared-secret")
+
+    creds = platform_credentials("microsoft_teams", "microsoft")
+    assert creds["client_id"] == "its-own-app"
+    assert creds["client_secret"] == "its-own-secret"

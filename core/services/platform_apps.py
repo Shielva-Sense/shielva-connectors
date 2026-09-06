@@ -26,6 +26,10 @@ from __future__ import annotations
 
 import os
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 # Env var per connector type. Only these keys are ever injected — an unknown
 # connector type gets nothing, rather than a partial config that fails later
 # with a confusing error.
@@ -239,7 +243,32 @@ def platform_credentials(connector_type: str, provider: str | None = None) -> di
     keys = _PLATFORM_APPS.get(connector_type)
     if keys is None:
         return {}
-    return _read(keys) or _read(_PROVIDER_APPS.get((provider or "").strip().lower(), {}))
+    per_type = _read(keys)
+    shared = _read(_PROVIDER_APPS.get((provider or "").strip().lower(), {}))
+
+    # 🚨 A per-type app that names the SAME registration as the provider app is
+    # not an override — it is a duplicate, and duplicates drift.
+    #
+    # TEAMS_APP_* and MICROSOFT_APP_* carried the same client_id and two
+    # different secrets. The per-type entry won, its secret was the stale one,
+    # and Teams failed every consent with AADSTS7000215 while the working secret
+    # sat in the provider app one lookup away. The point of the per-type
+    # override is a DIFFERENT registration — a separate Google project for a
+    # heavier quota, say — so when the client_id matches, the shared app is the
+    # one owner and the per-type copy is ignored rather than trusted.
+    if per_type and shared and per_type.get("client_id") == shared.get("client_id"):
+        if per_type != shared:
+            logger.warning(
+                "platform_app.duplicate_registration_ignored",
+                connector_type=connector_type,
+                provider=provider,
+                detail=(
+                    "per-type app names the same client_id as the provider app but "
+                    "differs — using the provider app; delete the per-type entry"
+                ),
+            )
+        return shared
+    return per_type or shared
 
 
 def apply_platform_app(connector_type: str, config: dict, provider: str | None = None) -> dict:
