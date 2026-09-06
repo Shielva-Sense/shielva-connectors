@@ -51,3 +51,22 @@ def install_auth_status(result: Any) -> str:
     if auth is not None:
         return getattr(auth, "value", str(auth))
     return "pending" if getattr(result, "success", True) else "failed"
+
+
+def install_health(result: Any) -> str:
+    """The health an install() result means, whatever shape it came in.
+
+    🚨 The sibling of install_auth_status, and it exists because fixing only
+    `auth_status` left `health` one line below reading the attribute directly —
+    so hubspot swapped one 500 for another. A connector-local InstallResult
+    carries neither field; what it does carry is whether it succeeded.
+    """
+    health = getattr(result, "health", None)
+    if health is not None:
+        return getattr(health, "value", str(health))
+    return "healthy" if getattr(result, "success", True) else "unhealthy"
+
+
+def install_message(result: Any) -> str:
+    """Whatever the connector said about the install, or ''."""
+    return str(getattr(result, "message", "") or "")

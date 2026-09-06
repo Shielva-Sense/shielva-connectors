@@ -41,7 +41,12 @@ _envelope_bootstrap()
 
 from services import credential_manager
 from services.connector_store import connector_store
-from services.install_gate import install_auth_ok, install_auth_status
+from services.install_gate import (
+    install_auth_ok,
+    install_auth_status,
+    install_health,
+    install_message,
+)
 from services.platform_apps import (
     apply_platform_app,
     credential_mode,
@@ -2056,14 +2061,14 @@ async def install_connector(
             connector_type=connector_type,
             tenant_id=tenant_id,
             auth_status=_auth,
-            health=getattr(status.health, "value", str(status.health)),
+            health=install_health(status),
         )
         # Nothing is registered and nothing is persisted, so a failed install
         # leaves no half-configured connector behind to be found later and
         # mistaken for a working one.
         raise HTTPException(
             status_code=400,
-            detail=(status.message or f"{connector_type}: credentials rejected ({_auth})"),
+            detail=(install_message(status) or f"{connector_type}: credentials rejected ({_auth})"),
         )
 
     # Register connector
@@ -2254,19 +2259,19 @@ async def check_connector_connection(
             # No token exchange needed — validate directly via install() + health_check()
             # Pass config explicitly so generated connectors that check the parameter (not self.config) work correctly.
             status = await _install_with(connector, config)
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
                 }
             health = await connector.health_check()
-            healthy = health.health.value == "healthy"
+            healthy = install_health(health) == "healthy"
             if healthy:
                 try:
                     config_to_save = persistable_config(connector_type, config, _provider)
@@ -2276,7 +2281,7 @@ async def check_connector_connection(
                     logger.warning("check.creds_save_failed", error=str(_e))
             return {
                 "healthy": healthy,
-                "auth_status": health.auth_status.value,
+                "auth_status": install_auth_status(health),
                 "message": health.message if healthy else None,
                 "error": health.error if not healthy else None,
                 "oauth_url": None,
@@ -2285,13 +2290,13 @@ async def check_connector_connection(
         # ── 2. OAuth2 Client Credentials (machine-to-machine, no popup) ──────────
         if auth_type == "oauth2_client_credentials":
             status = await connector.install()
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
@@ -2307,7 +2312,7 @@ async def check_connector_connection(
                     "oauth_url": None,
                 }
             health = await connector.health_check()
-            healthy = health.health.value == "healthy"
+            healthy = install_health(health) == "healthy"
             if healthy:
                 try:
                     config_to_save = persistable_config(connector_type, config, _provider)
@@ -2317,13 +2322,13 @@ async def check_connector_connection(
                     logger.warning("check.creds_save_failed", error=str(_e))
             return {
                 "healthy": healthy,
-                "auth_status": health.auth_status.value,
+                "auth_status": install_auth_status(health),
                 "message": health.message if healthy else None,
                 "error": health.error if not healthy else None,
                 "oauth_url": None,
                 "test_result": {
                     "healthy": healthy,
-                    "auth_status": health.auth_status.value,
+                    "auth_status": install_auth_status(health),
                     "message": health.message if healthy else None,
                     "error": health.error if not healthy else None,
                 },
@@ -2332,13 +2337,13 @@ async def check_connector_connection(
         # ── 3. OAuth2 Password Grant (deprecated — exchange username+password for token) ──
         if auth_type == "oauth2_password":
             status = await connector.install()
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
@@ -2354,7 +2359,7 @@ async def check_connector_connection(
                     "oauth_url": None,
                 }
             health = await connector.health_check()
-            healthy = health.health.value == "healthy"
+            healthy = install_health(health) == "healthy"
             if healthy:
                 try:
                     config_to_save = persistable_config(connector_type, config, _provider)
@@ -2364,13 +2369,13 @@ async def check_connector_connection(
                     logger.warning("check.creds_save_failed", error=str(_e))
             return {
                 "healthy": healthy,
-                "auth_status": health.auth_status.value,
+                "auth_status": install_auth_status(health),
                 "message": health.message if healthy else None,
                 "error": health.error if not healthy else None,
                 "oauth_url": None,
                 "test_result": {
                     "healthy": healthy,
-                    "auth_status": health.auth_status.value,
+                    "auth_status": install_auth_status(health),
                     "message": health.message if healthy else None,
                     "error": health.error if not healthy else None,
                 },
@@ -2379,13 +2384,13 @@ async def check_connector_connection(
         # ── 4. Service Account (Google SA JSON / JWT assertion) ───────────────────
         if auth_type in ("service_account", "jwt"):
             status = await connector.install()
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
@@ -2412,7 +2417,7 @@ async def check_connector_connection(
                     "oauth_url": None,
                 }
             health = await connector.health_check()
-            healthy = health.health.value == "healthy"
+            healthy = install_health(health) == "healthy"
             if healthy:
                 try:
                     config_to_save = persistable_config(connector_type, config, _provider)
@@ -2422,13 +2427,13 @@ async def check_connector_connection(
                     logger.warning("check.creds_save_failed", error=str(_e))
             return {
                 "healthy": healthy,
-                "auth_status": health.auth_status.value,
+                "auth_status": install_auth_status(health),
                 "message": health.message if healthy else None,
                 "error": health.error if not healthy else None,
                 "oauth_url": None,
                 "test_result": {
                     "healthy": healthy,
-                    "auth_status": health.auth_status.value,
+                    "auth_status": install_auth_status(health),
                     "message": health.message if healthy else None,
                     "error": health.error if not healthy else None,
                 },
@@ -2437,13 +2442,13 @@ async def check_connector_connection(
         # ── 5. OAuth2 Device Authorization Grant (CLI/TV/headless) ───────────────
         if auth_type == "oauth2_device":
             status = await connector.install()
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
@@ -2478,13 +2483,13 @@ async def check_connector_connection(
         # ── 6. OAuth2 Authorization Code / PKCE (user consent popup) ─────────────
         if auth_type in ("oauth2_code", "oauth2_pkce", "oauth2"):
             status = await connector.install()
-            if status.auth_status.value in (
+            if install_auth_status(status) in (
                 "missing_credentials",
                 "invalid_credentials",
             ):
                 return {
                     "healthy": False,
-                    "auth_status": status.auth_status.value,
+                    "auth_status": install_auth_status(status),
                     "message": None,
                     "error": status.error or "Missing or invalid credentials.",
                     "oauth_url": None,
@@ -2558,7 +2563,7 @@ async def check_connector_connection(
                         if not _reuse_connector._token_info:
                             continue  # no token loaded — try next candidate
                         _health = await _reuse_connector.health_check()
-                        if _health.health.value == "healthy":
+                        if install_health(_health) == "healthy":
                             # Token still valid — persist updated config + write canonical key
                             _merged = {
                                 **stored_creds,
@@ -2747,7 +2752,7 @@ async def poll_device_authorization(
         await connector.poll_device_token(device_code)
         # Token is now stored — run health_check
         health = await connector.health_check()
-        healthy = health.health.value == "healthy"
+        healthy = install_health(health) == "healthy"
         # Persist full config after successful device token exchange
         try:
             config_to_save = persistable_config(connector_type, stored_creds, await _provider_of(connector_type))
@@ -3041,10 +3046,10 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
 
         await _asyncio.wait_for(connector.initialize(), timeout=8.0)
         health = await _asyncio.wait_for(connector.health_check(), timeout=10.0)
-        test_healthy = health.health.value == "healthy"
+        test_healthy = install_health(health) == "healthy"
         test_result = {
             "healthy": test_healthy,
-            "auth_status": health.auth_status.value,
+            "auth_status": install_auth_status(health),
             "message": health.message if test_healthy else None,
             "error": health.error if not test_healthy else None,
         }
@@ -3064,7 +3069,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
         test_result = None
 
     # If still pending after test (no token yet), generate OAuth URL
-    effective_status = status.auth_status.value
+    effective_status = install_auth_status(status)
     if test_result and test_result["healthy"]:
         effective_status = "connected"
     elif (
@@ -3807,10 +3812,10 @@ async def oauth_callback(
         test_result: dict | None = None
         try:
             health = await connector.health_check()
-            test_healthy = health.health.value == "healthy"
+            test_healthy = install_health(health) == "healthy"
             test_result = {
                 "healthy": test_healthy,
-                "auth_status": health.auth_status.value,
+                "auth_status": install_auth_status(health),
                 "message": health.message if test_healthy else None,
                 "error": health.error if not test_healthy else None,
             }
@@ -3950,8 +3955,8 @@ async def get_connector_status(connector_id: str, tenant_id: str = Depends(get_t
     return ConnectorStatusResponse(
         connector_id=connector_id,
         connector_type=connector.CONNECTOR_TYPE,
-        health=status.health.value,
-        auth_status=status.auth_status.value,
+        health=install_health(status),
+        auth_status=install_auth_status(status),
         last_sync=status.last_sync,
         documents_indexed=status.documents_indexed,
         error=status.error,
@@ -3983,7 +3988,7 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
         conn = registry.get(cid)
         if conn:
             status = conn.get_status()
-            health, auth = status.health.value, status.auth_status.value
+            health, auth = install_health(status), install_auth_status(status)
         connectors.append(
             {
                 "connector_id": cid,

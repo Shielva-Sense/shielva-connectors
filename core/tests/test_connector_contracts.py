@@ -65,3 +65,19 @@ def test_the_sdk_can_complete_an_exchange_without_a_per_connector_override() -> 
     assert "grant_type" in body
     assert "authorization_code" in body
     assert "error_description" in body, "the provider's reason must survive a failed exchange"
+
+
+def test_no_result_field_is_read_off_the_object_directly() -> None:
+    """🚨 Fixing `auth_status` alone left `health` one line below still reading the
+    attribute — so hubspot swapped one 500 for another, on the same defect, in
+    the same statement. Connector-local result types carry neither field, and
+    every one of them has to go through the resolver."""
+    offenders = [
+        (i + 1, ln.strip())
+        for i, ln in enumerate(_SRC.splitlines())
+        if ("status.health" in ln or "status.auth_status" in ln)
+        and not ln.strip().startswith("#")
+        and "install_health(" not in ln
+        and "install_auth_status(" not in ln
+    ]
+    assert offenders == [], "result fields read directly instead of through install_gate: " + str(offenders)
