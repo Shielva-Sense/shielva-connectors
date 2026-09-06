@@ -18,7 +18,12 @@ _CORE = Path(__file__).resolve().parent.parent
 if str(_CORE) not in sys.path:
     sys.path.insert(0, str(_CORE))
 
-from services.platform_apps import apply_platform_app, platform_app_available, platform_credentials
+from services.platform_apps import (
+    apply_platform_app,
+    platform_app_available,
+    platform_app_fields,
+    platform_credentials,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -135,3 +140,61 @@ def test_the_original_config_is_not_mutated(monkeypatch: pytest.MonkeyPatch) -> 
     apply_platform_app("microsoft_teams", original)
 
     assert original == {"redirect_uri": "https://x/cb"}
+
+
+# ── calendars ────────────────────────────────────────────────────────────────
+# 🚨 Both calendars asked the CUSTOMER for client_id and client_secret as
+# required fields, so connecting one meant registering a Google Cloud project or
+# an Azure app first — a developer task standing in front of a product feature.
+# It is also how a redirect_uri pointing at Shielva's SSO callback got pasted in:
+# that was the URI already registered on the app the customer happened to have.
+
+
+def test_a_customer_is_never_asked_for_calendar_credentials(monkeypatch) -> None:
+    for connector, env_id, env_secret in (
+        ("google_calendar", "GOOGLE_CALENDAR_APP_CLIENT_ID", "GOOGLE_CALENDAR_APP_CLIENT_SECRET"),
+        ("outlook_calendar", "OUTLOOK_CALENDAR_APP_CLIENT_ID", "OUTLOOK_CALENDAR_APP_CLIENT_SECRET"),
+    ):
+        monkeypatch.setenv(env_id, "platform-id")
+        monkeypatch.setenv(env_secret, "platform-secret")
+        assert platform_app_available(connector) is True
+        assert platform_app_fields(connector) == ["client_id", "client_secret"]
+        filled = apply_platform_app(connector, {})
+        assert filled["client_id"] == "platform-id"
+        assert filled["client_secret"] == "platform-secret"
+
+
+def test_an_enterprise_bringing_its_own_calendar_app_still_wins(monkeypatch) -> None:
+    """Some enterprises require their own registration for audit; quietly
+    substituting ours is a silent change of identity on their workspace."""
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "platform-id")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "platform-secret")
+    out = apply_platform_app("google_calendar", {"client_id": "their-own", "client_secret": "theirs"})
+    assert out["client_id"] == "their-own"
+    assert out["client_secret"] == "theirs"
+
+
+def test_unregistered_calendars_behave_exactly_as_before(monkeypatch) -> None:
+    """This ships before the OAuth apps exist: with the env unset the install
+    falls back to asking for credentials, rather than half-filling a config that
+    fails later with an error that reads like the customer's fault."""
+    for env in (
+        "GOOGLE_CALENDAR_APP_CLIENT_ID",
+        "GOOGLE_CALENDAR_APP_CLIENT_SECRET",
+        "OUTLOOK_CALENDAR_APP_CLIENT_ID",
+        "OUTLOOK_CALENDAR_APP_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(env, raising=False)
+    for connector in ("google_calendar", "outlook_calendar"):
+        assert platform_app_available(connector) is False
+        assert platform_app_fields(connector) == []
+        assert apply_platform_app(connector, {}) == {}
+
+
+def test_half_a_credential_pair_is_not_used(monkeypatch) -> None:
+    """A lone client_id produces an OAuth error that reads like the customer
+    mistyped something."""
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "platform-id")
+    monkeypatch.delenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", raising=False)
+    assert platform_app_available("google_calendar") is False
+    assert apply_platform_app("google_calendar", {}) == {}

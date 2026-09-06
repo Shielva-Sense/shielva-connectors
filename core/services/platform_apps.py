@@ -42,6 +42,24 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
         "app_id": "WHATSAPP_APP_ID",
         "app_secret": "WHATSAPP_APP_SECRET",
     },
+    # 🚨 Calendars belong here for the same reason Slack does, and their absence
+    # was doing real damage: both asked the CUSTOMER for client_id and
+    # client_secret as required fields. That means every customer registering
+    # their own Google Cloud project or Azure app before they can book a call
+    # back — a developer task standing in front of a product feature — and it is
+    # also how a redirect_uri pointing at Shielva's SSO callback got pasted in,
+    # because that was the URI already registered on the app they had.
+    #
+    # With the platform app, a customer clicks Connect, approves consent, and
+    # any Google or Microsoft account links.
+    "google_calendar": {
+        "client_id": "GOOGLE_CALENDAR_APP_CLIENT_ID",
+        "client_secret": "GOOGLE_CALENDAR_APP_CLIENT_SECRET",
+    },
+    "outlook_calendar": {
+        "client_id": "OUTLOOK_CALENDAR_APP_CLIENT_ID",
+        "client_secret": "OUTLOOK_CALENDAR_APP_CLIENT_SECRET",
+    },
 }
 
 
