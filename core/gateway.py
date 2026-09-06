@@ -1295,6 +1295,69 @@ try:
 except Exception as _sop_exc:  # pragma: no cover
     logger.warning("sop_setup_skipped", error=str(_sop_exc))
 
+#: Local dev front ends, used when CORS_ORIGINS is unset. Named so the callback
+#: page and CORS cannot drift to different defaults.
+_DEFAULT_ORIGINS = json.loads(
+    '["https://localhost:3010","https://localhost:3001","http://localhost:3010","http://localhost:3000","https://localhost:3000","https://localhost:3005","https://127.0.0.1:3010","http://127.0.0.1:3000"]'
+)
+
+
+#: The only path an OAuth provider may redirect back to.
+_CALLBACK_PATH = "/connectors/oauth/callback"
+
+
+def _validated_redirect(supplied: str, default: str) -> str:
+    """A caller-supplied redirect_uri, or a 400 saying why it cannot be used.
+
+    🚨 The failure this prevents. `redirect_uri` is an optional install field, and
+    somebody reasonably pastes whichever URI is already registered on their OAuth
+    client — for Google that is usually Shielva's own SSO callback,
+    /auth/oidc/google/callback. The provider accepts it (it IS registered), sends
+    the user there, and the SIGN-IN handler receives a connector's state and
+    answers `{"code":"http_400","message":"Invalid state parameter or session
+    expired"}` as raw JSON on a login route. Nothing in that mentions connectors,
+    the connector stays unauthorised, and there is no thread back to this field.
+
+    Checked on the PATH only. The host is deliberately not pinned: a deployment
+    behind its own domain or an enterprise proxy is legitimate, and the thing
+    that actually goes wrong is landing on some other handler.
+    """
+    supplied = (supplied or "").strip()
+    if not supplied:
+        return default
+    from urllib.parse import urlparse
+
+    parsed = urlparse(supplied)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"redirect_uri must be an absolute http(s) URL, got '{supplied}'")
+    if parsed.path.rstrip("/") != _CALLBACK_PATH:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"redirect_uri must end in {_CALLBACK_PATH} — '{supplied}' points somewhere else, "
+                f"so the provider would send the user to a handler that knows nothing about this "
+                f"connector. Register {parsed.scheme}://{parsed.netloc}{_CALLBACK_PATH} on your "
+                f"OAuth app, or leave this field blank to use {default}."
+            ),
+        )
+    return supplied
+
+
+def _app_origins() -> list[str]:
+    """The front-end origins this deployment serves.
+
+    One list, shared by CORS and by the OAuth callback's postMessage target, so
+    "which of our front ends is this?" has a single answer. The callback used to
+    post the authorization code to "*" — readable by any page that managed to
+    open that window, which is a one-step account takeover.
+    """
+    try:
+        origins = json.loads(os.getenv("CORS_ORIGINS", "") or "[]")
+    except (TypeError, ValueError):
+        origins = []
+    return [o for o in origins if isinstance(o, str) and o.strip() and o != "*"] or _DEFAULT_ORIGINS
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=json.loads(
@@ -1912,7 +1975,7 @@ async def check_connector_connection(
     config = body.get("config", {})
     _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
-    redirect_uri = body.get("redirect_uri") or config.get("redirect_uri") or _default_redirect
+    redirect_uri = _validated_redirect(body.get("redirect_uri") or config.get("redirect_uri") or "", _default_redirect)
 
     _load_generated_connectors()
     connector_type = _resolve_connector_type(connector_type)
@@ -2793,7 +2856,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # re-authorization. Non-OAuth connectors simply ignore the value.
     _gw = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     _default_redirect = f"{_gw}/connectors/oauth/callback"
-    redirect_uri = final_config.get("redirect_uri") or _default_redirect
+    redirect_uri = _validated_redirect(final_config.get("redirect_uri") or "", _default_redirect)
     connector.config["redirect_uri"] = redirect_uri
 
     # Generate the consent URL whenever the connector is not already connected, so any
@@ -3311,6 +3374,9 @@ async def oauth_redirect_callback(request: Request):
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
+    # The app origins this deployment serves — the same list CORS is configured
+    # with, so there is one answer to "which of our front ends is this?".
+    origins_json = json.dumps(_app_origins())
 
     if error:
         html = f"""<!DOCTYPE html>
@@ -3325,7 +3391,10 @@ async def oauth_redirect_callback(request: Request):
 <script>
     // Notify opener of error then close
     if (window.opener) {{
-        window.opener.postMessage({{type:"oauth_callback",error:"{error}",state:"{state}"}}, "*");
+        var err = {{type:"oauth_callback",error:"{error}",state:"{state}"}};
+        {origins_json}.forEach(function (o) {{
+            try {{ window.opener.postMessage(err, o); }} catch (e) {{ /* not this deployment's origin */ }}
+        }});
         setTimeout(() => window.close(), 2000);
     }}
 </script>
@@ -3338,27 +3407,42 @@ async def oauth_redirect_callback(request: Request):
 <div style="text-align:center;padding:40px;max-width:480px">
     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="1.5" style="margin-bottom:16px"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
     <h2 style="color:#065F46;margin:0 0 8px">Authorization Successful</h2>
-    <p style="color:#374151;font-size:14px;margin:0 0 24px">Sending you back to Shielva…</p>
-    <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:20px;font-size:12px;color:#065F46">
+    <p id="msg" style="color:#374151;font-size:14px;margin:0 0 24px">Sending you back to Shielva…</p>
+    <div id="closing" style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:20px;font-size:12px;color:#065F46">
         <span style="width:8px;height:8px;border-radius:50%;background:#10B981;animation:pulse 1s ease-in-out infinite;display:inline-block"></span>
         Closing automatically…
     </div>
 </div>
 <style>@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:0.4}}}}</style>
 <script>
-    // Send code to parent window via postMessage, then close popup
+    // Send the code to the opener, then close.
+    //
+    // 🚨 Targeted origins, never "*". The opener is whoever opened this window,
+    // and an authorization code posted to "*" is readable by any page that
+    // managed to open it — which is a one-step account takeover. Only the app
+    // origins this deployment serves are addressed.
     var payload = {{type:"oauth_callback",code:"{code}",state:"{state}"}};
+    var ORIGINS = {origins_json};
+    var closing = document.getElementById("closing");
+    var msg = document.getElementById("msg");
     if (window.opener && !window.opener.closed) {{
-        window.opener.postMessage(payload, "*");
+        ORIGINS.forEach(function (o) {{
+            try {{ window.opener.postMessage(payload, o); }} catch (e) {{ /* wrong origin for this deployment */ }}
+        }});
         setTimeout(function() {{ window.close(); }}, 800);
     }} else {{
-        // Opened as full tab (no opener) — show manual fallback
-        document.querySelector("p").textContent = "Paste this code in the connector setup:";
+        // No opener — nothing can be posted and this window cannot close itself.
+        //
+        // 🚨 The pill has to go. It used to be removed by querySelector(".inline-flex"),
+        // which matched nothing (the pill is inline-styled and has no such class),
+        // so the page told the user to paste a code while still insisting it was
+        // closing automatically. Removed by id now.
+        if (closing) {{ closing.remove(); }}
+        msg.textContent = "Paste this code in the connector setup:";
         var box = document.createElement("div");
         box.style.cssText = "background:#fff;border:1.5px solid #14B8A6;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:12px;word-break:break-all;color:#0F766E;margin:12px auto;max-width:400px;user-select:all";
         box.textContent = "{code}";
-        document.querySelector("div").appendChild(box);
-        document.querySelector(".inline-flex")?.remove();
+        msg.parentNode.appendChild(box);
     }}
 </script>
 </body></html>"""
