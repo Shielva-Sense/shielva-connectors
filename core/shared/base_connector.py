@@ -193,17 +193,39 @@ def _discover_endpoint(connector, aliases: tuple, meta_keys: tuple) -> "str | No
     cls = connector.__class__
     module = sys.modules.get(cls.__module__)
 
+    # 🚨 The INSTANCE first, before the class or the module.
+    #
+    # outlook_mail is the case that exposed this. Its endpoints are per-tenant
+    # templates — https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
+    # — so the module constant is a template, not a URL, and the only resolved
+    # value is `self.auth_url`, built in __init__ from the Azure tenant. The
+    # search skipped instance attributes entirely and reported "auth_uri is not
+    # set" for a connector that had it all along under a different name.
+    #
+    # Preferring the instance is also what keeps consent and token exchange on
+    # the SAME endpoint: `self.auth_url` / `self.token_url` are what the
+    # connector's own authorize() uses, so a connector installed against a
+    # specific Azure tenant cannot be sent to consent at `common`.
+    instance_names = tuple(dict.fromkeys([a.lower().lstrip("_") for a in aliases] + list(meta_keys)))
+    for name in instance_names:
+        val = getattr(connector, name, None)
+        if isinstance(val, str) and val.startswith("http") and "{" not in val:
+            return val
+
     for name in aliases:
         for holder in (cls, module):
             val = getattr(holder, name, None)
-            if isinstance(val, str) and val.startswith("http"):
+            # An unformatted template ("…/{tenant}/…") is not a URL. Returning it
+            # produces a consent screen at a literal "{tenant}" — the
+            # plausible-looking wrong URL this function exists to avoid.
+            if isinstance(val, str) and val.startswith("http") and "{" not in val:
                 return val
 
     # Provider-prefixed module constants — `_WEBFLOW_AUTH_URL` and friends —
     # which no fixed alias list can enumerate.
     if module is not None:
         for name, val in vars(module).items():
-            if not isinstance(val, str) or not val.startswith("http"):
+            if not isinstance(val, str) or not val.startswith("http") or "{" in val:
                 continue
             upper = name.upper()
             if any(upper.endswith(a.lstrip("_")) for a in aliases):

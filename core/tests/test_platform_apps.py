@@ -24,6 +24,7 @@ from services.platform_apps import (
     MODE_SELF,
     apply_platform_app,
     credential_mode,
+    persistable_config,
     platform_app_available,
     platform_app_fields,
     platform_app_types,
@@ -56,7 +57,11 @@ def test_slack_is_one_click_once_the_app_is_registered(
     monkeypatch.setenv("SLACK_APP_CLIENT_SECRET", "sec")
 
     assert platform_app_available("slack") is True
-    assert apply_platform_app("slack", {}) == {"client_id": "cid", "client_secret": "sec"}
+    assert apply_platform_app("slack", {}) == {
+        "client_id": "cid",
+        "client_secret": "sec",
+        CREDENTIAL_MODE_KEY: MODE_MANAGED,
+    }
 
 
 def test_slack_without_env_is_not_one_click() -> None:
@@ -72,7 +77,11 @@ def test_a_registered_app_enables_one_click(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("TEAMS_APP_CLIENT_SECRET", "sec")
 
     assert platform_app_available("microsoft_teams") is True
-    assert apply_platform_app("microsoft_teams", {}) == {"client_id": "cid", "client_secret": "sec"}
+    assert apply_platform_app("microsoft_teams", {}) == {
+        "client_id": "cid",
+        "client_secret": "sec",
+        CREDENTIAL_MODE_KEY: MODE_MANAGED,
+    }
 
 
 def test_half_a_credential_pair_counts_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,7 +111,11 @@ def test_a_tenants_own_app_is_never_overridden(monkeypatch: pytest.MonkeyPatch) 
 
     out = apply_platform_app("microsoft_teams", {"client_id": "theirs", "client_secret": "theirs-secret"})
 
-    assert out == {"client_id": "theirs", "client_secret": "theirs-secret"}
+    assert out == {
+        "client_id": "theirs",
+        "client_secret": "theirs-secret",
+        CREDENTIAL_MODE_KEY: MODE_SELF,
+    }
 
 
 def test_a_partial_config_is_never_completed_from_the_platform_app(
@@ -442,3 +455,74 @@ def test_every_consent_url_path_honours_the_mode() -> None:
         handler = "\n".join(src[start:i])
         assert "apply_platform_app(" in handler, f"consent URL built without the platform app at line {i + 1}"
         assert re.search(r"_provider_of\(", handler), f"platform app applied without a provider at line {i + 1}"
+
+
+def test_a_managed_install_never_persists_our_secret(monkeypatch) -> None:
+    """🚨 Our client secret used to be copied into every tenant's stored config.
+
+    Two costs, and the second is the one that bites: the secret existed in as
+    many places as there were installs, and a rotation reached none of them —
+    the stale copy was "already set" and won at the next re-auth.
+    """
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "platform-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "platform-secret")
+
+    merged = apply_platform_app("google_drive", {"folder_id": "abc"}, "google")
+    assert merged["client_secret"] == "platform-secret"  # used for the exchange
+
+    saved = persistable_config("google_drive", merged, "google")
+    assert "client_secret" not in saved
+    assert "client_id" not in saved
+    assert saved["folder_id"] == "abc"
+    # The decision survives, so the next read does not have to guess.
+    assert saved[CREDENTIAL_MODE_KEY] == MODE_MANAGED
+
+
+def test_a_self_install_keeps_the_credentials_the_customer_supplied(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "platform-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "platform-secret")
+
+    theirs = {"client_id": "their-id", "client_secret": "their-secret"}
+    merged = apply_platform_app("google_drive", theirs, "google")
+    saved = persistable_config("google_drive", merged, "google")
+    assert saved["client_id"] == "their-id"
+    assert saved["client_secret"] == "their-secret"
+    assert saved[CREDENTIAL_MODE_KEY] == MODE_SELF
+
+
+def test_a_managed_config_reads_back_as_managed(monkeypatch) -> None:
+    """The inference reads "carries credentials" as "a human supplied them", so a
+    merge that leaves ours behind flips a managed install to self on the next
+    read — and the platform app then stops being applied to it at all."""
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "platform-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "platform-secret")
+
+    merged = apply_platform_app("microsoft_teams", {}, "microsoft")
+    saved = persistable_config("microsoft_teams", merged, "microsoft")
+    assert credential_mode("microsoft_teams", saved, "microsoft") == MODE_MANAGED
+    # ...and a rotation reaches it, because nothing stale is stored.
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "rotated-secret")
+    assert apply_platform_app("microsoft_teams", saved, "microsoft")["client_secret"] == "rotated-secret"
+
+
+def test_every_persist_path_goes_through_persistable_config() -> None:
+    """🚨 Seven copies of one filter is how the strip was written and then not
+    used. A new persist site that hand-rolls the dict is the only way our secret
+    can start spreading again, so the shape is pinned rather than the sites.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "gateway.py").read_text().splitlines()
+    starts = [i for i, ln in enumerate(src) if ln.startswith("@app.")]
+    for i, ln in enumerate(src):
+        if "store_credentials(" not in ln or "def " in ln or ln.strip().startswith("#"):
+            continue
+        # The WHOLE handler, not the lines above the call: `store_credentials(`
+        # opens a multi-line call and its argument — the filtered config — sits
+        # on the lines below it.
+        start = max((h for h in starts if h < i), default=0)
+        end = min((h for h in starts if h > i), default=len(src))
+        handler = "\n".join(src[start:end])
+        assert "persistable_config(" in handler, (
+            f"credentials persisted without persistable_config at gateway.py:{i + 1}"
+        )

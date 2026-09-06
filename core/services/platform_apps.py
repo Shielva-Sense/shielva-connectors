@@ -228,13 +228,23 @@ def apply_platform_app(connector_type: str, config: dict, provider: str | None =
     chosen its own app must get an error naming the credential it forgot, not
     ours quietly standing in for it. That is the difference between "you missed a
     field" and a consent screen carrying the wrong company's name.
+
+    🚨 The resolved mode is STAMPED onto the returned config. Without it the
+    merge destroys the evidence the inference runs on: managed mode writes our
+    client_id in, and the very next reader sees a config carrying credentials
+    and concludes a human supplied them — self. That misreading is what let our
+    secret be persisted per tenant, because the persist path asked "is this
+    self?" about a config we had just filled in ourselves. Deciding once and
+    recording it is the difference; nothing downstream re-derives it.
     """
-    if credential_mode(connector_type, config or {}, provider) == MODE_SELF:
-        return config
+    mode = credential_mode(connector_type, config or {}, provider)
+    decided = platform_app_available(connector_type, provider)
+    if mode == MODE_SELF:
+        return {**(config or {}), CREDENTIAL_MODE_KEY: MODE_SELF} if decided else config
     creds = platform_credentials(connector_type, provider)
     if not creds:
         return config
-    return {**(config or {}), **creds}
+    return {**(config or {}), **creds, CREDENTIAL_MODE_KEY: MODE_MANAGED}
 
 
 def strip_platform_credentials(connector_type: str, config: dict, provider: str | None = None) -> dict:
@@ -254,6 +264,19 @@ def strip_platform_credentials(connector_type: str, config: dict, provider: str 
         return dict(config or {})
     supplied = set(platform_credentials(connector_type, provider))
     return {k: v for k, v in (config or {}).items() if k not in supplied}
+
+
+def persistable_config(connector_type: str, config: dict, provider: str | None = None) -> dict:
+    """The config as it may be written to a tenant's stored credentials.
+
+    Two rules, in one place because they were previously seven copies of one of
+    them: drop blanks so an untouched optional field does not overwrite a real
+    stored value, and drop anything the platform app owns so our client secret
+    is not duplicated into every install. Every persist path calls this; a new
+    one that forgets is the only way the secret can spread again.
+    """
+    stripped = strip_platform_credentials(connector_type, config or {}, provider)
+    return {k: v for k, v in stripped.items() if v is not None and v != ""}
 
 
 def platform_app_fields(connector_type: str, provider: str | None = None) -> list[str]:

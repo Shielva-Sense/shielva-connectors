@@ -16,6 +16,15 @@ no thread back to the field that caused it.
 from __future__ import annotations
 
 import pytest
+
+# 🚨 Skip, do not abort. Importing the gateway pulls in shielva-common, which is
+# installed from a git ref in core/requirements.txt and so is present in CI and
+# absent from a bare checkout. As a hard import it turned one missing dependency
+# into a COLLECTION error, and a collection error takes the whole suite with it —
+# every other test in this directory stopped running locally and nobody saw a
+# failure, only "1 error".
+pytest.importorskip("shielva_common", reason="gateway import needs the CI dependency set")
+
 from core.gateway import _validated_redirect
 from fastapi import HTTPException
 

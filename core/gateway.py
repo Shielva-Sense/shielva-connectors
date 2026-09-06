@@ -45,6 +45,7 @@ from services.install_gate import install_auth_ok
 from services.platform_apps import (
     apply_platform_app,
     credential_mode,
+    persistable_config,
     platform_app_available,
     platform_app_fields,
     platform_app_types,
@@ -1806,12 +1807,18 @@ async def store_credentials(
 ):
     """
     Store encrypted credentials for a tenant and connector type.
+
+    🚨 Through the same filter as every other persist path. A caller that posts
+    a managed config here would otherwise pin a copy of our client secret to
+    this tenant, and a later rotation would not reach it — the copy is "already
+    set" and wins at the next re-auth. A `self` config is stored untouched;
+    those credentials really are the customer's.
     """
     try:
         cred_id = await credential_manager.store_credentials(
             tenant_id=tenant_id,
             connector_type=connector_type,
-            credentials=request.credentials,
+            credentials=persistable_config(connector_type, request.credentials, await _provider_of(connector_type)),
         )
 
         return {
@@ -2165,7 +2172,7 @@ async def check_connector_connection(
             healthy = health.health.value == "healthy"
             if healthy:
                 try:
-                    config_to_save = {k: v for k, v in config.items() if v is not None and v != ""}
+                    config_to_save = persistable_config(connector_type, config, _provider)
                     if config_to_save:
                         await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
                 except Exception as _e:
@@ -2206,7 +2213,7 @@ async def check_connector_connection(
             healthy = health.health.value == "healthy"
             if healthy:
                 try:
-                    config_to_save = {k: v for k, v in config.items() if v is not None and v != ""}
+                    config_to_save = persistable_config(connector_type, config, _provider)
                     if config_to_save:
                         await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
                 except Exception as _e:
@@ -2253,7 +2260,7 @@ async def check_connector_connection(
             healthy = health.health.value == "healthy"
             if healthy:
                 try:
-                    config_to_save = {k: v for k, v in config.items() if v is not None and v != ""}
+                    config_to_save = persistable_config(connector_type, config, _provider)
                     if config_to_save:
                         await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
                 except Exception as _e:
@@ -2311,7 +2318,7 @@ async def check_connector_connection(
             healthy = health.health.value == "healthy"
             if healthy:
                 try:
-                    config_to_save = {k: v for k, v in config.items() if v is not None and v != ""}
+                    config_to_save = persistable_config(connector_type, config, _provider)
                     if config_to_save:
                         await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
                 except Exception as _e:
@@ -2356,7 +2363,7 @@ async def check_connector_connection(
                 }
             # Save full config so form fields are restored on return
             try:
-                config_to_save = {k: v for k, v in config.items() if v is not None and v != ""}
+                config_to_save = persistable_config(connector_type, config, _provider)
                 if config_to_save:
                     await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
             except Exception as _e:
@@ -2646,7 +2653,7 @@ async def poll_device_authorization(
         healthy = health.health.value == "healthy"
         # Persist full config after successful device token exchange
         try:
-            config_to_save = {k: v for k, v in stored_creds.items() if v is not None and v != ""}
+            config_to_save = persistable_config(connector_type, stored_creds, await _provider_of(connector_type))
             if config_to_save:
                 await credential_manager.store_credentials(tenant_id, connector_type, config_to_save)
         except Exception:
@@ -3650,8 +3657,10 @@ async def oauth_callback(
 
             config_to_save = {
                 k: v
-                for k, v in (connector.config or {}).items()
-                if v is not None and v != "" and k not in _EXCLUDE_FROM_CONFIG
+                for k, v in persistable_config(
+                    _resolved_cred_type, connector.config or {}, await _provider_of(_resolved_cred_type)
+                ).items()
+                if k not in _EXCLUDE_FROM_CONFIG
             }
             config_to_save["_auth_hash"] = _auth_hash
             if config_to_save:
