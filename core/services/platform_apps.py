@@ -138,8 +138,31 @@ def credential_mode(connector_type: str, config: dict, provider: str | None = No
     # behaviour and it produced exactly that, so anyone who supplies one of
     # these fields is bringing their own app and should be told which field is
     # missing.
+    # 🚨 Whose credential is it — compare, do not merely detect.
+    #
+    # "A platform field is present" was read as "a human supplied it", and that
+    # is wrong for every install made before managed mode stopped persisting our
+    # own credentials: those rows carry OUR client_id and a snapshot of OUR
+    # secret. The inference called them `self`, so the platform app was skipped
+    # and the STALE copy was sent to the provider — which answered
+    #
+    #     AADSTS7000215: Invalid client secret provided
+    #
+    # while the current secret sat in the environment, valid, one lookup away.
+    # The tell is the client_id: our app registration is the same one, so a
+    # stored id equal to the platform app's identifies a copy of ours no matter
+    # how stale the secret beside it has become. An id that DIFFERS is genuinely
+    # the customer's app, and stays self.
+    ours = platform_credentials(connector_type, provider)
     supplied = platform_app_fields(connector_type, provider)
-    if supplied and any(str((config or {}).get(k) or "").strip() for k in supplied):
+    for key in supplied:
+        value = str((config or {}).get(key) or "").strip()
+        if not value:
+            continue
+        # The identifying half is what decides; a secret is not comparable
+        # across a rotation and must never be the thing we match on.
+        if key.endswith("_id") and ours.get(key) and value == ours[key]:
+            return MODE_MANAGED
         return MODE_SELF
     return default_credential_mode(connector_type, provider)
 

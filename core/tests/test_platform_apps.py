@@ -526,3 +526,52 @@ def test_every_persist_path_goes_through_persistable_config() -> None:
         assert "persistable_config(" in handler, (
             f"credentials persisted without persistable_config at gateway.py:{i + 1}"
         )
+
+
+def test_a_stale_copy_of_our_own_credentials_is_still_managed(monkeypatch) -> None:
+    """🚨 The live failure: AADSTS7000215 while the correct secret sat in the
+    environment, valid.
+
+    Installs made before managed mode stopped persisting our credentials carry
+    OUR client_id and a snapshot of OUR secret. Reading "a platform field is
+    present" as "a human supplied it" called those `self`, skipped the platform
+    app, and sent the stale secret to the provider — for an app registration
+    whose current secret we hold.
+    """
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "our-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "rotated-secret")
+
+    stale = {"client_id": "our-app-id", "client_secret": "the-secret-from-last-year"}
+    assert credential_mode("microsoft_teams", stale, "microsoft") == MODE_MANAGED
+    # ...so the rotation reaches it.
+    assert apply_platform_app("microsoft_teams", stale, "microsoft")["client_secret"] == "rotated-secret"
+
+
+def test_a_customers_own_app_is_still_recognised(monkeypatch) -> None:
+    """The id is what identifies the app. A DIFFERENT id is genuinely theirs and
+    must never be overwritten with ours — that is a consent screen carrying the
+    wrong company's name."""
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "our-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "our-secret")
+
+    theirs = {"client_id": "their-own-app", "client_secret": "their-secret"}
+    assert credential_mode("microsoft_teams", theirs, "microsoft") == MODE_SELF
+    assert apply_platform_app("microsoft_teams", theirs, "microsoft")["client_secret"] == "their-secret"
+
+
+def test_a_secret_alone_is_never_matched_on(monkeypatch) -> None:
+    """A secret is not comparable across a rotation. Matching on it would call a
+    customer's install managed the moment our secret changed."""
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "our-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "our-secret")
+
+    secret_only = {"client_secret": "our-secret"}
+    assert credential_mode("microsoft_teams", secret_only, "microsoft") == MODE_SELF
+
+
+def test_an_explicit_choice_still_wins(monkeypatch) -> None:
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_ID", "our-app-id")
+    monkeypatch.setenv("MICROSOFT_APP_CLIENT_SECRET", "our-secret")
+
+    pinned = {"client_id": "our-app-id", CREDENTIAL_MODE_KEY: MODE_SELF}
+    assert credential_mode("microsoft_teams", pinned, "microsoft") == MODE_SELF
