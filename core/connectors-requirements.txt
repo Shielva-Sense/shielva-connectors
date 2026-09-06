@@ -75,8 +75,8 @@ shielva-connector-gitlab==1.0.5
 shielva-connector-gohighlevel==1.0.5
 shielva-connector-gong==1.0.5
 shielva-connector-google-analytics==1.0.5
-shielva-connector-google-calendar==1.0.5
-shielva-connector-google-drive==1.0.5
+shielva-connector-google-calendar==1.2.1
+shielva-connector-google-drive==1.2.1
 shielva-connector-google-gmail-connector==1.0.5
 shielva-connector-google-sheets==1.0.5
 shielva-connector-gorgias==1.0.5
