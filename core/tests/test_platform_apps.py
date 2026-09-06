@@ -311,3 +311,70 @@ def test_an_unknown_mode_falls_back_rather_than_failing(monkeypatch) -> None:
     assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: "nonsense"}) == MODE_MANAGED
     assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: ""}) == MODE_MANAGED
     assert credential_mode("google_calendar", {CREDENTIAL_MODE_KEY: "SELF"}) == MODE_SELF
+
+
+# ── provider-shared credentials ──────────────────────────────────────────────
+# One Google Cloud OAuth client serves every Google API, and one Azure
+# registration serves all of Graph — scopes are requested per authorization, not
+# baked into the client. Without sharing, the same client_id/secret is sealed
+# once per connector type and a rotation means editing every copy and learning
+# about the one you missed at re-auth.
+
+
+def test_a_provider_app_covers_a_listed_connector(monkeypatch) -> None:
+    for env in ("GOOGLE_CALENDAR_APP_CLIENT_ID", "GOOGLE_CALENDAR_APP_CLIENT_SECRET"):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    assert platform_app_available("google_calendar", "google") is True
+    assert apply_platform_app("google_calendar", {}, "google")["client_id"] == "shared-id"
+
+
+def test_a_per_type_app_overrides_the_provider_one(monkeypatch) -> None:
+    """So one connector can move to its own registration — a separate Google
+    project for a heavier API quota — without disturbing the others."""
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_ID", "calendar-id")
+    monkeypatch.setenv("GOOGLE_CALENDAR_APP_CLIENT_SECRET", "calendar-secret")
+    assert apply_platform_app("google_calendar", {}, "google")["client_id"] == "calendar-id"
+
+
+def test_a_provider_app_does_not_enable_an_unlisted_connector(monkeypatch) -> None:
+    """🚨 The decision this protects. Auto-enabling everything a provider covers
+    would turn Gmail into a platform app the moment a Google app was registered
+    — and Gmail's scopes are RESTRICTED, meaning an annual third-party security
+    assessment taken on by whoever owns the app. That must be deliberate.
+    """
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    assert platform_app_available("google_gmail_connector", "google") is False
+    assert apply_platform_app("google_gmail_connector", {}, "google") == {}
+
+
+def test_self_mode_still_wins_over_a_provider_app(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_ID", "shared-id")
+    monkeypatch.setenv("GOOGLE_APP_CLIENT_SECRET", "shared-secret")
+    out = apply_platform_app("google_calendar", {CREDENTIAL_MODE_KEY: MODE_SELF}, "google")
+    assert "client_id" not in out
+
+
+def test_every_consent_url_path_honours_the_mode() -> None:
+    """🚨 reauthorize did not, and it is the path that runs most: re-auth happens
+    whenever the refresh token is gone, which for a Google app still in Testing
+    is every seven days. It worked only because install had COPIED our
+    credentials into the tenant's stored config — so rotating a platform secret
+    would leave every managed connector re-authorising with the old one.
+    """
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "gateway.py").read_text().splitlines()
+    starts = [i for i, ln in enumerate(src) if ln.startswith("@app.")]
+    for i, ln in enumerate(src):
+        if "get_oauth_url(" not in ln or ln.strip().startswith("#"):
+            continue
+        start = max((h for h in starts if h < i), default=0)
+        handler = "\n".join(src[start:i])
+        assert "apply_platform_app(" in handler, f"consent URL built without the platform app at line {i + 1}"
+        assert re.search(r"_provider_of\(", handler), f"platform app applied without a provider at line {i + 1}"

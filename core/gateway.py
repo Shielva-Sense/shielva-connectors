@@ -1311,6 +1311,35 @@ _DEFAULT_ORIGINS = json.loads(
 _CALLBACK_PATH = "/connectors/oauth/callback"
 
 
+_PROVIDER_CACHE: dict[str, str] = {}
+
+
+async def _provider_of(connector_type: str) -> str | None:
+    """Which vendor's OAuth app covers this connector type.
+
+    Read from the catalogue, which already declares `provider`, rather than kept
+    as a second type-to-provider map — that is the mistake the platform-apps
+    endpoint made with its own copy of the platform-app keys, and it drifted
+    silently the first time the map changed.
+
+    Best-effort: an unreachable catalogue means the per-type environment still
+    resolves, so a connector with its own env pair keeps working.
+    """
+    if connector_type in _PROVIDER_CACHE:
+        return _PROVIDER_CACHE[connector_type] or None
+    try:
+        from services.connector_catalog import list_catalog
+
+        for c in await list_catalog():
+            ctype = c.get("connector_type") or c.get("type")
+            if ctype:
+                _PROVIDER_CACHE[ctype] = str(c.get("provider") or "")
+    except Exception as e:  # never block an install on the catalogue
+        logger.warning("provider_lookup_failed", connector_type=connector_type, error=str(e)[:160])
+        return None
+    return _PROVIDER_CACHE.get(connector_type) or None
+
+
 def _validated_redirect(supplied: str, default: str) -> str:
     """A caller-supplied redirect_uri, or a 400 saying why it cannot be used.
 
@@ -1609,11 +1638,18 @@ async def list_platform_apps():
     # Derived from the platform-app map, never a literal beside it — see
     # platform_app_types(). A hardcoded tuple here silently ignored every type
     # added to that map.
-    available = [t for t in platform_app_types() if platform_app_available(t)]
+    #
+    # Asked WITH the provider, so a type whose credentials come from the shared
+    # provider app is reported too. Without it this endpoint says "no platform
+    # app" while install happily uses one — and the UI, which reads only this,
+    # would go on asking the customer for credentials.
+    types = platform_app_types()
+    providers = {t: await _provider_of(t) for t in types}
+    available = [t for t in types if platform_app_available(t, providers[t])]
     # Which fields we already hold, per type. Without this the UI can only
     # guess the names, and a wrong guess asks the customer for a credential
     # the platform already has.
-    return {"available": available, "fields": {t: platform_app_fields(t) for t in available}}
+    return {"available": available, "fields": {t: platform_app_fields(t, providers[t]) for t in available}}
 
 
 @app.get("/connectors/types")
@@ -1819,7 +1855,7 @@ async def install_connector(
     # if they supplied any — an enterprise that must use its own registration
     # keeps it. Unregistered platform app = no-op, and install asks for
     # credentials exactly as before.
-    request.config = apply_platform_app(connector_type, request.config or {})
+    request.config = apply_platform_app(connector_type, request.config or {}, await _provider_of(connector_type))
 
     # 2. Merge credentials into config
     # stored_creds take precedence over request.config if both exist for security?
@@ -1995,7 +2031,7 @@ async def check_connector_connection(
     # client_id and client_secret we already hold, which is the exact thing the
     # platform app exists to stop. Resolved AFTER _resolve_connector_type, so an
     # alias reaches the same entry as install does.
-    config = apply_platform_app(connector_type, config or {})
+    config = apply_platform_app(connector_type, config or {}, await _provider_of(connector_type))
 
     if connector_type not in CONNECTOR_CLASSES:
         return {
@@ -2798,7 +2834,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # for the same reason check does: it re-generates the consent URL for any
     # connector that is not yet connected, and without credentials there is no
     # URL to generate.
-    final_config = apply_platform_app(connector_type, final_config)
+    final_config = apply_platform_app(connector_type, final_config, await _provider_of(connector_type))
 
     # ONE instance per (tenant, connector type) — see install_connector. Reusing the
     # canonical id makes deploy / re-auth idempotent (replaces the token in place; no
@@ -2919,6 +2955,26 @@ async def reauthorize_connector(
     _base = os.getenv("PUBLIC_GATEWAY_URL") or os.getenv("GATEWAY_URL", "https://localhost:8000")
     redirect_uri = f"{_base}/connectors/oauth/callback"
     connector.config["redirect_uri"] = redirect_uri
+
+    # 🚨 Re-apply the platform app, honouring the mode stored on this install.
+    #
+    # This was the one consent-URL path that did not, and it is the path that
+    # runs most: re-auth happens whenever the refresh token is gone, which for a
+    # Google app still in Testing is every seven days. It worked only because
+    # install had COPIED our client_id/secret into the tenant's stored config —
+    # so rotating a platform secret would leave every existing managed connector
+    # re-authorising with the old one and failing at the provider, with nothing
+    # here to explain why.
+    #
+    # Filling in only what is missing keeps the precedence identical to install:
+    # an organisation that chose its own app keeps it, and gets an error naming
+    # the credential it forgot rather than a consent screen with our name on it.
+    _cred_type = next(
+        (k for k, v in CONNECTOR_CLASSES.items() if v is type(connector)),
+        connector.CONNECTOR_TYPE,
+    )
+    connector.config = apply_platform_app(_cred_type, connector.config or {}, await _provider_of(_cred_type))
+
     try:
         oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
     except Exception as exc:

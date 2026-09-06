@@ -70,12 +70,12 @@ MODE_SELF = "self"
 CREDENTIAL_MODE_KEY = "credential_mode"
 
 
-def default_credential_mode(connector_type: str) -> str:
+def default_credential_mode(connector_type: str, provider: str | None = None) -> str:
     """Managed wherever we have an app, self everywhere else."""
-    return MODE_MANAGED if platform_app_available(connector_type) else MODE_SELF
+    return MODE_MANAGED if platform_app_available(connector_type, provider) else MODE_SELF
 
 
-def credential_mode(connector_type: str, config: dict) -> str:
+def credential_mode(connector_type: str, config: dict, provider: str | None = None) -> str:
     """Which app this install uses — ours or the customer's.
 
     🚨 An explicit choice, because the implicit one was unreachable. The rule
@@ -94,7 +94,7 @@ def credential_mode(connector_type: str, config: dict) -> str:
         return MODE_SELF
     if chosen == MODE_MANAGED:
         return MODE_MANAGED
-    return default_credential_mode(connector_type)
+    return default_credential_mode(connector_type, provider)
 
 
 def platform_app_types() -> list[str]:
@@ -110,31 +110,65 @@ def platform_app_types() -> list[str]:
     return sorted(_PLATFORM_APPS)
 
 
-def platform_app_available(connector_type: str) -> bool:
+#: One app per PROVIDER, because a Google Cloud OAuth client serves every Google
+#: API and one Azure registration serves all of Graph — scopes are requested per
+#: authorization, not baked into the client. Without this the same client_id and
+#: secret would be sealed once per connector type, and a rotation would mean
+#: editing five copies and finding out about the one you missed at re-auth.
+#:
+#: 🚨 A provider app does NOT enable a connector on its own. The type must still
+#: be listed in _PLATFORM_APPS. Auto-enabling everything a provider covers would
+#: quietly turn Gmail into a platform app the moment a Google app was registered,
+#: and Gmail's scopes are RESTRICTED — that is an annual third-party security
+#: assessment, taken on by whoever owns the app. That has to be a decision.
+_PROVIDER_APPS: dict[str, dict[str, str]] = {
+    "google": {
+        "client_id": "GOOGLE_APP_CLIENT_ID",
+        "client_secret": "GOOGLE_APP_CLIENT_SECRET",
+    },
+    "microsoft": {
+        "client_id": "MICROSOFT_APP_CLIENT_ID",
+        "client_secret": "MICROSOFT_APP_CLIENT_SECRET",
+    },
+}
+
+
+def _read(env_map: dict[str, str]) -> dict[str, str]:
+    """All-or-nothing: half a credential pair produces an OAuth error that reads
+    like the customer's fault."""
+    creds = {field: os.getenv(env, "").strip() for field, env in env_map.items()}
+    return creds if all(creds.values()) else {}
+
+
+def platform_app_available(connector_type: str, provider: str | None = None) -> bool:
     """Whether a customer can connect this type with one click.
 
     The UI asks this before offering a Connect button, so an unregistered app
     shows the credential form rather than a button that leads to a broken
     consent screen.
     """
-    keys = _PLATFORM_APPS.get(connector_type)
-    if not keys:
-        return False
-    return all(os.getenv(env, "").strip() for env in keys.values())
+    return bool(platform_credentials(connector_type, provider))
 
 
-def platform_credentials(connector_type: str) -> dict[str, str]:
-    """The platform app's credentials for this type, or {} if unregistered."""
+def platform_credentials(connector_type: str, provider: str | None = None) -> dict[str, str]:
+    """The platform app's credentials for this type, or {} if unregistered.
+
+    Per-type environment wins, then the provider-wide app. The per-type override
+    exists so one connector can be moved onto its own registration — a different
+    Google project for a heavier API quota, say — without disturbing the others.
+
+    `provider` comes from the connector catalogue, which already declares it.
+    Deriving it from the type name, or keeping a second type-to-provider map
+    here, is the same mistake as the endpoint that kept its own copy of this
+    module's keys and silently drifted from it.
+    """
     keys = _PLATFORM_APPS.get(connector_type)
     if not keys:
         return {}
-    creds = {field: os.getenv(env, "").strip() for field, env in keys.items()}
-    # All-or-nothing: half a credential pair produces an OAuth error that reads
-    # like the customer's fault.
-    return creds if all(creds.values()) else {}
+    return _read(keys) or _read(_PROVIDER_APPS.get((provider or "").strip().lower(), {}))
 
 
-def apply_platform_app(connector_type: str, config: dict) -> dict:
+def apply_platform_app(connector_type: str, config: dict, provider: str | None = None) -> dict:
     """Fill in the platform app's credentials for anything the caller omitted.
 
     🚨 The caller's own values always win. A tenant that brings its own app
@@ -147,9 +181,9 @@ def apply_platform_app(connector_type: str, config: dict) -> dict:
     ours quietly standing in for it. That is the difference between "you missed a
     field" and a consent screen carrying the wrong company's name.
     """
-    if credential_mode(connector_type, config or {}) == MODE_SELF:
+    if credential_mode(connector_type, config or {}, provider) == MODE_SELF:
         return config
-    creds = platform_credentials(connector_type)
+    creds = platform_credentials(connector_type, provider)
     if not creds:
         return config
     merged = dict(config)
@@ -159,7 +193,7 @@ def apply_platform_app(connector_type: str, config: dict) -> dict:
     return merged
 
 
-def platform_app_fields(connector_type: str) -> list[str]:
+def platform_app_fields(connector_type: str, provider: str | None = None) -> list[str]:
     """Which install fields the platform app supplies for this type.
 
     The UI must not ask a customer for a credential we already hold — that is
@@ -167,6 +201,4 @@ def platform_app_fields(connector_type: str) -> list[str]:
     must not guess the field NAMES: slack and teams use client_id/client_secret,
     whatsapp uses app_id/app_secret. So the mapping answers, not the caller.
     """
-    if not platform_app_available(connector_type):
-        return []
-    return sorted(_PLATFORM_APPS.get(connector_type, {}).keys())
+    return sorted(platform_credentials(connector_type, provider))
