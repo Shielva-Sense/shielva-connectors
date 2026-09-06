@@ -93,6 +93,10 @@ MODE_MANAGED = "managed"
 MODE_SELF = "self"
 CREDENTIAL_MODE_KEY = "credential_mode"
 
+#: The catalogue's provider name, carried on the config so the connector SDK can
+#: fall back to that provider's well-known OAuth endpoints.
+PROVIDER_KEY = "provider"
+
 
 def default_credential_mode(connector_type: str, provider: str | None = None) -> str:
     """Managed wherever we have an app, self everywhere else."""
@@ -239,12 +243,18 @@ def apply_platform_app(connector_type: str, config: dict, provider: str | None =
     """
     mode = credential_mode(connector_type, config or {}, provider)
     decided = platform_app_available(connector_type, provider)
+    # 🚨 The provider travels WITH the config, because the SDK cannot derive it.
+    # Google's authorize endpoint is one fact shared by drive, calendar, gmail,
+    # sheets and analytics; each connector re-declaring it is what let sheets
+    # ship declaring it nowhere, and 500 on install with "auth_uri is not set".
+    # A name, not a secret — it is the catalogue's own field.
+    hint = {PROVIDER_KEY: provider} if provider else {}
     if mode == MODE_SELF:
-        return {**(config or {}), CREDENTIAL_MODE_KEY: MODE_SELF} if decided else config
+        return {**(config or {}), **hint, CREDENTIAL_MODE_KEY: MODE_SELF} if decided else config
     creds = platform_credentials(connector_type, provider)
     if not creds:
-        return config
-    return {**(config or {}), **creds, CREDENTIAL_MODE_KEY: MODE_MANAGED}
+        return {**(config or {}), **hint} if hint else config
+    return {**(config or {}), **creds, **hint, CREDENTIAL_MODE_KEY: MODE_MANAGED}
 
 
 def strip_platform_credentials(connector_type: str, config: dict, provider: str | None = None) -> dict:

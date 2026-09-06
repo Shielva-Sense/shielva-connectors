@@ -60,3 +60,35 @@ def test_an_unformatted_template_is_never_returned() -> None:
         AUTH_URI = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
 
     assert _discover_endpoint(_OnlyATemplate(), _AUTH_URI_ALIASES, _META) is None
+
+
+def test_a_connector_declaring_nothing_falls_back_to_its_provider() -> None:
+    """🚨 google_sheets 500'd on install declaring no endpoint anywhere. Google's
+    authorize endpoint is one fact shared by drive, calendar, gmail and sheets;
+    requiring each connector to restate it is what made the omission possible."""
+    from shared.base_connector import _provider_endpoint
+
+    class _Bare:
+        config = {"provider": "google"}
+
+    assert _provider_endpoint(_Bare(), "auth") == "https://accounts.google.com/o/oauth2/v2/auth"
+    assert _provider_endpoint(_Bare(), "token") == "https://oauth2.googleapis.com/token"
+
+
+def test_the_microsoft_fallback_excludes_personal_accounts() -> None:
+    """`common` admits personal Microsoft accounts, which Graph then refuses
+    AFTER sign-in with "personal account not allowed" — the exact dead end this
+    console already hit once."""
+    from shared.base_connector import _provider_endpoint
+
+    class _Bare:
+        config = {"provider": "microsoft"}
+
+    assert "/organizations/" in _provider_endpoint(_Bare(), "auth")
+    assert "/common/" not in _provider_endpoint(_Bare(), "auth")
+
+
+def test_the_connectors_own_endpoint_still_wins_over_the_provider_default() -> None:
+    c = _OutlookLike(azure_tenant="9f00a0de-0000-0000-0000-000000000000")
+    c.config = {"provider": "microsoft"}
+    assert "9f00a0de" in _discover_endpoint(c, _AUTH_URI_ALIASES, _META)

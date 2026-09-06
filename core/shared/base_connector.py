@@ -178,6 +178,36 @@ _TOKEN_URI_ALIASES = (
 )
 
 
+#: A provider's well-known OAuth endpoints — the LAST resort, used only when a
+#: connector declares none of its own.
+#:
+#: 🚨 These are provider facts, not connector facts. Google's authorize endpoint
+#: is the same one for drive, calendar, gmail, sheets and analytics, and asking
+#: each connector to restate it is what let google_sheets ship stating it
+#: nowhere: install raised "auth_uri is not set" for a connector whose endpoint
+#: was never in doubt. Anything the connector declares still wins, so a tenant
+#: pinned to a specific Azure directory keeps its own URL.
+_PROVIDER_ENDPOINTS: "dict[str, dict[str, str]]" = {
+    "google": {
+        "auth": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token": "https://oauth2.googleapis.com/token",
+    },
+    "microsoft": {
+        # `organizations`, not `common`: a work/school directory. `common` also
+        # admits personal Microsoft accounts, which Graph then refuses with
+        # "personal account not allowed" AFTER the user has signed in.
+        "auth": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+        "token": "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+    },
+}
+
+
+def _provider_endpoint(connector, kind: str) -> "str | None":
+    """The provider's well-known endpoint for a connector that declares none."""
+    provider = str((getattr(connector, "config", None) or {}).get("provider") or "").strip().lower()
+    return _PROVIDER_ENDPOINTS.get(provider, {}).get(kind)
+
+
 def _discover_endpoint(connector, aliases: tuple, meta_keys: tuple) -> "str | None":
     """Find an OAuth endpoint the connector already declares, wherever it put it.
 
@@ -504,6 +534,7 @@ class BaseConnector(ABC):
             or getattr(sys.modules.get(self.__class__.__module__, None), "AUTH_URI", None)
             # …then wherever else this connector actually declared it.
             or _discover_endpoint(self, _AUTH_URI_ALIASES, ("authorization_url", "auth_uri", "authorize_url"))
+            or _provider_endpoint(self, "auth")
         )
         if not auth_uri:
             raise ValueError(
@@ -600,6 +631,7 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
         if not token_uri:
             # No TOKEN_URI — can't probe; let gateway fall through to the OAuth popup
@@ -735,6 +767,7 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
         if not token_uri:
             raise ValueError(f"TOKEN_URI not set for connector '{self.CONNECTOR_TYPE}'")
@@ -794,6 +827,7 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
         username = self.config.get("username") or self.config.get("email")
         password = self.config.get("password")
@@ -903,6 +937,7 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
         client_id = (
             self.config.get("client_id")
@@ -1012,6 +1047,7 @@ class BaseConnector(ABC):
             or getattr(self.__class__, "TOKEN_URI", None)
             or getattr(sys.modules.get(self.__class__.__module__, None), "TOKEN_URI", None)
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
+            or _provider_endpoint(self, "token")
         )
         private_key = key_info.get("private_key") or self.config.get("private_key")
         client_email = key_info.get("client_email") or self.config.get("client_email") or self.config.get("iss")
