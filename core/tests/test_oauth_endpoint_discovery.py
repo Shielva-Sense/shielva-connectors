@@ -130,3 +130,44 @@ def test_a_connector_that_names_its_own_azure_tenant_is_honoured() -> None:
         config = {"provider": "microsoft", "tenant_hint": "contoso.onmicrosoft.com"}
 
     assert "contoso.onmicrosoft.com" in _provider_endpoint(_ByTenantHint(), "auth")
+
+
+def test_the_authority_reaches_a_connector_that_declares_its_own_url() -> None:
+    """🚨 The reason the first attempt changed nothing.
+
+    Most Microsoft connectors declare their own
+    `.../organizations/oauth2/v2.0/authorize`, which wins over the provider
+    fallback — so configuring an authority left exactly those connectors
+    untouched, and the consent screen went on saying "You don't have the
+    required permissions to access this org".
+    """
+    from shared.base_connector import _pin_authority
+
+    class _DeclaresItsOwn:
+        config = {"provider": "microsoft", "azure_authority": "629c248d-a791-4921-9590-db05e5863356"}
+
+    url = "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?client_id=x"
+    pinned = _pin_authority(_DeclaresItsOwn(), url)
+    assert "629c248d-a791-4921-9590-db05e5863356" in pinned
+    assert "/organizations/" not in pinned
+    assert pinned.endswith("?client_id=x")
+
+
+def test_nothing_is_rewritten_without_an_explicit_authority() -> None:
+    from shared.base_connector import _pin_authority
+
+    class _NoAuthority:
+        config = {"provider": "microsoft"}
+
+    url = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+    assert _pin_authority(_NoAuthority(), url) == url
+
+
+def test_only_microsoft_login_urls_are_touched() -> None:
+    from shared.base_connector import _pin_authority
+
+    class _Google:
+        config = {"provider": "google", "azure_authority": "should-be-ignored"}
+
+    url = "https://accounts.google.com/o/oauth2/v2/auth"
+    assert _pin_authority(_Google(), url) == url

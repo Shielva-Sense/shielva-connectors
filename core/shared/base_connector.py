@@ -4,6 +4,7 @@ All connectors inherit from this base class.
 """
 
 import os
+import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -205,6 +206,36 @@ _PROVIDER_ENDPOINTS: "dict[str, dict[str, str]]" = {
         "token": "https://login.microsoftonline.com/{authority}/oauth2/v2.0/token",
     },
 }
+
+
+def _pin_authority(connector, url: "str | None") -> "str | None":
+    """Point a Microsoft login URL at the directory the operator configured.
+
+    🚨 Applied to whatever the resolution chain returned, not only to the
+    provider fallback. Most Microsoft connectors declare their own
+    `.../organizations/oauth2/v2.0/authorize` constant, which wins over the
+    fallback — so configuring an authority changed nothing for exactly the
+    connectors that needed it, and the consent screen went on saying
+    "You don't have the required permissions to access this org".
+
+    Only ever rewrites the directory segment of a login.microsoftonline.com URL,
+    and only when an authority was explicitly configured. Everything else is
+    returned untouched.
+    """
+    if not url or "login.microsoftonline.com/" not in url:
+        return url
+    config = getattr(connector, "config", None) or {}
+    authority = str(
+        config.get("azure_authority") or config.get("azure_tenant") or config.get("tenant_hint") or ""
+    ).strip()
+    if not authority or "{" in authority:
+        return url
+    return re.sub(
+        r"(https://login\.microsoftonline\.com/)[^/]+(/)",
+        lambda m: m.group(1) + authority + m.group(2),
+        url,
+        count=1,
+    )
 
 
 def _provider_endpoint(connector, kind: str) -> "str | None":
@@ -516,6 +547,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         if not token_uri:
             raise ValueError(
                 f"token_uri is not set for connector '{self.CONNECTOR_TYPE}'. "
@@ -627,6 +659,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _AUTH_URI_ALIASES, ("authorization_url", "auth_uri", "authorize_url"))
             or _provider_endpoint(self, "auth")
         )
+        auth_uri = _pin_authority(self, auth_uri)
         if not auth_uri:
             raise ValueError(
                 f"auth_uri is not set for connector '{self.CONNECTOR_TYPE}'. "
@@ -724,6 +757,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         if not token_uri:
             # No TOKEN_URI — can't probe; let gateway fall through to the OAuth popup
             return {
@@ -860,6 +894,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         if not token_uri:
             raise ValueError(f"TOKEN_URI not set for connector '{self.CONNECTOR_TYPE}'")
 
@@ -920,6 +955,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         username = self.config.get("username") or self.config.get("email")
         password = self.config.get("password")
         client_id = self.config.get("client_id") or getattr(self, "client_id", None) or ""
@@ -1030,6 +1066,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         client_id = (
             self.config.get("client_id")
             or getattr(self, "client_id", None)
@@ -1140,6 +1177,7 @@ class BaseConnector(ABC):
             or _discover_endpoint(self, _TOKEN_URI_ALIASES, ("token_url", "token_uri"))
             or _provider_endpoint(self, "token")
         )
+        token_uri = _pin_authority(self, token_uri)
         private_key = key_info.get("private_key") or self.config.get("private_key")
         client_email = key_info.get("client_email") or self.config.get("client_email") or self.config.get("iss")
         audience = key_info.get("token_uri") or token_uri
