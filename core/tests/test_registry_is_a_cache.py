@@ -91,3 +91,26 @@ def test_rehydration_reuses_the_startup_steps() -> None:
     body = _body("_rehydrate_connector")
     for step in ("install()", "initialize()", "_status", "registry.register("):
         assert step in body, f"rehydration is missing {step}"
+
+
+def test_every_listing_endpoint_consults_the_durable_store() -> None:
+    """🚨 There are TWO endpoints that answer "is this connected", and the console
+    reads the other one.
+
+    /connectors/list was fixed first and the badge did not move, because the
+    console asks GET /connectors — which answered "unknown" whenever the
+    instance was absent from this process, and "unknown" is not in the
+    authorised set. Both are pinned here so a fix cannot land on one and be
+    reported as done.
+    """
+    for endpoint in ("list_connectors", "list_tenant_connectors"):
+        body = _body(endpoint)
+        assert "get_connector_tokens" in body, f"{endpoint} decides connectedness without consulting the token store"
+
+
+def test_the_console_endpoint_never_settles_for_unknown() -> None:
+    """A connector holding a valid refresh token must not render "Ready to
+    connect" merely because this pod has not loaded it."""
+    body = _body("list_connectors")
+    assert 'auth not in ("connected", "authenticated")' in body
+    assert '"healthy", "connected"' in body

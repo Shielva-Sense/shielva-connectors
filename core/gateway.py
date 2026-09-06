@@ -4079,11 +4079,27 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
         cid = getattr(cfg, "connector_id", None)
         if not cid:
             continue
+        # 🚨 The console reads THIS endpoint for its badge, and it answered
+        # "unknown" whenever the instance was not in this process's registry —
+        # after a restart, on a replica that never restored, or once a wheel
+        # upgrade evicted instances of the class it replaced. "unknown" is not
+        # in the authorised set, so a connector holding a valid refresh token
+        # rendered "Ready to connect" and offered no way to see otherwise.
+        #
+        # The stored token is the durable fact; the live instance is the richer
+        # one when it happens to be here. Ask the registry first, and fall back
+        # to the token rather than to a shrug.
         health, auth = "unknown", "unknown"
         conn = registry.get(cid)
         if conn:
             status = conn.get_status()
             health, auth = install_health(status), install_auth_status(status)
+        if auth not in ("connected", "authenticated"):
+            token = None
+            with suppress(Exception):
+                token = await connector_store.get_connector_tokens(cid)
+            if token and getattr(token, "access_token", None):
+                health, auth = "healthy", "connected"
         connectors.append(
             {
                 "connector_id": cid,
