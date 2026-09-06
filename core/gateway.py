@@ -1761,10 +1761,23 @@ async def list_tenant_connectors(
     # The registry is a cache. The token is the truth, so ask the store.
     result = []
     for c in tenant_connectors:
+        # 🚨 Two ways to be connected, and only checking one breaks the other.
+        #
+        # An OAuth connector's proof is the stored token. A static-credential
+        # connector — Slack with a bot token, anything on an API key — never has
+        # one, and reading only the token store would have flipped the single
+        # card that was still correct. So: a durable token, OR a live instance
+        # that reports itself authenticated.
         token = None
         with suppress(Exception):
             token = await connector_store.get_connector_tokens(c.connector_id)
-        status = "connected" if token and token.access_token else "configured"
+        connected = bool(token and token.access_token)
+        if not connected:
+            live = registry.get(c.connector_id)
+            if live is not None:
+                with suppress(Exception):
+                    connected = install_auth_status(live.get_status()) in ("connected", "authenticated")
+        status = "connected" if connected else "configured"
 
         result.append(
             {

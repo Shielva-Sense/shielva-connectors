@@ -44,6 +44,19 @@ def test_the_listing_badge_comes_from_the_token_store() -> None:
     assert "registry._connectors" not in code, "in-memory membership is back in the badge"
 
 
+def test_a_static_credential_connector_keeps_its_badge() -> None:
+    """🚨 Slack has NO OAuth token — it authenticates with a bot token in config —
+    and it was the one card still showing the truth. Reading only the token store
+    would have broken the single connector that was correct, which is how a fix
+    for a regression becomes a second regression.
+
+    A live instance reporting itself authenticated is the other valid proof.
+    """
+    body = _body("list_tenant_connectors")
+    assert "registry.get(" in body
+    assert "install_auth_status(" in body
+
+
 def test_a_registry_miss_rebuilds_from_the_store() -> None:
     body = _body("_resolve_for_tenant")
     assert "_rehydrate_for_tenant" in body
