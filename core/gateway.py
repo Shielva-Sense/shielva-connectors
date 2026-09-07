@@ -40,7 +40,7 @@ from shielva_common.envelope import bootstrap as _envelope_bootstrap
 
 _envelope_bootstrap()
 
-from services import credential_manager
+from services import credential_manager, job_store
 from services.connection_state import EXPIRED, connection_state, is_connected
 from services.connector_store import connector_store
 from services.install_gate import (
@@ -236,6 +236,25 @@ def _ensure_sync_runtime() -> None:
     logger.info("sync.workers_started", count=SYNC_WORKER_COUNT, queue_max=SYNC_QUEUE_MAX)
 
 
+async def _watch_for_cancel(job_id: str, task: asyncio.Task, interval: float = 2.0) -> None:
+    """Cancel `task` when a cancel flag appears for its job.
+
+    Polled rather than pushed: a pub/sub subscription per running job is a
+    connection per job, and a sync runs for minutes — a 2s poll costs one Redis
+    GET in that time and cannot leak a subscription when the pod dies.
+    """
+    try:
+        while not task.done():
+            await asyncio.sleep(interval)
+            if await job_store.cancel_requested(job_id):
+                task.cancel()
+                return
+    except asyncio.CancelledError:
+        return
+    except Exception as e:  # a watcher must never take the job down
+        logger.warning("sync.cancel_watch_failed", job_id=job_id, error=str(e)[:160])
+
+
 async def _sync_worker(worker_id: int) -> None:
     """Drain the sync queue forever, one job at a time."""
     assert _SYNC_QUEUE is not None
@@ -246,14 +265,35 @@ async def _sync_worker(worker_id: int) -> None:
             logger.warning("sync.worker_queue_get_failed", worker=worker_id, error=str(e))
             continue
         job = _JOBS.get(job_id)
+        watcher: asyncio.Task | None = None
         try:
             if job is None or job.get("status") == "cancelled":
                 # Cancelled while it waited — the common case, and the whole
                 # point of queueing: the work never runs at all.
                 continue
+            # Cancelled while it queued — possibly by another pod, which can only
+            # leave a flag. Checked here, before any work begins, because that is
+            # the cheapest possible moment to honour it.
+            if await job_store.cancel_requested(job_id):
+                job.update({"status": "cancelled", "finished_at": _time_mod.time()})
+                with suppress(Exception):
+                    job["_done_event"].set()
+                await job_store.update(job_id, status="cancelled")
+                await job_store.release_connector(str(job.get("connector_id") or ""), job_id)
+                await job_store.clear_cancel(job_id)
+                logger.info("sync.cancelled_before_start", job_id=job_id, worker=worker_id)
+                continue
+
             job.update({"status": "running", "started_at": _time_mod.time(), "worker": worker_id})
+            with suppress(Exception):
+                await job_store.update(job_id, status="running", worker=worker_id)
             task = asyncio.create_task(run())
             _SYNC_TASKS[job_id] = task
+            # 🚨 A cancel raised on another pod is a flag, and a flag nobody reads
+            # is a label. This watches it and cancels the task locally, which is
+            # the only way a job can actually be interrupted — by the process
+            # holding it.
+            watcher = asyncio.create_task(_watch_for_cancel(job_id, task))
             try:
                 await task
             except asyncio.CancelledError:
@@ -270,9 +310,16 @@ async def _sync_worker(worker_id: int) -> None:
                 with suppress(Exception):
                     job["_done_event"].set()
         finally:
+            with suppress(Exception):
+                if watcher is not None:
+                    watcher.cancel()
             _SYNC_TASKS.pop(job_id, None)
             if job is not None:
-                _SYNC_INFLIGHT.pop(str(job.get("connector_id") or ""), None)
+                connector_of_job = str(job.get("connector_id") or "")
+                _SYNC_INFLIGHT.pop(connector_of_job, None)
+                with suppress(Exception):
+                    await job_store.release_connector(connector_of_job, job_id)
+                    await job_store.clear_cancel(job_id)
             with suppress(Exception):
                 _SYNC_QUEUE.task_done()
 
@@ -4153,22 +4200,46 @@ async def sync_connector(
     # double the upstream calls for no extra data. Clicking twice is not a
     # request for two syncs; it is impatience, and the honest answer is the job
     # already running.
-    existing = _SYNC_INFLIGHT.get(connector_id)
-    if existing and _JOBS.get(existing, {}).get("status") in ("queued", "running"):
-        return SyncResponse(
-            job_id=existing,
-            status=_JOBS[existing].get("status", "syncing"),
-            message="A sync is already in progress for this connector",
-        )
+    # 🚨 Claimed atomically, and in Redis, so it holds across replicas. Two pods
+    # handling two clicks in the same millisecond would both read "nothing in
+    # flight" and both start a sync — the check and the claim have to be one
+    # instruction or dedupe is just a race with better odds.
+    held_by = await job_store.claim_connector(connector_id, job_id)
+    if held_by:
+        existing_job = await job_store.get(held_by) or {}
+        if existing_job.get("status") not in job_store.TERMINAL:
+            return SyncResponse(
+                job_id=held_by,
+                status=existing_job.get("status", "syncing"),
+                message="A sync is already in progress for this connector",
+            )
+        # The holder finished but its claim outlived it — take it over.
+        await job_store.release_connector(connector_id, held_by)
+        await job_store.claim_connector(connector_id, job_id)
 
     _sync_job = _job(job_id)
     _sync_job.update({"status": "queued", "kind": "sync", "connector_id": connector_id})
     _SYNC_INFLIGHT[connector_id] = job_id
+    await job_store.put(job_id, _sync_job)
 
-    def _finish(status: str, **fields) -> None:
+    async def _finish_async(status: str, **fields) -> None:
         _sync_job.update({"status": status, "finished_at": _time_mod.time(), **fields})
         with suppress(Exception):
             _sync_job["_done_event"].set()
+        with suppress(Exception):
+            await job_store.put(job_id, _sync_job)
+            await job_store.release_connector(connector_id, job_id)
+            await job_store.clear_cancel(job_id)
+
+    def _finish(status: str, **fields) -> None:
+        # Fire-and-forget the durable write: the caller is inside the sync
+        # worker's exception paths, where awaiting a Redis round trip would let
+        # a Redis stall swallow the outcome it is trying to record.
+        _sync_job.update({"status": status, "finished_at": _time_mod.time(), **fields})
+        with suppress(Exception):
+            _sync_job["_done_event"].set()
+        with suppress(Exception):
+            asyncio.create_task(_finish_async(status, **fields))
 
     # Run sync in background
     async def run_sync():
@@ -4269,10 +4340,17 @@ async def sync_job_status(connector_id: str, job_id: str, tenant_id: str = Depen
     if not connector or connector.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    job = _JOBS.get(job_id)
+    # 🚨 Redis first, local second. A poll load-balanced to a pod that did not
+    # start the job must still answer — that is the whole point of moving the
+    # store off the process, and reading local-first would make the answer
+    # depend on which pod you happened to reach.
+    job = await job_store.get(job_id)
+    if job is None:
+        local = _JOBS.get(job_id)
+        job = _serialise_job(job_id, local) if local else None
     if not job or job.get("kind") != "sync":
         raise HTTPException(status_code=404, detail="Sync job not found (may have expired)")
-    return _serialise_job(job_id, job)
+    return job | {"job_id": job_id}
 
 
 @app.post("/connectors/{connector_id}/sync/jobs/{job_id}/cancel")
@@ -4290,28 +4368,46 @@ async def cancel_sync_job(connector_id: str, job_id: str, tenant_id: str = Depen
     if not connector or connector.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    job = _JOBS.get(job_id)
+    job = await job_store.get(job_id)
+    if job is None:
+        local = _JOBS.get(job_id)
+        job = _serialise_job(job_id, local) if local else None
     if not job or job.get("kind") != "sync":
         raise HTTPException(status_code=404, detail="Sync job not found (may have expired)")
 
     status = job.get("status")
-    if status in ("completed", "failed", "cancelled"):
+    if status in job_store.TERMINAL:
         # Already finished. Not an error — the button was pressed a moment late,
         # and reporting a 409 for that is noise.
-        return _serialise_job(job_id, job)
+        return job | {"job_id": job_id}
+
+    # 🚨 Always set the flag, even when this pod holds the task.
+    #
+    # Cancellation crosses pods as a flag, never as a call: only the process
+    # running a job can interrupt it, and a cancel endpoint that pretends
+    # otherwise marks a job cancelled while it keeps running. When the task IS
+    # here we also cancel it directly, so the common single-pod case is
+    # immediate rather than waiting for the next poll.
+    await job_store.request_cancel(job_id)
 
     task = _SYNC_TASKS.get(job_id)
     if task is not None and not task.done():
         task.cancel()
-        job["status"] = "cancelling"
-    else:
-        job.update({"status": "cancelled", "finished_at": _time_mod.time()})
+        job = await job_store.update(job_id, status="cancelling")
+    elif job_id in _JOBS:
+        # Queued on THIS pod and not started — stop it before it ever runs.
+        _JOBS[job_id].update({"status": "cancelled", "finished_at": _time_mod.time()})
         with suppress(Exception):
-            job["_done_event"].set()
+            _JOBS[job_id]["_done_event"].set()
         _SYNC_INFLIGHT.pop(connector_id, None)
+        await job_store.release_connector(connector_id, job_id)
+        job = await job_store.update(job_id, status="cancelled")
+    else:
+        # Running on another pod. It polls the flag and stops itself.
+        job = await job_store.update(job_id, status="cancelling")
 
     logger.info("sync.cancel_requested", job_id=job_id, connector_id=connector_id, was=status)
-    return _serialise_job(job_id, job)
+    return job | {"job_id": job_id}
 
 
 @app.get("/connectors/{connector_id}/status", response_model=ConnectorStatusResponse)

@@ -86,8 +86,31 @@ def test_a_second_click_returns_the_running_job() -> None:
     double the upstream calls for no extra data. Clicking twice is impatience,
     not a request for two syncs."""
     body = _body("sync_connector")
-    assert "_SYNC_INFLIGHT.get(connector_id)" in body
     assert "already in progress" in body
+    # 🚨 Claimed with SET NX in Redis, not read-then-write in a dict. Two pods
+    # handling two clicks in the same millisecond both read "nothing in flight"
+    # and both start a sync; the check and the claim must be one instruction.
+    assert "job_store.claim_connector(" in body
+
+
+def test_the_job_store_is_shared_across_replicas() -> None:
+    """A dict is correct at one replica and a lie at two: a poll load-balanced
+    elsewhere answers "not found", a cancel reaches a pod not running the job,
+    and dedupe stops working — none of which shows up until the replica count
+    changes."""
+    for endpoint in ("sync_job_status", "cancel_sync_job"):
+        assert "job_store.get(job_id)" in _body(endpoint), (
+            f"{endpoint} must read the shared store, not this process's dict"
+        )
+
+
+def test_a_cancel_from_another_pod_is_actually_honoured() -> None:
+    """Cancellation crosses pods as a flag, and a flag nobody reads is a label.
+    Only the process holding a task can interrupt it."""
+    assert "job_store.request_cancel(" in _body("cancel_sync_job")
+    worker = _body("_sync_worker")
+    assert "job_store.cancel_requested(job_id)" in worker, "queued jobs must check before starting"
+    assert "_watch_for_cancel(" in worker, "running jobs need the flag watched"
 
 
 def test_sync_is_queued_not_fired() -> None:
