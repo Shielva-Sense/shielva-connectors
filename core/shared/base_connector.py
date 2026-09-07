@@ -3,9 +3,11 @@ Shielva Connectors - Base Connector Abstract Class
 All connectors inherit from this base class.
 """
 
+import asyncio
 import contextlib
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -407,6 +409,42 @@ def _discover_endpoint(connector, aliases: tuple, meta_keys: tuple) -> "str | No
     return None
 
 
+class _TokenBucket:
+    """Paces outbound calls so a provider's quota is respected BEFORE it is hit.
+
+    🚨 Retry-on-429 is not a rate limiter. It is what you do when your rate
+    limiting failed: the request was already sent, the quota was already spent,
+    and on a shared per-user bucket the retry storm makes the next caller's
+    request fail too. Gmail returns "Quota exceeded for quota metric 'Total
+    Query Cost'" and a sync of a large mailbox simply walks into it, because
+    nothing was pacing the loop — it went as fast as the network allowed.
+
+    A bucket refilled continuously rather than per-window: a fixed window lets a
+    full minute's allowance go out in the first second, which is precisely the
+    burst that trips a per-minute quota.
+    """
+
+    def __init__(self, per_minute: float) -> None:
+        self.rate = max(float(per_minute), 1.0) / 60.0  # tokens per second
+        self.capacity = max(float(per_minute) / 6.0, 1.0)  # ~10s of burst
+        self._tokens = self.capacity
+        self._updated = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, cost: float = 1.0) -> None:
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._tokens = min(self.capacity, self._tokens + (now - self._updated) * self.rate)
+                self._updated = now
+                if self._tokens >= cost:
+                    self._tokens -= cost
+                    return
+                # Sleep for exactly the shortfall — no spinning, no fixed tick
+                # that would over- or under-shoot the quota.
+                await asyncio.sleep((cost - self._tokens) / self.rate)
+
+
 class BaseConnector(ABC):
     """
     Abstract base class for all Shielva Connectors.
@@ -588,6 +626,32 @@ class BaseConnector(ABC):
         Returns:
             ConnectorStatus with installation result
         """
+
+    #: Requests per minute this connector may make. Overridden by the
+    #: `rate_limit_per_min` install field, which 74 connectors already collect —
+    #: and which, before this, nothing read.
+    RATE_LIMIT_PER_MIN: int = 600
+
+    def _rate_limiter(self) -> "_TokenBucket":
+        limiter = getattr(self, "_rate_bucket", None)
+        if limiter is None:
+            configured = (self.config or {}).get("rate_limit_per_min")
+            try:
+                per_min = float(configured) if configured else float(self.RATE_LIMIT_PER_MIN)
+            except (TypeError, ValueError):
+                per_min = float(self.RATE_LIMIT_PER_MIN)
+            limiter = _TokenBucket(per_min)
+            self._rate_bucket = limiter
+        return limiter
+
+    async def throttle(self, cost: float = 1.0) -> None:
+        """Wait until this connector may make its next call.
+
+        `cost` is the provider's own unit, not a request count — Gmail prices
+        messages.get at 5 and messages.list at 5, and a limiter that counts
+        requests would under-count by five times on the call a sync makes most.
+        """
+        await self._rate_limiter().acquire(cost)
 
     async def authorize(self, auth_code: str, state: str = None) -> TokenInfo:
         """Exchange an authorization code for tokens. Standard RFC 6749, no override needed.
