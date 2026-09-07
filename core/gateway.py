@@ -5,6 +5,7 @@ Central service for managing all connectors
 
 import ast
 import asyncio
+import inspect
 import json
 import os
 import socket
@@ -234,6 +235,29 @@ def _ensure_sync_runtime() -> None:
         asyncio.create_task(_sync_worker(i))
     _SYNC_WORKERS_STARTED = True
     logger.info("sync.workers_started", count=SYNC_WORKER_COUNT, queue_max=SYNC_QUEUE_MAX)
+
+
+def _supported_kwargs(fn, **candidates) -> dict[str, Any]:
+    """Only the keyword arguments `fn` actually declares.
+
+    🚨 The gateway called connector.sync(full=…, kb_id=…, webhook_url=…) and 47
+    of 214 connectors do not declare webhook_url — some do not declare `full`
+    either. Every one of them raised TypeError the moment a sync was triggered,
+    which is the same defect that hit install() and authorize(): the caller
+    assuming a uniform signature the generated connectors never had.
+
+    Fixing 47 wheels would leave the 48th to be found by a user. Fixing the
+    caller covers every connector that exists and every one still to be
+    written. A connector that does not accept webhook_url could never have
+    used it, so dropping it loses nothing that was ever delivered.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # builtins and C callables have no signature
+        return dict(candidates)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return dict(candidates)
+    return {k: v for k, v in candidates.items() if k in params}
 
 
 async def _watch_for_cancel(job_id: str, task: asyncio.Task, interval: float = 2.0) -> None:
@@ -4247,11 +4271,19 @@ async def sync_connector(
 
         try:
             # Pass webhook_url to sync method
-            result = await connector.sync(
+            _sync_kwargs = _supported_kwargs(
+                connector.sync,
                 full=request.full_sync,
                 kb_id=request.kb_id,
                 webhook_url=request.webhook_url,
             )
+            if "webhook_url" not in _sync_kwargs and request.webhook_url:
+                logger.info(
+                    "sync.webhook_unsupported_by_connector",
+                    connector_id=connector_id,
+                    detail="connector.sync() does not declare webhook_url; the gateway reports failures itself",
+                )
+            result = await connector.sync(**_sync_kwargs)
 
             if result.status.value == "failed":
                 logger.error(
