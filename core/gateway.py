@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -160,7 +161,122 @@ DEPLOY_JOB_TTL_S = int(os.getenv("DEPLOY_JOB_TTL_S", "1800"))  # 30 min — long
 # bound, so a hung loader can never wedge every other worker forever.
 DEPLOY_PIPELINE_TIMEOUT_S = float(os.getenv("DEPLOY_PIPELINE_TIMEOUT_S", "120"))
 DEPLOY_LOAD_TIMEOUT_S = float(os.getenv("DEPLOY_LOAD_TIMEOUT_S", "60"))
-_DEPLOY_JOBS: dict[str, dict[str, Any]] = {}
+# 🚨 One background-job store, not one per feature. It was named for deploys
+# because deploys were the first user; a sync is the same thing — start work,
+# hand back an id, let the caller ask how it went — and a second store would
+# have meant a second GC, a second TTL and a second status endpoint that drifts
+# from this one.
+_JOBS: dict[str, dict[str, Any]] = {}
+
+# ── blocking-call executor ───────────────────────────────────────────────────
+#
+# 🚨 `run_in_executor(None, …)` uses asyncio's default pool, whose size is
+# min(32, os.cpu_count() + 4). Inside a container os.cpu_count() reports the
+# NODE's cpus, not the cgroup limit — here it says 6 while cpu.max grants 1.0 —
+# so the pool was sized from a number that has nothing to do with what this pod
+# may use, and nobody had chosen it.
+#
+# The number below is chosen, and chosen for I/O: a synchronous connector method
+# is almost always waiting on an upstream HTTP call, not computing, so more
+# threads than CPUs is correct. What it must NOT be is unbounded — each thread
+# holds a connector's buffers inside a 512Mi limit.
+CONNECTOR_EXECUTOR_WORKERS = int(os.getenv("CONNECTOR_EXECUTOR_WORKERS", "16"))
+_BLOCKING_EXECUTOR: "ThreadPoolExecutor | None" = None
+
+
+def _blocking_executor() -> "ThreadPoolExecutor":
+    """The bounded pool every synchronous connector method runs on."""
+    global _BLOCKING_EXECUTOR
+    if _BLOCKING_EXECUTOR is None:
+        _BLOCKING_EXECUTOR = ThreadPoolExecutor(
+            max_workers=CONNECTOR_EXECUTOR_WORKERS,
+            thread_name_prefix="connector-blocking",
+        )
+        logger.info("connector.executor_started", max_workers=CONNECTOR_EXECUTOR_WORKERS)
+    return _BLOCKING_EXECUTOR
+
+
+# ── sync work queue ──────────────────────────────────────────────────────────
+#
+# 🚨 Sync ran on FastAPI BackgroundTasks: unbounded. Every request spawned its
+# own coroutine, so a hundred people pressing Sync started a hundred concurrent
+# mailbox walks and the pod's memory and its upstream rate limits both went with
+# it. There was no way to see them, no way to stop one, and pressing the button
+# twice ran the same sync twice against the same knowledge base.
+#
+# A bounded queue fixes all three: work waits instead of piling up, a queued job
+# can be cancelled before it ever starts, and a second press for a connector
+# already syncing returns the job that is running rather than starting a rival.
+SYNC_WORKER_COUNT = int(os.getenv("SYNC_WORKER_COUNT", "4"))
+SYNC_QUEUE_MAX = int(os.getenv("SYNC_QUEUE_MAX", "1000"))
+_SYNC_QUEUE: asyncio.Queue | None = None
+_SYNC_WORKERS_STARTED = False
+#: connector_id → job_id, for the jobs that are queued or running. This is what
+#: makes a second click idempotent rather than duplicative.
+_SYNC_INFLIGHT: dict[str, str] = {}
+#: job_id → the asyncio.Task actually doing the work, so cancel has something to
+#: cancel. A job that has not started yet has no entry and is cancelled by flag.
+_SYNC_TASKS: dict[str, asyncio.Task] = {}
+
+
+def _ensure_sync_runtime() -> None:
+    """Lazy-init the sync queue + workers on first use.
+
+    Lazy for the same reason the deploy pool is: asyncio primitives bind to the
+    running loop, which does not exist at import time.
+    """
+    global _SYNC_QUEUE, _SYNC_WORKERS_STARTED
+    if _SYNC_WORKERS_STARTED:
+        return
+    if _SYNC_QUEUE is None:
+        _SYNC_QUEUE = asyncio.Queue(maxsize=SYNC_QUEUE_MAX)
+    for i in range(SYNC_WORKER_COUNT):
+        asyncio.create_task(_sync_worker(i))
+    _SYNC_WORKERS_STARTED = True
+    logger.info("sync.workers_started", count=SYNC_WORKER_COUNT, queue_max=SYNC_QUEUE_MAX)
+
+
+async def _sync_worker(worker_id: int) -> None:
+    """Drain the sync queue forever, one job at a time."""
+    assert _SYNC_QUEUE is not None
+    while True:
+        try:
+            job_id, run = await _SYNC_QUEUE.get()
+        except Exception as e:  # a queue that raises must not kill the worker
+            logger.warning("sync.worker_queue_get_failed", worker=worker_id, error=str(e))
+            continue
+        job = _JOBS.get(job_id)
+        try:
+            if job is None or job.get("status") == "cancelled":
+                # Cancelled while it waited — the common case, and the whole
+                # point of queueing: the work never runs at all.
+                continue
+            job.update({"status": "running", "started_at": _time_mod.time(), "worker": worker_id})
+            task = asyncio.create_task(run())
+            _SYNC_TASKS[job_id] = task
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Cancellation of the JOB, not of this worker — record it and
+                # carry on draining, or one cancel would stop the pool.
+                job.update({"status": "cancelled", "finished_at": _time_mod.time()})
+                with suppress(Exception):
+                    job["_done_event"].set()
+                logger.info("sync.job_cancelled", job_id=job_id, worker=worker_id)
+        except Exception as e:
+            logger.error("sync.worker_crashed", job_id=job_id, worker=worker_id, error=str(e)[:200])
+            if job is not None:
+                job.update({"status": "failed", "error": str(e)[:300], "finished_at": _time_mod.time()})
+                with suppress(Exception):
+                    job["_done_event"].set()
+        finally:
+            _SYNC_TASKS.pop(job_id, None)
+            if job is not None:
+                _SYNC_INFLIGHT.pop(str(job.get("connector_id") or ""), None)
+            with suppress(Exception):
+                _SYNC_QUEUE.task_done()
+
+
 _DEPLOY_QUEUE: asyncio.Queue | None = None
 _DEPLOY_WORKERS_STARTED = False
 # Serialise `_load_generated_connectors()` — it does heavy sync disk + sys.modules
@@ -170,15 +286,15 @@ _LOAD_LOCK: asyncio.Lock | None = None
 
 
 def _job(job_id: str) -> dict[str, Any]:
-    """Return or create the in-memory record for a deploy job.
+    """Return or create the in-memory record for a background job.
 
     The `_done_event` is an `asyncio.Event` set by the worker the moment the
     job reaches a terminal state. The SSE endpoint awaits it so the client
     learns about completion without polling — single network round-trip,
     zero CPU spin.
     """
-    if job_id not in _DEPLOY_JOBS:
-        _DEPLOY_JOBS[job_id] = {
+    if job_id not in _JOBS:
+        _JOBS[job_id] = {
             "status": "queued",
             "queued_at": _time_mod.time(),
             "result": None,
@@ -186,11 +302,11 @@ def _job(job_id: str) -> dict[str, Any]:
             "code": None,
             "_done_event": asyncio.Event(),
         }
-    return _DEPLOY_JOBS[job_id]
+    return _JOBS[job_id]
 
 
 def _serialise_job(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
-    """JSON-safe projection of a deploy job — drops the internal asyncio.Event."""
+    """JSON-safe projection of a job — drops the internal asyncio.Event."""
     return {k: v for k, v in job.items() if not k.startswith("_")} | {"job_id": job_id}
 
 
@@ -223,12 +339,12 @@ async def _deploy_jobs_gc() -> None:
             now = _time_mod.time()
             stale = [
                 jid
-                for jid, j in _DEPLOY_JOBS.items()
+                for jid, j in _JOBS.items()
                 if j.get("status") in ("completed", "failed")
                 and (now - (j.get("finished_at") or j.get("queued_at") or now)) > DEPLOY_JOB_TTL_S
             ]
             for jid in stale:
-                _DEPLOY_JOBS.pop(jid, None)
+                _JOBS.pop(jid, None)
             if stale:
                 logger.info("deploy.jobs_gc", evicted=len(stale))
         except Exception as e:
@@ -2903,7 +3019,7 @@ async def deploy_job_status(job_id: str):
     SSE endpoint — it pushes the moment the worker finishes instead of waiting
     for the next poll tick.
     """
-    job = _DEPLOY_JOBS.get(job_id)
+    job = _JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Deploy job not found (may have expired)")
     return _serialise_job(job_id, job)
@@ -2922,7 +3038,7 @@ async def deploy_job_events(job_id: str, request: Request):
 
     from fastapi.responses import StreamingResponse
 
-    job = _DEPLOY_JOBS.get(job_id)
+    job = _JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Deploy job not found (may have expired)")
 
@@ -3689,7 +3805,7 @@ async def test_connector_method(
         else:
             loop = asyncio.get_event_loop()
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: method(**params)),
+                loop.run_in_executor(_blocking_executor(), lambda: method(**params)),
                 timeout=_budget,
             )
 
@@ -4027,6 +4143,32 @@ async def sync_connector(
     import uuid
 
     job_id = str(uuid.uuid4())
+    # 🚨 Record it. The id was generated, returned, and never written anywhere —
+    # so a caller holding a job_id had nothing to ask about it, and the only way
+    # to run a sync and see the result was the console's inline path, which the
+    # 30s request budget then killed. An id you cannot poll is decoration.
+    # 🚨 A second press returns the FIRST job, it does not start a rival.
+    #
+    # Two syncs of one connector into one knowledge base race each other and
+    # double the upstream calls for no extra data. Clicking twice is not a
+    # request for two syncs; it is impatience, and the honest answer is the job
+    # already running.
+    existing = _SYNC_INFLIGHT.get(connector_id)
+    if existing and _JOBS.get(existing, {}).get("status") in ("queued", "running"):
+        return SyncResponse(
+            job_id=existing,
+            status=_JOBS[existing].get("status", "syncing"),
+            message="A sync is already in progress for this connector",
+        )
+
+    _sync_job = _job(job_id)
+    _sync_job.update({"status": "queued", "kind": "sync", "connector_id": connector_id})
+    _SYNC_INFLIGHT[connector_id] = job_id
+
+    def _finish(status: str, **fields) -> None:
+        _sync_job.update({"status": status, "finished_at": _time_mod.time(), **fields})
+        with suppress(Exception):
+            _sync_job["_done_event"].set()
 
     # Run sync in background
     async def run_sync():
@@ -4046,6 +4188,7 @@ async def sync_connector(
                     connector_id=connector_id,
                     errors=result.errors,
                 )
+                _finish("failed", error="; ".join(result.errors) if result.errors else "Unknown connector error")
                 if request.webhook_url:
                     async with httpx.AsyncClient() as client:
                         await client.post(
@@ -4060,6 +4203,14 @@ async def sync_connector(
                         )
                 return
 
+            _finish(
+                "completed",
+                result={
+                    "documents_synced": getattr(result, "documents_synced", None),
+                    "status": getattr(getattr(result, "status", None), "value", None),
+                    "errors": list(getattr(result, "errors", None) or []),
+                },
+            )
             logger.info(
                 "Sync completed",
                 connector_id=connector_id,
@@ -4067,6 +4218,7 @@ async def sync_connector(
                 kb_id=request.kb_id,
             )
         except Exception as e:
+            _finish("failed", error=f"Connector task crash: {e!s}"[:300])
             logger.error("Sync background task crashed", connector_id=connector_id, error=str(e))
             if request.webhook_url:
                 try:
@@ -4084,9 +4236,82 @@ async def sync_connector(
                 except Exception as e:
                     logger.error("Webhook notification failed", error=str(e))
 
-    background_tasks.add_task(run_sync)
+    # Queued, not fired. BackgroundTasks is unbounded — it starts the coroutine
+    # immediately, however many are already running — which is exactly what a
+    # bounded pool exists to prevent.
+    _ensure_sync_runtime()
+    assert _SYNC_QUEUE is not None
+    try:
+        _SYNC_QUEUE.put_nowait((job_id, run_sync))
+    except asyncio.QueueFull:
+        _JOBS.pop(job_id, None)
+        _SYNC_INFLIGHT.pop(connector_id, None)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Sync queue is full ({SYNC_QUEUE_MAX}); retry shortly",
+        ) from None
 
-    return SyncResponse(job_id=job_id, status="syncing", message="Sync started in background")
+    return SyncResponse(job_id=job_id, status="queued", message="Sync queued")
+
+
+@app.get("/connectors/{connector_id}/sync/jobs/{job_id}")
+async def sync_job_status(connector_id: str, job_id: str, tenant_id: str = Depends(get_tenant_id)):
+    """The state of a background sync.
+
+    The counterpart the sync endpoint never had: it returned a job_id that
+    nothing recorded, so the only way to run a sync and see its outcome was to
+    run it inline — which the 30s request budget exists to prevent.
+
+    Tenant-checked against the connector the job belongs to, so a job id alone
+    is not a handle on somebody else's sync.
+    """
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
+    if not connector or connector.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    job = _JOBS.get(job_id)
+    if not job or job.get("kind") != "sync":
+        raise HTTPException(status_code=404, detail="Sync job not found (may have expired)")
+    return _serialise_job(job_id, job)
+
+
+@app.post("/connectors/{connector_id}/sync/jobs/{job_id}/cancel")
+async def cancel_sync_job(connector_id: str, job_id: str, tenant_id: str = Depends(get_tenant_id)):
+    """Stop a sync — whether it is waiting or already running.
+
+    🚨 Two different stops, and only one of them is an interruption. A queued
+    job is simply marked and never starts, which costs the provider nothing. A
+    running job's task is cancelled, and the connector sees CancelledError at
+    its next await — so a sync that has already written documents keeps them
+    rather than being rolled back. That is the honest contract: cancel stops
+    further work, it does not undo what finished.
+    """
+    connector = await _resolve_for_tenant(connector_id, tenant_id)
+    if not connector or connector.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    job = _JOBS.get(job_id)
+    if not job or job.get("kind") != "sync":
+        raise HTTPException(status_code=404, detail="Sync job not found (may have expired)")
+
+    status = job.get("status")
+    if status in ("completed", "failed", "cancelled"):
+        # Already finished. Not an error — the button was pressed a moment late,
+        # and reporting a 409 for that is noise.
+        return _serialise_job(job_id, job)
+
+    task = _SYNC_TASKS.get(job_id)
+    if task is not None and not task.done():
+        task.cancel()
+        job["status"] = "cancelling"
+    else:
+        job.update({"status": "cancelled", "finished_at": _time_mod.time()})
+        with suppress(Exception):
+            job["_done_event"].set()
+        _SYNC_INFLIGHT.pop(connector_id, None)
+
+    logger.info("sync.cancel_requested", job_id=job_id, connector_id=connector_id, was=status)
+    return _serialise_job(job_id, job)
 
 
 @app.get("/connectors/{connector_id}/status", response_model=ConnectorStatusResponse)
