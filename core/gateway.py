@@ -393,6 +393,25 @@ def _validate_required_fields(config: dict, install_fields: list) -> list[str]:
 CONNECTOR_AST_SCAN = os.getenv("CONNECTOR_AST_SCAN", "enforce").lower()  # enforce | warn | off
 CONNECTOR_IMPORT_TIMEOUT_S = float(os.getenv("CONNECTOR_IMPORT_TIMEOUT_S", "10"))
 CONNECTOR_INVOKE_TIMEOUT_S = float(os.getenv("CONNECTOR_INVOKE_TIMEOUT_S", "30"))
+# 🚨 sync() gets its own budget, and it is not a weakening of the guard above.
+#
+# 30s is the right bound for a request: it stops a runaway loop freezing the
+# event loop for every other tenant. sync() is not a request — it is the SDK's
+# declared long-running operation, with its own background-job endpoint
+# (POST /connectors/{id}/sync) precisely because it pages an entire mailbox or
+# drive. Running it under the request budget killed a working sync at 30s and
+# reported "Connector method timed out", which reads as a broken connector
+# rather than as the wrong budget for the job.
+#
+# Named methods only. Everything else keeps the 30s bound.
+CONNECTOR_SYNC_TIMEOUT_S = float(os.getenv("CONNECTOR_SYNC_TIMEOUT_S", "300"))
+LONG_RUNNING_METHODS = frozenset({"sync"})
+
+
+def invoke_timeout_for(method_name: str) -> float:
+    """The wall-clock budget for one connector method."""
+    return CONNECTOR_SYNC_TIMEOUT_S if method_name in LONG_RUNNING_METHODS else CONNECTOR_INVOKE_TIMEOUT_S
+
 
 # Canonical connector tree lives at <repo-root>/generated_connectors/{tenant_id}/{name}_connector/.
 # Resolved from this file's location (…/shielva-connectors/core/gateway.py →
@@ -3664,13 +3683,14 @@ async def test_connector_method(
         # Layer 3 — bound the invocation wall-clock, and offload SYNC connector
         # methods to a worker thread so a runaway/blocking method can't freeze the
         # gateway event loop for every other tenant.
+        _budget = invoke_timeout_for(method_name)
         if inspect.iscoroutinefunction(method):
-            result = await asyncio.wait_for(method(**params), timeout=CONNECTOR_INVOKE_TIMEOUT_S)
+            result = await asyncio.wait_for(method(**params), timeout=_budget)
         else:
             loop = asyncio.get_event_loop()
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: method(**params)),
-                timeout=CONNECTOR_INVOKE_TIMEOUT_S,
+                timeout=_budget,
             )
 
         # Serialize dataclasses / Pydantic models to dict
@@ -3688,12 +3708,22 @@ async def test_connector_method(
             "test_connector_method timeout",
             connector_id=connector_id,
             method=method_name,
-            timeout=CONNECTOR_INVOKE_TIMEOUT_S,
+            timeout=invoke_timeout_for(method_name),
         )
         return {
             "status": "error",
             "method": method_name,
-            "error": f"Connector method timed out after {CONNECTOR_INVOKE_TIMEOUT_S}s",
+            # Name the budget that was actually applied, not the general one —
+            # "timed out after 30s" on a method given 300 sends someone hunting
+            # the wrong number.
+            "error": (
+                f"'{method_name}' timed out after {invoke_timeout_for(method_name)}s"
+                + (
+                    " — a full sync runs as a background job (POST /connectors/{id}/sync); the console runs it inline."
+                    if method_name in LONG_RUNNING_METHODS
+                    else ""
+                )
+            ),
         }
     except Exception as e:
         logger.error(
