@@ -3767,6 +3767,25 @@ async def test_connector_method(
     import dataclasses
     import inspect
 
+    # 🚨 The version check the other invocation routes already do, and this one
+    # did not — so a published upgrade never reached the path that executes.
+    #
+    # `_WHEEL_VERSIONS` is re-pinned from the catalog snapshot every 120s and
+    # `_ensure_connector_installed` reinstalls when the pinned version differs
+    # from the installed one. Both worked. But this route resolved straight out
+    # of `CONNECTOR_CLASSES`, so it kept calling whatever class the process
+    # loaded at startup: `/connectors/types` reported the new version while the
+    # wheel stayed old, and the only cure was recycling the pod.
+    #
+    # Observed with google_gmail_connector 1.4.0 — the catalogue said 1.4.0,
+    # `pip show` said 1.3.2, and `send_email` rejected the parameter that
+    # version had added. This is the route `capability_exec` uses for every
+    # mail/sms/calendar/crm node, so the same staleness applied to all of them.
+    #
+    # Cheap in the common case: when the pinned and installed versions agree it
+    # is a metadata lookup and returns immediately.
+    await _ensure_connector_installed(_resolve_connector_type(connector_id))
+
     connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
         # The action-schema bridge (and live bot actions) reference a connector by
