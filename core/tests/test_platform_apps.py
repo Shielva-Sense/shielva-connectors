@@ -606,3 +606,19 @@ def test_a_per_type_app_for_a_different_registration_still_wins(monkeypatch) -> 
     creds = platform_credentials("microsoft_teams", "microsoft")
     assert creds["client_id"] == "its-own-app"
     assert creds["client_secret"] == "its-own-secret"
+
+
+def test_gohighlevel_connects_on_shielvas_marketplace_app(monkeypatch) -> None:
+    """A clinic or agency picks its sub-account; it never registers a Marketplace app."""
+    monkeypatch.setenv("GOHIGHLEVEL_APP_CLIENT_ID", "ghl-app")
+    monkeypatch.setenv("GOHIGHLEVEL_APP_CLIENT_SECRET", "ghl-secret")
+    assert platform_app_available("gohighlevel") is True
+    assert platform_app_fields("gohighlevel") == ["client_id", "client_secret"]
+    assert apply_platform_app("gohighlevel", {})["client_id"] == "ghl-app"
+    # Our secret is never copied into a tenant's stored config; the sub-account is.
+    stored = persistable_config(
+        "gohighlevel", {"client_id": "ghl-app", "client_secret": "ghl-secret", "location_id": "loc-1"}
+    )
+    assert "client_secret" not in stored
+    assert "client_id" not in stored
+    assert stored["location_id"] == "loc-1"

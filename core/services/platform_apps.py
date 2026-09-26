@@ -88,6 +88,14 @@ _PLATFORM_APPS: dict[str, dict[str, str]] = {
         "client_id": "CALENDLY_APP_CLIENT_ID",
         "client_secret": "CALENDLY_APP_CLIENT_SECRET",
     },
+    # Shielva's GoHighLevel Marketplace app. A workspace connects one
+    # sub-account through HighLevel's own "choose location" screen; asking a
+    # clinic or an agency to register a Marketplace app first is the developer
+    # task this module exists to remove.
+    "gohighlevel": {
+        "client_id": "GOHIGHLEVEL_APP_CLIENT_ID",
+        "client_secret": "GOHIGHLEVEL_APP_CLIENT_SECRET",
+    },
 }
 
 
