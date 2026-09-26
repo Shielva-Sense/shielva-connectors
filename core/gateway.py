@@ -41,7 +41,7 @@ from shielva_common.envelope import bootstrap as _envelope_bootstrap
 
 _envelope_bootstrap()
 
-from services import credential_manager, job_store
+from services import credential_manager, job_store, oauth_state
 from services.connection_state import EXPIRED, connection_state, is_connected
 from services.connector_store import connector_store
 from services.install_gate import (
@@ -2376,7 +2376,7 @@ async def install_connector(
         redirect_uri = final_config.get("redirect_uri") or f"{_redir_base}/connectors/oauth/callback"
         # Persist so authorize() reuses the SAME redirect_uri at token exchange.
         connector.config["redirect_uri"] = redirect_uri
-        oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
+        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
 
     return ConnectorInstallResponse(
         connector_id=connector_id,
@@ -3355,7 +3355,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # non-connected state can start/restart the OAuth flow.
     if effective_status != "connected":
         with suppress(Exception):
-            oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
+            oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
 
     return {
         "connector_id": connector_id,
@@ -3409,7 +3409,7 @@ async def reauthorize_connector(
     connector.config = apply_platform_app(_cred_type, connector.config or {}, await _provider_of(_cred_type))
 
     try:
-        oauth_url = connector.get_oauth_url(redirect_uri, state=connector_id)
+        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
     except Exception as exc:
         logger.error(
             "reauthorize get_oauth_url failed",
@@ -3985,24 +3985,60 @@ async def oauth_redirect_callback(request: Request):
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
+
+    # 🚨 Complete here when the state is one we minted — the popup's link back to
+    # the console may be gone (a provider page with Cross-Origin-Opener-Policy
+    # severs it), and then nobody else ever will. See `services/oauth_state`.
+    completed = False
+    if code and not error:
+        claimed = await oauth_state.consume(state)
+        if claimed is not None:
+            _tenant, _connector_id = claimed
+            _asking = request.headers.get("X-Tenant-ID", "")
+            if _asking and _asking != _tenant:
+                # The browser finishing the flow is signed into another workspace.
+                error = "This sign-in was started from another workspace."
+            else:
+                _connector = await _resolve_for_tenant(_connector_id, _tenant)
+                if _connector is None:
+                    error = "That connector is no longer installed."
+                else:
+                    try:
+                        await _complete_oauth(_connector, _connector_id, _tenant, code, state)
+                        completed = True
+                        logger.info("callback.completed_server_side", connector_id=_connector_id)
+                    except Exception as _exc:
+                        logger.error("callback.server_side_failed", connector_id=_connector_id, error=str(_exc)[:200])
+                        error = f"The provider refused the sign-in: {str(_exc)[:160]}"
     # The app origins this deployment serves — the same list CORS is configured
     # with, so there is one answer to "which of our front ends is this?".
     origins_json = json.dumps(_app_origins())
 
+    # 🚨 Everything below reaches this page from the address bar or a provider's
+    # error text. Escaped for HTML where it is shown and JSON-encoded where a
+    # script reads it — raw, a crafted `?error=` or `?state=` is script on our origin.
+    import html as _html
+
+    def _script_json(value) -> str:
+        """JSON safe INSIDE a <script> block: `</script>` in a value must not end it."""
+        return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
     if error:
+        error_html = _html.escape(error)
+        err_json = _script_json({"type": "oauth_callback", "error": error, "state": state})
         html = f"""<!DOCTYPE html>
 <html><head><title>Authorization Failed</title></head>
 <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#FEF2F2">
 <div style="text-align:center;padding:40px;max-width:480px">
     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="1.5" style="margin-bottom:16px"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
     <h2 style="color:#991B1B;margin:0 0 8px">Authorization Failed</h2>
-    <p style="color:#7F1D1D;margin:0 0 4px">{error}</p>
+    <p style="color:#7F1D1D;margin:0 0 4px">{error_html}</p>
     <p style="color:#6B7280;font-size:13px">Close this window and try again.</p>
 </div>
 <script>
     // Notify opener of error then close
     if (window.opener) {{
-        var err = {{type:"oauth_callback",error:"{error}",state:"{state}"}};
+        var err = {err_json};
         {origins_json}.forEach(function (o) {{
             try {{ window.opener.postMessage(err, o); }} catch (e) {{ /* not this deployment's origin */ }}
         }});
@@ -4012,6 +4048,15 @@ async def oauth_redirect_callback(request: Request):
 </body></html>"""
         return HTMLResponse(html, status_code=400)
 
+    # A completed exchange hands the console nothing to redeem — the code is spent.
+    payload_json = _script_json(
+        {"type": "oauth_callback", "completed": True, "state": state}
+        if completed
+        else {"type": "oauth_callback", "code": code, "state": state}
+    )
+    # Spent once exchanged here, so it is not written into the page at all.
+    code_json = _script_json("" if completed else code)
+    completed_json = "true" if completed else "false"
     html = f"""<!DOCTYPE html>
 <html><head><title>Authorization Successful</title></head>
 <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F0FDF4">
@@ -4032,7 +4077,8 @@ async def oauth_redirect_callback(request: Request):
     // and an authorization code posted to "*" is readable by any page that
     // managed to open it — which is a one-step account takeover. Only the app
     // origins this deployment serves are addressed.
-    var payload = {{type:"oauth_callback",code:"{code}",state:"{state}"}};
+    var payload = {payload_json};
+    var COMPLETED = {completed_json};
     var ORIGINS = {origins_json};
     var closing = document.getElementById("closing");
     var msg = document.getElementById("msg");
@@ -4049,15 +4095,162 @@ async def oauth_redirect_callback(request: Request):
         // so the page told the user to paste a code while still insisting it was
         // closing automatically. Removed by id now.
         if (closing) {{ closing.remove(); }}
-        msg.textContent = "Paste this code in the connector setup:";
-        var box = document.createElement("div");
-        box.style.cssText = "background:#fff;border:1.5px solid #14B8A6;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:12px;word-break:break-all;color:#0F766E;margin:12px auto;max-width:400px;user-select:all";
-        box.textContent = "{code}";
-        msg.parentNode.appendChild(box);
+        if (COMPLETED) {{
+            // Finished here, on the server: nothing for anyone to paste.
+            msg.textContent = "Connected. You can close this window and return to Shielva.";
+        }} else {{
+            msg.textContent = "Paste this code in the connector setup:";
+            var box = document.createElement("div");
+            box.style.cssText = "background:#fff;border:1.5px solid #14B8A6;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:12px;word-break:break-all;color:#0F766E;margin:12px auto;max-width:400px;user-select:all";
+            box.textContent = {code_json};
+            msg.parentNode.appendChild(box);
+        }}
     }}
 </script>
 </body></html>"""
     return HTMLResponse(html)
+
+
+async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: str, state: str) -> dict:
+    """Exchange the code, keep the credentials and tokens, and prove them with a live call.
+
+    🚨 ONE PATH for both ways a consent comes back: the console posting the code
+    (`POST /connectors/{id}/callback`) and the provider's redirect completing on
+    its own (`GET /connectors/oauth/callback`, see `oauth_state`). Two copies of
+    this would drift on exactly the parts that matter — which config is kept,
+    where the token is stored, whether the card turns Connected.
+    """
+    token_info = await connector.authorize(auth_code=code, state=state)
+
+    # After successful OAuth, persist full connector config + auth hash.
+    # _auth_hash is used by the check endpoint to skip re-auth when credentials unchanged.
+    # Tokens are managed via connector_store — exclude them from credential_manager.
+    _EXCLUDE_FROM_CONFIG = {
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "token",
+        "expires_at",
+        "expires_in",
+    }
+
+    # Resolve the canonical CONNECTOR_CLASSES key for this connector instance.
+    # connector.CONNECTOR_TYPE may be the short name (e.g. "gmail") while the
+    # CONNECTOR_CLASSES key is the full package name (e.g. "shielva_gmail_connector").
+    # Using the wrong key causes credentials to be stored under a different name than
+    # what the frontend reads via GET /credentials/{connector_type}/values.
+    _resolved_cred_type = next(
+        (k for k, v in CONNECTOR_CLASSES.items() if v is type(connector)),
+        connector.CONNECTOR_TYPE,
+    )
+
+    try:
+        import hashlib as _hashlib
+        import json as _hjson
+
+        _AUTH_KEYS = ("client_id", "client_secret", "scopes")
+        _auth_hash = _hashlib.sha256(
+            _hjson.dumps(
+                {k: str((connector.config or {}).get(k, "")) for k in _AUTH_KEYS}
+                | {"connector_type": _resolved_cred_type},
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+
+        config_to_save = {
+            k: v
+            for k, v in persistable_config(
+                _resolved_cred_type, connector.config or {}, await _provider_of(_resolved_cred_type)
+            ).items()
+            if k not in _EXCLUDE_FROM_CONFIG
+        }
+        config_to_save["_auth_hash"] = _auth_hash
+        if config_to_save:
+            await credential_manager.store_credentials(tenant_id, _resolved_cred_type, config_to_save)
+            logger.info(
+                "callback.credentials_saved_encrypted",
+                connector_id=connector_id,
+                cred_type=_resolved_cred_type,
+                keys=sorted(config_to_save.keys()),
+            )
+    except Exception as _save_err:
+        logger.warning(
+            "callback.credentials_save_failed",
+            connector_id=connector_id,
+            error=str(_save_err),
+        )
+
+    # Store token under canonical key so future Check Connection can reuse it.
+    # We bypass set_token()'s fire-and-forget asyncio.create_task() and call
+    # connector_store directly with await so the save is guaranteed to be
+    # committed to Redis before this response is returned to the client.
+    try:
+        from services.connector_store import connector_store as _cs
+
+        _canonical_id = f"canonical_{_resolved_cred_type}_{tenant_id}"
+        _token_payload = {
+            "access_token": token_info.access_token,
+            "token_type": token_info.token_type or "Bearer",
+            "refresh_token": token_info.refresh_token,
+            "expires_at": token_info.expires_at.isoformat() if token_info.expires_at else None,
+            "scope": " ".join(token_info.scopes) if token_info.scopes else None,
+            "raw": token_info.raw,  # full provider payload — needed by connectors
+        }  # that reconstruct Credentials from raw JSON
+        await _cs.save_connector_tokens(_canonical_id, _token_payload)
+        logger.info(
+            "callback.canonical_token_stored",
+            connector_type=_resolved_cred_type,
+            canonical_id=_canonical_id,
+        )
+    except Exception as _ct_err:
+        logger.warning("callback.canonical_token_failed", error=str(_ct_err))
+
+    # ── Run real test API call immediately after token exchange ─────
+    # The token is now in memory (set_token was called inside authorize()).
+    # health_check() dynamically tests the live API — Gmail calls
+    # users().getProfile(), other connectors call their equivalent.
+    test_result: dict | None = None
+    try:
+        health = await connector.health_check()
+        test_healthy = install_health(health) == "healthy"
+        test_result = {
+            "healthy": test_healthy,
+            "auth_status": install_auth_status(health),
+            "message": health.message if test_healthy else None,
+            "error": health.error if not test_healthy else None,
+        }
+        logger.info(
+            "callback.test_api_call",
+            connector_id=connector_id,
+            healthy=test_healthy,
+            message=health.message,
+        )
+        # 🚨 A live API call just succeeded with these tokens — record it.
+        #
+        # The comment above assumes set_token() ran inside authorize() and
+        # updated `_status`. That is true for connectors whose exchange
+        # returns a TokenInfo and stores it; the ones that return raw token
+        # data never touch `_status`, so consent completed, the API answered,
+        # and the card still read "Ready To Connect".
+        #
+        # get_status() answers from `_status`, and a health probe that
+        # reached the provider is the strongest evidence there is.
+        if test_healthy:
+            with suppress(Exception):
+                connector._status = health
+    except Exception as _health_err:
+        logger.warning(
+            "callback.test_api_failed",
+            connector_id=connector_id,
+            error=str(_health_err),
+        )
+
+    return {
+        "status": "connected",
+        "connector_id": connector_id,
+        "message": "Authorization successful",
+        "test_result": test_result,
+    }
 
 
 @app.post("/connectors/{connector_id}/callback")
@@ -4076,138 +4269,7 @@ async def oauth_callback(
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        token_info = await connector.authorize(auth_code=request.code, state=request.state)
-
-        # After successful OAuth, persist full connector config + auth hash.
-        # _auth_hash is used by the check endpoint to skip re-auth when credentials unchanged.
-        # Tokens are managed via connector_store — exclude them from credential_manager.
-        _EXCLUDE_FROM_CONFIG = {
-            "access_token",
-            "refresh_token",
-            "id_token",
-            "token",
-            "expires_at",
-            "expires_in",
-        }
-
-        # Resolve the canonical CONNECTOR_CLASSES key for this connector instance.
-        # connector.CONNECTOR_TYPE may be the short name (e.g. "gmail") while the
-        # CONNECTOR_CLASSES key is the full package name (e.g. "shielva_gmail_connector").
-        # Using the wrong key causes credentials to be stored under a different name than
-        # what the frontend reads via GET /credentials/{connector_type}/values.
-        _resolved_cred_type = next(
-            (k for k, v in CONNECTOR_CLASSES.items() if v is type(connector)),
-            connector.CONNECTOR_TYPE,
-        )
-
-        try:
-            import hashlib as _hashlib
-            import json as _hjson
-
-            _AUTH_KEYS = ("client_id", "client_secret", "scopes")
-            _auth_hash = _hashlib.sha256(
-                _hjson.dumps(
-                    {k: str((connector.config or {}).get(k, "")) for k in _AUTH_KEYS}
-                    | {"connector_type": _resolved_cred_type},
-                    sort_keys=True,
-                ).encode()
-            ).hexdigest()[:16]
-
-            config_to_save = {
-                k: v
-                for k, v in persistable_config(
-                    _resolved_cred_type, connector.config or {}, await _provider_of(_resolved_cred_type)
-                ).items()
-                if k not in _EXCLUDE_FROM_CONFIG
-            }
-            config_to_save["_auth_hash"] = _auth_hash
-            if config_to_save:
-                await credential_manager.store_credentials(tenant_id, _resolved_cred_type, config_to_save)
-                logger.info(
-                    "callback.credentials_saved_encrypted",
-                    connector_id=connector_id,
-                    cred_type=_resolved_cred_type,
-                    keys=sorted(config_to_save.keys()),
-                )
-        except Exception as _save_err:
-            logger.warning(
-                "callback.credentials_save_failed",
-                connector_id=connector_id,
-                error=str(_save_err),
-            )
-
-        # Store token under canonical key so future Check Connection can reuse it.
-        # We bypass set_token()'s fire-and-forget asyncio.create_task() and call
-        # connector_store directly with await so the save is guaranteed to be
-        # committed to Redis before this response is returned to the client.
-        try:
-            from services.connector_store import connector_store as _cs
-
-            _canonical_id = f"canonical_{_resolved_cred_type}_{tenant_id}"
-            _token_payload = {
-                "access_token": token_info.access_token,
-                "token_type": token_info.token_type or "Bearer",
-                "refresh_token": token_info.refresh_token,
-                "expires_at": token_info.expires_at.isoformat() if token_info.expires_at else None,
-                "scope": " ".join(token_info.scopes) if token_info.scopes else None,
-                "raw": token_info.raw,  # full provider payload — needed by connectors
-            }  # that reconstruct Credentials from raw JSON
-            await _cs.save_connector_tokens(_canonical_id, _token_payload)
-            logger.info(
-                "callback.canonical_token_stored",
-                connector_type=_resolved_cred_type,
-                canonical_id=_canonical_id,
-            )
-        except Exception as _ct_err:
-            logger.warning("callback.canonical_token_failed", error=str(_ct_err))
-
-        # ── Run real test API call immediately after token exchange ─────
-        # The token is now in memory (set_token was called inside authorize()).
-        # health_check() dynamically tests the live API — Gmail calls
-        # users().getProfile(), other connectors call their equivalent.
-        test_result: dict | None = None
-        try:
-            health = await connector.health_check()
-            test_healthy = install_health(health) == "healthy"
-            test_result = {
-                "healthy": test_healthy,
-                "auth_status": install_auth_status(health),
-                "message": health.message if test_healthy else None,
-                "error": health.error if not test_healthy else None,
-            }
-            logger.info(
-                "callback.test_api_call",
-                connector_id=connector_id,
-                healthy=test_healthy,
-                message=health.message,
-            )
-            # 🚨 A live API call just succeeded with these tokens — record it.
-            #
-            # The comment above assumes set_token() ran inside authorize() and
-            # updated `_status`. That is true for connectors whose exchange
-            # returns a TokenInfo and stores it; the ones that return raw token
-            # data never touch `_status`, so consent completed, the API answered,
-            # and the card still read "Ready To Connect".
-            #
-            # get_status() answers from `_status`, and a health probe that
-            # reached the provider is the strongest evidence there is.
-            if test_healthy:
-                with suppress(Exception):
-                    connector._status = health
-        except Exception as _health_err:
-            logger.warning(
-                "callback.test_api_failed",
-                connector_id=connector_id,
-                error=str(_health_err),
-            )
-
-        return {
-            "status": "connected",
-            "connector_id": connector_id,
-            "message": "Authorization successful",
-            "test_result": test_result,
-        }
-
+        return await _complete_oauth(connector, connector_id, tenant_id, request.code, request.state or "")
     except Exception as e:
         logger.error("OAuth callback failed", error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
