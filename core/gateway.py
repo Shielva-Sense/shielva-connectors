@@ -50,6 +50,8 @@ from services.install_gate import (
     install_health,
     install_message,
 )
+from services.personal_instance import is_personal, personal_connector_id, valid_person
+from services.personal_instance import type_of as personal_type_of
 from services.platform_apps import (
     apply_platform_app,
     credential_mode,
@@ -78,6 +80,9 @@ class ConnectorInstallRequest(BaseModel):
 
     connector_type: str
     config: dict[str, Any]
+    #: A PERSON's own instance beside the workspace's (`services/personal_instance`):
+    #: an opaque key chosen by the caller. Absent — the workspace's one instance.
+    person: str | None = None
 
 
 class ConnectorInstallResponse(BaseModel):
@@ -1473,6 +1478,10 @@ class ConnectorRegistry:
                 continue
             if str(getattr(inst, "CONNECTOR_TYPE", "")) != connector_type:
                 continue
+            if is_personal(getattr(inst, "connector_id", "")):
+                # 🚨 A person's own instance is reached only by its full id — never as
+                # "the tenant's <type>" (`services/personal_instance`).
+                continue
             _ti = getattr(inst, "_token_info", None)
             if _ti is not None and getattr(_ti, "refresh_token", None):
                 return inst  # complete: client config + refresh token
@@ -2255,8 +2264,12 @@ async def install_connector(
             detail=f"Connector type '{connector_type}' not found. Ensure the connector has been built successfully.",
         )
 
-    # 1. Fetch stored credentials
-    stored_creds = await credential_manager.get_credentials(tenant_id, connector_type)
+    # 1. Fetch stored credentials — the WORKSPACE's. A person's own instance is
+    # built from what the caller sent and the platform app only, so the
+    # workspace's own registration (if it brought one) never signs a person in.
+    stored_creds = (
+        None if request.person is not None else await credential_manager.get_credentials(tenant_id, connector_type)
+    )
 
     # 1b. Fall back to the PLATFORM app, so a customer can connect Slack or
     # Teams without registering a developer app of their own. Their values win
@@ -2286,6 +2299,11 @@ async def install_connector(
     # than accumulating a stray instance + duplicate refresh token alongside the old
     # ones. (The canonical id is also where the OAuth callback persists the token.)
     connector_id = f"canonical_{connector_type}_{tenant_id}"
+    if request.person is not None:
+        # A person's own instance beside the workspace's — same rule, one per person.
+        if not valid_person(request.person):
+            raise HTTPException(status_code=400, detail="person must be 8 to 64 lowercase letters or digits")
+        connector_id = personal_connector_id(connector_type, tenant_id, request.person)
 
     # Create connector instance
     ConnectorClass = CONNECTOR_CLASSES[connector_type]
@@ -3515,6 +3533,8 @@ async def _rehydrate_for_tenant(connector_id: str, tenant_id: str) -> "Any | Non
         return None
     mine = [c for c in stored if c.tenant_id == tenant_id]
     exact = [c for c in mine if c.connector_id == connector_id]
+    # 🚨 A person's own instance answers to its full id only (`exact`), never to a type.
+    mine = [c for c in mine if not is_personal(c.connector_id)]
     # By type, and by a vendor-prefixed type's trailing segment — the same two
     # identifier spaces _resolve_for_tenant already reconciles ("teams" vs
     # "microsoft_teams"). Ambiguity resolves to nothing, never to somebody
@@ -3558,7 +3578,9 @@ async def _resolve_for_tenant(connector_id: str, tenant_id: str):
     candidates = [
         inst
         for inst in registry._connectors.values()
-        if getattr(inst, "tenant_id", None) == tenant_id and str(getattr(inst, "CONNECTOR_TYPE", "")).endswith(suffix)
+        if getattr(inst, "tenant_id", None) == tenant_id
+        and str(getattr(inst, "CONNECTOR_TYPE", "")).endswith(suffix)
+        and not is_personal(getattr(inst, "connector_id", ""))
     ]
     if len(candidates) == 1:
         logger.info(
@@ -3784,7 +3806,10 @@ async def test_connector_method(
     #
     # Cheap in the common case: when the pinned and installed versions agree it
     # is a metadata lookup and returns immediately.
-    await _ensure_connector_installed(_resolve_connector_type(connector_id))
+    # A person's own instance is named by id; its wheel is its TYPE's.
+    await _ensure_connector_installed(
+        _resolve_connector_type(personal_type_of(connector_id, tenant_id) or connector_id)
+    )
 
     connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
@@ -3844,7 +3869,12 @@ async def test_connector_method(
     # The connector may have been installed with empty config (credentials-free install),
     # with credentials only saved later during Check Connection. Reload from Redis now.
     try:
-        _stored = await credential_manager.get_credentials(tenant_id, connector.CONNECTOR_TYPE)
+        # A person's own instance carries its own config; the workspace's is not theirs.
+        _stored = (
+            None
+            if is_personal(getattr(connector, "connector_id", ""))
+            else await credential_manager.get_credentials(tenant_id, connector.CONNECTOR_TYPE)
+        )
         if _stored:
             await _install_with(connector, _stored)
     except Exception as _hydrate_err:
@@ -4143,6 +4173,9 @@ async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: st
         (k for k, v in CONNECTOR_CLASSES.items() if v is type(connector)),
         connector.CONNECTOR_TYPE,
     )
+    # 🚨 A person's consent is theirs: it neither replaces the workspace's stored
+    # credentials nor lands on the workspace's token (`services/personal_instance`).
+    _personal = is_personal(connector_id)
 
     try:
         import hashlib as _hashlib
@@ -4165,7 +4198,7 @@ async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: st
             if k not in _EXCLUDE_FROM_CONFIG
         }
         config_to_save["_auth_hash"] = _auth_hash
-        if config_to_save:
+        if config_to_save and not _personal:
             await credential_manager.store_credentials(tenant_id, _resolved_cred_type, config_to_save)
             logger.info(
                 "callback.credentials_saved_encrypted",
@@ -4187,7 +4220,7 @@ async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: st
     try:
         from services.connector_store import connector_store as _cs
 
-        _canonical_id = f"canonical_{_resolved_cred_type}_{tenant_id}"
+        _canonical_id = connector_id if _personal else f"canonical_{_resolved_cred_type}_{tenant_id}"
         _token_payload = {
             "access_token": token_info.access_token,
             "token_type": token_info.token_type or "Bearer",
@@ -4548,13 +4581,18 @@ async def get_connector_status(connector_id: str, tenant_id: str = Depends(get_t
 
 
 @app.get("/connectors")
-async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
+async def list_connectors(tenant_id: str = Depends(get_tenant_id), include_personal: bool = False):
     """List a tenant's installed connectors.
 
     Source of truth is the PERSISTED connector_store, not the in-memory registry
     (which is empty after a restart or when a connector failed to re-initialize on
     boot). Reading the registry made installs disappear on refresh. We enrich with
     live health from the registry when the connector happens to be loaded.
+
+    🚨 People's own instances (`services/personal_instance`) are listed only when
+    asked for (`include_personal=true`, each marked `personal`): the console keys
+    its cards by TYPE, and a doctor's calendar must not answer for the
+    workspace's Google Calendar card.
     """
     connectors = []
     try:
@@ -4566,7 +4604,7 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
         if getattr(cfg, "tenant_id", None) != tenant_id:
             continue
         cid = getattr(cfg, "connector_id", None)
-        if not cid:
+        if not cid or (is_personal(cid) and not include_personal):
             continue
         # 🚨 The console reads THIS endpoint for its badge, and it answered
         # "unknown" whenever the instance was not in this process's registry —
@@ -4605,6 +4643,7 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id)):
                 "connector_type": getattr(cfg, "connector_type", None),
                 "health": health,
                 "auth_status": auth,
+                **({"personal": True} if is_personal(cid) else {}),
             }
         )
     return {"connectors": connectors}
@@ -4643,8 +4682,9 @@ async def delete_connector(connector_id: str, tenant_id: str = Depends(get_tenan
     # Remove from persistence
     await connector_store.delete_connector(target_id)
 
-    # Delete stored credentials so the form starts fresh on next install
-    if connector_type_for_creds:
+    # Delete stored credentials so the form starts fresh on next install.
+    # 🚨 Not for a person's own instance: those credentials are the WORKSPACE's.
+    if connector_type_for_creds and not is_personal(target_id):
         try:
             await credential_manager.delete_credentials(tenant_id, connector_type_for_creds)
         except Exception as _e:
@@ -4675,8 +4715,10 @@ async def clear_connector_auth(
 
     # Delete canonical token for this connector type + tenant so smart re-auth
     # cannot find a cached token from a previous session.
-    _canonical_id = f"canonical_{connector.CONNECTOR_TYPE}_{tenant_id}"
-    await connector_store.delete_connector_tokens(_canonical_id)
+    # 🚨 Not for a person's own instance — the canonical token is the workspace's.
+    if not is_personal(connector_id):
+        _canonical_id = f"canonical_{connector.CONNECTOR_TYPE}_{tenant_id}"
+        await connector_store.delete_connector_tokens(_canonical_id)
 
     # Reset the in-memory token so the live connector instance also forgets it
     if hasattr(connector, "_token_info"):
