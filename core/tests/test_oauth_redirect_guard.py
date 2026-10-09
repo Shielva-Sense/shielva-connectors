@@ -86,7 +86,7 @@ def test_a_managed_install_ignores_a_supplied_redirect() -> None:
     On a managed install the redirect belongs to Shielva's app, so a value from
     the customer is not a choice they get to make. Ignored, not rejected.
     """
-    from core.gateway import _redirect_for
+    from gateway import _redirect_for
 
     for supplied in (
         "https://app.shielva.ai/connectors/callback",  # the placeholder
@@ -100,7 +100,7 @@ def test_a_managed_install_ignores_a_supplied_redirect() -> None:
 def test_a_self_install_still_owns_and_is_checked() -> None:
     """It genuinely is theirs, so a wrong path must still be refused — that is
     what stops consent landing on a handler that knows nothing about it."""
-    from core.gateway import _redirect_for
+    from gateway import _redirect_for
 
     own = "https://connect.acme.example/connectors/oauth/callback"
     assert _redirect_for(own, DEFAULT, "self") == own
