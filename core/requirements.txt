@@ -37,8 +37,14 @@ APScheduler>=3.10.4
 # `vault:v1:` — it silently ignores `vault:kv:` references. Both gaps have
 # already broken a service on its next rebuild (acp-core, auth-manager), and
 # in each case the running pod kept serving because it PREDATED the gap, so
-# nothing surfaced it until a restart. Same ref shielva-identity pins.
-shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@65748b8e1e9e8d7f3285c427773de764e150cdaa#subdirectory=shielva-common
+# nothing surfaced it until a restart.
+# 2026-10-09: moved to fd1353f (shielva-common 1.4.1, python-jose replaced by
+# PyJWT; python-jose 3.5.0 has CVE-2026-85394 with no fix). Connectors never
+# imports shielva_common.security.auth or jose. This commit is the head of
+# Shielva-AI/shielva-platform-core PR #12; repin to its merge commit once it
+# lands. shielva-identity must NOT follow until its `from jose import JWTError`
+# handlers catch shielva_common's JWTError instead.
+shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@fd1353f0b973806e39628224d5a3bb60e79b3f5e#subdirectory=shielva-common
 
 pymongo>=4.6.0
 motor>=3.3.0
