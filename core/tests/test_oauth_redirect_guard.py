@@ -15,6 +15,9 @@ no thread back to the field that caused it.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 # 🚨 Skip, do not abort. Importing the gateway pulls in shielva-common, which is
@@ -25,8 +28,17 @@ import pytest
 # failure, only "1 error".
 pytest.importorskip("shielva_common", reason="gateway import needs the CI dependency set")
 
-from core.gateway import _validated_redirect
+# The gateway imports `services.*` as top-level packages, so core/ must be on the
+# path, exactly as the sibling gateway tests arrange it. Importing it as
+# `core.gateway` only worked when an earlier test had already inserted core/,
+# and it loaded a second copy of the module alongside theirs.
+_CORE = Path(__file__).resolve().parents[1]
+if str(_CORE) not in sys.path:
+    sys.path.insert(0, str(_CORE))
+
 from fastapi import HTTPException
+
+from gateway import _validated_redirect
 
 DEFAULT = "https://api.shielva.ai/connectors/oauth/callback"
 
