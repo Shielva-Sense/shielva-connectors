@@ -38,13 +38,12 @@ APScheduler>=3.10.4
 # already broken a service on its next rebuild (acp-core, auth-manager), and
 # in each case the running pod kept serving because it PREDATED the gap, so
 # nothing surfaced it until a restart.
-# 2026-10-09: moved to fd1353f (shielva-common 1.4.1, python-jose replaced by
-# PyJWT; python-jose 3.5.0 has CVE-2026-85394 with no fix). Connectors never
-# imports shielva_common.security.auth or jose. This commit is the head of
-# Shielva-AI/shielva-platform-core PR #12; repin to its merge commit once it
-# lands. shielva-identity must NOT follow until its `from jose import JWTError`
+# 2026-10-09: 31e4755 = shielva-platform-core master after PR #12 (shielva-common
+# 1.4.1, python-jose replaced by PyJWT; python-jose 3.5.0 has CVE-2026-85394 with
+# no fix). Connectors never imports shielva_common.security.auth or jose.
+# shielva-identity must NOT follow until its `from jose import JWTError`
 # handlers catch shielva_common's JWTError instead.
-shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@fd1353f0b973806e39628224d5a3bb60e79b3f5e#subdirectory=shielva-common
+shielva-common @ git+https://github.com/Shielva-AI/shielva-platform-core@31e47557c0d84c46645b8e95fe87beaf1a6a9c47#subdirectory=shielva-common
 
 pymongo>=4.6.0
 motor>=3.3.0
