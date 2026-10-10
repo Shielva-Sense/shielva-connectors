@@ -78,11 +78,15 @@ def connection_state(token: Any = None, live_status: Any = None, refresh_rejecte
     store reports the working ones as unconfigured.
     """
     state = token_state(token, refresh_rejected)
-    if state == CONNECTED:
-        return CONNECTED
-    # A recorded rejection outranks a live instance. That instance was built
-    # before the provider said no, and it is the stale opinion of one pod.
-    if live_status is not None and not refresh_rejected:
+    if state != PENDING:
+        # 🚨 A token that has aged out with no refresh token outranks a live
+        # instance, exactly as a recorded rejection does. That instance said
+        # Connected when the token was fresh and never looked again — so the
+        # card read Connected while every call failed with "Token expired and
+        # no refresh token available", and nobody was asked to reconnect.
+        return state
+    # No token at all: only a static-credential connector proves itself here.
+    if live_status is not None:
         reported = getattr(live_status, "value", str(live_status)).lower()
         if reported in AUTHORISED:
             return CONNECTED

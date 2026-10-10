@@ -1800,6 +1800,15 @@ def get_tenant_id(request: Request) -> str:
     return tenant_id
 
 
+def get_initiator(request: Request) -> str:
+    """The person asking, as the gateway (or the calling service) verified them; "".
+
+    Recorded in an OAuth state so the callback can tell whether the browser that
+    finishes a consent belongs to the person who started it (`oauth_state`).
+    """
+    return request.headers.get("X-User-Email", "")
+
+
 # ===== Endpoints =====
 
 
@@ -2243,6 +2252,7 @@ async def install_connector(
     connector_type: str,
     request: ConnectorInstallRequest,
     tenant_id: str = Depends(get_tenant_id),
+    initiator: str = Depends(get_initiator),
 ):
     """
     Install a new connector.
@@ -2394,7 +2404,9 @@ async def install_connector(
         redirect_uri = final_config.get("redirect_uri") or f"{_redir_base}/connectors/oauth/callback"
         # Persist so authorize() reuses the SAME redirect_uri at token exchange.
         connector.config["redirect_uri"] = redirect_uri
-        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
+        oauth_url = connector.get_oauth_url(
+            redirect_uri, state=await oauth_state.mint(tenant_id, connector_id, initiator)
+        )
 
     return ConnectorInstallResponse(
         connector_id=connector_id,
@@ -3373,6 +3385,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # non-connected state can start/restart the OAuth flow.
     if effective_status != "connected":
         with suppress(Exception):
+            # A queued deploy carries no person: its state keeps the workspace check.
             oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
 
     return {
@@ -3389,6 +3402,7 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
 async def reauthorize_connector(
     connector_id: str,
     tenant_id: str = Depends(get_tenant_id),
+    initiator: str = Depends(get_initiator),
 ):
     """Generate a fresh OAuth authorization URL for an ALREADY-installed connector.
 
@@ -3427,7 +3441,9 @@ async def reauthorize_connector(
     connector.config = apply_platform_app(_cred_type, connector.config or {}, await _provider_of(_cred_type))
 
     try:
-        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
+        oauth_url = connector.get_oauth_url(
+            redirect_uri, state=await oauth_state.mint(tenant_id, connector_id, initiator)
+        )
     except Exception as exc:
         logger.error(
             "reauthorize get_oauth_url failed",
@@ -4023,15 +4039,16 @@ async def oauth_redirect_callback(request: Request):
     if code and not error:
         claimed = await oauth_state.consume(state)
         if claimed is not None:
-            _tenant, _connector_id = claimed
-            _asking = request.headers.get("X-Tenant-ID", "")
-            if _asking and _asking != _tenant:
-                # The browser finishing the flow is signed into another workspace.
-                error = "This sign-in was started from another workspace."
+            _tenant, _connector_id = claimed.tenant_id, claimed.connector_id
+            refusal = _callback_refusal(claimed, request.headers)
+            if refusal is not None:
+                reason, error = refusal
+                logger.warning("callback.refused", connector_id=_connector_id, reason=reason)
             else:
                 _connector = await _resolve_for_tenant(_connector_id, _tenant)
                 if _connector is None:
                     error = "That connector is no longer installed."
+                    logger.warning("callback.refused", connector_id=_connector_id, reason="not_installed")
                 else:
                     try:
                         await _complete_oauth(_connector, _connector_id, _tenant, code, state)
@@ -4139,6 +4156,39 @@ async def oauth_redirect_callback(request: Request):
 </script>
 </body></html>"""
     return HTMLResponse(html)
+
+
+def _callback_refusal(claim: oauth_state.Claim, headers) -> tuple[str, str] | None:
+    """Why the browser finishing this consent may not, as `(reason, sentence)`; None when it may.
+
+    🚨 [Sensitive] The TENANT is the state's, always — nothing here can move a
+    grant into another workspace. What this decides is whether the browser that
+    brought the code back belongs to the person who asked for the consent URL,
+    which is what stops someone sending their own consent link to another
+    Shielva user and collecting that user's account into their workspace.
+
+    It compares PEOPLE. It used to compare the workspace of the browser's
+    `.shielva.ai` session cookie with the state's, and that cookie holds
+    whichever workspace was signed in to last, in whichever product: one person
+    with two workspaces could never connect the one they were working in. The
+    workspace comparison survives only for a state minted with no person (a
+    service call that did not say who asked), where it is all there is.
+    """
+    if claim.initiator:
+        finisher = oauth_state.normalise_person(headers.get("X-User-Email"))
+        if not finisher:
+            return "not_signed_in", "Sign in to Shielva in this browser, then press Connect again."
+        if finisher != claim.initiator:
+            return (
+                "different_person",
+                "This sign-in was started by someone else. Sign in to Shielva in this browser "
+                "as the person who pressed Connect, then try again.",
+            )
+        return None
+    asking = headers.get("X-Tenant-ID", "")
+    if asking and asking != claim.tenant_id:
+        return "other_workspace", "This sign-in was started from another workspace."
+    return None
 
 
 async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: str, state: str) -> dict:
@@ -4616,6 +4666,11 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id), include_perso
         # The stored token is the durable fact; the live instance is the richer
         # one when it happens to be here. Ask the registry first, and fall back
         # to the token rather than to a shrug.
+        #
+        # 🚨 And the token is read EVEN WHEN the live instance says connected:
+        # that opinion was formed when the token was fresh. A token that has
+        # since aged out with no refresh token must read `expired` here, which
+        # is what makes ABS and the console offer Reconnect.
         health, auth = "unknown", "unknown"
         conn = registry.get(cid)
         live_status = None
@@ -4623,20 +4678,20 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id), include_perso
             status = conn.get_status()
             health, auth = install_health(status), install_auth_status(status)
             live_status = auth
-        if auth not in ("connected", "authenticated"):
-            token, rejected = None, False
-            with suppress(Exception):
-                token = await connector_store.get_connector_tokens(cid)
-            with suppress(Exception):
-                rejected = await connector_store.refresh_failed(cid)
-            state = connection_state(token, live_status, rejected)
-            if state == "connected":
+        token, rejected = None, False
+        with suppress(Exception):
+            token = await connector_store.get_connector_tokens(cid)
+        with suppress(Exception):
+            rejected = await connector_store.refresh_failed(cid)
+        state = connection_state(token, live_status, rejected)
+        if state == "connected":
+            if auth not in ("connected", "authenticated"):
                 health, auth = "healthy", "connected"
-            elif state == EXPIRED:
-                # Named, not folded into `pending`: "connected once, and the
-                # credential aged out" is a different thing to say than "never
-                # signed in", and only one of them is the user's fault.
-                health, auth = "degraded", EXPIRED
+        elif state == EXPIRED:
+            # Named, not folded into `pending`: "connected once, and the
+            # credential aged out" is a different thing to say than "never
+            # signed in", and only one of them is the user's fault.
+            health, auth = "degraded", EXPIRED
         connectors.append(
             {
                 "connector_id": cid,

@@ -161,7 +161,7 @@ async def test_installing_a_persons_instance_names_it_by_the_person_and_ignores_
     async def _save(**kw):
         saved.append(kw["connector_id"])
 
-    async def _mint(tenant_id, connector_id):
+    async def _mint(tenant_id, connector_id, initiator=""):
         return f"{connector_id}.nonce"
 
     async def _true(*a, **k):

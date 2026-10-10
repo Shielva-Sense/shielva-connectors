@@ -63,7 +63,7 @@ async def test_a_minted_state_names_its_connector_and_is_single_use(redis) -> No
     state = await oauth_state.mint("Tenant-1", "canonical_gohighlevel_Tenant-1")
     assert state.startswith("canonical_gohighlevel_Tenant-1.")
     assert len(state.rsplit(".", 1)[1]) >= 24, "the nonce must be unguessable"
-    assert await oauth_state.consume(state) == ("Tenant-1", "canonical_gohighlevel_Tenant-1")
+    assert await oauth_state.consume(state) == ("Tenant-1", "canonical_gohighlevel_Tenant-1", "")
     assert await oauth_state.consume(state) is None, "a replayed callback completes nothing"
 
 
