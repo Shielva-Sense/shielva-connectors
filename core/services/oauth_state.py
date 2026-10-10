@@ -19,18 +19,27 @@ callback trusting it would bind whichever account's code arrived to that
 tenant's connector (OAuth login-CSRF). Only a nonce minted here, unexpired and
 unused, completes anything server-side.
 
-🚨 THE STATE NAMES THE TENANT — THE BROWSER'S WORKSPACE DOES NOT. The callback
-used to refuse whenever the `X-Tenant-ID` the gateway stamped from the browser's
-`.shielva.ai` session cookie differed from the tenant in the state. That cookie
-is shared by every product and holds whichever workspace signed in LAST, while
-abs.shielva.ai authenticates with its own per-app Bearer token. One person with
-two workspaces, booking for one in ABS and signed in to ARC as the other, got
-"This sign-in was started from another workspace" on every attempt
-(2026-10-10, Google Calendar). The tenant has only ever come from here, so the
-comparison protected no data; what it stood in for is "the browser finishing
-the consent belongs to whoever started it". That is now checked directly: the
-person who asked for the consent URL (`initiator`, the gateway-verified email)
-is recorded, and the callback compares PEOPLE, not workspaces.
+🚨 [Sensitive] THE STATE IS THE WHOLE AUTHORISATION OF THE CALLBACK. It is a
+provider redirect: it arrives from whatever browser finished the consent, with
+whatever `.shielva.ai` cookie that browser happens to hold (another product,
+another workspace) or none at all (abs.shielva.ai and a business's custom domain
+sign in with their own Bearer token). So the gateway serves the callback
+anonymously (`connectors-oauth-callback`) and the callback asks nothing of the
+browser: the tenant and connector come from here, minted when an authenticated
+member of that workspace asked for the consent URL. Because the nonce is
+unguessable, single-use and short-lived, possessing it is what proves the
+redirect belongs to that flow. Nothing in the request can name another tenant.
+
+The residual risk this accepts: someone who starts a consent can forward the
+consent link, and whoever approves it within TTL_SECONDS connects THEIR account
+to the starter's workspace. That needs the victim to approve a consent screen
+naming Shielva and their own account. The cookie-workspace check this replaces
+only stopped a victim who happened to be signed in to a DIFFERENT workspace; one
+signed in to the same workspace passed, and one with no session was stopped by
+the gateway's JWT requirement, which stopped every customer signed in by Bearer
+token too. The proper fix, binding the state to the browser that
+opened the popup (a cookie set on the callback origin at popup start), is a
+follow-up.
 """
 
 from __future__ import annotations
@@ -56,27 +65,13 @@ class Claim(NamedTuple):
 
     tenant_id: str
     connector_id: str
-    #: The person who asked for the consent URL, normalised; "" when the caller
-    #: did not say (a service call with no person, or a state minted before this).
-    initiator: str = ""
 
 
-def normalise_person(email: str | None) -> str:
-    """The one form an initiator is stored and compared in."""
-    return (email or "").strip().lower()
-
-
-async def mint(tenant_id: str, connector_id: str, initiator: str = "") -> str:
+async def mint(tenant_id: str, connector_id: str) -> str:
     """The `state` for a new consent URL. Plain `connector_id` when Redis is down —
-    the popup route still works then; only server-side completion is lost.
-
-    `initiator` is the email of the person asking, as the gateway (or the calling
-    service) verified it; "" when there is none."""
+    the popup route still works then; only server-side completion is lost."""
     nonce = secrets.token_urlsafe(24)
     record = {"tenant_id": tenant_id, "connector_id": connector_id}
-    person = normalise_person(initiator)
-    if person:
-        record["initiator"] = person
     try:
         await redis_service.set(_KEY.format(nonce=nonce), json.dumps(record), expire=TTL_SECONDS)
     except Exception as exc:
@@ -121,4 +116,4 @@ async def consume(state: str) -> Claim | None:
         # pairs it with another is not ours.
         _unclaimed(connector_id, "connector_mismatch")
         return None
-    return Claim(str(found["tenant_id"]), connector_id, normalise_person(found.get("initiator")))
+    return Claim(str(found["tenant_id"]), connector_id)

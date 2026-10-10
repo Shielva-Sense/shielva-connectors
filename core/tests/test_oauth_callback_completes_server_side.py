@@ -63,7 +63,7 @@ async def test_a_minted_state_names_its_connector_and_is_single_use(redis) -> No
     state = await oauth_state.mint("Tenant-1", "canonical_gohighlevel_Tenant-1")
     assert state.startswith("canonical_gohighlevel_Tenant-1.")
     assert len(state.rsplit(".", 1)[1]) >= 24, "the nonce must be unguessable"
-    assert await oauth_state.consume(state) == ("Tenant-1", "canonical_gohighlevel_Tenant-1", "")
+    assert await oauth_state.consume(state) == ("Tenant-1", "canonical_gohighlevel_Tenant-1")
     assert await oauth_state.consume(state) is None, "a replayed callback completes nothing"
 
 
@@ -129,15 +129,17 @@ async def test_a_legacy_state_still_goes_back_to_the_console(completed) -> None:
 
 
 @pytest.mark.asyncio
-async def test_another_workspace_cannot_finish_this_workspaces_sign_in(completed) -> None:
+async def test_the_browsers_workspace_never_decides_the_tenant(completed) -> None:
+    """🚨 The state names the tenant. A session cookie on another workspace neither refuses the
+    sign-in (2026-10-10) nor moves it: the grant lands on the state's tenant."""
     state = await oauth_state.mint("Tenant-1", "canonical_gohighlevel_Tenant-1")
     page = TestClient(gw.app).get(
         "/connectors/oauth/callback",
         params={"code": "c-3", "state": state},
         headers={"X-Tenant-ID": "Tenant-2"},
     )
-    assert page.status_code == 400
-    assert completed == []
+    assert page.status_code == 200
+    assert completed == [("canonical_gohighlevel_Tenant-1", "Tenant-1", "c-3")]
 
 
 def test_the_page_never_runs_what_the_address_bar_says(completed) -> None:

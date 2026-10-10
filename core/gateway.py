@@ -1800,15 +1800,6 @@ def get_tenant_id(request: Request) -> str:
     return tenant_id
 
 
-def get_initiator(request: Request) -> str:
-    """The person asking, as the gateway (or the calling service) verified them; "".
-
-    Recorded in an OAuth state so the callback can tell whether the browser that
-    finishes a consent belongs to the person who started it (`oauth_state`).
-    """
-    return request.headers.get("X-User-Email", "")
-
-
 # ===== Endpoints =====
 
 
@@ -2252,7 +2243,6 @@ async def install_connector(
     connector_type: str,
     request: ConnectorInstallRequest,
     tenant_id: str = Depends(get_tenant_id),
-    initiator: str = Depends(get_initiator),
 ):
     """
     Install a new connector.
@@ -2404,9 +2394,7 @@ async def install_connector(
         redirect_uri = final_config.get("redirect_uri") or f"{_redir_base}/connectors/oauth/callback"
         # Persist so authorize() reuses the SAME redirect_uri at token exchange.
         connector.config["redirect_uri"] = redirect_uri
-        oauth_url = connector.get_oauth_url(
-            redirect_uri, state=await oauth_state.mint(tenant_id, connector_id, initiator)
-        )
+        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
 
     return ConnectorInstallResponse(
         connector_id=connector_id,
@@ -3385,7 +3373,6 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
     # non-connected state can start/restart the OAuth flow.
     if effective_status != "connected":
         with suppress(Exception):
-            # A queued deploy carries no person: its state keeps the workspace check.
             oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
 
     return {
@@ -3402,7 +3389,6 @@ async def _run_deploy_pipeline(body: dict, tenant_id: str) -> dict:
 async def reauthorize_connector(
     connector_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    initiator: str = Depends(get_initiator),
 ):
     """Generate a fresh OAuth authorization URL for an ALREADY-installed connector.
 
@@ -3441,9 +3427,7 @@ async def reauthorize_connector(
     connector.config = apply_platform_app(_cred_type, connector.config or {}, await _provider_of(_cred_type))
 
     try:
-        oauth_url = connector.get_oauth_url(
-            redirect_uri, state=await oauth_state.mint(tenant_id, connector_id, initiator)
-        )
+        oauth_url = connector.get_oauth_url(redirect_uri, state=await oauth_state.mint(tenant_id, connector_id))
     except Exception as exc:
         logger.error(
             "reauthorize get_oauth_url failed",
@@ -4031,6 +4015,9 @@ async def oauth_redirect_callback(request: Request):
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
+    if error:
+        # The provider's own refusal (`access_denied` when the person pressed Cancel).
+        logger.warning("callback.refused", reason="provider_error", provider_error=error[:80])
 
     # 🚨 Complete here when the state is one we minted — the popup's link back to
     # the console may be gone (a provider page with Cross-Origin-Opener-Policy
@@ -4039,24 +4026,31 @@ async def oauth_redirect_callback(request: Request):
     if code and not error:
         claimed = await oauth_state.consume(state)
         if claimed is not None:
-            _tenant, _connector_id = claimed.tenant_id, claimed.connector_id
-            refusal = _callback_refusal(claimed, request.headers)
-            if refusal is not None:
-                reason, error = refusal
-                logger.warning("callback.refused", connector_id=_connector_id, reason=reason)
+            # 🚨 [Sensitive] THE STATE DECIDES — tenant and connector both — and
+            # nothing about the browser does. This used to refuse when the
+            # gateway's X-Tenant-ID (stamped from whatever `.shielva.ai` session
+            # cookie the browser carried) differed from the state's tenant. That
+            # cookie belongs to whichever product and workspace signed in LAST,
+            # while abs.shielva.ai and a business's custom domain sign in with
+            # their own Bearer token, so one person with two workspaces, or an
+            # ARC session beside ABS, got "This sign-in was started from another
+            # workspace" on every attempt (2026-10-10). The gateway route is
+            # anonymous now (`connectors-oauth-callback`); a header that still
+            # arrives with a valid cookie is ignored here on purpose. See
+            # services/oauth_state.py for what the state guarantees.
+            _tenant, _connector_id = claimed
+            _connector = await _resolve_for_tenant(_connector_id, _tenant)
+            if _connector is None:
+                error = "That connector is no longer installed."
+                logger.warning("callback.refused", connector_id=_connector_id, reason="not_installed")
             else:
-                _connector = await _resolve_for_tenant(_connector_id, _tenant)
-                if _connector is None:
-                    error = "That connector is no longer installed."
-                    logger.warning("callback.refused", connector_id=_connector_id, reason="not_installed")
-                else:
-                    try:
-                        await _complete_oauth(_connector, _connector_id, _tenant, code, state)
-                        completed = True
-                        logger.info("callback.completed_server_side", connector_id=_connector_id)
-                    except Exception as _exc:
-                        logger.error("callback.server_side_failed", connector_id=_connector_id, error=str(_exc)[:200])
-                        error = f"The provider refused the sign-in: {str(_exc)[:160]}"
+                try:
+                    await _complete_oauth(_connector, _connector_id, _tenant, code, state)
+                    completed = True
+                    logger.info("callback.completed_server_side", connector_id=_connector_id)
+                except Exception as _exc:
+                    logger.error("callback.server_side_failed", connector_id=_connector_id, error=str(_exc)[:200])
+                    error = f"The provider refused the sign-in: {str(_exc)[:160]}"
     # The app origins this deployment serves — the same list CORS is configured
     # with, so there is one answer to "which of our front ends is this?".
     origins_json = json.dumps(_app_origins())
@@ -4156,39 +4150,6 @@ async def oauth_redirect_callback(request: Request):
 </script>
 </body></html>"""
     return HTMLResponse(html)
-
-
-def _callback_refusal(claim: oauth_state.Claim, headers) -> tuple[str, str] | None:
-    """Why the browser finishing this consent may not, as `(reason, sentence)`; None when it may.
-
-    🚨 [Sensitive] The TENANT is the state's, always — nothing here can move a
-    grant into another workspace. What this decides is whether the browser that
-    brought the code back belongs to the person who asked for the consent URL,
-    which is what stops someone sending their own consent link to another
-    Shielva user and collecting that user's account into their workspace.
-
-    It compares PEOPLE. It used to compare the workspace of the browser's
-    `.shielva.ai` session cookie with the state's, and that cookie holds
-    whichever workspace was signed in to last, in whichever product: one person
-    with two workspaces could never connect the one they were working in. The
-    workspace comparison survives only for a state minted with no person (a
-    service call that did not say who asked), where it is all there is.
-    """
-    if claim.initiator:
-        finisher = oauth_state.normalise_person(headers.get("X-User-Email"))
-        if not finisher:
-            return "not_signed_in", "Sign in to Shielva in this browser, then press Connect again."
-        if finisher != claim.initiator:
-            return (
-                "different_person",
-                "This sign-in was started by someone else. Sign in to Shielva in this browser "
-                "as the person who pressed Connect, then try again.",
-            )
-        return None
-    asking = headers.get("X-Tenant-ID", "")
-    if asking and asking != claim.tenant_id:
-        return "other_workspace", "This sign-in was started from another workspace."
-    return None
 
 
 async def _complete_oauth(connector, connector_id: str, tenant_id: str, code: str, state: str) -> dict:
