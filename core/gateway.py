@@ -4015,6 +4015,9 @@ async def oauth_redirect_callback(request: Request):
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
+    if error:
+        # The provider's own refusal (`access_denied` when the person pressed Cancel).
+        logger.warning("callback.refused", reason="provider_error", provider_error=error[:80])
 
     # 🚨 Complete here when the state is one we minted — the popup's link back to
     # the console may be gone (a provider page with Cross-Origin-Opener-Policy
@@ -4023,23 +4026,31 @@ async def oauth_redirect_callback(request: Request):
     if code and not error:
         claimed = await oauth_state.consume(state)
         if claimed is not None:
+            # 🚨 [Sensitive] THE STATE DECIDES — tenant and connector both — and
+            # nothing about the browser does. This used to refuse when the
+            # gateway's X-Tenant-ID (stamped from whatever `.shielva.ai` session
+            # cookie the browser carried) differed from the state's tenant. That
+            # cookie belongs to whichever product and workspace signed in LAST,
+            # while abs.shielva.ai and a business's custom domain sign in with
+            # their own Bearer token, so one person with two workspaces, or an
+            # ARC session beside ABS, got "This sign-in was started from another
+            # workspace" on every attempt (2026-10-10). The gateway route is
+            # anonymous now (`connectors-oauth-callback`); a header that still
+            # arrives with a valid cookie is ignored here on purpose. See
+            # services/oauth_state.py for what the state guarantees.
             _tenant, _connector_id = claimed
-            _asking = request.headers.get("X-Tenant-ID", "")
-            if _asking and _asking != _tenant:
-                # The browser finishing the flow is signed into another workspace.
-                error = "This sign-in was started from another workspace."
+            _connector = await _resolve_for_tenant(_connector_id, _tenant)
+            if _connector is None:
+                error = "That connector is no longer installed."
+                logger.warning("callback.refused", connector_id=_connector_id, reason="not_installed")
             else:
-                _connector = await _resolve_for_tenant(_connector_id, _tenant)
-                if _connector is None:
-                    error = "That connector is no longer installed."
-                else:
-                    try:
-                        await _complete_oauth(_connector, _connector_id, _tenant, code, state)
-                        completed = True
-                        logger.info("callback.completed_server_side", connector_id=_connector_id)
-                    except Exception as _exc:
-                        logger.error("callback.server_side_failed", connector_id=_connector_id, error=str(_exc)[:200])
-                        error = f"The provider refused the sign-in: {str(_exc)[:160]}"
+                try:
+                    await _complete_oauth(_connector, _connector_id, _tenant, code, state)
+                    completed = True
+                    logger.info("callback.completed_server_side", connector_id=_connector_id)
+                except Exception as _exc:
+                    logger.error("callback.server_side_failed", connector_id=_connector_id, error=str(_exc)[:200])
+                    error = f"The provider refused the sign-in: {str(_exc)[:160]}"
     # The app origins this deployment serves — the same list CORS is configured
     # with, so there is one answer to "which of our front ends is this?".
     origins_json = json.dumps(_app_origins())
@@ -4616,6 +4627,11 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id), include_perso
         # The stored token is the durable fact; the live instance is the richer
         # one when it happens to be here. Ask the registry first, and fall back
         # to the token rather than to a shrug.
+        #
+        # 🚨 And the token is read EVEN WHEN the live instance says connected:
+        # that opinion was formed when the token was fresh. A token that has
+        # since aged out with no refresh token must read `expired` here, which
+        # is what makes ABS and the console offer Reconnect.
         health, auth = "unknown", "unknown"
         conn = registry.get(cid)
         live_status = None
@@ -4623,20 +4639,20 @@ async def list_connectors(tenant_id: str = Depends(get_tenant_id), include_perso
             status = conn.get_status()
             health, auth = install_health(status), install_auth_status(status)
             live_status = auth
-        if auth not in ("connected", "authenticated"):
-            token, rejected = None, False
-            with suppress(Exception):
-                token = await connector_store.get_connector_tokens(cid)
-            with suppress(Exception):
-                rejected = await connector_store.refresh_failed(cid)
-            state = connection_state(token, live_status, rejected)
-            if state == "connected":
+        token, rejected = None, False
+        with suppress(Exception):
+            token = await connector_store.get_connector_tokens(cid)
+        with suppress(Exception):
+            rejected = await connector_store.refresh_failed(cid)
+        state = connection_state(token, live_status, rejected)
+        if state == "connected":
+            if auth not in ("connected", "authenticated"):
                 health, auth = "healthy", "connected"
-            elif state == EXPIRED:
-                # Named, not folded into `pending`: "connected once, and the
-                # credential aged out" is a different thing to say than "never
-                # signed in", and only one of them is the user's fault.
-                health, auth = "degraded", EXPIRED
+        elif state == EXPIRED:
+            # Named, not folded into `pending`: "connected once, and the
+            # credential aged out" is a different thing to say than "never
+            # signed in", and only one of them is the user's fault.
+            health, auth = "degraded", EXPIRED
         connectors.append(
             {
                 "connector_id": cid,

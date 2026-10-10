@@ -1791,6 +1791,13 @@ class BaseConnector(ABC):
 
                             await connector_store.mark_refresh_failed(self.connector_id, str(e)[:200])
                     raise RefreshError("Token refresh failed") from e
+            elif self._token_info is None:
+                # 🚨 Not "expired": nothing was ever stored, so consent never
+                # finished. Logged as an expiry it reads as a lost refresh token
+                # (2026-10-10, Google Calendar) when the sign-in may simply have
+                # been refused at the callback, leaving no token at all.
+                logger.error("No token stored: sign-in has not completed", connector_id=self.connector_id)
+                raise RefreshError("No token stored: sign-in has not completed")
             else:
                 logger.error(
                     "Token expired and no refresh token available",
