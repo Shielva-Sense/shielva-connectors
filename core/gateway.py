@@ -1126,11 +1126,19 @@ async def _ensure_connector_installed(connector_type: str) -> bool:
         # Dropping the connector's own modules makes the re-scan import the new
         # ones; nothing else imports them, so nothing else holds a stale class.
         if loaded:
-            prefix = f"{suffix}_connector"
-            for name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
-                sys.modules.pop(name, None)
             resolved = _resolve_connector_type(connector_type)
-            CONNECTOR_CLASSES.pop(resolved, None)
+            # The package to drop is the one the loaded class LIVES in, read off
+            # the class. It used to be guessed as f"{suffix}_connector", but the
+            # suffix is the hyphenated dist name ("google-gmail-connector"), so
+            # the guess ("google-gmail-connector_connector") never matched a
+            # module, nothing was dropped, and the re-scan re-registered the old
+            # class: Gmail stayed on its boot-time 1.0.5 after "upgrading" to
+            # 1.5.0, and get_account (1.5.0) was "not found" on every pod.
+            stale = CONNECTOR_CLASSES.pop(resolved, None)
+            prefix = (getattr(stale, "__module__", "") or "").split(".")[0]
+            if prefix:
+                for name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
+                    sys.modules.pop(name, None)
             # Live instances were built from the class we just replaced — see
             # Registry.evict_type. They are rebuilt from stored config on the
             # next resolve, so dropping them costs nothing and leaving them
