@@ -496,6 +496,24 @@ async def _deploy_worker(worker_id: int) -> None:
                 _evt.set()
 
 
+def _instance_type(connector_id: str, tenant_id: str) -> str:
+    """The connector TYPE an id names: a person's instance, the workspace's, or a type already.
+
+    🚨 The workspace's own instance is `canonical_{type}_{tenant}`. Only a
+    person's id was parsed here, so a call by the workspace's id resolved to no
+    type: "no wheel in manifest", the upgrade check never ran, and a published
+    fix (gmail 1.5.1) never reached anyone who called by id — sales-core's and
+    abs.shielva.ai's mailbox calls included.
+    """
+    personal = personal_type_of(connector_id, tenant_id)
+    if personal:
+        return personal
+    tail = f"_{tenant_id}"
+    if tenant_id and connector_id.startswith("canonical_") and connector_id.endswith(tail):
+        return connector_id[len("canonical_") : -len(tail)]
+    return connector_id
+
+
 def _resolve_connector_type(connector_type: str) -> str:
     """Normalize connector_type to the canonical key used in CONNECTOR_CLASSES.
 
@@ -3814,10 +3832,8 @@ async def test_connector_method(
     #
     # Cheap in the common case: when the pinned and installed versions agree it
     # is a metadata lookup and returns immediately.
-    # A person's own instance is named by id; its wheel is its TYPE's.
-    await _ensure_connector_installed(
-        _resolve_connector_type(personal_type_of(connector_id, tenant_id) or connector_id)
-    )
+    # An instance is named by id; its wheel is its TYPE's.
+    await _ensure_connector_installed(_resolve_connector_type(_instance_type(connector_id, tenant_id)))
 
     connector = await _resolve_for_tenant(connector_id, tenant_id)
     if not connector:
