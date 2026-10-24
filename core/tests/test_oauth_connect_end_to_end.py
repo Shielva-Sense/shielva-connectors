@@ -203,7 +203,9 @@ async def test_start_callback_complete_status(monkeypatch, runtime, ctype, auth_
     if google:
         # 🚨 A reconnect after an earlier grant gets no refresh token without these, and dies in an hour.
         assert query["access_type"] == ["offline"]
-        assert query["prompt"] == ["consent"]
+        # ...and Google must ask WHICH account, or a browser signed in to one
+        # account connects it silently (an owner's personal Gmail, once).
+        assert query["prompt"] == ["select_account consent"]
     state = query["state"][0]
     assert _status(cid) != "connected", "nothing reads connected before the consent"
 
