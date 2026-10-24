@@ -850,7 +850,12 @@ class BaseConnector(ABC):
         #     the auth-code flow simply ignore the extra scope.
         if "google" in auth_uri.lower():
             params["access_type"] = "offline"  # request refresh_token
-            params["prompt"] = "consent"  # always show consent so refresh_token is issued
+            # `consent` so a refresh_token is issued; `select_account` so Google
+            # asks WHICH account. With consent alone, a browser signed in to one
+            # Google account is connected as that account without being asked:
+            # sales.shielva.ai registered an owner's personal Gmail as a cold
+            # outreach mailbox that way.
+            params["prompt"] = "select_account consent"
         elif scope_str and "offline_access" not in scope_str.split():
             scope_str = (scope_str + " offline_access").strip()
             params["scope"] = scope_str
